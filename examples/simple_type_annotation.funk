@@ -1,0 +1,5 @@
+# Simple Type Annotation Test
+
+let x : Int = 42
+let name : String = "Alice"
+let config : Config = { retries = 3, timeout = 30 }

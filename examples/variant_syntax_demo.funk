@@ -1,0 +1,50 @@
+# Variant Syntax Demo - Anonymous and Named Use Same Syntax
+
+# Named closed variant
+type Color = | Red, Green, Blue |
+
+# Named open variant  
+type ExtensibleColor = | Red, Green, Blue, ... |
+
+# Anonymous closed variant (same syntax!)
+let processColor = { color: | Red, Green, Blue | } ->
+  match color {
+    Red -> "red"
+    Green -> "green"
+    Blue -> "blue"
+  }
+
+# Anonymous open variant (same syntax!)
+let processExtensibleColor = { color: | Red, Green, Blue, ... | } ->
+  match color {
+    Red -> "red"
+    Green -> "green" 
+    Blue -> "blue"
+    _ -> "unknown color"
+  }
+
+# Named variants with record constructors
+type Result = | Ok { value: Int }, Error { message: String } |
+type ExtensibleResult = | Ok { value: Int }, Error { message: String }, ... |
+
+# Anonymous variants with record constructors (same syntax!)
+let handleResult = { result: | Ok { value: Int }, Error { message: String } | } ->
+  match result {
+    Ok { value } -> "Success"
+    Error { message } -> "Error"
+  }
+
+let handleExtensibleResult = { result: | Ok { value: Int }, Error { message: String }, ... | } ->
+  match result {
+    Ok { value } -> "Success"
+    Error { message } -> "Error"
+    _ -> "Unknown result"
+  }
+
+# Usage examples
+let red = Red
+let success = Ok { value = 42 }
+
+let colorResult = processColor { color = red }
+let resultDescription = handleResult { result = success }
+

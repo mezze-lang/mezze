@@ -1,0 +1,17 @@
+# Do Syntax Test - Simplified to avoid parsing issues
+
+# Helper function for converting integers to strings
+let intToString = { n: Int } -> "number"
+
+# Simple lambda without do
+let simple = { x: Int } -> x + 1
+
+# Multi-line lambda with do block
+let myFunc = { x: Int } -> do
+  let y = x + 1
+  let z = y * 5
+  z / 4
+
+# Test function calls
+let result1 = myFunc { x = 10 }
+let result2 = simple { x = 5 }

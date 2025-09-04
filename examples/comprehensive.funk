@@ -1,0 +1,49 @@
+# Comprehensive Funk Language Example
+# This file demonstrates all major language features
+
+# Basic let bindings
+let x = 42
+let message = "Hello, Funk!"
+let isReady = true
+
+# Function definitions with record parameters
+let add = { x: Int, y: Int } -> x + y
+let greet = { name: String, age: Int } -> "Hello, " ++ name ++ "! You are " ++ age ++ " years old."
+
+# Record literals and access
+let person = { name = "Alice", age = 30 }
+let personName = person.name
+
+# Record updates
+let olderPerson = person with { age = 31 }
+
+# If expressions
+let status = if isReady then "Ready" else "Not ready"
+
+# Block expressions
+let result = do
+    let a = 10
+    let b = 20
+    a + b
+
+# Function calls
+let sum = add { x = 5, y = 10 }
+let greeting = greet { name = "Bob", age = 25 }
+
+# Type declarations
+type Person = { name: String, age: Int }
+type Point = { x: Int, y: Int }
+
+# Sum types (variants)
+type Result = | Ok { value: Int }, Error { message: String } |
+type Color = | Red, Green, Blue |
+
+# Pattern matching
+let handleResult = { result: Result } -> do
+    match result {
+        Ok { value } -> "Success: " ++ value
+        Error { message } -> "Error: " ++ message
+    }
+
+# More complex expressions
+let complexCalc = (10 + 5) * 2 - 3

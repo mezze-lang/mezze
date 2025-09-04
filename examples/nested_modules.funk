@@ -1,0 +1,68 @@
+# Nested Modules Example
+
+module MyProject where
+    expose Core, Utils
+    
+    module Core where
+        expose Http, Auth
+        
+        module Http where
+            expose get, post, put
+            
+            let get = { url: String } -> "GET " ++ url
+            let post = { url: String, body: String } -> "POST " ++ url ++ " with " ++ body
+            let put = { url: String, body: String } -> "PUT " ++ url ++ " with " ++ body
+        
+        module Auth where
+            expose login, logout, verify
+            # access MyProject.Core.Http.{ get, post }  # Module system not fully implemented
+            
+            let login = { username: String, password: String } -> "Logged in: " ++ username
+            
+            let logout = { token: String } -> "Logged out: " ++ token
+            
+            let verify = { token: String } -> "Verified: " ++ token
+    
+    module Utils where
+        expose String, Math
+        
+        module String where
+            expose capitalize, reverse
+            
+            let capitalize = { text: String } -> "CAPITALIZED: " ++ text
+            
+            let reverse = { text: String } -> "REVERSED: " ++ text
+        
+        module Math where
+            expose square, cube, factorial
+            
+            let square = { x: Int } -> x * x
+            let cube = { x: Int } -> x * x * x
+            let factorial = { n: Int } -> n  # Simplified for demo
+
+# Using nested modules - simplified since module system not fully implemented
+# access MyProject.Core.Http.{ get, post }
+# access MyProject.Core.Auth.{ login as authenticate }
+# access MyProject.Utils.Math.{ square, factorial }
+
+# Application code - simplified
+let userLogin = "Mock login result"  # authenticate { username = "alice", password = "secret123" }
+let userData = "Mock user data"      # get { url = "/users/alice" }
+let squaredAge = 625                 # square { x = 25 }
+let factorialResult = 120  # factorial { n = 5 }
+
+# Deeply nested module access
+module Application where
+    module Services where
+        module Database where
+            module Queries where
+                expose findUser, createUser
+                
+                let findUser = { id: Int } -> "SELECT * FROM users WHERE id = " ++ id
+                let createUser = { name: String, email: String } -> "INSERT INTO users (name, email) VALUES (" ++ name ++ ", " ++ email ++ ")"
+
+# Using deeply nested modules - simplified
+# access Application.Services.Database.Queries.{ findUser, createUser }
+
+let user = "Mock user data"  # findUser { id = 123 }
+let newUser = "Mock create result"  # createUser { name = "Bob", email = "bob@example.com" }

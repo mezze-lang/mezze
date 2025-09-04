@@ -1,0 +1,6 @@
+let isReady = true
+let value = 100
+
+# This if/then/else expression has nested arithmetic expressions
+# in its branches.
+let result = if isReady then (value * 2) + 5 else 0

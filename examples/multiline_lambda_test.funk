@@ -1,0 +1,13 @@
+# Multi-line Lambda Test
+
+let simpleAdd = { x: Int, y: Int } -> x + y
+
+let complexCalculation = { x: Int, y: Int } -> (x * 2) + (y * 3)
+
+let processData = { input: String } -> "Processed: " ++ input ++ "!"
+
+# Test the functions
+let simple = simpleAdd { x = 5, y = 10 }
+let complex = complexCalculation { x = 3, y = 4 }
+let processed = processData { input = "hello" }
+

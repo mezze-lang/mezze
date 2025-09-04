@@ -1,0 +1,22 @@
+# Complex variant usage examples - all should pass
+let describeColor = { color } ->
+  match color {
+    Red -> "It's red"
+    Green -> "It's green"
+    Blue -> "It's blue"
+    _ -> "color not found"
+  }
+
+let describeAnimal = { animal: | Cat, Dog, Rat | } ->
+  match animal {
+    Cat -> "It's Cat"
+    Dog -> "It's Dog"
+    Rat -> "It's Rat"
+  }
+
+let describeSize = { size: | S, M, L |} -> 
+  match size {
+    S -> "Small"
+    M -> "Medium"
+    L -> "Large"
+  }

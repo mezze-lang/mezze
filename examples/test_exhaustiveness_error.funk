@@ -1,0 +1,8 @@
+# Test file for exhaustiveness error detection
+# This should fail with "not exhaustive" error
+
+let describeAnimal = { animal: | Cat, Dog, Rat | } ->
+  match animal {
+    Cat -> "It's Cat"
+    Dog -> "It's Dog"
+  }

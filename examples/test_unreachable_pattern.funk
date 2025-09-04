@@ -1,0 +1,10 @@
+# Test file for unreachable pattern detection
+# This should fail with "unreachable pattern" error
+
+let describeSize = { size: | S, M, L |} -> 
+  match size {
+    S -> "Small"
+    M -> "Medium" 
+    L -> "Large"
+    _ -> "Don't know"  # This wildcard should be unreachable
+  }

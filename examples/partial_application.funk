@@ -1,0 +1,37 @@
+# Partial Application Examples
+
+# Basic function definition
+let add = { x: Int, y: Int } -> x + y
+let multiply = { a: Int, b: Int, c: Int } -> a * b * c
+
+# Partial application - providing some arguments
+let add5 = add { x = 5 }  # Partially applied, waiting for y
+let multiplyBy2And3 = multiply { a = 2, b = 3 }  # Waiting for c
+
+# Using partially applied functions
+let result1 = add5 { y = 10 }  # 5 + 10 = 15
+let result2 = multiplyBy2And3 { c = 4 }  # 2 * 3 * 4 = 24
+
+# More complex partial application
+let greet = { greeting: String, name: String, punctuation: String } -> greeting ++ " " ++ name ++ punctuation
+
+let sayHello = greet { greeting = "Hello" }
+let sayHelloToAlice = sayHello { name = "Alice" }
+let friendlyGreeting = sayHelloToAlice { punctuation = "!" }
+
+# Partial application with records
+let createUser = { name: String, email: String, age: Int, role: String } -> { name = name, email = email, age = age, role = role, active = true }
+
+let createAdmin = createUser { role = "admin" }
+let createUser25 = createUser { age = 25 }
+
+let admin = createAdmin { name = "Bob", email = "bob@example.com", age = 35 }
+let youngUser = createUser25 { name = "Charlie", email = "charlie@example.com", role = "user" }
+
+# Partial application with pipe operator
+let processData = { data: String, transform: String, validate: Boolean } -> if validate then transform ++ "(" ++ data ++ ")" else data
+
+let validateAndTransform = processData { validate = true }
+let upperCaseTransform = validateAndTransform { transform = "uppercase" }
+
+# let result = "hello world" |> upperCaseTransform { data = @, transform = "uppercase", validate = true }

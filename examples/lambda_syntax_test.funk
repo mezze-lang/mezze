@@ -1,0 +1,19 @@
+# New Lambda Syntax Test
+
+# Simple lambda function
+let add = { x: Int, y: Int } -> x + y
+
+# Lambda with single parameter
+let double = { x: Int } -> x * 2
+
+# Lambda with complex body  
+let greet = { name: String } -> "Hello, " ++ name ++ "!"
+
+# Lambda with simple body
+let processData = { input: String } -> "Processed: " ++ input
+
+# Function calls (should work the same as before)
+let sum = add { x = 5, y = 10 }
+let doubled = double { x = 21 }
+let greeting = greet { name = "Alice" }
+let result = processData { input = "test data" }

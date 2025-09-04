@@ -1,0 +1,20 @@
+# Pipe Operator Example
+
+let add = { x: Int, y: Int } -> x + y
+let multiply = { x: Int, y: Int } -> x * y
+let square = { x: Int } -> x * x
+
+# Using pipe operator with placeholder
+let result1 = 5 |> add { x = 10, y = @ }
+let result2 = 3 |> multiply { x = @, y = 4 }
+let result3 = 7 |> square { x = @ }
+
+# Chaining operations
+let complexResult = 
+    5 |> add { x = 10, y = @ } |> multiply { x = @, y = 2 }
+
+# Function that takes a record with rest fields
+let logData = { msg: String, ...rest } -> 
+    "Message: " ++ msg
+
+let logged = logData { msg = "Hello", extra = "data", more = 42 }

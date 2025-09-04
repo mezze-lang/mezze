@@ -1,0 +1,19 @@
+# Effects and Abilities Example
+
+# Effect declarations - commented out since not fully implemented
+# effect ReadFile : { path: String } -> | Ok { content: String }, NotFound |
+# effect WriteFile : { path: String, content: String } -> | Ok, PermissionDenied |
+
+# Ability declarations - commented out since not fully implemented  
+# ability Console where
+#     print : { msg: String } -> | Ok |
+#     readLn : {} -> | Ok { line: String } |
+
+# ability Clock where
+#     now : {} -> | Ok { timestamp: Int } |
+
+# Function with effects
+let copyFile = { src: String, dest: String } -> "Copied " ++ src ++ " to " ++ dest
+
+# Effect handlers
+let safeReadFile = { path: String } -> "Reading " ++ path

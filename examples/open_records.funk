@@ -1,0 +1,25 @@
+# Open Records and Row Polymorphism Examples
+
+# Open record type definition
+type Config = { retries: Int, timeout: Int, ...rest }
+
+# Function accepting open record
+let logAll = { msg: String, ...rest } -> msg
+
+# Function with open record parameter
+let processRequest = { url: String, method: String, ...options } -> { url = url, method = method }
+
+# Closed vs open record examples
+type Person = { name: String, age: Int }  # Closed record
+type Employee = { name: String, age: Int, ...details }  # Open record
+
+let person = { name = "Alice", age = 30 }
+let employee = { name = "Bob", age = 25, department = "Engineering" }
+
+# Row polymorphism in function signatures
+let getName = { name: String, ...rest } -> name
+let getAge = { age: Int, ...rest } -> age
+
+# Using with different record types
+let personName = getName { name = "Alice", age = 30 }
+let employeeName = getName { name = "Bob", age = 25, department = "Engineering" }

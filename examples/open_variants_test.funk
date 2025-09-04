@@ -1,0 +1,35 @@
+# Open Variants Test
+
+# Helper function for converting integers to strings
+let intToString = { n: Int } -> "42"  # Simplified implementation for testing
+
+# Closed variants (traditional)
+type Color = | Red, Green, Blue |
+type Result = | Ok { value: Int }, Error { message: String } |
+
+# Open variants (extensible)
+type ExtensibleColor = | Red, Green, Blue, ... |
+type ExtensibleResult = | Ok { value: Int }, Error { message: String }, ... |
+
+# Anonymous open variants (same syntax)
+let processColor = { color: | Red, Green, Blue, ... | } -> 
+  match color {
+    Red -> "It's red"
+    Green -> "It's green" 
+    Blue -> "It's blue"
+    _ -> "Unknown color"
+  }
+
+# Anonymous closed variants (simplified without pattern destructuring)
+let processResult = { result: | Ok { value: Int }, Error { message: String } | } ->
+  match result {
+    Ok -> "Success: 42"
+    Error -> "Error occurred"
+  }
+
+# Usage examples
+let myColor = Red
+let myResult = Ok { value = 42 }
+let colorDescription = processColor { color = myColor }
+let resultDescription = processResult { result = myResult }
+

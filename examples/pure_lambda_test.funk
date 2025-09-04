@@ -1,0 +1,24 @@
+# Pure Lambda Function Test
+
+# Simple lambda functions
+let square = { n: Int } -> n * n
+let add = { x: Int, y: Int } -> x + y
+let greet = { name: String } -> "Hello, " ++ name ++ "!"
+
+# Lambda with arithmetic
+let addDouble = { x: Int, y: Int } -> (x + y) * 2
+
+# Lambda assigned to variable (anonymous)
+let double = { x: Int } -> x * 2
+
+# Function calls
+let result1 = square { n = 5 }
+let result2 = add { x = 10, y = 20 }
+let result3 = greet { name = "Alice" }
+let result4 = addDouble { x = 3, y = 7 }
+let result5 = double { x = 15 }
+
+# Partial application
+let add10 = add { x = 10 }
+let finalResult = add10 { y = 25 }
+

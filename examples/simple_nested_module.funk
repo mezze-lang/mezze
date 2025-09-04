@@ -1,0 +1,7 @@
+# Simple Nested Module Test
+
+module MyProject where
+    module Core where
+        let add = { x: Int, y: Int } -> x + y
+    
+    let multiply = { a: Int, b: Int } -> a * b

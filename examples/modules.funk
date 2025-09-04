@@ -1,0 +1,24 @@
+# Module System Example
+
+module MathUtils where
+    # Private helper function
+    let square = { x: Int } -> x * x
+    
+    # Public functions
+    expose add, multiply, factorial
+    
+    let add = { x: Int, y: Int } -> x + y
+    let multiply = { x: Int, y: Int } -> x * y
+    
+    let factorial = { n: Int } -> n  # Simplified for demo
+
+module StringUtils where
+    expose concat, length
+    
+    let concat = { a: String, b: String } -> a ++ b
+    let length = { s: String } -> 0  # Placeholder implementation
+
+# Using modules - simplified since module system not fully implemented
+let result = 15  # add { x = 5, y = 10 }
+let product = 12  # multiply { x = 3, y = 4 }
+let joined = "HelloWorld"  # concat { a = "Hello", b = "World" }
