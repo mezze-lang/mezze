@@ -1,0 +1,33 @@
+# Pipe Operator Error Cases
+# These should fail type checking with specific errors
+
+# Type mismatch errors
+let square = { n: Int } -> n * n
+let greet = { name: String } -> "Hello, " ++ name
+
+# This should fail: String piped to Int function
+# let error1 = "hello" |> square { n = @ }
+
+# This should fail: Int piped to String function  
+# let error2 = 42 |> greet { name = @ }
+
+# Wrong argument name errors
+let add = { x: Int, y: Int } -> x + y
+
+# This should fail: wrong argument name
+# let error3 = 5 |> add { wrong = @, y = 10 }
+
+# This actually works - partial application!
+let partialAdd = 5 |> add { x = @ }  # Returns { y: Int } -> Int
+let completedAdd = partialAdd { y = 10 }  # Returns 15
+
+# Function arity errors
+let simpleFunc = { n: Int } -> n + 1
+
+# This should fail: too many arguments
+# let error5 = 5 |> simpleFunc { n = @, extra = 10 }
+
+# Valid cases that should work
+let validResult1 = 5 |> square { n = @ }
+let validResult2 = "World" |> greet { name = @ }
+let validResult3 = 3 |> add { x = 7, y = @ }

@@ -1,0 +1,13 @@
+# Debug scoping test - should fail if scoping works
+
+module TestModule where
+    expose onlyThis  # Only expose this function
+    
+    let onlyThis = { x: Int } -> x + 1
+    let notExposed = { x: Int } -> x * 2  # Should NOT be accessible
+
+# This should work (exposed function)
+let test1 = onlyThis { x = 5 }
+
+# This should fail if scoping works (non-exposed function)
+let test2 = notExposed { x = 3 }

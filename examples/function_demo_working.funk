@@ -1,0 +1,13 @@
+# Working function demo with current parser capabilities
+# This demonstrates functions and basic operations
+
+let addNumbers = { x, y } -> x + y
+
+let result1 = addNumbers { x = 8, y = 5 }
+let result2 = addNumbers { x = 3, y = 4 }
+
+# Simple conditional logic (avoiding comparison operators)
+let message1 = "First result calculated"
+let message2 = "Second result calculated"
+
+let final = message1 ++ " and " ++ message2

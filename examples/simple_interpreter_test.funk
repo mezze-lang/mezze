@@ -1,0 +1,6 @@
+# Simple example to test the Funk interpreter
+# This demonstrates basic arithmetic and variables
+
+let x = 10
+let y = 5
+let sum = x + y

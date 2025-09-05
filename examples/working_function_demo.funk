@@ -1,0 +1,28 @@
+# Working function that adds two numbers and returns Red or Blue variant
+# based on whether sum is greater than 10
+
+let addAndColor = { x, y } -> {
+    let sum = x + y
+    if sum > 10 then
+        Red { value = sum }
+    else
+        Blue { value = sum }
+}
+
+# Test the function
+let result1 = addAndColor { x = 8, y = 5 }  # Should be Red (13 > 10)
+let result2 = addAndColor { x = 3, y = 4 }  # Should be Blue (7 <= 10)
+
+# Pattern match the results
+let message1 = match result1 {
+    Red { value } -> "Got Red variant"
+    Blue { value } -> "Got Blue variant"
+}
+
+let message2 = match result2 {
+    Red { value } -> "Got Red variant"
+    Blue { value } -> "Got Blue variant"
+}
+
+# Combine the messages
+let final = message1 ++ " and " ++ message2

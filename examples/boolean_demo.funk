@@ -1,0 +1,5 @@
+# Boolean operations and conditionals demo
+let x = 10
+let y = 5
+let condition = true
+let result = if condition then "condition is true" else "condition is false"

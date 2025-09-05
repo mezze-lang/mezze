@@ -144,7 +144,11 @@ ifExpression:
     ;
 
 updateExpression:
-    additiveExpression (WITH recordLiteral)?
+    comparisonExpression (WITH recordLiteral)?
+    ;
+
+comparisonExpression:
+    additiveExpression ((GT | LT | GTE | LTE | EQ | NEQ) additiveExpression)*
     ;
 
 additiveExpression:
@@ -168,7 +172,7 @@ primaryExpression:
     | blockExpression
     | doExpression                         // Do block
     | lambdaExpression                     // Lambda function
-    | primaryExpression recordLiteral      // Function call
+    | primaryExpression recordLiteral      // Function call or record update (disambiguated in AST builder)
     ;
 
 lambdaExpression:
@@ -271,6 +275,14 @@ ARROW: '->';
 PLACEHOLDER: '@';
 WILDCARD: '_';
 ELLIPSIS: '...';
+
+// Comparison operators
+GT: '>';
+LT: '<';
+GTE: '>=';
+LTE: '<=';
+EQ: '==';
+NEQ: '!=';
 
 // Delimiters
 LPAREN: '(';

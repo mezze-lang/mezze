@@ -1,0 +1,25 @@
+# Basic Pipe Operator Tests
+# Testing the |> operator with @ placeholder
+
+# Simple functions for testing
+let square = { n: Int } -> n * n
+let double = { n: Int } -> n * 2
+let add = { x: Int, y: Int } -> x + y
+let greet = { name: String } -> "Hello, " ++ name ++ "!"
+
+# Basic pipe operations
+let result1 = 5 |> square { n = @ }                    # Should be 25
+let result2 = 10 |> double { n = @ }                   # Should be 20
+let result3 = "World" |> greet { name = @ }            # Should be "Hello, World!"
+
+# Pipe with multiple arguments
+let result4 = 5 |> add { x = 10, y = @ }               # Should be 15
+let result5 = 3 |> add { x = @, y = 7 }                # Should be 10
+
+# Chained pipe operations
+let result6 = 3 |> square { n = @ } |> double { n = @ } # Should be 18 (3² * 2)
+let result7 = 2 |> double { n = @ } |> square { n = @ } # Should be 16 (2 * 2)²
+
+# Pipe with complex expressions
+let result8 = (5 + 3) |> square { n = @ }              # Should be 64
+let result9 = (10 - 2) |> add { x = 5, y = @ }         # Should be 13

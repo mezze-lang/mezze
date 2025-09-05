@@ -1,0 +1,2 @@
+let checkGreater = { x, y } -> x > y
+let result = checkGreater { x = 15, y = 10 }

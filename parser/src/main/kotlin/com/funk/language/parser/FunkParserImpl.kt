@@ -18,6 +18,32 @@ class FunkParserImpl {
 
 private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
 
+    /**
+     * Heuristic to determine if an identifier is likely a record variable vs a function.
+     * This is conservative - when in doubt, we prefer function calls.
+     */
+    private fun isLikelyRecordVariable(name: String): Boolean {
+        // Common record variable patterns: person, user, data, config, etc.
+        // Avoid common function names: add, create, get, make, etc.
+        val commonRecordNames = setOf(
+            "person", "user", "data", "config", "record", "item", "entity", 
+            "obj", "object", "state", "model", "info", "details"
+        )
+        val commonFunctionNames = setOf(
+            "add", "create", "make", "get", "set", "update", "delete", "remove",
+            "build", "construct", "generate", "compute", "calculate", "process"
+        )
+        
+        return when {
+            name in commonRecordNames -> true
+            name in commonFunctionNames -> false
+            // Default: if it ends with common record suffixes, likely a record
+            name.endsWith("Data") || name.endsWith("Info") || name.endsWith("Config") -> true
+            // Otherwise, prefer function call (conservative)
+            else -> false
+        }
+    }
+
     override fun visitProgram(ctx: FunkParser.ProgramContext): ASTNode {
         val items = ctx.statement().mapNotNull { visit(it) as? ProgramItem }
         return Program(items)
@@ -211,13 +237,25 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
     }
 
     override fun visitUpdateExpression(ctx: FunkParser.UpdateExpressionContext): ASTNode {
-        val baseExpr = visit(ctx.additiveExpression()) as Expression
+        val baseExpr = visit(ctx.comparisonExpression()) as Expression
         return if (ctx.recordLiteral() != null) {
             val updates = visit(ctx.recordLiteral()) as RecordLiteral
             RecordUpdate(baseExpr, updates.entries)
         } else {
             baseExpr
         }
+    }
+
+    override fun visitComparisonExpression(ctx: FunkParser.ComparisonExpressionContext): ASTNode {
+        var left = visit(ctx.additiveExpression(0)) as Expression
+        
+        for (i in 1 until ctx.additiveExpression().size) {
+            val operator = ctx.getChild(i * 2 - 1).text
+            val right = visit(ctx.additiveExpression(i)) as Expression
+            left = BinaryOperation(left, operator, right)
+        }
+        
+        return left
     }
 
     override fun visitAdditiveExpression(ctx: FunkParser.AdditiveExpressionContext): ASTNode {
@@ -255,11 +293,31 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
     }
 
     override fun visitPrimaryExpression(ctx: FunkParser.PrimaryExpressionContext): ASTNode {
-        // Handle function calls first
+        // Handle function calls and record updates
         if (ctx.primaryExpression() != null && ctx.recordLiteral() != null) {
-            val function = visit(ctx.primaryExpression()) as Expression
-            val arguments = visit(ctx.recordLiteral()) as RecordLiteral
-            return FunctionCall(function, arguments)
+            val leftExpr = visit(ctx.primaryExpression()) as Expression
+            val recordLiteral = visit(ctx.recordLiteral()) as RecordLiteral
+            
+            // Disambiguation logic for expr { ... }:
+            if (leftExpr is Identifier && recordLiteral.entries.all { it.value != null }) {
+                when {
+                    // Variant construction: Ok { value = 42 }
+                    leftExpr.name.first().isUpperCase() -> {
+                        return VariantConstruction(leftExpr.name, recordLiteral)
+                    }
+                    // Record update: person { age = 26 }
+                    isLikelyRecordVariable(leftExpr.name) -> {
+                        return RecordUpdate(leftExpr, recordLiteral.entries)
+                    }
+                    // Function call: func { x = 5, y = 10 }
+                    else -> {
+                        return FunctionCall(leftExpr, recordLiteral)
+                    }
+                }
+            } else {
+                // Function call (default case)
+                return FunctionCall(leftExpr, recordLiteral)
+            }
         }
 
         return when {

@@ -1,0 +1,53 @@
+# Module System Comprehensive Test
+
+# Basic module with expose
+module MathUtils where
+    expose square, add, PI
+    
+    let PI = 3  # Simplified to Int for now
+    let square = { x: Int } -> x * x
+    let add = { x: Int, y: Int } -> x + y
+    let private = { x: Int } -> x * 2  # Not exposed
+
+# Module with types
+module DataTypes where
+    expose Person, Point
+    
+    type Person = { name: String, age: Int }
+    type Point = { x: Int, y: Int }
+    
+    let createPerson = { name: String, age: Int } -> { name = name, age = age }
+
+# Nested modules
+module Graphics where
+    expose Shapes, Colors
+    
+    module Shapes where
+        expose Circle, Rectangle
+        
+        type Circle = { radius: Int, center: Point }
+        type Rectangle = { width: Int, height: Int }
+        
+        let circleArea = { c: Circle } -> 3 * c.radius * c.radius  # Simplified PI
+    
+    module Colors where
+        expose Red, Green, Blue, rgb
+        
+        type Red = | Red |
+        type Green = | Green |  
+        type Blue = | Blue |
+        
+        let rgb = { r: Int, g: Int, b: Int } -> "RGB(" ++ "values" ++ ")"
+
+# Test basic usage (without imports for now)
+let testSquare = square { x = 5 }
+let testAdd = add { x = 3, y = 7 }
+let testPerson = createPerson { name = "Alice", age = 30 }
+
+# Module access would look like this (not implemented yet):
+# access MathUtils.{ square, add }
+# access DataTypes.{ Person }
+# access Graphics.Shapes.{ Circle }
+
+let result1 = testSquare   # Should be 25
+let result2 = testAdd     # Should be 10

@@ -1,0 +1,11 @@
+# Simple module test
+
+let globalVar = 42
+
+module TestModule where
+    expose moduleVar
+    
+    let moduleVar = 100
+    let hiddenVar = 200
+
+let afterModule = 300

@@ -1,0 +1,5 @@
+let value = Some { value = 42 }
+let result = match value {
+    Some { value } -> "Found: " ++ "42"
+    None -> "Not found"
+}

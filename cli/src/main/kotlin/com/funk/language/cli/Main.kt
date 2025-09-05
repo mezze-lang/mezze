@@ -2,6 +2,8 @@ package com.funk.language.cli
 
 import com.funk.language.parser.FunkParserImpl
 import com.funk.language.typechecker.*
+import com.funk.language.interpreter.FunkInterpreter
+import com.funk.language.interpreter.FunkException
 import java.io.File
 
 fun main(args: Array<String>) {
@@ -13,6 +15,7 @@ fun main(args: Array<String>) {
     when (args[0]) {
         "parse" -> handleParseCommand(args.drop(1))
         "check" -> handleCheckCommand(args.drop(1))
+        "exec" -> handleExecCommand(args.drop(1))
         else -> {
             println("Error: Unknown command '${args[0]}'")
             printUsage()
@@ -24,6 +27,7 @@ private fun printUsage() {
     println("Usage:")
     println("  funk parse [file]    - Parse a file (or stdin if no file) and pretty-print the AST")
     println("  funk check [file]    - Type check a file (or stdin if no file) and pretty-print the types")
+    println("  funk exec [file]     - Execute a file (or stdin if no file) and show the result")
 }
 
 private fun handleParseCommand(args: List<String>) {
@@ -146,7 +150,11 @@ private fun prettyPrintType(type: FunkType): String = when (type) {
     }
     is FunkType.VariantType -> {
         val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
-            if (dataType != null) "$name(${prettyPrintType(dataType)})" else name
+            when (dataType) {
+                null -> name
+                is FunkType.RecordType -> "$name ${prettyPrintType(dataType)}" // Ok { value: Int }
+                else -> "$name(${prettyPrintType(dataType)})" // Ok(Int) for non-record types
+            }
         }
         val openMarker = if (type.rowVar != null) ", ..." else ""
         "| $constructors$openMarker |"
@@ -231,6 +239,51 @@ private fun prettyPrintExpression(expr: com.funk.language.parser.Expression): St
             "if ${prettyPrintExpression(expr.condition)} then ${prettyPrintExpression(expr.thenBranch)} else ${prettyPrintExpression(expr.elseBranch)}"
         }
         else -> expr.toString()
+    }
+}
+
+private fun handleExecCommand(args: List<String>) {
+    val source = when {
+        args.isEmpty() -> {
+            // Read from stdin
+            readStdin()
+        }
+        args.size == 1 -> {
+            // Read from file
+            val file = File(args[0])
+            if (!file.exists()) {
+                println("Error: File not found at '${args[0]}'")
+                return
+            }
+            file.readText()
+        }
+        else -> {
+            println("Error: exec command takes at most 1 argument (filename)")
+            printUsage()
+            return
+        }
+    }
+
+    try {
+        val interpreter = FunkInterpreter()
+        val result = interpreter.execute(source)
+        
+        println("✅ Execution successful!")
+        println()
+        println("Result: ${result.toDisplayString()}")
+        
+    } catch (e: StructuredTypeError) {
+        println("❌ Type Error:")
+        println(ErrorPrettyPrinter.prettyPrintErrorSimple(e))
+        kotlin.system.exitProcess(1)
+    } catch (e: FunkException) {
+        println("❌ Runtime Error:")
+        println(e.message ?: "Unknown runtime error")
+        kotlin.system.exitProcess(1)
+    } catch (e: Exception) {
+        println("❌ Error:")
+        println(e.message ?: "Unknown error")
+        kotlin.system.exitProcess(1)
     }
 }
 

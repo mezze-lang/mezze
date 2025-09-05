@@ -1,0 +1,6 @@
+let addAndColor = { x, y } -> if x + y > 10 then "Red" else "Blue"
+
+let result1 = addAndColor { x = 8, y = 5 }
+let result2 = addAndColor { x = 3, y = 4 }
+
+let final = result1 ++ " and " ++ result2

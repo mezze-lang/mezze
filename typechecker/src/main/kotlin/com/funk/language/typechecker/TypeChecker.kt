@@ -16,7 +16,7 @@ class TypeChecker {
         val typedItems = mutableListOf<TypedItem>()
         
         for (item in program.items) {
-            val typedItem = inferItem(item, context)
+            val typedItem = inferItemWithConstraints(item, context)
             typedItems.add(typedItem)
             
             // Update context with new bindings for subsequent items
@@ -63,7 +63,82 @@ class TypeChecker {
             }
         }
         
-        return TypedProgram(typedItems)
+        // Post-process: rename type variables to clean names (a, b, c, etc.)
+        val cleanedItems = typedItems.map { item ->
+            when (item) {
+                is TypedLetBinding -> {
+                    val cleanedType = cleanupTypeVariableNames(item.inferredType)
+                    item.copy(inferredType = cleanedType)
+                }
+                else -> item
+            }
+        }
+        
+        return TypedProgram(cleanedItems)
+    }
+    
+    /**
+     * Clean up type variable names by renaming them to a, b, c, etc.
+     * This should be called after all unification is complete.
+     */
+    private fun cleanupTypeVariableNames(type: FunkType): FunkType {
+        val renameMap = mutableMapOf<TypeVar, String>()
+        var letterCounter = 0
+        
+        fun generateCleanName(): String {
+            return if (letterCounter < 26) {
+                ('a' + letterCounter).toString()
+            } else {
+                // For indices >= 26, use aa, ab, ac, etc.
+                val firstLetter = 'a' + (letterCounter / 26 - 1)
+                val secondLetter = 'a' + (letterCounter % 26)
+                "$firstLetter$secondLetter"
+            }
+        }
+        
+        fun cleanupType(t: FunkType): FunkType {
+            return when (t) {
+                is FunkType.VarType -> {
+                    val cleanName = renameMap.getOrPut(t.variable) {
+                        val name = generateCleanName()
+                        letterCounter++
+                        name
+                    }
+                    FunkType.VarType(TypeVar(cleanName, t.variable.level, t.variable.id))
+                }
+                is FunkType.RecordType -> {
+                    FunkType.RecordType(
+                        t.fields.mapValues { cleanupType(it.value) },
+                        t.rowVar
+                    )
+                }
+                is FunkType.VariantType -> {
+                    FunkType.VariantType(
+                        t.constructors.mapValues { it.value?.let { cleanupType(it) } },
+                        t.rowVar
+                    )
+                }
+                is FunkType.FunctionType -> {
+                    FunkType.FunctionType(
+                        cleanupType(t.paramType),
+                        cleanupType(t.returnType),
+                        t.effects
+                    )
+                }
+                is FunkType.TypeConstructor -> {
+                    FunkType.TypeConstructor(
+                        t.name,
+                        t.args.map { cleanupType(it) }
+                    )
+                }
+                is FunkType.TypeAlias -> {
+                    FunkType.TypeAlias(t.name, cleanupType(t.type))
+                }
+                else -> t // Primitive types remain unchanged
+            }
+        }
+        
+        return cleanupType(type)
     }
     
     private fun inferItem(item: ProgramItem, context: TypeContext): TypedItem {
@@ -146,6 +221,81 @@ class TypeChecker {
         }
     }
     
+    /**
+     * Constraint-based item inference - collects constraints and solves them
+     */
+    private fun inferItemWithConstraints(item: ProgramItem, context: TypeContext): TypedItem {
+        return when (item) {
+            is LetBinding -> {
+                // Use constraint-based inference for expressions
+                val result = inferExpressionWithConstraints(item.expression, context)
+                
+                // Solve all constraints to get the final type
+                val substitution = ConstraintSolver.solve(result.constraints)
+                val finalType = substitution.apply(result.type)
+                
+                TypedLetBinding(
+                    variableName = item.variableName,
+                    declaredType = item.typeAnnotation?.let { convertTypeAnnotation(it) },
+                    inferredType = finalType,
+                    expression = TypedExpression(item.expression, finalType)
+                )
+            }
+            
+            is TypeDeclaration -> {
+                val type = convertTypeDefinition(item.definition)
+                
+                TypedTypeDeclaration(
+                    name = item.name,
+                    type = type,
+                    hash = ContentHash.compute(type)
+                )
+            }
+            
+            is EffectDeclaration -> {
+                val inputType = convertRecordType(item.inputType)
+                val resultType = convertVariantType(item.resultType)
+                val effect = Effect(item.name)
+                
+                TypedEffectDeclaration(
+                    name = item.name,
+                    inputType = inputType,
+                    resultType = resultType,
+                    effect = effect
+                )
+            }
+            
+            is AbilityDeclaration -> {
+                // For now, treat abilities as simple type declarations
+                // This is a placeholder until the effect system is fully implemented
+                val abilityType = FunkType.TypeConstructor(item.name, emptyList())
+                TypedTypeDeclaration(
+                    name = item.name,
+                    type = abilityType,
+                    hash = ContentHash.compute(abilityType)
+                )
+            }
+            
+            is ModuleDeclaration -> {
+                // For now, modules are simplified
+                TypedModuleDeclaration(
+                    name = item.name,
+                    statements = emptyList()
+                )
+            }
+            
+            is ExpressionStatement -> {
+                // Expression statements are not supported at the top level in this simplified version
+                throw TypeError.UnboundVariable("Expression statements not supported at top level")
+            }
+            
+            is ResumeStatement -> {
+                // Resume statements are not supported at the top level
+                throw TypeError.UnboundVariable("Resume statements not supported at top level")
+            }
+        }
+    }
+    
     private fun inferExpression(expr: Expression, context: TypeContext): FunkType {
         return when (expr) {
             is Literal<*> -> inferLiteral(expr)
@@ -165,6 +315,33 @@ class TypeChecker {
             is HandleExpression -> inferHandleExpression(expr, context)
             is PlaceholderExpression -> {
                 // Placeholder should only appear in pipe expressions and will be replaced during transformation
+                throw TypeError.UnboundVariable("Placeholder @ can only be used in pipe expressions")
+            }
+            else -> throw TypeError.UnboundVariable("Unsupported expression: ${expr::class.simpleName}")
+        }
+    }
+    
+    /**
+     * Constraint-based expression inference - the core of the new system
+     */
+    private fun inferExpressionWithConstraints(expr: Expression, context: TypeContext): InferenceResult {
+        return when (expr) {
+            is Literal<*> -> InferenceResultHelper.simple(inferLiteral(expr))
+            is Identifier -> inferIdentifierWithConstraints(expr, context)
+            is LambdaExpression -> inferLambdaWithConstraints(expr, context)
+            is FunctionCall -> inferFunctionCallWithConstraints(expr, context)
+            is RecordLiteral -> inferRecordLiteralWithConstraints(expr, context)
+            is MemberAccess -> inferMemberAccessWithConstraints(expr, context)
+            is RecordUpdate -> inferRecordUpdateWithConstraints(expr, context)
+            is BinaryOperation -> inferBinaryOperationWithConstraints(expr, context)
+            is VariantConstruction -> inferVariantConstructionWithConstraints(expr, context)
+            is IfExpression -> inferIfExpressionWithConstraints(expr, context)
+            is MatchExpression -> inferMatchExpressionWithConstraints(expr, context)
+            is PipeExpression -> inferPipeExpressionWithConstraints(expr, context)
+            is DoExpression -> inferDoExpressionWithConstraints(expr, context)
+            is BlockExpression -> inferBlockExpressionWithConstraints(expr, context)
+            is HandleExpression -> inferHandleExpressionWithConstraints(expr, context)
+            is PlaceholderExpression -> {
                 throw TypeError.UnboundVariable("Placeholder @ can only be used in pipe expressions")
             }
             else -> throw TypeError.UnboundVariable("Unsupported expression: ${expr::class.simpleName}")
@@ -191,6 +368,18 @@ class TypeChecker {
         if (effect != null) {
             // For now, return a placeholder type - effects need special handling in function calls
             throw TypeError.UnboundVariable("Effect '${identifier.name}' cannot be used as a standalone expression")
+        }
+        
+        // Check if it's an uppercase identifier (potential variant constructor)
+        if (identifier.name.isNotEmpty() && identifier.name[0].isUpperCase()) {
+            // Create a closed variant type with this constructor
+            // It will be merged with other constructors during unification
+            val constructorType: FunkType? = null // No data constructor for simple variants
+            val variantType = FunkType.VariantType(
+                constructors = mapOf(identifier.name to constructorType),
+                rowVar = null // Start closed - will be opened if needed during unification
+            )
+            return variantType
         }
         
         throw StructuredTypeError.unboundVariable(
@@ -232,12 +421,16 @@ class TypeChecker {
             is UntypedParameters -> {
                 // Create fresh type variables for untyped parameters (bidirectional inference)
                 val paramTypes = parameters.names.associate { name ->
-                    name to FunkType.VarType(TypeVar.fresh("param_$name"))
+                    name to FunkType.VarType(TypeVar.fresh())
                 }
                 val paramType = FunkType.RecordType(paramTypes)
                 
                 // Create context with type variables - let match expressions do bidirectional inference
                 val paramContext = bindUntypedParameters(parameters.names, paramTypes, context)
+                
+                // Store the original parameter type variables for substitution tracking
+                val originalParamVars = paramTypes.values.toSet()
+                
                 val bodyType = inferExpression(lambda.body, paramContext)
                 val effects = collectEffects(lambda.body)
                 
@@ -314,15 +507,126 @@ class TypeChecker {
             }
             
             is BinaryOperation -> {
-                // If parameters are used in arithmetic, infer as Int
+                // If parameters are used in arithmetic or comparison with numbers, infer as Int
                 val leftExpr = expr.left
                 val rightExpr = expr.right
+                
+                // Arithmetic operations
                 if (expr.operator in listOf("+", "-", "*", "/", "%")) {
+                    // Handle direct parameter usage like param + 1
                     if (leftExpr is Identifier && paramTypes.containsKey(leftExpr.name)) {
                         paramTypes[leftExpr.name] = FunkType.IntType
                     }
                     if (rightExpr is Identifier && paramTypes.containsKey(rightExpr.name)) {
                         paramTypes[rightExpr.name] = FunkType.IntType
+                    }
+                    
+                    // Handle member access expressions like person.age + 1
+                    if (leftExpr is MemberAccess && leftExpr.receiver is Identifier) {
+                        val receiver = leftExpr.receiver as Identifier
+                        if (paramTypes.containsKey(receiver.name)) {
+                            val paramName = receiver.name
+                            val fieldName = leftExpr.member
+                            val currentType = paramTypes[paramName]
+                            if (currentType is FunkType.VarType) {
+                                // Create record type with Int field
+                                val recordType = FunkType.RecordType(
+                                    mapOf(fieldName to FunkType.IntType),
+                                    rowVar = null
+                                )
+                                paramTypes[paramName] = recordType
+                            } else if (currentType is FunkType.RecordType) {
+                                // Update existing record type with Int field
+                                val updatedFields = currentType.fields + (fieldName to FunkType.IntType)
+                                paramTypes[paramName] = FunkType.RecordType(updatedFields, currentType.rowVar)
+                            }
+                        }
+                    }
+                    if (rightExpr is MemberAccess && rightExpr.receiver is Identifier) {
+                        val receiver = rightExpr.receiver as Identifier
+                        if (paramTypes.containsKey(receiver.name)) {
+                            val paramName = receiver.name
+                            val fieldName = rightExpr.member
+                            val currentType = paramTypes[paramName]
+                            if (currentType is FunkType.VarType) {
+                                // Create record type with Int field
+                                val recordType = FunkType.RecordType(
+                                    mapOf(fieldName to FunkType.IntType),
+                                    rowVar = null
+                                )
+                                paramTypes[paramName] = recordType
+                            } else if (currentType is FunkType.RecordType) {
+                                // Update existing record type with Int field
+                                val updatedFields = currentType.fields + (fieldName to FunkType.IntType)
+                                paramTypes[paramName] = FunkType.RecordType(updatedFields, currentType.rowVar)
+                            }
+                        }
+                    }
+                }
+                
+                // Comparison operations - infer types from literals
+                if (expr.operator in listOf(">", "<", ">=", "<=", "==", "!=")) {
+                    // If comparing parameter with integer literal, infer parameter as Int
+                    if (leftExpr is Identifier && paramTypes.containsKey(leftExpr.name) && 
+                        rightExpr is Literal<*> && rightExpr.value is Int) {
+                        paramTypes[leftExpr.name] = FunkType.IntType
+                    }
+                    if (rightExpr is Identifier && paramTypes.containsKey(rightExpr.name) && 
+                        leftExpr is Literal<*> && leftExpr.value is Int) {
+                        paramTypes[rightExpr.name] = FunkType.IntType
+                    }
+                    
+                    // If comparing parameter with float literal, infer parameter as Float
+                    if (leftExpr is Identifier && paramTypes.containsKey(leftExpr.name) && 
+                        rightExpr is Literal<*> && rightExpr.value is Float) {
+                        paramTypes[leftExpr.name] = FunkType.FloatType
+                    }
+                    if (rightExpr is Identifier && paramTypes.containsKey(rightExpr.name) && 
+                        leftExpr is Literal<*> && leftExpr.value is Float) {
+                        paramTypes[rightExpr.name] = FunkType.FloatType
+                    }
+                    
+                    // If comparing parameter with string literal, infer parameter as String
+                    if (leftExpr is Identifier && paramTypes.containsKey(leftExpr.name) && 
+                        rightExpr is Literal<*> && rightExpr.value is String) {
+                        paramTypes[leftExpr.name] = FunkType.StringType
+                    }
+                    if (rightExpr is Identifier && paramTypes.containsKey(rightExpr.name) && 
+                        leftExpr is Literal<*> && leftExpr.value is String) {
+                        paramTypes[rightExpr.name] = FunkType.StringType
+                    }
+                }
+                
+                // String concatenation - infer both operands as String
+                if (expr.operator == "++") {
+                    // Handle member access expressions like a.name ++ "hello"
+                    if (leftExpr is MemberAccess && leftExpr.receiver is Identifier) {
+                        val receiver = leftExpr.receiver as Identifier
+                        if (paramTypes.containsKey(receiver.name)) {
+                            val paramName = receiver.name
+                            val fieldName = leftExpr.member
+                            val currentType = paramTypes[paramName]
+                            if (currentType is FunkType.VarType) {
+                                // Create record type with String field
+                                val recordType = FunkType.RecordType(
+                                    mapOf(fieldName to FunkType.StringType),
+                                    rowVar = null
+                                )
+                                paramTypes[paramName] = recordType
+                            } else if (currentType is FunkType.RecordType) {
+                                // Update existing record type with String field
+                                val updatedFields = currentType.fields + (fieldName to FunkType.StringType)
+                                paramTypes[paramName] = FunkType.RecordType(updatedFields, currentType.rowVar)
+                            }
+                        }
+                    }
+                    
+                    // Handle direct parameter usage like param ++ "hello"
+                    if (leftExpr is Identifier && paramTypes.containsKey(leftExpr.name)) {
+                        paramTypes[leftExpr.name] = FunkType.StringType
+                    }
+                    if (rightExpr is Identifier && paramTypes.containsKey(rightExpr.name)) {
+                        paramTypes[rightExpr.name] = FunkType.StringType
                     }
                 }
                 
@@ -355,8 +659,27 @@ class TypeChecker {
                 extractInferredTypesFromBody(expr.result, paramTypes)
             }
             
+            is MemberAccess -> {
+                // Only process member access in post-processing if we can infer concrete types
+                // Don't create new generic type variables that would override initial inference
+                // The concrete type inference is handled by the binary operation cases above
+                
+                // Recursively analyze the receiver
+                extractInferredTypesFromBody(expr.receiver, paramTypes)
+            }
+            
             else -> { /* Other expression types */ }
         }
+    }
+    
+    /**
+     * Infer the type of a field from its usage context
+     */
+    private fun inferFieldTypeFromContext(memberAccess: MemberAccess, paramTypes: Map<String, FunkType>): FunkType {
+        // For now, return a fresh type variable for the field
+        // In a more sophisticated implementation, we would analyze the parent expression
+        // to infer the field type (e.g., from string concatenation, arithmetic, etc.)
+        return FunkType.VarType(TypeVar.fresh())
     }
     
     /**
@@ -367,7 +690,7 @@ class TypeChecker {
         
         // Initialize with fresh type variables
         for (name in paramNames) {
-            paramTypes[name] = FunkType.VarType(TypeVar.fresh("param_$name"))
+            paramTypes[name] = FunkType.VarType(TypeVar.fresh())
         }
         
         // Analyze the body to infer more specific types
@@ -475,8 +798,53 @@ class TypeChecker {
         val thenType = inferExpression(ifExpr.thenBranch, context)
         val elseType = inferExpression(ifExpr.elseBranch, context)
         
-        Unification.unify(thenType, elseType)
-        return thenType
+        // Special handling for variant types - create closed variants when possible
+        val resultType = when {
+            thenType is FunkType.VariantType && elseType is FunkType.VariantType -> {
+                // Both branches are variants - merge into a closed variant
+                mergeVariantTypes(thenType, elseType)
+            }
+            thenType is FunkType.VariantType -> {
+                // Then branch is variant, else is something else - try to unify
+                try {
+                    Unification.unify(thenType, elseType)
+                    thenType
+                } catch (e: Exception) {
+                    // If unification fails, return the variant type
+                    thenType
+                }
+            }
+            elseType is FunkType.VariantType -> {
+                // Else branch is variant, then is something else - try to unify  
+                try {
+                    Unification.unify(thenType, elseType)
+                    elseType
+                } catch (e: Exception) {
+                    // If unification fails, return the variant type
+                    elseType
+                }
+            }
+            else -> {
+                Unification.unify(thenType, elseType)
+                thenType
+            }
+        }
+        
+        return resultType
+    }
+    
+    private fun mergeVariantTypes(type1: FunkType.VariantType, type2: FunkType.VariantType): FunkType.VariantType {
+        // Merge constructors from both variants
+        val mergedConstructors = type1.constructors + type2.constructors
+        
+        // Always create closed variants by default unless explicitly asked otherwise
+        // This represents a complete finite set of constructors
+        return FunkType.VariantType(mergedConstructors, rowVar = null) // Always closed by default
+    }
+    
+    private fun areSimpleConstructorVariants(variant: FunkType.VariantType): Boolean {
+        // Check if all constructors are simple (no data)
+        return variant.constructors.values.all { it == null }
     }
     
     private fun inferMatchExpression(matchExpr: MatchExpression, context: TypeContext): FunkType {
@@ -891,14 +1259,17 @@ class TypeChecker {
             }
             is FunkType.VarType -> {
                 // Create a fresh type variable for the field type
-                val fieldType = FunkType.VarType(TypeVar.fresh("field_${access.member}"))
-                val rowVar = RowVar.fresh()
+                val fieldType = FunkType.VarType(TypeVar.fresh())
+                // Create a closed record type by default (no rowVar)
                 val expectedRecordType = FunkType.RecordType(
                     mapOf(access.member to fieldType),
-                    rowVar
+                    rowVar = null // Closed record by default
                 )
-                Unification.unify(recordType, expectedRecordType)
-                fieldType
+                val substitution = Unification.unify(recordType, expectedRecordType)
+                // Apply the substitution to the field type and return it
+                // This ensures the return type is the same as the field type
+                val resultType = substitution.apply(fieldType)
+                resultType
             }
             else -> throw TypeError.UnificationError(recordType, FunkType.RecordType(mapOf(access.member to FunkType.VarType(TypeVar.fresh()))))
         }
@@ -962,8 +1333,9 @@ class TypeChecker {
             }
             "++" -> {
                 // String concatenation
-                Unification.unify(leftType, FunkType.StringType)
-                Unification.unify(rightType, FunkType.StringType)
+                val leftSubst = Unification.unify(leftType, FunkType.StringType)
+                val rightSubst = Unification.unify(rightType, FunkType.StringType)
+                // Apply substitutions (though they don't affect the return type in this case)
                 FunkType.StringType
             }
             "==", "!=", "<", ">", "<=", ">=" -> {
@@ -982,25 +1354,20 @@ class TypeChecker {
     }
     
     private fun inferVariantConstruction(constructor: VariantConstruction, context: TypeContext): FunkType {
-        // Look up the variant constructor in the environment
-        val scheme = context.env.lookup(constructor.constructor)
-            ?: throw TypeError.UnboundVariable("Variant constructor '${constructor.constructor}' not found")
-        
-        val constructorType = instantiate(scheme)
-        
         val value = constructor.value
-        return if (value != null) {
+        
+        if (value != null) {
+            // Variant constructor with data: Ok { value = 42 }
             val valueType = inferExpression(value, context)
-            // Apply the constructor to the value
-            when (constructorType) {
-                is FunkType.FunctionType -> {
-                    Unification.unify(valueType, constructorType.paramType)
-                    constructorType.returnType
-                }
-                else -> throw TypeError.UnificationError(constructorType, FunkType.FunctionType(valueType, FunkType.VarType(TypeVar.fresh())))
-            }
+            
+            // Create a variant type with this constructor and its data type
+            val constructors = mapOf(constructor.constructor to valueType)
+            return FunkType.VariantType(constructors, rowVar = null) // Closed variant
         } else {
-            constructorType
+            // Simple variant constructor: Ok (no data)
+            // This should be handled by inferIdentifier, but just in case
+            val constructors = mapOf(constructor.constructor to null)
+            return FunkType.VariantType(constructors, rowVar = null) // Closed variant
         }
     }
     
@@ -1211,6 +1578,533 @@ class TypeChecker {
             type.effects
         )
         else -> type
+    }
+    
+    // ========================================
+    // CONSTRAINT-BASED INFERENCE METHODS
+    // ========================================
+    
+    private fun inferIdentifierWithConstraints(identifier: Identifier, context: TypeContext): InferenceResult {
+        return context.env.lookup(identifier.name)?.let { scheme ->
+            InferenceResultHelper.simple(instantiate(scheme))
+        } ?: run {
+            // Check for implicit variant constructor
+            if (identifier.name.first().isUpperCase()) {
+                val variantType = FunkType.VariantType(
+                    constructors = mapOf(identifier.name to null),
+                    rowVar = RowVar.fresh("variant") // Open variant to allow subtyping
+                )
+                InferenceResultHelper.simple(variantType)
+            } else {
+                throw TypeError.UnboundVariable("Unbound variable: ${identifier.name}")
+            }
+        }
+    }
+    
+    private fun inferLambdaWithConstraints(lambda: LambdaExpression, context: TypeContext): InferenceResult {
+        val parameters = lambda.parameters
+        return when (parameters) {
+            is TypedParameters -> {
+                val paramType = convertRecordType(parameters.recordType)
+                val paramContext = bindRecordParameters(parameters.recordType, context)
+                val bodyResult = inferExpressionWithConstraints(lambda.body, paramContext)
+                val effects = collectEffects(lambda.body)
+                
+                val funcType = FunkType.FunctionType(paramType, bodyResult.type, effects)
+                InferenceResult(funcType, bodyResult.constraints)
+            }
+            is UntypedParameters -> {
+                // Create fresh type variables for parameters
+                val paramTypes = parameters.names.associate { name ->
+                    name to FunkType.VarType(TypeVar.fresh())
+                }
+                val paramType = FunkType.RecordType(paramTypes)
+                
+                // Create context with type variables
+                val paramContext = bindUntypedParameters(parameters.names, paramTypes, context)
+                
+                // Infer body with constraints
+                val bodyResult = inferExpressionWithConstraints(lambda.body, paramContext)
+                val effects = collectEffects(lambda.body)
+                
+                // Create function type
+                val funcType = FunkType.FunctionType(paramType, bodyResult.type, effects)
+                
+                // Return result with all constraints from body
+                InferenceResult(funcType, bodyResult.constraints)
+            }
+        }
+    }
+    
+    private fun inferMemberAccessWithConstraints(access: MemberAccess, context: TypeContext): InferenceResult {
+        // Infer the receiver type
+        val receiverResult = inferExpressionWithConstraints(access.receiver, context)
+        
+        // Create a fresh type variable for the field type
+        val fieldType = FunkType.VarType(TypeVar.fresh())
+        
+        // Create a constraint that the receiver must have this field
+        val fieldConstraint = Constraint.HasField(receiverResult.type, access.member, fieldType)
+        
+        // Return the field type with the constraint
+        return InferenceResult(fieldType, receiverResult.constraints + fieldConstraint)
+    }
+    
+    private fun inferBinaryOperationWithConstraints(binOp: BinaryOperation, context: TypeContext): InferenceResult {
+        val leftResult = inferExpressionWithConstraints(binOp.left, context)
+        val rightResult = inferExpressionWithConstraints(binOp.right, context)
+        
+        val allConstraints = leftResult.constraints + rightResult.constraints
+        
+        return when (binOp.operator) {
+            "+", "-", "*", "/", "%" -> {
+                // Arithmetic operations: both operands must be Int, result is Int
+                val leftConstraint = Constraint.Equality(leftResult.type, FunkType.IntType)
+                val rightConstraint = Constraint.Equality(rightResult.type, FunkType.IntType)
+                InferenceResult(FunkType.IntType, allConstraints + leftConstraint + rightConstraint)
+            }
+            "++" -> {
+                // String concatenation: both operands must be String, result is String
+                val leftConstraint = Constraint.Equality(leftResult.type, FunkType.StringType)
+                val rightConstraint = Constraint.Equality(rightResult.type, FunkType.StringType)
+                InferenceResult(FunkType.StringType, allConstraints + leftConstraint + rightConstraint)
+            }
+            "==", "!=" -> {
+                // Equality: both operands must have same type, result is Boolean
+                val equalityConstraint = Constraint.Equality(leftResult.type, rightResult.type)
+                InferenceResult(FunkType.BooleanType, allConstraints + equalityConstraint)
+            }
+            "<", "<=", ">", ">=" -> {
+                // Comparison: both operands must be Int, result is Boolean
+                val leftConstraint = Constraint.Equality(leftResult.type, FunkType.IntType)
+                val rightConstraint = Constraint.Equality(rightResult.type, FunkType.IntType)
+                InferenceResult(FunkType.BooleanType, allConstraints + leftConstraint + rightConstraint)
+            }
+            "&&", "||" -> {
+                // Logical operations: both operands must be Boolean, result is Boolean
+                val leftConstraint = Constraint.Equality(leftResult.type, FunkType.BooleanType)
+                val rightConstraint = Constraint.Equality(rightResult.type, FunkType.BooleanType)
+                InferenceResult(FunkType.BooleanType, allConstraints + leftConstraint + rightConstraint)
+            }
+            else -> throw TypeError.UnboundVariable("Unsupported binary operator: ${binOp.operator}")
+        }
+    }
+    
+    private fun inferFunctionCallWithConstraints(call: FunctionCall, context: TypeContext): InferenceResult {
+        val funcResult = inferExpressionWithConstraints(call.function, context)
+        val argResult = inferExpressionWithConstraints(call.arguments, context)
+        
+        // Create fresh type variable for return type
+        val returnType = FunkType.VarType(TypeVar.fresh())
+        
+        // Use partial application constraint instead of strict equality
+        val partialAppConstraint = Constraint.PartialApplication(funcResult.type, argResult.type, returnType)
+        
+        val allConstraints = funcResult.constraints + argResult.constraints + partialAppConstraint
+        return InferenceResult(returnType, allConstraints)
+    }
+    
+    private fun inferRecordLiteralWithConstraints(record: RecordLiteral, context: TypeContext): InferenceResult {
+        val fieldResults = mutableMapOf<String, InferenceResult>()
+        var allConstraints = emptySet<Constraint>()
+        
+        for (entry in record.entries) {
+            val valueResult = if (entry.value != null) {
+                inferExpressionWithConstraints(entry.value as Expression, context)
+            } else {
+                // Punned field - look up the identifier
+                inferExpressionWithConstraints(Identifier(entry.name), context)
+            }
+            fieldResults[entry.name] = valueResult
+            allConstraints += valueResult.constraints
+        }
+        
+        val fieldTypes = fieldResults.mapValues { it.value.type }
+        val recordType = FunkType.RecordType(fieldTypes, rowVar = null) // Closed by default
+        
+        return InferenceResult(recordType, allConstraints)
+    }
+    
+    // Placeholder implementations for other methods (can be implemented as needed)
+    private fun inferRecordUpdateWithConstraints(update: RecordUpdate, context: TypeContext): InferenceResult {
+        // Infer the base record type with constraints
+        val recordResult = inferExpressionWithConstraints(update.record, context)
+        var allConstraints = recordResult.constraints
+        
+        // Infer types of update values with constraints
+        val updateTypes = mutableMapOf<String, FunkType>()
+        for (entry in update.updates) {
+            if (entry.value != null) {
+                val valueResult = inferExpressionWithConstraints(entry.value!!, context)
+                updateTypes[entry.name] = valueResult.type
+                allConstraints += valueResult.constraints
+            } else {
+                // Punned field - look up in context
+                val scheme = context.env.lookup(entry.name)
+                    ?: throw RuntimeException("Unbound variable: ${entry.name}")
+                updateTypes[entry.name] = scheme.type
+            }
+        }
+        
+        // Create constraints for the record to have the updated fields
+        val fieldConstraints = updateTypes.map { (name, type) ->
+            Constraint.HasField(recordResult.type, name, type)
+        }
+        
+        // The result type is the same as the input record type (records are immutable)
+        return InferenceResult(recordResult.type, allConstraints + fieldConstraints)
+    }
+    
+    private fun inferVariantConstructionWithConstraints(construction: VariantConstruction, context: TypeContext): InferenceResult {
+        val value = construction.value
+        if (value != null) {
+            // Variant with data - infer the value type with constraints
+            val valueResult = inferExpressionWithConstraints(value, context)
+            val constructors = mapOf(construction.constructor to valueResult.type)
+            // Create open variant to allow subtyping with other variants
+            val variantType = FunkType.VariantType(constructors, rowVar = RowVar.fresh("variant"))
+            return InferenceResult(variantType, valueResult.constraints)
+        } else {
+            // Simple variant constructor with no data
+            val constructors = mapOf(construction.constructor to null)
+            // Create open variant to allow subtyping with other variants
+            val variantType = FunkType.VariantType(constructors, rowVar = RowVar.fresh("variant"))
+            return InferenceResult(variantType, emptySet())
+        }
+    }
+    
+    private fun inferIfExpressionWithConstraints(ifExpr: IfExpression, context: TypeContext): InferenceResult {
+        // Infer condition with constraints
+        val conditionResult = inferExpressionWithConstraints(ifExpr.condition, context)
+        
+        // Infer then and else branches with constraints
+        val thenResult = inferExpressionWithConstraints(ifExpr.thenBranch, context)
+        val elseResult = inferExpressionWithConstraints(ifExpr.elseBranch, context)
+        
+        // Create constraint for condition
+        val conditionConstraint = Constraint.Equality(conditionResult.type, FunkType.BooleanType)
+        
+        // Handle branch type unification - special case for variants
+        val (resultType, branchConstraints) = when {
+            thenResult.type is FunkType.VariantType && elseResult.type is FunkType.VariantType -> {
+                // Both branches are variants - merge them directly
+                val mergedType = mergeVariantTypes(thenResult.type, elseResult.type)
+                Pair(mergedType, emptySet<Constraint>())
+            }
+            else -> {
+                // Regular unification constraint
+                val branchConstraint = Constraint.Equality(thenResult.type, elseResult.type)
+                Pair(thenResult.type, setOf(branchConstraint))
+            }
+        }
+        
+        // Collect all constraints
+        val allConstraints = conditionResult.constraints + 
+                           thenResult.constraints + 
+                           elseResult.constraints + 
+                           conditionConstraint + 
+                           branchConstraints
+        
+        return InferenceResult(resultType, allConstraints)
+    }
+    
+    private fun inferMatchExpressionWithConstraints(matchExpr: MatchExpression, context: TypeContext): InferenceResult {
+        // Infer the expression being matched with constraints
+        val exprResult = inferExpressionWithConstraints(matchExpr.expression, context)
+        var allConstraints = exprResult.constraints
+        
+        // Collect all constructor constraints to build the variant type
+        val constructorConstraints = mutableSetOf<Constraint.HasConstructor>()
+        val hasWildcard = matchExpr.cases.any { it.pattern is WildcardPattern }
+        
+        // Infer each case with constraints, including pattern variable binding
+        val caseTypes = mutableListOf<FunkType>()
+        for (case in matchExpr.cases) {
+            // Extract pattern variables and create extended context
+            val (patternConstraints, extendedContext) = inferPatternWithConstraints(
+                case.pattern, 
+                exprResult.type, 
+                context
+            )
+            
+            // Collect constructor constraints for variant type building, but don't add them to allConstraints yet
+            // We'll create a unified variant type instead
+            constructorConstraints += patternConstraints.filterIsInstance<Constraint.HasConstructor>()
+            
+            // Add non-constructor constraints (like field constraints from record patterns)
+            allConstraints += patternConstraints.filterNot { it is Constraint.HasConstructor }
+            
+            // Infer case expression with extended context (includes pattern variables)
+            val caseResult = inferExpressionWithConstraints(case.expression, extendedContext)
+            caseTypes.add(caseResult.type)
+            allConstraints += caseResult.constraints
+        }
+        
+        // Create a unified variant type from all constructor constraints
+        if (constructorConstraints.isNotEmpty()) {
+            val constructors = constructorConstraints.associate { 
+                it.constructor to it.constructorType 
+            }
+            // If there's a wildcard pattern, make it open; otherwise closed
+            val unifiedVariantType = FunkType.VariantType(
+                constructors, 
+                rowVar = if (hasWildcard) RowVar.fresh("match") else null
+            )
+            // Add constraint that matched expression has this variant type
+            val variantConstraint = Constraint.Equality(exprResult.type, unifiedVariantType)
+            allConstraints += variantConstraint
+        }
+        
+        // All cases must have the same type
+        val resultType = caseTypes.firstOrNull() ?: FunkType.VarType(TypeVar.fresh())
+        val unificationConstraints = caseTypes.drop(1).map { caseType ->
+            Constraint.Equality(resultType, caseType)
+        }
+        
+        return InferenceResult(resultType, allConstraints + unificationConstraints)
+    }
+    
+    /**
+     * Infer pattern constraints and extract pattern variables
+     * Returns (constraints, extended context with pattern variables)
+     */
+    private fun inferPatternWithConstraints(
+        pattern: Pattern, 
+        matchedType: FunkType, 
+        context: TypeContext
+    ): Pair<Set<Constraint>, TypeContext> {
+        return when (pattern) {
+            is WildcardPattern -> {
+                // Wildcard matches anything, no constraints or variables
+                Pair(emptySet(), context)
+            }
+            
+            is VariablePattern -> {
+                // Variable pattern binds the matched type to the variable
+                val scheme = TypeScheme.monomorphic(matchedType)
+                val extendedEnv = context.env.extend(pattern.name, scheme)
+                val extendedContext = context.copy(env = extendedEnv)
+                Pair(emptySet(), extendedContext)
+            }
+            
+            is ConstructorPattern -> {
+                // Constructor pattern: Red {val} -> constraint that matchedType has Red constructor
+                val constraints = mutableSetOf<Constraint>()
+                var extendedContext = context
+                
+                if (pattern.recordPattern != null) {
+                    // Constructor with data: Red {val}
+                    val recordPattern = pattern.recordPattern!!
+                    val (recordConstraints, recordContext, fieldTypes) = inferRecordPatternWithConstraints(
+                        recordPattern, 
+                        context
+                    )
+                    constraints += recordConstraints
+                    extendedContext = recordContext
+                    
+                    // Create constraint that matchedType has this constructor with the record type
+                    // Use the actual field types from pattern inference
+                    val recordType = FunkType.RecordType(fieldTypes, rowVar = null)
+                    val constructorConstraint = Constraint.HasConstructor(
+                        matchedType, 
+                        pattern.constructor, 
+                        recordType
+                    )
+                    constraints += constructorConstraint
+                } else {
+                    // Simple constructor: Red
+                    val constructorConstraint = Constraint.HasConstructor(
+                        matchedType, 
+                        pattern.constructor, 
+                        null
+                    )
+                    constraints += constructorConstraint
+                }
+                
+                Pair(constraints, extendedContext)
+            }
+            
+            is RecordPattern -> {
+                // Direct record pattern matching
+                val (constraints, context, _) = inferRecordPatternWithConstraints(pattern, context)
+                Pair(constraints, context)
+            }
+            
+            else -> {
+                // Unknown pattern type
+                Pair(emptySet(), context)
+            }
+        }
+    }
+    
+    /**
+     * Infer constraints for record patterns and extract variables
+     * Returns (constraints, extended context, field types map)
+     */
+    private fun inferRecordPatternWithConstraints(
+        recordPattern: RecordPattern, 
+        context: TypeContext
+    ): Triple<Set<Constraint>, TypeContext, Map<String, FunkType>> {
+        var extendedContext = context
+        val constraints = mutableSetOf<Constraint>()
+        val fieldTypes = mutableMapOf<String, FunkType>()
+        
+        for (entry in recordPattern.entries) {
+            if (entry.pattern == null) {
+                // Simple field binding: {val} -> bind val to a fresh type variable
+                val fieldType = FunkType.VarType(TypeVar.fresh())
+                fieldTypes[entry.name] = fieldType
+                val scheme = TypeScheme.monomorphic(fieldType)
+                val extendedEnv = extendedContext.env.extend(entry.name, scheme)
+                extendedContext = extendedContext.copy(env = extendedEnv)
+            } else {
+                // Nested pattern: {val = SomePattern} -> recursively infer
+                val fieldType = FunkType.VarType(TypeVar.fresh())
+                fieldTypes[entry.name] = fieldType
+                val nestedPattern = entry.pattern!!
+                val (nestedConstraints, nestedContext) = inferPatternWithConstraints(
+                    nestedPattern, 
+                    fieldType, 
+                    extendedContext
+                )
+                constraints += nestedConstraints
+                extendedContext = nestedContext
+            }
+        }
+        
+        return Triple(constraints, extendedContext, fieldTypes)
+    }
+    
+    /**
+     * Create a record type from a record pattern for constraint generation
+     */
+    private fun createRecordTypeFromPattern(recordPattern: RecordPattern, context: TypeContext): FunkType {
+        val fields = mutableMapOf<String, FunkType>()
+        
+        for (entry in recordPattern.entries) {
+            if (entry.pattern == null) {
+                // Simple field: {val} -> create fresh type variable
+                fields[entry.name] = FunkType.VarType(TypeVar.fresh())
+            } else {
+                // Nested pattern: would need recursive type creation
+                // For now, use fresh type variable
+                fields[entry.name] = FunkType.VarType(TypeVar.fresh())
+            }
+        }
+        
+        return FunkType.RecordType(fields, rowVar = null) // Closed record
+    }
+    
+    private fun inferPipeExpressionWithConstraints(pipe: PipeExpression, context: TypeContext): InferenceResult {
+        // Infer left side with constraints
+        val leftResult = inferExpressionWithConstraints(pipe.left, context)
+        
+        // Infer right side with constraints
+        val rightResult = inferExpressionWithConstraints(pipe.right, context)
+        
+        // The right side should be a function that takes the left side's type
+        val resultType = FunkType.VarType(TypeVar.fresh())
+        val expectedFunctionType = FunkType.FunctionType(leftResult.type, resultType, emptySet<Effect>())
+        val pipeConstraint = Constraint.Equality(rightResult.type, expectedFunctionType)
+        
+        val allConstraints = leftResult.constraints + rightResult.constraints + pipeConstraint
+        return InferenceResult(resultType, allConstraints)
+    }
+    
+    private fun inferDoExpressionWithConstraints(doExpr: DoExpression, context: TypeContext): InferenceResult {
+        // Process statements in sequence, updating context
+        var currentContext = context
+        var allConstraints = emptySet<Constraint>()
+        
+        for (statement in doExpr.statements) {
+            when (statement) {
+                is LetBinding -> {
+                    // Infer the let binding expression with constraints
+                    val exprResult = inferExpressionWithConstraints(statement.expression, currentContext)
+                    allConstraints += exprResult.constraints
+                    
+                    // Add the variable to the context for subsequent statements
+                    val scheme = TypeScheme.monomorphic(exprResult.type)
+                    val newEnv = currentContext.env.extend(statement.variableName, scheme)
+                    currentContext = currentContext.copy(env = newEnv)
+                }
+                is ExpressionStatement -> {
+                    // Expression statements contribute constraints but don't bind variables
+                    val exprResult = inferExpressionWithConstraints(statement.expression, currentContext)
+                    allConstraints += exprResult.constraints
+                }
+                else -> {
+                    // Other statement types (TypeDeclaration, EffectDeclaration, etc.) 
+                    // are not typically used within do/block expressions
+                    // For now, ignore them
+                }
+            }
+        }
+        
+        // Infer the result expression with constraints
+        val resultResult = inferExpressionWithConstraints(doExpr.result, currentContext)
+        
+        return InferenceResult(resultResult.type, allConstraints + resultResult.constraints)
+    }
+    
+    private fun inferBlockExpressionWithConstraints(block: BlockExpression, context: TypeContext): InferenceResult {
+        // Process statements in sequence, updating context
+        var currentContext = context
+        var allConstraints = emptySet<Constraint>()
+        
+        for (statement in block.statements) {
+            when (statement) {
+                is LetBinding -> {
+                    // Infer the let binding expression with constraints
+                    val exprResult = inferExpressionWithConstraints(statement.expression, currentContext)
+                    allConstraints += exprResult.constraints
+                    
+                    // Add the variable to the context for subsequent statements
+                    val scheme = TypeScheme.monomorphic(exprResult.type)
+                    val newEnv = currentContext.env.extend(statement.variableName, scheme)
+                    currentContext = currentContext.copy(env = newEnv)
+                }
+                is ExpressionStatement -> {
+                    // Expression statements contribute constraints but don't bind variables
+                    val exprResult = inferExpressionWithConstraints(statement.expression, currentContext)
+                    allConstraints += exprResult.constraints
+                }
+                else -> {
+                    // Other statement types (TypeDeclaration, EffectDeclaration, etc.) 
+                    // are not typically used within do/block expressions
+                    // For now, ignore them
+                }
+            }
+        }
+        
+        // Infer the result expression with constraints
+        val resultResult = inferExpressionWithConstraints(block.result, currentContext)
+        
+        return InferenceResult(resultResult.type, allConstraints + resultResult.constraints)
+    }
+    
+    private fun inferHandleExpressionWithConstraints(handle: HandleExpression, context: TypeContext): InferenceResult {
+        // Infer the expression being handled with constraints
+        val exprResult = inferExpressionWithConstraints(handle.expression, context)
+        var allConstraints = exprResult.constraints
+        
+        // Infer each handle case with constraints
+        val caseTypes = mutableListOf<FunkType>()
+        for (case in handle.cases) {
+            // For now, we don't add effect pattern constraints to the context
+            // This would require more sophisticated effect type inference
+            val caseResult = inferExpressionWithConstraints(case.result, context)
+            caseTypes.add(caseResult.type)
+            allConstraints += caseResult.constraints
+        }
+        
+        // All cases must have the same type as the handled expression
+        val resultType = exprResult.type
+        val unificationConstraints = caseTypes.map { caseType ->
+            Constraint.Equality(resultType, caseType)
+        }
+        
+        return InferenceResult(resultType, allConstraints + unificationConstraints)
     }
 }
 

@@ -115,7 +115,7 @@ class BasicParserTest {
         val matchExpr = stmt.expression as MatchExpression
         
         assertEquals(2, matchExpr.cases.size)
-        assertEquals("Red", (matchExpr.cases[0].pattern as VariablePattern).name)
+        assertEquals("Red", (matchExpr.cases[0].pattern as ConstructorPattern).constructor)
         assertEquals("red", (matchExpr.cases[0].expression as Literal<*>).value)
     }
 

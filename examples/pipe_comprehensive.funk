@@ -1,0 +1,102 @@
+# Comprehensive Pipe Operator Demo
+# Showcasing all pipe operator features
+
+# Basic mathematical operations
+let square = { n: Int } -> n * n
+let double = { n: Int } -> n * 2
+let add = { x: Int, y: Int } -> x + y
+let multiply = { x: Int, y: Int } -> x * y
+
+# String operations  
+let greet = { name: String } -> "Hello, " ++ name ++ "!"
+let shout = { text: String } -> text ++ "!!!"
+let prefix = { pre: String, text: String } -> pre ++ " " ++ text
+
+# Record operations
+let person = { name = "Bob", age = 25 }
+let getName = { p: { name: String, age: Int } } -> p.name
+let getAge = { p: { name: String, age: Int } } -> p.age
+
+# ========== BASIC PIPE EXAMPLES ==========
+
+# Simple single pipe
+let basic1 = 5 |> square { n = @ }                     # 25
+let basic2 = "Alice" |> greet { name = @ }             # "Hello, Alice!"
+
+# Pipe with multiple arguments
+let basic3 = 7 |> add { x = 3, y = @ }                 # 10
+let basic4 = 4 |> multiply { x = @, y = 5 }            # 20
+
+# ========== CHAINED PIPES ==========
+
+# Mathematical chains
+let chain1 = 3 |> square { n = @ } |> double { n = @ } # 18
+let chain2 = 2 |> double { n = @ } |> square { n = @ } # 16  
+let chain3 = 5 |> add { x = 2, y = @ } |> multiply { x = 3, y = @ } # 21
+
+# String processing chains
+let chain4 = "world" |> greet { name = @ } |> shout { text = @ }
+let chain5 = "test" |> prefix { pre = "DEBUG", text = @ } |> shout { text = @ }
+
+# ========== COMPLEX EXPRESSIONS ==========
+
+# Pipe with arithmetic expressions
+let complex1 = (10 + 5) |> square { n = @ }           # 225
+let complex2 = (8 - 3) |> add { x = 7, y = @ }        # 12
+
+# Pipe with record access
+let complex3 = person |> getName { p = @ } |> greet { name = @ }
+let complex4 = person |> getAge { p = @ } |> square { n = @ }
+
+# ========== DO BLOCK FUNCTIONS ==========
+
+let complexCalc = { base: Int, multiplier: Int } -> do
+    let doubled = base * 2
+    let multiplied = doubled * multiplier
+    let final = multiplied + 10
+    final
+
+let processText = { text: String, times: Int } -> do
+    let repeated = text ++ text  # Simple repetition
+    let processed = "Result: " ++ repeated
+    processed
+
+# Pipe with do block functions
+let doBlock1 = 3 |> complexCalc { base = @, multiplier = 4 }
+let doBlock2 = "hi" |> processText { text = @, times = 2 }
+
+# ========== NESTED AND COMPLEX SCENARIOS ==========
+
+# Function that returns a function (partial application)
+let makeAdder = { x: Int } -> { y: Int } -> x + y
+let addFive = makeAdder { x = 5 }
+
+# Pipe with partial application result
+let nested1 = 10 |> addFive { y = @ }                  # 15
+
+# Multiple levels of piping
+let multiLevel = 2 |> square { n = @ } |> add { x = 1, y = @ } |> double { n = @ } # 10
+
+# ========== PRACTICAL EXAMPLES ==========
+
+# Data processing pipeline
+let processData = { value: Int } -> do
+    let normalized = value * 100
+    let adjusted = normalized + 50
+    adjusted
+
+let formatResult = { n: Int } -> "Final result: " ++ "number"  # Simplified
+
+# Complete data pipeline
+let pipeline = 3 |> processData { value = @ } |> square { n = @ }
+
+# ========== VERIFICATION ==========
+
+# These should all type check successfully
+let verification1 = basic1    # Int
+let verification2 = basic2    # String  
+let verification3 = chain1    # Int
+let verification4 = chain4    # String
+let verification5 = complex3  # String
+let verification6 = doBlock1  # Int
+let verification7 = pipeline  # Int

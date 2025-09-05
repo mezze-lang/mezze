@@ -1,16 +1,18 @@
 # Funk Programming Language
 
-A modern functional programming language with **bidirectional type inference**, **row polymorphism**, and **content-addressable design**.
+A modern functional programming language with **bidirectional type inference**, **implicit variant constructors**, and **immutable data structures**.
 
-## 🎉 **PRODUCTION READY: 35/35 Examples Passing!**
+## 🎉 **CORE LANGUAGE COMPLETE!**
 
-Funk has reached a major milestone with **100% of example files** successfully parsing and type checking!
+Funk has reached a major milestone with **full end-to-end functionality** - from parsing through type checking to execution!
 
 ## 🚀 **Key Features**
 
 ### **🧠 Advanced Type System**
 - **Bidirectional Type Inference** - No annotations needed for most code
-- **Row Polymorphism** - Open records with `{ name: String, ...rest }`
+- **Implicit Variant Constructors** - `Red`, `Blue` automatically inferred as variants
+- **Closed Variant Types** - `| Red, Blue |` instead of `| Red, ... |`
+- **Parameter Type Inference** - Types inferred from usage (e.g., `x > 10` makes `x: Int`)
 - **Record-Based Currying** - Automatic partial application
 - **Principal Types** - Sophisticated constraint solving
 
@@ -19,19 +21,24 @@ Funk has reached a major milestone with **100% of example files** successfully p
 # Type inference - no annotations needed!
 let add = { x, y } -> x + y  # Infers: { x: Int, y: Int } -> Int
 
-# Partial application
-let add5 = add { x = 5 }     # Creates: { y: Int } -> Int
-let result = add5 { y = 10 } # Result: 15
+# Function calls with records
+let result = add { x = 5, y = 10 } # Result: 15
+
+# Implicit variant constructors - no declaration needed!
+let colorize = { x } -> if x > 10 then Red else Blue
+# Infers: { x: Int } -> | Red, Blue |
+
+# Pattern matching with variants
+let describe = match Red {
+  Red -> "red color"
+  Blue -> "blue color"
+}
 
 # Do expressions with proper scoping
-let process = { data: String } -> do
-  let cleaned = "Processed: " ++ data
-  let result = cleaned ++ "!"
-  result
-
-# Open records (row polymorphism)
-let getName = { name: String, ...rest } -> name
-# Works with ANY record containing a 'name' field!
+let process = do
+  let x = 10
+  let y = 20
+  x + y  # Result: 30
 ```
 
 ### **🎯 Functional Programming**
@@ -44,10 +51,10 @@ let getName = { name: String, ...rest } -> name
 
 | Component | Status | Features |
 |-----------|--------|----------|
-| **Parser** | ✅ Complete | ANTLR4-based, all constructs supported |
-| **Type Checker** | ✅ Advanced | Bidirectional inference, row polymorphism |
-| **CLI** | ✅ Complete | Pretty printing, error reporting |
-| **Examples** | ✅ 35/35 passing | Comprehensive test coverage |
+| **Parser** | ✅ Complete | ANTLR4-based, comparison operators, do blocks |
+| **Type Checker** | ✅ Complete | Bidirectional inference, implicit variants, closed types |
+| **Interpreter** | ✅ Complete | Functions, variants, pattern matching, execution |
+| **CLI** | ✅ Complete | `check` and `exec` commands, error reporting |
 
 ## 🛠️ **Quick Start**
 
@@ -61,29 +68,32 @@ cd funk
 
 ### **Try It Out**
 ```bash
-# Parse and type check a file
-./funk check examples/partial_application.funk
-
-# Parse only
-./funk parse examples/do_syntax_test.funk
-
-# Type check from stdin
+# Type check code
 echo "let add = { x, y } -> x + y" | ./funk check
+
+# Execute code  
+echo "let result = { x, y } -> x + y; result { x = 5, y = 10 }" | ./funk exec
+
+# Test bidirectional type inference
+echo "let colorize = { x } -> if x > 10 then Red else Blue" | ./funk check
+
+# Pattern matching
+echo 'let test = match Red { Red -> "red", Blue -> "blue" }' | ./funk exec
 ```
 
 ## 📚 **Language Examples**
 
-### **Type Inference**
-```funk
-# No type annotations needed!
-let multiply = { a, b } -> a * b
-let concat = { x, y } -> x ++ y
-let compare = { p, q } -> p == q
+### **Bidirectional Type Inference**
+```bash
+$ echo "let multiply = { a, b } -> a * b" | ./funk check
+✅ Type checking successful!
+Variables:
+  multiply : { a: Int, b: Int } -> Int
 
-# Correctly infers:
-# multiply : { a: Int, b: Int } -> Int
-# concat : { x: String, y: String } -> String  
-# compare : { p: t0, q: t0 } -> Boolean
+$ echo "let colorize = { x } -> if x > 10 then Red else Blue" | ./funk check  
+✅ Type checking successful!
+Variables:
+  colorize : { x: Int } -> | Red, Blue |
 ```
 
 ### **Record-Based Currying**
@@ -114,15 +124,19 @@ let log1 = logUser person    # Works!
 let log2 = logUser employee  # Also works!
 ```
 
-### **Pattern Matching**
-```funk
-type Result = | Ok { value: Int }, Error { message: String } |
+### **Full Execution Examples**
+```bash
+$ echo 'let add = { x, y } -> x + y; let result = add { x = 5, y = 10 }' | ./funk exec
+✅ Execution successful!
+Result: 15
 
-let handleResult = { result: Result } ->
-  match result {
-    Ok { value } -> "Success: " ++ intToString { n = value }
-    Error { message } -> "Error: " ++ message
-  }
+$ echo 'let test = match Red { Red -> "red color", Blue -> "blue color" }' | ./funk exec
+✅ Execution successful!
+Result: "red color"
+
+$ echo 'let tripleColor = { x } -> if x > 10 then Red else if x > 5 then Blue else Green; tripleColor { x = 2 }' | ./funk exec
+✅ Execution successful!
+Result: Green
 ```
 
 ## 🏗️ **Project Structure**
@@ -160,17 +174,17 @@ for file in examples/*.funk; do ./funk check "$file"; done
 - **Content Addressability** for future tooling
 - **Excellent Developer Experience** with pretty printing
 
-🔄 **Future Work:**
-- Pipe operator with placeholder substitution
-- Advanced effect handling (handle/resume)
-- Module system exports (expose/access)
-- Performance optimization
+🔄 **Next Phase:**
+- Fix record updates (`record { field = newValue }`)
+- Module system runtime
+- Effect system runtime
+- Standard library (toString, parseInt, etc.)
+- Compiler implementation
 
 ## 📖 **Documentation**
 
-- **[CURRENT_STATUS.md](./CURRENT_STATUS.md)** - Detailed implementation status
-- **[funk.md](./funk.md)** - Complete language specification
-- **[examples/](./examples/)** - 35 working code examples
+- **[FUNK_IMPLEMENTATION_STATUS.md](./FUNK_IMPLEMENTATION_STATUS.md)** - Detailed implementation status
+- **[examples/](./examples/)** - Working code examples
 
 ## 🤝 **Contributing**
 

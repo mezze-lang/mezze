@@ -1,0 +1,4 @@
+# String operations demo
+let firstName = "Alice"
+let lastName = "Smith"
+let greeting = "Hello, " ++ firstName ++ " " ++ lastName ++ "!"

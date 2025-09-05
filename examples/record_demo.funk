@@ -1,0 +1,4 @@
+# Records demo
+let person = { name = "Bob", age = 25 }
+let name = person.name
+let greeting = "Hello, " ++ name

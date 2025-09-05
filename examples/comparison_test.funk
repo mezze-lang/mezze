@@ -1,0 +1,4 @@
+let x = 10
+let y = 5
+let greater = x > y
+let result = if greater then "x is greater" else "y is greater"

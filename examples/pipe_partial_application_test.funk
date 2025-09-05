@@ -1,0 +1,15 @@
+# Pipe Operator with Partial Application Test
+
+let add = { x: Int, y: Int } -> x + y
+
+# This should work: partial application via pipe
+let addFive = 5 |> add { x = @ }  # Should be: { y: Int } -> Int
+
+# Test that the partially applied function works
+let result = addFive { y = 10 }   # Should be: 15
+
+# Another partial application example
+let multiply = { x: Int, y: Int, z: Int } -> x * y * z
+let multiplyByTwo = 2 |> multiply { x = @ }  # Should be: { y: Int, z: Int } -> Int
+let multiplyByTwoAndThree = multiplyByTwo { y = 3 }  # Should be: { z: Int } -> Int
+let finalResult = multiplyByTwoAndThree { z = 4 }    # Should be: 24

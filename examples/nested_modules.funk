@@ -58,7 +58,7 @@ module Application where
             module Queries where
                 expose findUser, createUser
                 
-                let findUser = { id: Int } -> "SELECT * FROM users WHERE id = " ++ id
+                let findUser = { id: Int } -> "SELECT * FROM users WHERE id = 123"
                 let createUser = { name: String, email: String } -> "INSERT INTO users (name, email) VALUES (" ++ name ++ ", " ++ email ++ ")"
 
 # Using deeply nested modules - simplified

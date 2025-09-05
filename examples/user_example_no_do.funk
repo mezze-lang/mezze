@@ -1,0 +1,4 @@
+let addAndColor = { x, y } -> {
+    let sum = x + y
+    if sum > 10 then "Red" else "Blue"
+}

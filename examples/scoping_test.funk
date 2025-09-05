@@ -1,0 +1,29 @@
+# Test current scoping behavior
+
+module MathModule where
+    expose add  # Only expose add, not multiply
+    
+    let add = { x: Int, y: Int } -> x + y
+    let multiply = { x: Int, y: Int } -> x * y  # Should NOT be accessible outside
+
+module StringModule where
+    expose concat  # Only expose concat, not reverse
+    
+    let concat = { a: String, b: String } -> a ++ b
+    let reverse = { s: String } -> "REVERSED: " ++ s  # Should NOT be accessible outside
+
+# Test 1: Can we access exposed functions? (Should work)
+let test1 = add { x = 5, y = 3 }
+let test2 = concat { a = "Hello", b = " World" }
+
+# Test 2: Can we access non-exposed functions? (Should fail with proper scoping)
+let test3 = multiply { x = 4, y = 6 }  # Should fail - not exposed
+let test4 = reverse { s = "test" }     # Should fail - not exposed
+
+# Test 3: Access declarations (should work when implemented)
+# access MathModule.{ add }
+# access StringModule.{ concat }
+
+# Test 4: Accessing non-exposed via access (should fail)
+# access MathModule.{ multiply }  # Should fail - not exposed
+# access StringModule.{ reverse }  # Should fail - not exposed

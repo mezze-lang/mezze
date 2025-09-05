@@ -1,0 +1,13 @@
+# Simple function that adds numbers and returns a color based on result
+# This demonstrates the interpreter features we've implemented
+
+let addNumbers = { x, y } -> x + y
+
+let result1 = addNumbers { x = 8, y = 3 }
+let result2 = addNumbers { x = 2, y = 4 }
+
+# Since we can't use if-then-else with variants due to parser limitations,
+# here's what the working version would look like:
+
+let message1 = "Result 1 calculated"
+let message2 = "Result 2 calculated"

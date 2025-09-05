@@ -202,22 +202,24 @@ object Unification {
         open: FunkType.VariantType,
         subst: Substitution
     ): Substitution {
-        // Check that all constructors in open are present in closed
-        for ((constructor, openType) in open.constructors) {
-            if (!closed.constructors.containsKey(constructor)) {
+        // Check that all constructors in CLOSED are present in OPEN (closed is subset of open)
+        var currentSubst = subst
+        for ((constructor, closedType) in closed.constructors) {
+            val openType = open.constructors[constructor]
+            if (openType == null) {
+                // Closed variant has constructor not in open variant - this is an error
                 throw StructuredTypeError.unificationError(closed, open)
             }
             
-            val closedType = closed.constructors[constructor]
             when {
-                openType == null && closedType == null -> continue
-                openType != null && closedType != null -> 
-                    unifyTypes(openType, closedType, subst)
+                closedType == null && openType == null -> continue
+                closedType != null && openType != null -> 
+                    currentSubst = unifyTypes(closedType, openType, currentSubst)
                 else -> throw StructuredTypeError.unificationError(closed, open)
             }
         }
         
-        return subst
+        return currentSubst
     }
     
     private fun unifyOpenVariants(
@@ -288,13 +290,24 @@ object Unification {
 }
 
 /**
- * Most General Unifier - finds the most general substitution
+ * Constraint-based type inference solver
  */
-object MGU {
-    fun mgu(constraints: List<Constraint.Equality>): Substitution {
+object ConstraintSolver {
+    
+    /**
+     * Solve all constraints and return the most general unifier
+     */
+    fun solve(constraints: Set<Constraint>): Substitution {
         var subst = Substitution.empty()
         
-        for (constraint in constraints) {
+        // Separate different types of constraints
+        val equalityConstraints = constraints.filterIsInstance<Constraint.Equality>()
+        val fieldConstraints = constraints.filterIsInstance<Constraint.HasField>()
+        val constructorConstraints = constraints.filterIsInstance<Constraint.HasConstructor>()
+        val partialAppConstraints = constraints.filterIsInstance<Constraint.PartialApplication>()
+        
+        // Solve equality constraints first
+        for (constraint in equalityConstraints) {
             val newSubst = Unification.unify(
                 subst.apply(constraint.type1),
                 subst.apply(constraint.type2)
@@ -302,7 +315,196 @@ object MGU {
             subst = subst.compose(newSubst)
         }
         
+        // Solve field access constraints
+        for (constraint in fieldConstraints) {
+            val recordType = subst.apply(constraint.recordType)
+            val fieldType = subst.apply(constraint.fieldType)
+            
+            when (recordType) {
+                is FunkType.VarType -> {
+                    // Create a record type with the required field
+                    val expectedRecordType = FunkType.RecordType(
+                        mapOf(constraint.field to fieldType),
+                        rowVar = null // Closed by default
+                    )
+                    val newSubst = Unification.unify(recordType, expectedRecordType)
+                    subst = subst.compose(newSubst)
+                }
+                is FunkType.RecordType -> {
+                    // Check if field exists and unify types
+                    val existingFieldType = recordType.fields[constraint.field]
+                    if (existingFieldType != null) {
+                        val newSubst = Unification.unify(fieldType, existingFieldType)
+                        subst = subst.compose(newSubst)
+                    } else {
+                        // Field doesn't exist - this is an error
+                        throw StructuredTypeError.unboundVariable("Field '${constraint.field}' not found in record")
+                    }
+                }
+                else -> {
+                    throw StructuredTypeError.unificationError(recordType, 
+                        FunkType.RecordType(mapOf(constraint.field to fieldType)))
+                }
+            }
+        }
+        
+        // Solve constructor constraints (for variants)
+        for (constraint in constructorConstraints) {
+            val variantType = subst.apply(constraint.variantType)
+            val constructorType = constraint.constructorType?.let { subst.apply(it) }
+            
+            when (variantType) {
+                is FunkType.VarType -> {
+                    // Create a variant type with the required constructor
+                    val expectedVariantType = FunkType.VariantType(
+                        mapOf(constraint.constructor to constructorType),
+                        rowVar = null // Closed by default
+                    )
+                    val newSubst = Unification.unify(variantType, expectedVariantType)
+                    subst = subst.compose(newSubst)
+                }
+                is FunkType.VariantType -> {
+                    // Check if constructor exists and unify types
+                    val existingConstructorType = variantType.constructors[constraint.constructor]
+                    if (existingConstructorType != null || constructorType != null) {
+                        if (existingConstructorType != null && constructorType != null) {
+                            val newSubst = Unification.unify(existingConstructorType, constructorType)
+                            subst = subst.compose(newSubst)
+                        }
+                    }
+                }
+                else -> {
+                    throw StructuredTypeError.unificationError(variantType,
+                        FunkType.VariantType(mapOf(constraint.constructor to constructorType)))
+                }
+            }
+        }
+        
+        // Solve partial application constraints
+        for (constraint in partialAppConstraints) {
+            val functionType = subst.apply(constraint.functionType)
+            val argumentType = subst.apply(constraint.argumentType)
+            val resultType = subst.apply(constraint.resultType)
+            
+            val actualResultType = solvePartialApplication(functionType, argumentType)
+            val newSubst = Unification.unify(resultType, actualResultType)
+            subst = subst.compose(newSubst)
+        }
+        
         return subst
+    }
+    
+    /**
+     * Merge two variant types for constraint solving
+     */
+    private fun mergeVariantTypesInSolver(type1: FunkType.VariantType, type2: FunkType.VariantType): FunkType.VariantType {
+        // Merge constructors from both variants
+        val mergedConstructors = type1.constructors + type2.constructors
+        
+        // Create a closed variant when merging simple constructor variants
+        // This represents a complete finite set of constructors
+        val shouldBeClosed = areSimpleConstructorVariants(type1) && areSimpleConstructorVariants(type2)
+        
+        return if (shouldBeClosed) {
+            FunkType.VariantType(mergedConstructors, rowVar = null) // Closed variant
+        } else {
+            // Keep open if either has complex constructors (with data)
+            FunkType.VariantType(mergedConstructors, RowVar.fresh("merged"))
+        }
+    }
+    
+    /**
+     * Check if all constructors in a variant are simple (no data)
+     */
+    private fun areSimpleConstructorVariants(variant: FunkType.VariantType): Boolean {
+        return variant.constructors.values.all { it == null }
+    }
+    
+    /**
+     * Solve partial application constraint using the logic from AdvancedTypeChecker
+     */
+    private fun solvePartialApplication(functionType: FunkType, argumentType: FunkType): FunkType {
+        return when (functionType) {
+            is FunkType.FunctionType -> {
+                when (val paramType = functionType.paramType) {
+                    is FunkType.RecordType -> {
+                        when (argumentType) {
+                            is FunkType.RecordType -> {
+                                val providedFields = argumentType.fields.keys
+                                val requiredFields = paramType.fields.keys
+                                
+                                when {
+                                    // Exact match - full application
+                                    providedFields == requiredFields -> {
+                                        // Unify field types
+                                        for (field in requiredFields) {
+                                            val requiredFieldType = paramType.fields[field]!!
+                                            val providedFieldType = argumentType.fields[field]!!
+                                            Unification.unify(providedFieldType, requiredFieldType)
+                                        }
+                                        functionType.returnType
+                                    }
+                                    
+                                    // Subset - partial application
+                                    providedFields.all { it in requiredFields } -> {
+                                        val remainingFields = paramType.fields - providedFields
+                                        
+                                        // Unify provided fields
+                                        for (field in providedFields) {
+                                            val requiredFieldType = paramType.fields[field]!!
+                                            val providedFieldType = argumentType.fields[field]!!
+                                            Unification.unify(providedFieldType, requiredFieldType)
+                                        }
+                                        
+                                        // Return function with remaining parameters
+                                        FunkType.FunctionType(
+                                            FunkType.RecordType(remainingFields, paramType.rowVar),
+                                            functionType.returnType,
+                                            functionType.effects
+                                        )
+                                    }
+                                    
+                                    else -> {
+                                        // Invalid partial application
+                                        throw StructuredTypeError.unificationError(argumentType, paramType)
+                                    }
+                                }
+                            }
+                            else -> {
+                                // Non-record argument - must match exactly
+                                Unification.unify(paramType, argumentType)
+                                functionType.returnType
+                            }
+                        }
+                    }
+                    else -> {
+                        // Non-record parameter - must match exactly
+                        Unification.unify(paramType, argumentType)
+                        functionType.returnType
+                    }
+                }
+            }
+            is FunkType.VarType -> {
+                // Function type is unknown - create a fresh function type
+                val returnType = FunkType.VarType(TypeVar.fresh())
+                val expectedFuncType = FunkType.FunctionType(argumentType, returnType, emptySet())
+                Unification.unify(functionType, expectedFuncType)
+                returnType
+            }
+            else -> {
+                throw StructuredTypeError.unificationError(functionType, 
+                    FunkType.FunctionType(argumentType, FunkType.VarType(TypeVar.fresh()), emptySet()))
+            }
+        }
+    }
+}
+
+/**
+ * Most General Unifier - finds the most general substitution
+ */
+object MGU {
+    fun mgu(constraints: List<Constraint.Equality>): Substitution {
+        return ConstraintSolver.solve(constraints.toSet())
     }
 }
 

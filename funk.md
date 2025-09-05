@@ -415,3 +415,10 @@ module MyProject.Core where
 *   Modules can be nested using a hierarchical naming convention (e.g., `MyProject.Core.Http`).
 *   Accessing items in nested modules would use the full qualified path.
 
+let maybe = {color, x , y} -> do
+  let sum = x + y
+  match color {
+    Red { val } -> if val > sum then "Hello" else "Bye"
+    Blue -> "Good Morning"
+    _ -> "Good  Bye"
+  }

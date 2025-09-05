@@ -10,7 +10,11 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int = nextId())
         private var counter = 0
         private fun nextId() = counter++
         
-        fun fresh(prefix: String = "t", level: Int = 0) = TypeVar("$prefix${nextId()}", level)
+        fun fresh(prefix: String = "t", level: Int = 0): TypeVar {
+            val name = "$prefix${counter}"
+            counter++
+            return TypeVar(name, level, counter - 1)
+        }
     }
 }
 
@@ -181,7 +185,21 @@ sealed interface Constraint {
     data class RowUnification(val row1: RowVar, val row2: RowVar, val fields: Map<String, FunkType>) : Constraint
     data class HasField(val recordType: FunkType, val field: String, val fieldType: FunkType) : Constraint
     data class HasConstructor(val variantType: FunkType, val constructor: String, val constructorType: FunkType?) : Constraint
+    data class PartialApplication(val functionType: FunkType, val argumentType: FunkType, val resultType: FunkType) : Constraint
 }
+
+// Helper functions for creating InferenceResult instances
+object InferenceResultHelper {
+    fun simple(type: FunkType) = InferenceResult(type, emptySet())
+    fun withConstraints(type: FunkType, vararg constraints: Constraint) = 
+        InferenceResult(type, constraints.toSet())
+}
+
+fun InferenceResult.addConstraint(constraint: Constraint) = 
+    InferenceResult(type, constraints + constraint)
+
+fun InferenceResult.addConstraints(newConstraints: Set<Constraint>) = 
+    InferenceResult(type, constraints + newConstraints)
 
 // Type checking errors
 sealed class TypeError(message: String) : Exception(message) {
