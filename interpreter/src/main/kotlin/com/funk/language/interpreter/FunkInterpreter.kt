@@ -458,11 +458,9 @@ class FunkInterpreter {
     }
     
     /**
-     * Replace placeholder with value in pipe expressions
+* Replace placeholder with value in pipe expressions
      */
     private fun replacePlaceholder(expr: com.funk.language.parser.Expression, value: FunkValue, context: FunkContext): com.funk.language.parser.Expression {
-        // For now, we'll implement a simple version that handles basic cases
-        // A full implementation would need to traverse the entire expression tree
         return when (expr) {
             is com.funk.language.parser.PlaceholderExpression -> {
                 // Create a temporary identifier for the value
@@ -471,11 +469,99 @@ class FunkInterpreter {
                 com.funk.language.parser.Identifier(tempName)
             }
             is com.funk.language.parser.FunctionCall -> {
-                // Replace placeholder in arguments
+                // Replace placeholder in function and arguments
+                val newFunction = replacePlaceholder(expr.function, value, context)
                 val newArgs = replacePlaceholder(expr.arguments, value, context)
-                com.funk.language.parser.FunctionCall(expr.function, newArgs)
+                com.funk.language.parser.FunctionCall(newFunction, newArgs)
             }
-            else -> expr // Return as-is for other expressions
+            is com.funk.language.parser.RecordLiteral -> {
+                val newEntries = expr.entries.map { entry ->
+                    com.funk.language.parser.RecordEntry(
+                        entry.name,
+                        entry.value?.let { replacePlaceholder(it, value, context) }
+                    )
+                }
+                com.funk.language.parser.RecordLiteral(newEntries, expr.restField)
+            }
+            is com.funk.language.parser.BinaryOperation -> {
+                val newLeft = replacePlaceholder(expr.left, value, context)
+                val newRight = replacePlaceholder(expr.right, value, context)
+                com.funk.language.parser.BinaryOperation(newLeft, expr.operator, newRight)
+            }
+            is com.funk.language.parser.IfExpression -> {
+                val newCondition = replacePlaceholder(expr.condition, value, context)
+                val newThen = replacePlaceholder(expr.thenBranch, value, context)
+                val newElse = replacePlaceholder(expr.elseBranch, value, context)
+                com.funk.language.parser.IfExpression(newCondition, newThen, newElse)
+            }
+            is com.funk.language.parser.LambdaExpression -> {
+                val newBody = replacePlaceholder(expr.body, value, context)
+                com.funk.language.parser.LambdaExpression(expr.parameters, newBody)
+            }
+            is com.funk.language.parser.MemberAccess -> {
+                val newReceiver = replacePlaceholder(expr.receiver, value, context)
+                com.funk.language.parser.MemberAccess(newReceiver, expr.member)
+            }
+            is com.funk.language.parser.RecordUpdate -> {
+                val newRecord = replacePlaceholder(expr.record, value, context)
+                val newUpdates = expr.updates.map { entry ->
+                    com.funk.language.parser.RecordEntry(
+                        entry.name,
+                        entry.value?.let { replacePlaceholder(it, value, context) }
+                    )
+                }
+                com.funk.language.parser.RecordUpdate(newRecord, newUpdates)
+            }
+            is com.funk.language.parser.VariantConstruction -> {
+                val newValue = expr.value?.let { replacePlaceholder(it, value, context) }
+                com.funk.language.parser.VariantConstruction(expr.constructor, newValue)
+            }
+            is com.funk.language.parser.MatchExpression -> {
+                val newExpression = replacePlaceholder(expr.expression, value, context)
+                val newCases = expr.cases.map { case ->
+                    com.funk.language.parser.MatchCase(
+                        case.pattern,
+                        replacePlaceholder(case.expression, value, context)
+                    )
+                }
+                com.funk.language.parser.MatchExpression(newExpression, newCases)
+            }
+            is com.funk.language.parser.DoExpression -> {
+                val newStatements = expr.statements.map { stmt ->
+                    when (stmt) {
+                        is com.funk.language.parser.LetBinding -> com.funk.language.parser.LetBinding(
+                            stmt.variableName,
+                            stmt.typeAnnotation,
+                            replacePlaceholder(stmt.expression, value, context)
+                        )
+                        is com.funk.language.parser.ExpressionStatement -> com.funk.language.parser.ExpressionStatement(
+                            replacePlaceholder(stmt.expression, value, context)
+                        )
+                        else -> stmt
+                    }
+                }
+                val newResult = replacePlaceholder(expr.result, value, context)
+                com.funk.language.parser.DoExpression(newStatements, newResult)
+            }
+            is com.funk.language.parser.BlockExpression -> {
+                val newStatements = expr.statements.map { stmt ->
+                    when (stmt) {
+                        is com.funk.language.parser.LetBinding -> com.funk.language.parser.LetBinding(
+                            stmt.variableName,
+                            stmt.typeAnnotation,
+                            replacePlaceholder(stmt.expression, value, context)
+                        )
+                        is com.funk.language.parser.ExpressionStatement -> com.funk.language.parser.ExpressionStatement(
+                            replacePlaceholder(stmt.expression, value, context)
+                        )
+                        else -> stmt
+                    }
+                }
+                val newResult = replacePlaceholder(expr.result, value, context)
+                com.funk.language.parser.BlockExpression(newStatements, newResult)
+            }
+            // For all other expressions (literals, identifiers, etc.), return as-is
+            else -> expr
         }
     }
 }

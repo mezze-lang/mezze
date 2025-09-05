@@ -569,7 +569,16 @@ fun FunkType.prettyPrint(): String = when (this) {
     }
     is FunkType.VariantType -> {
         val constructors = this.constructors.entries.joinToString(", ") { (name, type) ->
-            if (type != null) "$name { ${type.prettyPrint()} }" else name
+            when (type) {
+                null -> name
+                is FunkType.RecordType -> {
+                    // For record types, format as "Red { val: Int }" without extra braces
+                    val fields = type.fields.entries.joinToString(", ") { "${it.key}: ${it.value.prettyPrint()}" }
+                    val suffix = if (type.isOpen) ", ..." else ""
+                    "$name { $fields$suffix }"
+                }
+                else -> "$name(${type.prettyPrint()})" // Non-record types use parentheses
+            }
         }
         val suffix = if (this.isOpen) ", ..." else ""
         "| $constructors$suffix |"

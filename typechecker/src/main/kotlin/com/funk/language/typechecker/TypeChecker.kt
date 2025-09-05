@@ -1590,11 +1590,12 @@ class TypeChecker {
         } ?: run {
             // Check for implicit variant constructor
             if (identifier.name.first().isUpperCase()) {
-                val variantType = FunkType.VariantType(
-                    constructors = mapOf(identifier.name to null),
-                    rowVar = RowVar.fresh("variant") // Open variant to allow subtyping
-                )
-                InferenceResultHelper.simple(variantType)
+                // Register the variant in the global registry
+                context.registerVariant(identifier.name, null)
+                
+                // Return the global variant type (which includes this constructor)
+                val globalVariantType = context.getGlobalVariantType()
+                InferenceResultHelper.simple(globalVariantType)
             } else {
                 throw TypeError.UnboundVariable("Unbound variable: ${identifier.name}")
             }
@@ -1760,16 +1761,21 @@ class TypeChecker {
         if (value != null) {
             // Variant with data - infer the value type with constraints
             val valueResult = inferExpressionWithConstraints(value, context)
-            val constructors = mapOf(construction.constructor to valueResult.type)
-            // Create open variant to allow subtyping with other variants
-            val variantType = FunkType.VariantType(constructors, rowVar = RowVar.fresh("variant"))
-            return InferenceResult(variantType, valueResult.constraints)
+            
+            // Register the variant in the global registry
+            context.registerVariant(construction.constructor, valueResult.type)
+            
+            // Return the global variant type (which includes this constructor)
+            val globalVariantType = context.getGlobalVariantType()
+            return InferenceResult(globalVariantType, valueResult.constraints)
         } else {
             // Simple variant constructor with no data
-            val constructors = mapOf(construction.constructor to null)
-            // Create open variant to allow subtyping with other variants
-            val variantType = FunkType.VariantType(constructors, rowVar = RowVar.fresh("variant"))
-            return InferenceResult(variantType, emptySet())
+            // Register the variant in the global registry
+            context.registerVariant(construction.constructor, null)
+            
+            // Return the global variant type (which includes this constructor)
+            val globalVariantType = context.getGlobalVariantType()
+            return InferenceResult(globalVariantType, emptySet())
         }
     }
     
@@ -1840,18 +1846,13 @@ class TypeChecker {
             allConstraints += caseResult.constraints
         }
         
-        // Create a unified variant type from all constructor constraints
+        // Use the global variant type that includes all registered constructors
         if (constructorConstraints.isNotEmpty()) {
-            val constructors = constructorConstraints.associate { 
-                it.constructor to it.constructorType 
-            }
-            // If there's a wildcard pattern, make it open; otherwise closed
-            val unifiedVariantType = FunkType.VariantType(
-                constructors, 
-                rowVar = if (hasWildcard) RowVar.fresh("match") else null
-            )
-            // Add constraint that matched expression has this variant type
-            val variantConstraint = Constraint.Equality(exprResult.type, unifiedVariantType)
+            // The global variant type already includes all the constructors we've registered
+            val globalVariantType = context.getGlobalVariantType()
+            
+            // Add constraint that matched expression has the global variant type
+            val variantConstraint = Constraint.Equality(exprResult.type, globalVariantType)
             allConstraints += variantConstraint
         }
         
@@ -1905,6 +1906,10 @@ class TypeChecker {
                     // Create constraint that matchedType has this constructor with the record type
                     // Use the actual field types from pattern inference
                     val recordType = FunkType.RecordType(fieldTypes, rowVar = null)
+                    
+                    // Register the variant in the global registry
+                    context.registerVariant(pattern.constructor, recordType)
+                    
                     val constructorConstraint = Constraint.HasConstructor(
                         matchedType, 
                         pattern.constructor, 
@@ -1913,6 +1918,9 @@ class TypeChecker {
                     constraints += constructorConstraint
                 } else {
                     // Simple constructor: Red
+                    // Register the variant in the global registry
+                    context.registerVariant(pattern.constructor, null)
+                    
                     val constructorConstraint = Constraint.HasConstructor(
                         matchedType, 
                         pattern.constructor, 
@@ -1999,18 +2007,112 @@ class TypeChecker {
         // Infer left side with constraints
         val leftResult = inferExpressionWithConstraints(pipe.left, context)
         
-        // Infer right side with constraints
-        val rightResult = inferExpressionWithConstraints(pipe.right, context)
+        // Transform right side by replacing @ placeholders with left value
+        val transformedRight = transformPipeExpression(pipe.right, pipe.left)
         
-        // The right side should be a function that takes the left side's type
-        val resultType = FunkType.VarType(TypeVar.fresh())
-        val expectedFunctionType = FunkType.FunctionType(leftResult.type, resultType, emptySet<Effect>())
-        val pipeConstraint = Constraint.Equality(rightResult.type, expectedFunctionType)
+        // Infer the transformed right side
+        val rightResult = inferExpressionWithConstraints(transformedRight, context)
         
-        val allConstraints = leftResult.constraints + rightResult.constraints + pipeConstraint
-        return InferenceResult(resultType, allConstraints)
+        // The result type is the type of the transformed right side
+        return InferenceResult(rightResult.type, leftResult.constraints + rightResult.constraints)
     }
     
+    /**
+     * Transform pipe expressions by replacing @ placeholders with the piped value
+     */
+    private fun transformPipeExpression(expression: Expression, pipeValue: Expression): Expression {
+        return when (expression) {
+            is PlaceholderExpression -> pipeValue
+            is FunctionCall -> FunctionCall(
+                transformPipeExpression(expression.function, pipeValue),
+                transformPipeExpression(expression.arguments, pipeValue)
+            )
+            is RecordLiteral -> RecordLiteral(
+                expression.entries.map { entry ->
+                    RecordEntry(
+                        entry.name,
+                        entry.value?.let { transformPipeExpression(it, pipeValue) }
+                    )
+                },
+                expression.restField
+            )
+            is BinaryOperation -> BinaryOperation(
+                transformPipeExpression(expression.left, pipeValue),
+                expression.operator,
+                transformPipeExpression(expression.right, pipeValue)
+            )
+            is IfExpression -> IfExpression(
+                transformPipeExpression(expression.condition, pipeValue),
+                transformPipeExpression(expression.thenBranch, pipeValue),
+                transformPipeExpression(expression.elseBranch, pipeValue)
+            )
+            is LambdaExpression -> LambdaExpression(
+                expression.parameters,
+                transformPipeExpression(expression.body, pipeValue)
+            )
+            is MemberAccess -> MemberAccess(
+                transformPipeExpression(expression.receiver, pipeValue),
+                expression.member
+            )
+            is RecordUpdate -> RecordUpdate(
+                transformPipeExpression(expression.record, pipeValue),
+                expression.updates.map { entry ->
+                    RecordEntry(
+                        entry.name,
+                        entry.value?.let { transformPipeExpression(it, pipeValue) }
+                    )
+                }
+            )
+            is VariantConstruction -> VariantConstruction(
+                expression.constructor,
+                expression.value?.let { transformPipeExpression(it, pipeValue) }
+            )
+            is MatchExpression -> MatchExpression(
+                transformPipeExpression(expression.expression, pipeValue),
+                expression.cases.map { case ->
+                    MatchCase(
+                        case.pattern,
+                        transformPipeExpression(case.expression, pipeValue)
+                    )
+                }
+            )
+            is DoExpression -> DoExpression(
+                expression.statements.map { stmt ->
+                    when (stmt) {
+                        is LetBinding -> LetBinding(
+                            stmt.variableName,
+                            stmt.typeAnnotation,
+                            transformPipeExpression(stmt.expression, pipeValue)
+                        )
+                        is ExpressionStatement -> ExpressionStatement(
+                            transformPipeExpression(stmt.expression, pipeValue)
+                        )
+                        else -> stmt
+                    }
+                },
+                transformPipeExpression(expression.result, pipeValue)
+            )
+            is BlockExpression -> BlockExpression(
+                expression.statements.map { stmt ->
+                    when (stmt) {
+                        is LetBinding -> LetBinding(
+                            stmt.variableName,
+                            stmt.typeAnnotation,
+                            transformPipeExpression(stmt.expression, pipeValue)
+                        )
+                        is ExpressionStatement -> ExpressionStatement(
+                            transformPipeExpression(stmt.expression, pipeValue)
+                        )
+                        else -> stmt
+                    }
+                },
+                transformPipeExpression(expression.result, pipeValue)
+            )
+            // For all other expressions (literals, identifiers, etc.), return as-is
+            else -> expression
+        }
+    }
+
     private fun inferDoExpressionWithConstraints(doExpr: DoExpression, context: TypeContext): InferenceResult {
         // Process statements in sequence, updating context
         var currentContext = context

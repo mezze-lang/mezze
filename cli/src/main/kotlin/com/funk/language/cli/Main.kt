@@ -152,7 +152,14 @@ private fun prettyPrintType(type: FunkType): String = when (type) {
         val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
             when (dataType) {
                 null -> name
-                is FunkType.RecordType -> "$name ${prettyPrintType(dataType)}" // Ok { value: Int }
+                is FunkType.RecordType -> {
+                    // For record types, format as "Red { value: Int }" without extra braces
+                    val fields = dataType.fields.entries.joinToString(", ") { (fieldName, fieldType) ->
+                        "$fieldName: ${prettyPrintType(fieldType)}"
+                    }
+                    val openMarker = if (dataType.rowVar != null) ", ..." else ""
+                    "$name { $fields$openMarker }"
+                }
                 else -> "$name(${prettyPrintType(dataType)})" // Ok(Int) for non-record types
             }
         }

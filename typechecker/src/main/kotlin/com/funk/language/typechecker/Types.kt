@@ -129,13 +129,42 @@ data class TypeEnvironment(
     fun lookupEffect(name: String): Effect? = effects[name]
 }
 
+// Variant registry for hoisting variants within a module/context
+data class VariantRegistry(
+    private val variants: MutableMap<String, FunkType?> = mutableMapOf()
+) {
+    fun registerVariant(constructor: String, dataType: FunkType?) {
+        variants[constructor] = dataType
+    }
+    
+    fun getGlobalVariantType(): FunkType.VariantType {
+        return FunkType.VariantType(
+            constructors = variants.toMap(),
+            rowVar = RowVar.fresh("global") // Open to allow future variants
+        )
+    }
+    
+    fun hasVariant(constructor: String): Boolean = variants.containsKey(constructor)
+    
+    fun getVariantDataType(constructor: String): FunkType? = variants[constructor]
+    
+    fun getAllConstructors(): Set<String> = variants.keys.toSet()
+}
+
 // Type checking context
 data class TypeContext(
     val env: TypeEnvironment = TypeEnvironment(),
     val substitution: Substitution = Substitution.empty(),
     val constraints: MutableSet<Constraint> = mutableSetOf(),
-    val currentFunction: String? = null // Added for richer error context
-)
+    val currentFunction: String? = null, // Added for richer error context
+    val variantRegistry: VariantRegistry = VariantRegistry()
+) {
+    fun registerVariant(constructor: String, dataType: FunkType?) {
+        variantRegistry.registerVariant(constructor, dataType)
+    }
+    
+    fun getGlobalVariantType(): FunkType.VariantType = variantRegistry.getGlobalVariantType()
+}
 
 // Substitution for type variables
 data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {

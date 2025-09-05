@@ -167,34 +167,54 @@ object Unification {
         variant2: FunkType.VariantType, 
         subst: Substitution
     ): Substitution {
-        // Similar logic to records but for variant constructors
-        return when {
-            variant1.isClosed && variant2.isClosed -> {
-                if (variant1.constructors.keys != variant2.constructors.keys) {
+        // Handle all variant unification cases with robust subtyping
+        
+        // If both are closed, they must have identical constructors
+        if (variant1.isClosed && variant2.isClosed) {
+            if (variant1.constructors.keys != variant2.constructors.keys) {
+                throw StructuredTypeError.unificationError(variant1, variant2)
+            }
+            
+            var currentSubst = subst
+            for (constructor in variant1.constructors.keys) {
+                val type1 = variant1.constructors[constructor]
+                val type2 = variant2.constructors[constructor]
+                
+                when {
+                    type1 == null && type2 == null -> continue
+                    type1 != null && type2 != null -> 
+                        currentSubst = unifyTypes(type1, type2, currentSubst)
+                    else -> throw StructuredTypeError.unificationError(variant1, variant2)
+                }
+            }
+            return currentSubst
+        }
+        
+        // Handle closed-with-open cases (both directions)
+        if ((variant1.isClosed && variant2.isOpen) || (variant2.isClosed && variant1.isOpen)) {
+            val (closed, open) = if (variant1.isClosed) Pair(variant1, variant2) else Pair(variant2, variant1)
+            
+            // Check that all constructors in closed are present in open (subset relationship)
+            var currentSubst = subst
+            for ((constructor, closedType) in closed.constructors) {
+                val openType = open.constructors[constructor]
+                if (openType == null) {
+                    // Closed variant has constructor not in open variant - this should fail
                     throw StructuredTypeError.unificationError(variant1, variant2)
                 }
                 
-                var currentSubst = subst
-                for (constructor in variant1.constructors.keys) {
-                    val type1 = variant1.constructors[constructor]
-                    val type2 = variant2.constructors[constructor]
-                    
-                    when {
-                        type1 == null && type2 == null -> continue
-                        type1 != null && type2 != null -> 
-                            currentSubst = unifyTypes(type1, type2, currentSubst)
-                        else -> throw StructuredTypeError.unificationError(variant1, variant2)
-                    }
+                when {
+                    closedType == null && openType == null -> continue
+                    closedType != null && openType != null -> 
+                        currentSubst = unifyTypes(closedType, openType, currentSubst)
+                    else -> throw StructuredTypeError.unificationError(variant1, variant2)
                 }
-                currentSubst
             }
-            
-            variant1.isClosed && variant2.isOpen -> unifyClosedWithOpenVariant(variant1, variant2, subst)
-            variant1.isOpen && variant2.isClosed -> unifyClosedWithOpenVariant(variant2, variant1, subst)
-            variant1.isOpen && variant2.isOpen -> unifyOpenVariants(variant1, variant2, subst)
-            
-            else -> throw StructuredTypeError.unificationError(variant1, variant2)
+            return currentSubst
         }
+        
+        // Both open - unify common constructors
+        return unifyOpenVariants(variant1, variant2, subst)
     }
     
     private fun unifyClosedWithOpenVariant(
