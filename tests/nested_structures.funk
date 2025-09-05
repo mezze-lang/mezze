@@ -1,0 +1,36 @@
+// Test deeply nested data structures
+let deep_record = {
+  level1 = {
+    level2 = {
+      level3 = {
+        value = "deep value",
+        number = 42
+      }
+    }
+  }
+}
+
+let nested_variants = Response {
+  status = Ok { code = 200 },
+  data = Success {
+    payload = {
+      users = [
+        User { name = "Alice", role = Admin },
+        User { name = "Bob", role = User }
+      ]
+    }
+  }
+}
+
+let complex_computation = do
+  let config = {
+    database = { host = "localhost", port = 5432 },
+    cache = { enabled = true, ttl = 3600 }
+  }
+  let connection = if config.database.port > 0 then Connected else Disconnected
+  let result = {
+    config = config,
+    status = connection,
+    timestamp = 1234567890
+  }
+  result

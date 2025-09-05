@@ -1,0 +1,1 @@
+let message = Print { msg = "Hello from effect system!" }

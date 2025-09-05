@@ -3,6 +3,7 @@ package com.funk.language.interpreter
 import com.oracle.truffle.api.exception.AbstractTruffleException
 import com.oracle.truffle.api.interop.InteropLibrary
 import com.oracle.truffle.api.interop.TruffleObject
+import com.oracle.truffle.api.interop.ExceptionType
 import com.oracle.truffle.api.library.ExportLibrary
 import com.oracle.truffle.api.library.ExportMessage
 import com.oracle.truffle.api.nodes.Node
@@ -22,7 +23,7 @@ class FunkException(
     fun isException(): Boolean = true
     
     @ExportMessage
-    fun getExceptionType(): Any = "RUNTIME_ERROR"
+    fun getExceptionType(): ExceptionType = ExceptionType.RUNTIME_ERROR
     
     @ExportMessage
     fun getExceptionMessage(): String = message ?: "Funk runtime error"
@@ -38,6 +39,15 @@ class FunkException(
     
     @ExportMessage
     fun getExceptionStackTrace(): Any = stackTrace
+    
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun throwException(): RuntimeException {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+    
+    @ExportMessage
+    fun hasExceptionMessage(): Boolean = true
     
     companion object {
         /**

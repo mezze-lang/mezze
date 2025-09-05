@@ -131,16 +131,21 @@ data class TypeEnvironment(
 
 // Variant registry for hoisting variants within a module/context
 data class VariantRegistry(
-    private val variants: MutableMap<String, FunkType?> = mutableMapOf()
+    private val variants: MutableMap<String, FunkType?> = mutableMapOf(),
+    private var hasWildcardPatterns: Boolean = false
 ) {
     fun registerVariant(constructor: String, dataType: FunkType?) {
         variants[constructor] = dataType
     }
     
+    fun markAsOpen() {
+        hasWildcardPatterns = true
+    }
+    
     fun getGlobalVariantType(): FunkType.VariantType {
         return FunkType.VariantType(
             constructors = variants.toMap(),
-            rowVar = RowVar.fresh("global") // Open to allow future variants
+            rowVar = if (hasWildcardPatterns) RowVar.fresh("global") else null
         )
     }
     
@@ -161,6 +166,10 @@ data class TypeContext(
 ) {
     fun registerVariant(constructor: String, dataType: FunkType?) {
         variantRegistry.registerVariant(constructor, dataType)
+    }
+    
+    fun markVariantsAsOpen() {
+        variantRegistry.markAsOpen()
     }
     
     fun getGlobalVariantType(): FunkType.VariantType = variantRegistry.getGlobalVariantType()

@@ -1,8 +1,0 @@
-#!/bin/bash
-# Funk Language CLI wrapper script
-
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Run the Gradle CLI with the provided arguments
-cd "$SCRIPT_DIR" && gradle -q :cli:run --args="$*"

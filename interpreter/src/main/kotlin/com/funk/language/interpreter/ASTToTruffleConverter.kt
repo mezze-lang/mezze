@@ -17,9 +17,38 @@ class ASTToTruffleConverter {
     fun convertProgram(program: TypedProgram, language: FunkLanguage): FunkRootNode {
         val frameDescriptor = FrameDescriptor.newBuilder().build()
         
-        // For now, we'll create a simple program that evaluates to null
-        // TODO: Implement proper program execution with statements and final expression
-        val bodyNode = FunkNullLiteralNode()
+        // Convert all program items into statements and expressions
+        if (program.items.isEmpty()) {
+            return FunkRootNode(language, frameDescriptor, FunkNullLiteralNode(), "<main>")
+        }
+        
+        // Separate let bindings from other items
+        val statements = mutableListOf<FunkStatementNode>()
+        var resultExpression: FunkExpressionNode = FunkNullLiteralNode()
+        
+        for (item in program.items) {
+            when (item) {
+                is TypedLetBinding -> {
+                    // Convert let binding to a statement that defines the variable
+                    val expressionNode = convertExpression(item.expression.expression)
+                    statements.add(FunkLetBindingNode(item.variableName, expressionNode))
+                    
+                    // The last let binding also serves as the result expression
+                    resultExpression = FunkReadVariableNode(item.variableName)
+                }
+                else -> {
+                    // Other items (type declarations, etc.) don't produce runtime values
+                    // but we could handle them here if needed
+                }
+            }
+        }
+        
+        // Create a block node that executes all statements and returns the final result
+        val bodyNode = if (statements.isNotEmpty()) {
+            FunkBlockNode(statements.toTypedArray(), resultExpression)
+        } else {
+            FunkNullLiteralNode()
+        }
         
         return FunkRootNode(language, frameDescriptor, bodyNode, "<main>")
     }
@@ -81,9 +110,9 @@ class ASTToTruffleConverter {
      * Convert lambda expressions
      */
     private fun convertLambda(lambda: LambdaExpression): FunkExpressionNode {
-        // TODO: Implement lambda conversion
-        // This requires creating a new root node for the lambda body
-        throw FunkException.runtimeError("Lambda expressions not yet implemented")
+        // Create a FunkFunction value that can be called later
+        // The function will capture the current environment when created
+        return FunkLambdaNode(lambda.parameters, lambda.body)
     }
     
     /**
@@ -163,23 +192,67 @@ class ASTToTruffleConverter {
      * Convert do expressions
      */
     private fun convertDoExpression(doExpr: DoExpression): FunkExpressionNode {
-        // TODO: Implement do expression conversion
-        throw FunkException.runtimeError("Do expressions not yet implemented")
+        val statementNodes = doExpr.statements.map { convertStatement(it) }.toTypedArray()
+        val resultNode = convertExpression(doExpr.result)
+        return FunkDoNode(statementNodes, resultNode)
     }
     
     /**
      * Convert block expressions
      */
     private fun convertBlockExpression(block: BlockExpression): FunkExpressionNode {
-        // TODO: Implement block expression conversion
-        throw FunkException.runtimeError("Block expressions not yet implemented")
+        val statementNodes = block.statements.map { convertStatement(it) }.toTypedArray()
+        val resultNode = convertExpression(block.result)
+        return FunkBlockNode(statementNodes, resultNode)
+    }
+    
+    /**
+     * Convert a statement AST node to a Truffle statement node
+     */
+    private fun convertStatement(stmt: Statement): FunkStatementNode {
+        return when (stmt) {
+            is LetBinding -> FunkLetBindingNode(stmt.variableName, convertExpression(stmt.expression))
+            is ExpressionStatement -> FunkExpressionStatementNode(convertExpression(stmt.expression))
+            is ResumeStatement -> FunkResumeStatementNode(convertExpression(stmt.expression))
+            else -> throw FunkException.runtimeError("Unsupported statement type: ${stmt::class.simpleName}")
+        }
     }
     
     /**
      * Convert handle expressions
      */
     private fun convertHandleExpression(handle: HandleExpression): FunkExpressionNode {
-        // TODO: Implement handle expression conversion for effect system
-        throw FunkException.runtimeError("Handle expressions not yet implemented")
+        val expressionNode = convertExpression(handle.expression)
+        
+        // Convert handle cases to handler map
+        val handlers = handle.cases.associate { case ->
+            case.effectName to convertBlockToExpression(case.statements)
+        }
+        
+        return FunkHandleNode(expressionNode, handlers)
+    }
+    
+    /**
+     * Convert a list of statements to a single expression node
+     */
+    private fun convertBlockToExpression(statements: List<Statement>): FunkExpressionNode {
+        return when {
+            statements.isEmpty() -> FunkNullLiteralNode()
+            statements.size == 1 -> {
+                when (val stmt = statements[0]) {
+                    is LetBinding -> convertExpression(stmt.expression)
+                    else -> FunkNullLiteralNode()
+                }
+            }
+            else -> {
+                // For multiple statements, we'd need a block node
+                // For now, just return the last expression
+                val lastStmt = statements.last()
+                when (lastStmt) {
+                    is LetBinding -> convertExpression(lastStmt.expression)
+                    else -> FunkNullLiteralNode()
+                }
+            }
+        }
     }
 }

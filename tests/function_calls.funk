@@ -1,0 +1,18 @@
+// Test function calls with various argument patterns
+let add = { x, y } -> x + y
+let result1 = add { x = 10, y = 5 }
+
+let greet = { person } -> "Hello, " ++ person.name
+let user = { name = "Bob", age = 30 }
+let greeting = greet { person = user }
+
+let calculate = { operation, a, b } -> do
+  let sum = a + b
+  let product = a * b
+  if operation == "add" then sum else product
+
+let math_result = calculate { operation = "add", a = 8, b = 7 }
+
+let higher_order = { func, value } -> func { x = value }
+let double = { x } -> x * 2
+let doubled = higher_order { func = double, value = 21 }

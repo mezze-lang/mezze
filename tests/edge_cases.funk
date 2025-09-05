@@ -1,0 +1,23 @@
+// Test edge cases and boundary conditions
+let empty_string = ""
+let zero_value = 0
+let negative_number = -42
+let large_number = 999999
+
+let single_char = "a"
+let unicode_string = "Hello 🌍"
+
+let boolean_logic = do
+  let true_and_true = true == true
+  let false_or_false = false != false
+  let mixed_comparison = true != false
+  { all_true = true_and_true, mixed = mixed_comparison }
+
+let edge_arithmetic = do
+  let division_result = 100 / 1
+  let zero_multiplication = 42 * 0
+  let identity_addition = 5 + 0
+  { div = division_result, mult = zero_multiplication, add = identity_addition }
+
+let minimal_record = { a = 1 }
+let minimal_variant = Simple

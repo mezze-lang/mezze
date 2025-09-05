@@ -1,0 +1,9 @@
+// Test comparison operations
+let equal_test = 5 == 5
+let not_equal_test = 5 != 3
+let greater_test = 10 > 5
+let less_test = 3 < 7
+let greater_equal_test = 5 >= 5
+let less_equal_test = 4 <= 6
+let string_equal = "hello" == "hello"
+let string_not_equal = "hello" != "world"

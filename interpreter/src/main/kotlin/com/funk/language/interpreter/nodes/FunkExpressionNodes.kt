@@ -8,10 +8,26 @@ import com.funk.language.interpreter.*
  */
 class FunkReadVariableNode(private val identifier: String) : FunkExpressionNode() {
     override fun executeGeneric(frame: VirtualFrame): FunkValue {
-        // TODO: Implement proper variable lookup with frame slots
         val context = getContext()
-        return context.lookupGlobal(identifier) 
-            ?: throw FunkException.unboundVariable(identifier, this)
+        
+        // Check if this is a qualified identifier (Module.item)
+        if (identifier.contains(".")) {
+            val parts = identifier.split(".")
+            if (parts.size == 2) {
+                val (moduleName, itemName) = parts
+                return context.moduleRuntime.resolveAccess(moduleName, itemName, context)
+            }
+        }
+        
+        // Regular variable lookup
+        return context.lookupGlobal(identifier) ?: run {
+            // If it's an uppercase identifier, treat it as a variant constructor
+            if (identifier.first().isUpperCase()) {
+                FunkVariant(identifier, null) // Simple constructor with no data
+            } else {
+                throw FunkException.unboundVariable(identifier, this)
+            }
+        }
     }
 }
 
@@ -24,11 +40,66 @@ class FunkFunctionCallNode(
 ) : FunkExpressionNode() {
     
     override fun executeGeneric(frame: VirtualFrame): FunkValue {
+        val context = getContext()
+        
+        // Check if this is an effect invocation
+        // This is a simplified check - in a full implementation, we'd use type information
+        if (functionNode is FunkReadVariableNode) {
+            // We need to access the identifier, but it's private
+            // For now, let's try to execute and catch the unbound variable exception
+            try {
+                val function = functionNode.executeGeneric(frame)
+                val arguments = argumentsNode.executeGeneric(frame)
+                
+                return when (function) {
+                    is FunkFunction -> {
+                        function.call(arguments, context)
+                    }
+                    else -> {
+                        throw FunkException.typeError(
+                            "Cannot call non-function value: ${function::class.simpleName}",
+                            this
+                        )
+                    }
+                }
+            } catch (e: FunkException) {
+                if (e.message?.contains("Unbound variable") == true) {
+                    // Try as effect invocation
+                    val variableName = extractVariableName(e.message)
+                    if (variableName != null && isKnownEffect(variableName, context)) {
+                        val arguments = argumentsNode.executeGeneric(frame)
+                        return context.effectRuntime.invokeEffect(variableName, arguments, context)
+                    }
+                }
+                throw e
+            }
+        }
+        
+        // Regular function call
         val function = functionNode.executeGeneric(frame)
         val arguments = argumentsNode.executeGeneric(frame)
         
-        // TODO: Implement proper function calling
-        throw FunkException.runtimeError("Function calls not yet implemented", this)
+        return when (function) {
+            is FunkFunction -> {
+                function.call(arguments, context)
+            }
+            else -> {
+                throw FunkException.typeError(
+                    "Cannot call non-function value: ${function::class.simpleName}",
+                    this
+                )
+            }
+        }
+    }
+    
+    private fun extractVariableName(message: String?): String? {
+        // Extract variable name from "Unbound variable: variableName" message
+        return message?.substringAfter("Unbound variable: ")?.trim()
+    }
+    
+    private fun isKnownEffect(name: String, context: FunkContext): Boolean {
+        // Check if it's one of our known effects
+        return name in listOf("Print", "ReadFile", "WriteFile")
     }
 }
 
@@ -39,11 +110,30 @@ class FunkRecordLiteralNode(
     private val fieldNodes: Map<String, FunkExpressionNode>
 ) : FunkExpressionNode() {
     
-    @Children private val childNodes = fieldNodes.values.toTypedArray()
+    @Children private val childNodes: Array<FunkExpressionNode> = fieldNodes.values.toTypedArray()
     
     override fun executeGeneric(frame: VirtualFrame): FunkValue {
-        val fields = fieldNodes.mapValues { (_, node) -> node.executeGeneric(frame) }
+        val fields = mutableMapOf<String, FunkValue>()
+        for ((key, node) in fieldNodes) {
+            fields[key] = node.executeGeneric(frame)
+        }
         return FunkRecord(fields)
+    }
+}
+
+/**
+ * Node for lambda expressions
+ */
+class FunkLambdaNode(
+    private val parameters: com.funk.language.parser.LambdaParameters,
+    private val body: com.funk.language.parser.Expression
+) : FunkExpressionNode() {
+    
+    override fun executeGeneric(frame: VirtualFrame): FunkValue {
+        // Capture the current environment (for now, empty - we'll improve this)
+        val capturedEnvironment = emptyMap<String, FunkValue>()
+        
+        return FunkFunction(parameters, body, capturedEnvironment)
     }
 }
 
@@ -69,7 +159,7 @@ class FunkRecordUpdateNode(
     private val updateNodes: Map<String, FunkExpressionNode>
 ) : FunkExpressionNode() {
     
-    @Children private val childNodes = updateNodes.values.toTypedArray()
+    @Children private val childNodes: Array<FunkExpressionNode> = updateNodes.values.toTypedArray()
     
     override fun executeGeneric(frame: VirtualFrame): FunkValue {
         val record = recordNode.executeTyped<FunkRecord>(frame)
@@ -216,5 +306,43 @@ class FunkPipeNode(
     override fun executeGeneric(frame: VirtualFrame): FunkValue {
         // TODO: Implement proper pipe operator execution
         throw FunkException.runtimeError("Pipe operator not yet implemented", this)
+    }
+}
+
+/**
+ * Node for block expressions
+ */
+class FunkBlockNode(
+    @Children private val statementNodes: Array<FunkStatementNode>,
+    @Child private var resultNode: FunkExpressionNode
+) : FunkExpressionNode() {
+    
+    override fun executeGeneric(frame: VirtualFrame): FunkValue {
+        // Execute all statements in sequence
+        for (statementNode in statementNodes) {
+            statementNode.executeVoid(frame)
+        }
+        
+        // Return the result of the final expression
+        return resultNode.executeGeneric(frame)
+    }
+}
+
+/**
+ * Node for do expressions (similar to block but with effect handling)
+ */
+class FunkDoNode(
+    @Children private val statementNodes: Array<FunkStatementNode>,
+    @Child private var resultNode: FunkExpressionNode
+) : FunkExpressionNode() {
+    
+    override fun executeGeneric(frame: VirtualFrame): FunkValue {
+        // Execute all statements in sequence (with potential effect handling)
+        for (statementNode in statementNodes) {
+            statementNode.executeVoid(frame)
+        }
+        
+        // Return the result of the final expression
+        return resultNode.executeGeneric(frame)
     }
 }

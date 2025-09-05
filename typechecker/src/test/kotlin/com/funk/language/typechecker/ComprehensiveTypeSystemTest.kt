@@ -224,9 +224,9 @@ class ComprehensiveTypeSystemTest {
     fun `test lambda expression inference`() {
         val context = InferenceContext()
         val lambda = LambdaExpression(
-            RecordType(listOf(
+            TypedParameters(RecordType(listOf(
                 RecordTypeEntry("x", SimpleType("Int"))
-            )),
+            ))),
             BinaryOperation(Identifier("x"), "+", Literal(1))
         )
         
@@ -442,7 +442,7 @@ class ComprehensiveTypeSystemTest {
         
         // let id = { x } -> x
         val idLambda = LambdaExpression(
-            RecordType(listOf(RecordTypeEntry("x", SimpleType("a")))),
+            TypedParameters(RecordType(listOf(RecordTypeEntry("x", SimpleType("a"))))),
             Identifier("x")
         )
         val letBinding = LetBinding("id", null, idLambda)
@@ -548,11 +548,11 @@ class ComprehensiveTypeSystemTest {
         
         // let add = { x: Int, y: Int, z: Int } -> x + y + z
         val addFunc = LambdaExpression(
-            RecordType(listOf(
+            TypedParameters(RecordType(listOf(
                 RecordTypeEntry("x", SimpleType("Int")),
                 RecordTypeEntry("y", SimpleType("Int")),
                 RecordTypeEntry("z", SimpleType("Int"))
-            )),
+            ))),
             BinaryOperation(
                 BinaryOperation(Identifier("x"), "+", Identifier("y")),
                 "+",

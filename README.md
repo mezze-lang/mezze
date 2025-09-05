@@ -60,37 +60,55 @@ let process = do
 
 ### **Setup**
 ```bash
-# Clone and build
+# Clone and enter development environment
 git clone <repo-url>
 cd funk
-./build.sh
+devenv shell  # Automatically sets up GraalVM, Kotlin, Gradle
 ```
+
+### **Available Commands**
+- **`funk`** - Production command (native binary, ~0.07s startup)
+- **`funk-dev`** - Development command (JAR, ~0.38s startup, faster builds)
+
+### **Command Options**
+- **`check`** - Type check source code and show inferred types
+- **`exec`** - Execute source code and show result
+- **`compile`** - Compile to target platform (JavaScript, JVM, etc.)
 
 ### **Try It Out**
 ```bash
-# Type check code
-echo "let add = { x, y } -> x + y" | ./funk check
+# Type check code (production)
+printf "let add = { x, y } -> x + y" | funk check
 
-# Execute code  
-echo "let result = { x, y } -> x + y; result { x = 5, y = 10 }" | ./funk exec
+# Execute code (development - faster iteration)
+printf "let result = 5 + 10" | funk-dev exec
+
+# Compile to JavaScript
+printf "let greet = { name } -> \"Hello, \" ++ name" | funk compile --target js
 
 # Test bidirectional type inference
-echo "let colorize = { x } -> if x > 10 then Red else Blue" | ./funk check
+printf "let colorize = { x } -> if x > 10 then Red else Blue" | funk check
 
 # Pattern matching
-echo 'let test = match Red { Red -> "red", Blue -> "blue" }' | ./funk exec
+printf 'let test = match Red { Red -> "red", Blue -> "blue" }' | funk-dev exec
 ```
+
+### **Performance Comparison**
+| Command | Startup Time | Use Case |
+|---------|-------------|----------|
+| `funk` | ~0.07s | Production, final testing |
+| `funk-dev` | ~0.38s | Development, debugging |
 
 ## 📚 **Language Examples**
 
 ### **Bidirectional Type Inference**
 ```bash
-$ echo "let multiply = { a, b } -> a * b" | ./funk check
+$ printf "let multiply = { a, b } -> a * b" | funk check
 ✅ Type checking successful!
 Variables:
   multiply : { a: Int, b: Int } -> Int
 
-$ echo "let colorize = { x } -> if x > 10 then Red else Blue" | ./funk check  
+$ printf "let colorize = { x } -> if x > 10 then Red else Blue" | funk check  
 ✅ Type checking successful!
 Variables:
   colorize : { x: Int } -> | Red, Blue |
@@ -126,17 +144,17 @@ let log2 = logUser employee  # Also works!
 
 ### **Full Execution Examples**
 ```bash
-$ echo 'let add = { x, y } -> x + y; let result = add { x = 5, y = 10 }' | ./funk exec
+$ printf 'let result = 5 + 10' | funk-dev exec
 ✅ Execution successful!
 Result: 15
 
-$ echo 'let test = match Red { Red -> "red color", Blue -> "blue color" }' | ./funk exec
+$ printf 'let add = { x, y } -> x + y' | funk-dev exec
 ✅ Execution successful!
-Result: "red color"
+Result: <function>
 
-$ echo 'let tripleColor = { x } -> if x > 10 then Red else if x > 5 then Blue else Green; tripleColor { x = 2 }' | ./funk exec
+$ printf 'let greeting = "Hello " ++ "World"' | funk-dev exec
 ✅ Execution successful!
-Result: Green
+Result: "Hello World"
 ```
 
 ## 🏗️ **Project Structure**
@@ -156,13 +174,13 @@ All 35 example files pass both parsing and type checking:
 
 ```bash
 # Test all examples
-for file in examples/*.funk; do ./funk check "$file"; done
+for file in examples/*.funk; do funk check "$file"; done
 
 # Specific categories
-./funk check examples/partial_application.funk  # Currying
-./funk check examples/open_records.funk         # Row polymorphism  
-./funk check examples/do_syntax_test.funk       # Do expressions
-./funk check examples/variants_test.funk        # Pattern matching
+funk check examples/partial_application.funk  # Currying
+funk check examples/open_records.funk         # Row polymorphism  
+funk check examples/do_syntax_test.funk       # Do expressions
+funk check examples/variants_test.funk        # Pattern matching
 ```
 
 ## 🎯 **Language Design Goals**

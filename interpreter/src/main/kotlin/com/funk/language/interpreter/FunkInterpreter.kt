@@ -89,7 +89,7 @@ class FunkInterpreter {
     /**
      * Evaluate an expression (simplified version)
      */
-    private fun evaluateExpression(expr: com.funk.language.parser.Expression, context: FunkContext): FunkValue {
+    fun evaluateExpression(expr: com.funk.language.parser.Expression, context: FunkContext): FunkValue {
         return when (expr) {
             is com.funk.language.parser.Literal<*> -> {
                 when (val value = expr.value) {
@@ -389,7 +389,7 @@ class FunkInterpreter {
                 return evaluateExpression(case.expression, matchContext)
             }
         }
-        throw FunkException.runtimeError("No pattern matched the value: ${value.toDisplayString()}")
+        throw FunkException.runtimeError("No pattern matched the value: ${value.getDisplayString()}")
     }
     
     /**

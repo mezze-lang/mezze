@@ -2,8 +2,11 @@ package com.funk.language.cli
 
 import com.funk.language.parser.FunkParserImpl
 import com.funk.language.typechecker.*
-import com.funk.language.interpreter.FunkInterpreter
 import com.funk.language.interpreter.FunkException
+import com.funk.language.compiler.*
+import org.graalvm.polyglot.Context
+import org.graalvm.polyglot.Source
+import org.graalvm.polyglot.Value
 import java.io.File
 
 fun main(args: Array<String>) {
@@ -16,6 +19,7 @@ fun main(args: Array<String>) {
         "parse" -> handleParseCommand(args.drop(1))
         "check" -> handleCheckCommand(args.drop(1))
         "exec" -> handleExecCommand(args.drop(1))
+        "compile" -> handleCompileCommand(args.drop(1))
         else -> {
             println("Error: Unknown command '${args[0]}'")
             printUsage()
@@ -28,6 +32,12 @@ private fun printUsage() {
     println("  funk parse [file]    - Parse a file (or stdin if no file) and pretty-print the AST")
     println("  funk check [file]    - Type check a file (or stdin if no file) and pretty-print the types")
     println("  funk exec [file]     - Execute a file (or stdin if no file) and show the result")
+    println("  funk compile [options] [file] - Compile a file (or stdin if no file) to target language")
+    println()
+    println("Compile options:")
+    println("  --target js|jvm|llvm|c  - Target language (default: js)")
+    println("  --output <file>         - Output file (default: stdout)")
+    println("  --optimize <level>      - Optimization level 0-3 (default: 1)")
 }
 
 private fun handleParseCommand(args: List<String>) {
@@ -272,12 +282,22 @@ private fun handleExecCommand(args: List<String>) {
     }
 
     try {
-        val interpreter = FunkInterpreter()
-        val result = interpreter.execute(source)
+        // Use Truffle polyglot API to execute through FunkLanguage
+        val polyglotContext = org.graalvm.polyglot.Context.newBuilder("funk")
+            .allowAllAccess(true)
+            .build()
         
-        println("✅ Execution successful!")
-        println()
-        println("Result: ${result.toDisplayString()}")
+        try {
+            val polyglotSource = org.graalvm.polyglot.Source.newBuilder("funk", source, "<stdin>").build()
+            val result = polyglotContext.eval(polyglotSource)
+            
+            println("✅ Execution successful!")
+            println()
+            // Temporarily bypass formatPolyglotValue to isolate the issue
+            println("Result: ${result.toString()}")
+        } finally {
+            polyglotContext.close()
+        }
         
     } catch (e: StructuredTypeError) {
         println("❌ Type Error:")
@@ -290,6 +310,146 @@ private fun handleExecCommand(args: List<String>) {
     } catch (e: Exception) {
         println("❌ Error:")
         println(e.message ?: "Unknown error")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+private fun handleCompileCommand(args: List<String>) {
+    // Parse command line options
+    var target = CompilationTarget.JavaScript
+    var outputFile: String? = null
+    var optimizationLevel = OptimizationLevel.O1
+    var sourceFile: String? = null
+    
+    var i = 0
+    while (i < args.size) {
+        when (args[i]) {
+            "--target" -> {
+                if (i + 1 >= args.size) {
+                    println("Error: --target requires a value")
+                    return
+                }
+                target = when (args[i + 1].lowercase()) {
+                    "js", "javascript" -> CompilationTarget.JavaScript
+                    "jvm", "java" -> CompilationTarget.JVM
+                    "llvm" -> CompilationTarget.LLVM
+                    "c" -> CompilationTarget.C
+                    else -> {
+                        println("Error: Unknown target '${args[i + 1]}'. Supported: js, jvm, llvm, c")
+                        return
+                    }
+                }
+                i += 2
+            }
+            "--output" -> {
+                if (i + 1 >= args.size) {
+                    println("Error: --output requires a file path")
+                    return
+                }
+                outputFile = args[i + 1]
+                i += 2
+            }
+            "--optimize" -> {
+                if (i + 1 >= args.size) {
+                    println("Error: --optimize requires a level (0-3)")
+                    return
+                }
+                optimizationLevel = when (args[i + 1]) {
+                    "0" -> OptimizationLevel.O0
+                    "1" -> OptimizationLevel.O1
+                    "2" -> OptimizationLevel.O2
+                    "3" -> OptimizationLevel.O3
+                    else -> {
+                        println("Error: Invalid optimization level '${args[i + 1]}'. Use 0-3")
+                        return
+                    }
+                }
+                i += 2
+            }
+            else -> {
+                if (args[i].startsWith("--")) {
+                    println("Error: Unknown option '${args[i]}'")
+                    return
+                }
+                if (sourceFile == null) {
+                    sourceFile = args[i]
+                } else {
+                    println("Error: Multiple source files not supported")
+                    return
+                }
+                i++
+            }
+        }
+    }
+    
+    val source = when {
+        sourceFile == null -> {
+            // Read from stdin
+            readStdin()
+        }
+        else -> {
+            // Read from file
+            val file = File(sourceFile)
+            if (!file.exists()) {
+                println("Error: File not found at '$sourceFile'")
+                return
+            }
+            file.readText()
+        }
+    }
+    
+    try {
+        // Parse
+        val parser = FunkParserImpl()
+        val ast = parser.parse(source)
+        
+        // Type check
+        val typeChecker = TypeChecker()
+        val typedProgram = typeChecker.typeCheck(ast)
+        
+        // Compile
+        val compiler = FunkCompiler()
+        val options = CompilerOptions(
+            optimizationLevel = optimizationLevel,
+            includeDebugInfo = false
+        )
+        
+        val result = compiler.compile(typedProgram, target, options)
+        
+        when (result) {
+            is CompilationResult.Success -> {
+                println("✅ Compilation successful!")
+                println()
+                println("Target: ${result.target}")
+                println("Generated ${result.metadata.generatedLines} lines")
+                println("Optimization: ${result.metadata.optimizationLevel}")
+                println()
+                
+                if (outputFile != null) {
+                    File(outputFile).writeText(result.code)
+                    println("Output written to: $outputFile")
+                } else {
+                    println("Generated code:")
+                    println("=" + "=".repeat(49))
+                    println(result.code)
+                }
+            }
+            is CompilationResult.Error -> {
+                println("❌ Compilation failed:")
+                println(result.message)
+                result.cause?.printStackTrace()
+                kotlin.system.exitProcess(1)
+            }
+        }
+        
+    } catch (e: StructuredTypeError) {
+        println("❌ Type Error:")
+        println(ErrorPrettyPrinter.prettyPrintErrorSimple(e))
+        kotlin.system.exitProcess(1)
+    } catch (e: Exception) {
+        println("❌ Error:")
+        println(e.message ?: "Unknown error")
+        e.printStackTrace()
         kotlin.system.exitProcess(1)
     }
 }

@@ -10,17 +10,21 @@ class BasicTypeCheckerTest {
     
     @Test
     fun `infers literal types correctly`() {
-        val intLiteral = Literal(42)
-        val floatLiteral = Literal(3.14f)
-        val stringLiteral = Literal("hello")
-        val boolLiteral = Literal(true)
+        // Test literal type inference through complete programs
+        val intProgram = Program(listOf(LetBinding("x", null, Literal(42))))
+        val floatProgram = Program(listOf(LetBinding("x", null, Literal(3.14f))))
+        val stringProgram = Program(listOf(LetBinding("x", null, Literal("hello"))))
+        val boolProgram = Program(listOf(LetBinding("x", null, Literal(true))))
         
-        val context = TypeContext()
+        val intResult = typeChecker.typeCheck(intProgram)
+        val floatResult = typeChecker.typeCheck(floatProgram)
+        val stringResult = typeChecker.typeCheck(stringProgram)
+        val boolResult = typeChecker.typeCheck(boolProgram)
         
-        assertEquals(Type.IntType, typeChecker.inferLiteral(intLiteral))
-        assertEquals(Type.FloatType, typeChecker.inferLiteral(floatLiteral))
-        assertEquals(Type.StringType, typeChecker.inferLiteral(stringLiteral))
-        assertEquals(Type.BooleanType, typeChecker.inferLiteral(boolLiteral))
+        assertEquals(FunkType.IntType, (intResult.items[0] as TypedLetBinding).inferredType)
+        assertEquals(FunkType.FloatType, (floatResult.items[0] as TypedLetBinding).inferredType)
+        assertEquals(FunkType.StringType, (stringResult.items[0] as TypedLetBinding).inferredType)
+        assertEquals(FunkType.BooleanType, (boolResult.items[0] as TypedLetBinding).inferredType)
     }
     
     @Test
@@ -45,12 +49,12 @@ class BasicTypeCheckerTest {
     
     @Test
     fun `record type supports open and closed variants`() {
-        val closedRecord = Type.RecordType(
-            mapOf("x" to Type.IntType, "y" to Type.StringType)
+        val closedRecord = FunkType.RecordType(
+            mapOf("x" to FunkType.IntType, "y" to FunkType.StringType)
         )
         
-        val openRecord = Type.RecordType(
-            mapOf("x" to Type.IntType),
+        val openRecord = FunkType.RecordType(
+            mapOf("x" to FunkType.IntType),
             RowVar.fresh()
         )
         
@@ -63,12 +67,12 @@ class BasicTypeCheckerTest {
     
     @Test
     fun `variant type supports open and closed variants`() {
-        val closedVariant = Type.VariantType(
+        val closedVariant = FunkType.VariantType(
             mapOf("Red" to null, "Green" to null, "Blue" to null)
         )
         
-        val openVariant = Type.VariantType(
-            mapOf("Ok" to Type.IntType, "Error" to Type.StringType),
+        val openVariant = FunkType.VariantType(
+            mapOf("Ok" to FunkType.IntType, "Error" to FunkType.StringType),
             RowVar.fresh()
         )
         
@@ -84,9 +88,9 @@ class BasicTypeCheckerTest {
         val readFileEffect = Effect("ReadFile")
         val writeFileEffect = Effect("WriteFile")
         
-        val functionType = Type.FunctionType(
-            Type.RecordType(mapOf("path" to Type.StringType)),
-            Type.VariantType(mapOf("Ok" to Type.StringType, "Error" to Type.StringType)),
+        val functionType = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            FunkType.VariantType(mapOf("Ok" to FunkType.StringType, "Error" to FunkType.StringType)),
             setOf(readFileEffect, writeFileEffect)
         )
         
@@ -104,8 +108,8 @@ class BasicTypeCheckerTest {
             typeVars = setOf(typeVar),
             rowVars = setOf(rowVar),
             constraints = emptySet(),
-            type = Type.RecordType(
-                mapOf("value" to Type.VarType(typeVar)),
+            type = FunkType.RecordType(
+                mapOf("value" to FunkType.VarType(typeVar)),
                 rowVar
             )
         )
@@ -118,9 +122,9 @@ class BasicTypeCheckerTest {
     
     @Test
     fun `content hash computation`() {
-        val type1 = Type.RecordType(mapOf("x" to Type.IntType))
-        val type2 = Type.RecordType(mapOf("x" to Type.IntType))
-        val type3 = Type.RecordType(mapOf("y" to Type.IntType))
+        val type1 = FunkType.RecordType(mapOf("x" to FunkType.IntType))
+        val type2 = FunkType.RecordType(mapOf("x" to FunkType.IntType))
+        val type3 = FunkType.RecordType(mapOf("y" to FunkType.IntType))
         
         val hash1 = ContentHash.compute(type1)
         val hash2 = ContentHash.compute(type2)

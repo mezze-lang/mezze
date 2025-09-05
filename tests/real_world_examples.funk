@@ -1,0 +1,51 @@
+// Real-world example scenarios
+let user_authentication = do
+  let user = { 
+    id = 123, 
+    username = "alice", 
+    email = "alice@example.com",
+    active = true 
+  }
+  let credentials = { username = "alice", password = "secret123" }
+  let auth_result = if user.active then 
+    Authenticated { user = user, token = "abc123" }
+  else 
+    Rejected { reason = "User inactive" }
+  auth_result
+
+let api_response = do
+  let data = { 
+    users = [
+      { name = "Alice", role = "admin" },
+      { name = "Bob", role = "user" }
+    ],
+    total = 2,
+    page = 1
+  }
+  let response = Success {
+    status = 200,
+    data = data,
+    timestamp = 1234567890
+  }
+  response
+
+let configuration_system = do
+  let database_config = {
+    host = "localhost",
+    port = 5432,
+    database = "myapp",
+    ssl = true
+  }
+  let cache_config = {
+    enabled = true,
+    ttl = 3600,
+    max_size = 1000
+  }
+  let app_config = {
+    name = "MyApp",
+    version = "1.0.0",
+    database = database_config,
+    cache = cache_config,
+    debug = false
+  }
+  app_config

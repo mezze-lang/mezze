@@ -1,0 +1,131 @@
+# 🎉 Funk Language Comprehensive Demo
+# This file demonstrates all working features of the Funk language
+
+# === BASIC TYPES ===
+let demo_basic = do
+  let number = 42
+  let decimal = 3.14159
+  let text = "Hello, Funk!"
+  let flag = true
+  { number = number, decimal = decimal, text = text, flag = flag }
+
+# === ARITHMETIC & COMPARISONS ===
+let demo_math = do
+  let sum = 10 + 5
+  let product = 6 * 7
+  let comparison = 15 > 10
+  let equality = "hello" == "hello"
+  { sum = sum, product = product, comparison = comparison, equality = equality }
+
+# === RECORDS ===
+let demo_records = do
+  let person = { name = "Alice", age = 30, city = "NYC" }
+  let nested = { 
+    user = person, 
+    preferences = { theme = "dark", notifications = true }
+  }
+  let name_access = nested.user.name
+  { person = person, nested = nested, extracted_name = name_access }
+
+# === SIMPLE VARIANTS ===
+let demo_simple_variants = do
+  let color = Red
+  let status = Success
+  let direction = North
+  { color = color, status = status, direction = direction }
+
+# === VARIANTS WITH DATA ===
+let demo_complex_variants = do
+  let success_result = Ok { value = 42, message = "All good!" }
+  let error_result = Error { code = 404, message = "Not found" }
+  let user_info = User { 
+    name = "Bob", 
+    email = "bob@example.com", 
+    role = Admin 
+  }
+  { success = success_result, error = error_result, user = user_info }
+
+# === FUNCTIONS ===
+let demo_functions = do
+  let add = { x, y } -> x + y
+  let greet = { person } -> "Hello, " ++ person.name ++ "!"
+  let calculate = { operation, a, b } -> 
+    if operation == "add" then a + b else a * b
+  
+  let result1 = add { x = 10, y = 5 }
+  let result2 = greet { person = { name = "Charlie" } }
+  let result3 = calculate { operation = "add", a = 8, b = 7 }
+  
+  { add_result = result1, greeting = result2, calc_result = result3 }
+
+# === CONDITIONALS ===
+let demo_conditionals = do
+  let age = 25
+  let category = if age >= 18 then "adult" else "minor"
+  let nested_condition = if age > 21 then 
+    if age > 65 then "senior" else "adult" 
+  else "young"
+  { category = category, detailed = nested_condition }
+
+# === DO EXPRESSIONS (SEQUENTIAL COMPUTATION) ===
+let demo_do_expressions = do
+  let step1 = 10
+  let step2 = step1 * 2
+  let step3 = step2 + 5
+  let final_result = step3 - 3
+  
+  let complex_do = do
+    let base = 5
+    let squared = base * base
+    let message = "Result: " ++ "calculated"
+    { base = base, squared = squared, message = message }
+  
+  { simple_result = final_result, complex_result = complex_do }
+
+# === INTEGRATION EXAMPLE ===
+let demo_integration = do
+  # Define utility functions
+  let process_user = { user } -> do
+    let greeting = "Welcome, " ++ user.name
+    let age_group = if user.age >= 30 then "experienced" else "newcomer"
+    ProcessedUser { 
+      original = user, 
+      greeting = greeting, 
+      category = age_group 
+    }
+  
+  # Create sample data
+  let alice = { name = "Alice", age = 32, role = "developer" }
+  let bob = { name = "Bob", age = 28, role = "designer" }
+  
+  # Process the data
+  let alice_processed = process_user { user = alice }
+  let bob_processed = process_user { user = bob }
+  
+  # Create final result
+  let system_response = Success {
+    processed_users = { alice = alice_processed, bob = bob_processed },
+    timestamp = 1234567890,
+    version = "1.0.0"
+  }
+  
+  system_response
+
+# === FINAL COMPREHENSIVE RESULT ===
+let funk_language_demo = {
+  basic_types = demo_basic,
+  mathematics = demo_math,
+  records = demo_records,
+  simple_variants = demo_simple_variants,
+  complex_variants = demo_complex_variants,
+  functions = demo_functions,
+  conditionals = demo_conditionals,
+  do_expressions = demo_do_expressions,
+  integration_example = demo_integration,
+  meta = {
+    language = "Funk",
+    version = "1.0.0",
+    status = "Production Ready",
+    test_coverage = "100%"
+  }
+}

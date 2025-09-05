@@ -1848,6 +1848,11 @@ class TypeChecker {
         
         // Use the global variant type that includes all registered constructors
         if (constructorConstraints.isNotEmpty()) {
+            // If there's a wildcard pattern, mark variants as open
+            if (hasWildcard) {
+                context.markVariantsAsOpen()
+            }
+            
             // The global variant type already includes all the constructors we've registered
             val globalVariantType = context.getGlobalVariantType()
             

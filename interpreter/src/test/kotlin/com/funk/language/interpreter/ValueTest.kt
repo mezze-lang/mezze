@@ -13,7 +13,7 @@ class ValueTest {
     fun testFunkIntValue() {
         val value = FunkInt(42L)
         assertEquals(42L, value.value)
-        assertEquals("42", value.toDisplayString())
+        assertEquals("42", value.getDisplayString())
         assertTrue(value.isNumber())
         assertEquals(42L, value.asLong())
     }
@@ -22,7 +22,7 @@ class ValueTest {
     fun testFunkStringValue() {
         val value = FunkString("hello")
         assertEquals("hello", value.value)
-        assertEquals("\"hello\"", value.toDisplayString())
+        assertEquals("\"hello\"", value.getDisplayString())
         assertTrue(value.isString())
         assertEquals("hello", value.asString())
     }
@@ -31,7 +31,7 @@ class ValueTest {
     fun testFunkBooleanValue() {
         val value = FunkBoolean(true)
         assertTrue(value.value)
-        assertEquals("true", value.toDisplayString())
+        assertEquals("true", value.getDisplayString())
         assertTrue(value.isBoolean())
         assertTrue(value.asBoolean())
     }
@@ -44,7 +44,7 @@ class ValueTest {
         )
         val record = FunkRecord(fields)
         
-        assertEquals("{ name = \"John\", age = 30 }", record.toDisplayString())
+        assertEquals("{ name = \"John\", age = 30 }", record.getDisplayString())
         assertTrue(record.hasMembers())
         
         val members = record.getMembers(false)
@@ -59,10 +59,10 @@ class ValueTest {
     @Test
     fun testFunkVariantValue() {
         val variant1 = FunkVariant("None", null)
-        assertEquals("None", variant1.toDisplayString())
+        assertEquals("None", variant1.getDisplayString())
         
         val variant2 = FunkVariant("Some", FunkInt(42L))
-        assertEquals("Some(42)", variant2.toDisplayString())
+        assertEquals("Some(42)", variant2.getDisplayString())
         
         assertTrue(variant2.hasMembers())
         assertTrue(variant2.isMemberReadable("constructor"))
@@ -74,7 +74,7 @@ class ValueTest {
     
     @Test
     fun testFunkNullValue() {
-        assertEquals("null", FunkNull.toDisplayString())
+        assertEquals("null", FunkNull.getDisplayString())
         assertTrue(FunkNull.isNull())
     }
     

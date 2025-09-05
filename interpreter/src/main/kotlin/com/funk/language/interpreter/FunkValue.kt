@@ -16,18 +16,18 @@ abstract class FunkValue : TruffleObject {
     /**
      * Get a string representation of this value for debugging
      */
-    abstract fun toDisplayString(): String
+    abstract fun getDisplayString(): String
     
     @ExportMessage
-    open fun toDisplayString(allowSideEffects: Boolean): String = toDisplayString()
+    fun toDisplayString(allowSideEffects: Boolean): String = getDisplayString()
     
     @ExportMessage
     open fun hasLanguage(): Boolean = true
     
     @ExportMessage
-    open fun getLanguage(): Class<*> = FunkLanguage::class.java
+    open fun getLanguage(): Class<out com.oracle.truffle.api.TruffleLanguage<*>> = FunkLanguage::class.java
     
-    override fun toString(): String = toDisplayString()
+    override fun toString(): String = getDisplayString()
 }
 
 /**
@@ -35,10 +35,35 @@ abstract class FunkValue : TruffleObject {
  */
 @ExportLibrary(InteropLibrary::class)
 object FunkNull : FunkValue() {
-    override fun toDisplayString(): String = "null"
+    override fun getDisplayString(): String = "null"
     
     @ExportMessage
     fun isNull(): Boolean = true
+}
+
+/**
+ * Simple array wrapper for member keys to satisfy Truffle interop
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkMemberKeysArray(val keys: List<String>) : FunkValue() {
+    override fun getDisplayString(): String = keys.toString()
+    
+    @ExportMessage
+    fun hasArrayElements(): Boolean = true
+    
+    @ExportMessage
+    fun getArraySize(): Long = keys.size.toLong()
+    
+    @ExportMessage
+    fun isArrayElementReadable(index: Long): Boolean = index >= 0 && index < keys.size
+    
+    @ExportMessage
+    fun readArrayElement(index: Long): String {
+        if (index < 0 || index >= keys.size) {
+            throw FunkException.runtimeError("Array index out of bounds: $index")
+        }
+        return keys[index.toInt()]
+    }
 }
 
 /**
@@ -46,7 +71,7 @@ object FunkNull : FunkValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class FunkInt(val value: Long) : FunkValue() {
-    override fun toDisplayString(): String = value.toString()
+    override fun getDisplayString(): String = value.toString()
     
     @ExportMessage
     fun isNumber(): Boolean = true
@@ -62,6 +87,39 @@ data class FunkInt(val value: Long) : FunkValue() {
     
     @ExportMessage
     fun asInt(): Int = value.toInt()
+    
+    @ExportMessage
+    fun fitsInByte(): Boolean = value in Byte.MIN_VALUE..Byte.MAX_VALUE
+    
+    @ExportMessage
+    fun asByte(): Byte = value.toByte()
+    
+    @ExportMessage
+    fun fitsInShort(): Boolean = value in Short.MIN_VALUE..Short.MAX_VALUE
+    
+    @ExportMessage
+    fun asShort(): Short = value.toShort()
+    
+    @ExportMessage
+    fun fitsInFloat(): Boolean = true
+    
+    @ExportMessage
+    fun asFloat(): Float = value.toFloat()
+    
+    @ExportMessage
+    fun fitsInDouble(): Boolean = true
+    
+    @ExportMessage
+    fun asDouble(): Double = value.toDouble()
+    
+    @ExportMessage
+    fun fitsInBigInteger(): Boolean = false
+    
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun asBigInteger(): java.math.BigInteger {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
 }
 
 /**
@@ -69,7 +127,7 @@ data class FunkInt(val value: Long) : FunkValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class FunkFloat(val value: Double) : FunkValue() {
-    override fun toDisplayString(): String = value.toString()
+    override fun getDisplayString(): String = value.toString()
     
     @ExportMessage
     fun isNumber(): Boolean = true
@@ -79,6 +137,57 @@ data class FunkFloat(val value: Double) : FunkValue() {
     
     @ExportMessage
     fun asDouble(): Double = value
+    
+    @ExportMessage
+    fun fitsInByte(): Boolean = false
+    
+    @ExportMessage
+    fun fitsInShort(): Boolean = false
+    
+    @ExportMessage
+    fun fitsInInt(): Boolean = false
+    
+    @ExportMessage
+    fun fitsInLong(): Boolean = false
+    
+    @ExportMessage
+    fun fitsInFloat(): Boolean = true
+    
+    @ExportMessage
+    fun asFloat(): Float = value.toFloat()
+    
+    @ExportMessage
+    fun fitsInBigInteger(): Boolean = false
+    
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun asByte(): Byte {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+    
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun asShort(): Short {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+    
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun asInt(): Int {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+    
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun asLong(): Long {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+    
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun asBigInteger(): java.math.BigInteger {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
 }
 
 /**
@@ -86,7 +195,7 @@ data class FunkFloat(val value: Double) : FunkValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class FunkString(val value: String) : FunkValue() {
-    override fun toDisplayString(): String = "\"$value\""
+    override fun getDisplayString(): String = "\"$value\""
     
     @ExportMessage
     fun isString(): Boolean = true
@@ -100,7 +209,7 @@ data class FunkString(val value: String) : FunkValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class FunkBoolean(val value: Boolean) : FunkValue() {
-    override fun toDisplayString(): String = value.toString()
+    override fun getDisplayString(): String = value.toString()
     
     @ExportMessage
     fun isBoolean(): Boolean = true
@@ -112,23 +221,34 @@ data class FunkBoolean(val value: Boolean) : FunkValue() {
 /**
  * Record value (similar to objects/structs)
  */
-@ExportLibrary(InteropLibrary::class)
+// Temporarily disable InteropLibrary to isolate the issue
+// @ExportLibrary(InteropLibrary::class)
 data class FunkRecord(val fields: Map<String, FunkValue>) : FunkValue() {
-    override fun toDisplayString(): String {
-        val fieldStrings = fields.map { (key, value) -> "$key = ${value.toDisplayString()}" }
+    override fun getDisplayString(): String {
+        val fieldStrings = fields.map { (key, value) -> "$key = ${value.getDisplayString()}" }
         return "{ ${fieldStrings.joinToString(", ")} }"
     }
     
-    @ExportMessage
-    fun hasMembers(): Boolean = true
+    // Temporarily disable all interop methods
+    // @ExportMessage
+    // fun hasMembers(): Boolean = false
     
-    @ExportMessage
-    fun getMembers(includeInternal: Boolean): Array<String> = fields.keys.toTypedArray()
+    // @ExportMessage
+    // fun getMembers(includeInternal: Boolean): Any {
+    //     throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    // }
     
-    @ExportMessage
-    fun isMemberReadable(member: String): Boolean = fields.containsKey(member)
+    // @ExportMessage
+    // fun isMemberReadable(member: String): Boolean = fields.containsKey(member)
     
-    @ExportMessage
+    // @ExportMessage
+    // fun readMember(member: String): FunkValue {
+    //     return fields[member] ?: throw FunkException.runtimeError("Field '$member' not found in record")
+    // }
+    
+    /**
+     * Read a member field (non-interop version)
+     */
     fun readMember(member: String): FunkValue {
         return fields[member] ?: throw FunkException.runtimeError("Field '$member' not found in record")
     }
@@ -146,9 +266,9 @@ data class FunkRecord(val fields: Map<String, FunkValue>) : FunkValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class FunkVariant(val constructor: String, val value: FunkValue?) : FunkValue() {
-    override fun toDisplayString(): String {
+    override fun getDisplayString(): String {
         return if (value != null) {
-            "$constructor(${value.toDisplayString()})"
+            "$constructor(${value.getDisplayString()})"
         } else {
             constructor
         }
@@ -158,8 +278,9 @@ data class FunkVariant(val constructor: String, val value: FunkValue?) : FunkVal
     fun hasMembers(): Boolean = true
     
     @ExportMessage
-    fun getMembers(includeInternal: Boolean): Array<String> {
-        return if (value != null) arrayOf("constructor", "value") else arrayOf("constructor")
+    fun getMembers(includeInternal: Boolean): Any {
+        val memberList = if (value != null) listOf("constructor", "value") else listOf("constructor")
+        return memberList
     }
     
     @ExportMessage
@@ -185,7 +306,7 @@ data class FunkTruffleFunction(
     val callTarget: CallTarget,
     val name: String? = null
 ) : FunkValue() {
-    override fun toDisplayString(): String = name ?: "<function>"
+    override fun getDisplayString(): String = name ?: "<function>"
     
     @ExportMessage
     fun isExecutable(): Boolean = true
@@ -206,7 +327,72 @@ data class FunkFunction(
     val capturedEnvironment: Map<String, FunkValue>,
     val name: String? = null
 ) : FunkValue() {
-    override fun toDisplayString(): String = name ?: "<function>"
+    override fun getDisplayString(): String = name ?: "<function>"
+    
+    /**
+     * Call this function with the given arguments using Truffle execution
+     */
+    fun call(arguments: FunkValue, context: com.funk.language.interpreter.FunkContext): FunkValue {
+        // Save current locals to restore later
+        val savedLocals = context.locals.toMap()
+        
+        try {
+            // Add captured environment to context
+            capturedEnvironment.forEach { (name, value) ->
+                context.defineLocal(name, value)
+            }
+            
+            // Bind parameters to the current context
+            when (parameters) {
+                is com.funk.language.parser.TypedParameters -> {
+                    // For typed parameters, we expect a record argument
+                    if (arguments is FunkRecord) {
+                        bindRecordParameters(parameters.recordType, arguments, context)
+                    } else {
+                        throw FunkException.typeError("Expected record argument for typed function parameters")
+                    }
+                }
+                is com.funk.language.parser.UntypedParameters -> {
+                    // For untyped parameters, we expect a record argument
+                    if (arguments is FunkRecord) {
+                        bindUntypedParameters(parameters.names, arguments, context)
+                    } else {
+                        throw FunkException.typeError("Expected record argument for untyped function parameters")
+                    }
+                }
+            }
+            
+            // Execute function body using Truffle
+            val converter = com.funk.language.interpreter.ASTToTruffleConverter()
+            val bodyNode = converter.convertExpression(body)
+            
+            // Create a temporary frame for execution
+            val frameDescriptor = com.oracle.truffle.api.frame.FrameDescriptor.newBuilder().build()
+            val frame = com.oracle.truffle.api.Truffle.getRuntime().createVirtualFrame(arrayOf(), frameDescriptor)
+            
+            return bodyNode.executeGeneric(frame)
+        } finally {
+            // Restore original locals
+            context.locals.clear()
+            context.locals.putAll(savedLocals)
+        }
+    }
+    
+    private fun bindRecordParameters(recordType: com.funk.language.parser.RecordType, arguments: FunkRecord, context: com.funk.language.interpreter.FunkContext) {
+        for (entry in recordType.entries) {
+            val value = arguments.fields[entry.name] 
+                ?: throw FunkException.runtimeError("Missing argument: ${entry.name}")
+            context.defineLocal(entry.name, value)
+        }
+    }
+    
+    private fun bindUntypedParameters(paramNames: List<String>, arguments: FunkRecord, context: com.funk.language.interpreter.FunkContext) {
+        for (paramName in paramNames) {
+            val value = arguments.fields[paramName] 
+                ?: throw FunkException.runtimeError("Missing argument: $paramName")
+            context.defineLocal(paramName, value)
+        }
+    }
     
     @ExportMessage
     fun isExecutable(): Boolean = true

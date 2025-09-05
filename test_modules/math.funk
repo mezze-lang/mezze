@@ -1,0 +1,5 @@
+// Simple math module for testing
+let add = { x, y } -> x + y
+let multiply = { x, y } -> x * y
+let square = { x } -> x * x
+let pi = 3.14159

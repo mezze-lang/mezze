@@ -1,0 +1,8 @@
+// Test simple variant constructors
+let color_red = Red
+let color_blue = Blue
+let color_green = Green
+let status_ok = Ok
+let status_error = Error
+let direction_north = North
+let direction_south = South

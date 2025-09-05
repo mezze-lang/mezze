@@ -1,0 +1,4 @@
+// Test string operations
+let greeting = "Hello" ++ " World"
+let multipart = "A" ++ "B" ++ "C"
+let with_numbers = "Count: " ++ "42"

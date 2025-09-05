@@ -1,0 +1,33 @@
+[
+  {
+    "name": "org.antlr.v4.runtime.atn.ATN",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "org.antlr.v4.runtime.atn.ATNState",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "org.antlr.v4.runtime.atn.ATNDeserializer",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.funk.language.parser.FunkLexer",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.funk.language.parser.FunkParser",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "kotlin.reflect.jvm.internal.impl.builtins.BuiltInsLoaderImpl",
+    "allDeclaredConstructors": true
+  }
+]

@@ -1,0 +1,11 @@
+// Test record operations
+let simple_record = { x = 1, y = 2 }
+let person = { name = "John", age = 30 }
+let nested_record = { 
+  user = { name = "Alice", id = 123 }, 
+  active = true 
+}
+let record_with_expressions = { 
+  sum = 10 + 5, 
+  greeting = "Hello" ++ " World" 
+}

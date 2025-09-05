@@ -1,0 +1,25 @@
+// Test type inference capabilities
+let inferred_int = 42
+let inferred_float = 3.14
+let inferred_string = "hello"
+let inferred_bool = true
+
+let inferred_function = { x } -> x + 1
+let inferred_record = { name = "test", value = 123 }
+let inferred_variant = Success
+
+let complex_inference = do
+  let func = { person } -> person.age + 1
+  let data = { name = "Alice", age = 25 }
+  let result = func { person = data }
+  result
+
+let conditional_inference = do
+  let value = 10
+  let result = if value > 5 then "big" else "small"
+  result
+
+let variant_inference = do
+  let success = Ok { value = 42 }
+  let error = Error { message = "failed" }
+  if true then success else error

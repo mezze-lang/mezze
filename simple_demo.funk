@@ -1,0 +1,11 @@
+let demo_record = { name = "Alice", age = 30, active = true }
+let demo_variant = Success { value = 42, message = "All good!" }
+let demo_function = { x, y } -> x + y
+let demo_result = demo_function { x = 10, y = 5 }
+let demo_conditional = if demo_result > 10 then "big" else "small"
+let demo_function_new = { color, x, y } -> do
+  match color {
+    Red -> x + y
+    Blue { k } -> k
+    _ -> 0
+  }

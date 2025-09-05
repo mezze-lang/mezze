@@ -1,0 +1,11 @@
+// Test record member access
+let person = { name = "John", age = 30, city = "NYC" }
+let name_access = person.name
+let age_access = person.age
+
+let nested_record = { 
+  user = { name = "Alice", profile = { bio = "Developer" } },
+  settings = { theme = "dark" }
+}
+let nested_access = nested_record.user.name
+let deep_nested = nested_record.user.profile.bio

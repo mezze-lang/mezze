@@ -12,8 +12,8 @@ import java.util.concurrent.ConcurrentHashMap
  * Manages global state, built-in functions, and runtime environment.
  */
 class FunkContext(
-    private val language: FunkLanguage,
-    private val env: TruffleLanguage.Env?
+    val language: FunkLanguage,
+    val env: TruffleLanguage.Env?
 ) {
     
     /**
@@ -24,26 +24,27 @@ class FunkContext(
     /**
      * Local variables (for function scopes, blocks, etc.)
      */
-    private val locals = ConcurrentHashMap<String, FunkValue>()
+    val locals = ConcurrentHashMap<String, FunkValue>()
     
     /**
      * Built-in functions and effects
      */
     private val builtins = ConcurrentHashMap<String, FunkValue>()
     
+    /**
+     * Module runtime for handling imports and exports
+     */
+    val moduleRuntime = ModuleRuntime()
+    
+    /**
+     * Effect runtime for handling effects and continuations
+     */
+    val effectRuntime = EffectRuntime()
+    
     init {
         initializeBuiltins()
     }
     
-    /**
-     * Get the current language instance
-     */
-    fun getLanguage(): FunkLanguage = language
-    
-    /**
-     * Get the Truffle environment
-     */
-    fun getEnv(): TruffleLanguage.Env? = env
     
     /**
      * Define a global variable or function
@@ -73,8 +74,10 @@ class FunkContext(
         // Basic arithmetic and comparison operations will be handled by specialized nodes
         // Built-in effects and functions will be added here
         
-        // TODO: Add built-in functions as needed
-        // TODO: Add built-in effects like Print, ReadFile, etc.
+        // Register built-in effects
+        effectRuntime.registerHandler("Print", BuiltinEffects.createPrintEffect())
+        effectRuntime.registerHandler("ReadFile", BuiltinEffects.createReadFileEffect())
+        effectRuntime.registerHandler("WriteFile", BuiltinEffects.createWriteFileEffect())
     }
     
     /**
