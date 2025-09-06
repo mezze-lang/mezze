@@ -37,19 +37,32 @@ data class AccessItem(
     val alias: String?
 ) : ASTNode
 
+// Rust-style Module System
+data class ModDeclaration(
+    val moduleName: String
+) : ProgramItem, ModuleStatement
+
+data class AccessModuleDeclaration(
+    val modulePath: List<String>,
+    val alias: String?,
+    val isExposed: Boolean = false
+) : ProgramItem, ModuleStatement
+
 // Declarations
 sealed interface Declaration : ProgramItem, ModuleStatement, Statement
 
 data class LetBinding(
     val variableName: String,
     val typeAnnotation: TypeAnnotation?,
-    val expression: Expression
+    val expression: Expression,
+    val isExposed: Boolean = false
 ) : Declaration
 
 data class TypeDeclaration(
     val name: String,
     val typeParams: List<String>,
-    val definition: TypeDefinition
+    val definition: TypeDefinition,
+    val isExposed: Boolean = false
 ) : Declaration
 
 sealed interface TypeDefinition : ASTNode
@@ -57,12 +70,14 @@ sealed interface TypeDefinition : ASTNode
 data class EffectDeclaration(
     val name: String,
     val inputType: RecordType,
-    val resultType: VariantType
+    val resultType: VariantType,
+    val isExposed: Boolean = false
 ) : Declaration
 
 data class AbilityDeclaration(
     val name: String,
-    val effects: List<EffectSignature>
+    val effects: List<EffectSignature>,
+    val isExposed: Boolean = false
 ) : Declaration
 
 data class EffectSignature(

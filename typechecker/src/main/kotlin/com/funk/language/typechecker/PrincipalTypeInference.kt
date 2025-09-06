@@ -516,6 +516,12 @@ class PrincipalTypeInference {
                 is AccessDeclaration -> {
                     // Handle access declarations
                 }
+                is ModDeclaration -> {
+                    // Handle mod declarations
+                }
+                is AccessModuleDeclaration -> {
+                    // Handle access declarations
+                }
             }
         }
         

@@ -105,6 +105,14 @@ class ModuleSystemChecker {
                 is AbilityDeclaration -> {
                     processAbilityDeclaration(statement, context)
                 }
+                
+                is ModDeclaration -> {
+                    // Rust-style mod declaration - for now, just ignore
+                }
+                
+                is AccessModuleDeclaration -> {
+                    // Rust-style access declaration - for now, just ignore
+                }
             }
         }
         

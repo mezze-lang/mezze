@@ -1,11 +1,15 @@
-# Simple module test
+# Simple Rust-style module test
 
 let globalVar = 42
 
-module TestModule where
-    expose moduleVar
-    
-    let moduleVar = 100
-    let hiddenVar = 200
+# Declare a submodule
+mod test_module
+
+# Import from submodule
+access test_module::moduleVar
+
+# Module contents with expose prefix
+expose let moduleVar = 100
+let hiddenVar = 200  # Private - not exposed
 
 let afterModule = 300

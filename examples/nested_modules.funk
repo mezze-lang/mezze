@@ -1,68 +1,47 @@
-# Nested Modules Example
+# Rust-Style Nested Modules Example
 
-module MyProject where
-    expose Core, Utils
-    
-    module Core where
-        expose Http, Auth
-        
-        module Http where
-            expose get, post, put
-            
-            let get = { url: String } -> "GET " ++ url
-            let post = { url: String, body: String } -> "POST " ++ url ++ " with " ++ body
-            let put = { url: String, body: String } -> "PUT " ++ url ++ " with " ++ body
-        
-        module Auth where
-            expose login, logout, verify
-            # access MyProject.Core.Http.{ get, post }  # Module system not fully implemented
-            
-            let login = { username: String, password: String } -> "Logged in: " ++ username
-            
-            let logout = { token: String } -> "Logged out: " ++ token
-            
-            let verify = { token: String } -> "Verified: " ++ token
-    
-    module Utils where
-        expose String, Math
-        
-        module String where
-            expose capitalize, reverse
-            
-            let capitalize = { text: String } -> "CAPITALIZED: " ++ text
-            
-            let reverse = { text: String } -> "REVERSED: " ++ text
-        
-        module Math where
-            expose square, cube, factorial
-            
-            let square = { x: Int } -> x * x
-            let cube = { x: Int } -> x * x * x
-            let factorial = { n: Int } -> n  # Simplified for demo
+# Declare top-level modules
+mod core
+mod utils
+mod application
 
-# Using nested modules - simplified since module system not fully implemented
-# access MyProject.Core.Http.{ get, post }
-# access MyProject.Core.Auth.{ login as authenticate }
-# access MyProject.Utils.Math.{ square, factorial }
+# Import from nested modules
+access core::http::get
+access core::http::post
+access core::auth::login
+access utils::string_utils::capitalize
+access utils::math_utils::square
+access application::services::database::findUser
 
-# Application code - simplified
-let userLogin = "Mock login result"  # authenticate { username = "alice", password = "secret123" }
-let userData = "Mock user data"      # get { url = "/users/alice" }
-let squaredAge = 625                 # square { x = 25 }
-let factorialResult = 120  # factorial { n = 5 }
+# HTTP utilities
+expose let get = { url: String } -> "GET " ++ url
+expose let post = { url: String, body: String } -> "POST " ++ url ++ " with " ++ body
+expose let put = { url: String, body: String } -> "PUT " ++ url ++ " with " ++ body
 
-# Deeply nested module access
-module Application where
-    module Services where
-        module Database where
-            module Queries where
-                expose findUser, createUser
-                
-                let findUser = { id: Int } -> "SELECT * FROM users WHERE id = 123"
-                let createUser = { name: String, email: String } -> "INSERT INTO users (name, email) VALUES (" ++ name ++ ", " ++ email ++ ")"
+# Auth utilities
+expose let login = { username: String, password: String } -> "Logged in: " ++ username
+expose let logout = { token: String } -> "Logged out: " ++ token
+expose let verify = { token: String } -> "Verified: " ++ token
 
-# Using deeply nested modules - simplified
-# access Application.Services.Database.Queries.{ findUser, createUser }
+# String utilities
+expose let capitalize = { text: String } -> "CAPITALIZED: " ++ text
+expose let reverse = { text: String } -> "REVERSED: " ++ text
 
-let user = "Mock user data"  # findUser { id = 123 }
-let newUser = "Mock create result"  # createUser { name = "Bob", email = "bob@example.com" }
+# Math utilities
+expose let square = { x: Int } -> x * x
+expose let cube = { x: Int } -> x * x * x
+expose let factorial = { n: Int } -> n  # Simplified for demo
+
+# Database utilities
+expose let findUser = { id: Int } -> "SELECT * FROM users WHERE id = 123"
+expose let createUser = { name: String, email: String } -> "INSERT INTO users (name, email) VALUES (" ++ name ++ ", " ++ email ++ ")"
+
+# Application code using imported functions
+let userLogin = login { username = "alice", password = "secret123" }
+let userData = get { url = "/users/alice" }
+let squaredAge = square { x = 25 }
+let factorialResult = factorial { n = 5 }
+
+# Database operations
+let user = findUser { id = 123 }
+let newUser = createUser { name = "Bob", email = "bob@example.com" }

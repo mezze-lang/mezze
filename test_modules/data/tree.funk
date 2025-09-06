@@ -1,0 +1,14 @@
+# Tree utilities submodule
+# File: test_modules/data/tree.funk
+
+expose type Tree = | Leaf { value: Int }, Node { left: Tree, right: Tree } |
+
+expose let leaf = { value: Int } -> Leaf { value }
+
+expose let height = { tree: Tree } ->
+  match tree {
+    Leaf { value } -> 1
+    Node { left, right } -> 1  # Simplified for demo
+  }
+
+let private_balance = { tree: Tree } -> tree  # Private helper

@@ -175,8 +175,39 @@ class ASTToTruffleConverter {
      * Convert match expressions
      */
     private fun convertMatchExpression(match: MatchExpression): FunkExpressionNode {
-        // TODO: Implement match expression conversion with pattern matching
-        throw FunkException.runtimeError("Match expressions not yet implemented")
+        val valueNode = convertExpression(match.expression)
+        val caseNodes = match.cases.map { case ->
+            val patternNode = convertPattern(case.pattern)
+            val expressionNode = convertExpression(case.expression)
+            FunkMatchCaseNode(patternNode, expressionNode)
+        }
+        return FunkMatchNode(valueNode, caseNodes.toTypedArray())
+    }
+    
+    /**
+     * Convert pattern nodes
+     */
+    private fun convertPattern(pattern: Pattern): FunkPatternNode {
+        return when (pattern) {
+            is WildcardPattern -> FunkWildcardPatternNode()
+            is VariablePattern -> FunkVariablePatternNode(pattern.name)
+            is ConstructorPattern -> {
+                val recordPatternNode = pattern.recordPattern?.let { convertRecordPattern(it) }
+                FunkConstructorPatternNode(pattern.constructor, recordPatternNode)
+            }
+            is RecordPattern -> convertRecordPattern(pattern)
+        }
+    }
+    
+    /**
+     * Convert record pattern nodes
+     */
+    private fun convertRecordPattern(pattern: RecordPattern): FunkRecordPatternNode {
+        val entryNodes = pattern.entries.map { entry ->
+            val fieldPatternNode = entry.pattern?.let { convertPattern(it) }
+            FunkRecordPatternEntryNode(entry.name, fieldPatternNode)
+        }
+        return FunkRecordPatternNode(entryNodes.toTypedArray())
     }
     
     /**

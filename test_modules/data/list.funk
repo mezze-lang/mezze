@@ -1,0 +1,14 @@
+# List utilities submodule
+# File: test_modules/data/list.funk
+
+expose type IntList = | Empty, Cons { head: Int, tail: IntList } |
+
+expose let empty = Empty
+
+expose let head = { list: IntList } ->
+  match list {
+    Empty -> 0
+    Cons { head, tail } -> head
+  }
+
+let private_length = { list: IntList } -> 42  # Private helper

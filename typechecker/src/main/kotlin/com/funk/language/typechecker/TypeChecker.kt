@@ -1,17 +1,43 @@
 package com.funk.language.typechecker
 
 import com.funk.language.parser.*
+import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * Main type checker for Funk language with row polymorphism and effects
  */
 
-class TypeChecker {
+class TypeChecker(
+    private val moduleManager: RustModuleManager? = null
+) {
     
     /**
      * Type check a program and return the typed AST with inferred types
      */
     fun typeCheck(program: Program): TypedProgram {
+        return typeCheck(program, Paths.get("."))
+    }
+    
+    /**
+     * Type check a program with module resolution support
+     */
+    fun typeCheck(program: Program, currentPath: Path): TypedProgram {
+        // If we have a module manager, use it to resolve imports first
+        val resolvedProgram = if (moduleManager != null) {
+            moduleManager.compileProgram(program, currentPath)
+        } else {
+            // Fallback to simple type checking without module resolution
+            typeCheckSimple(program)
+        }
+        
+        return resolvedProgram
+    }
+    
+    /**
+     * Simple type checking without module resolution (legacy method)
+     */
+    private fun typeCheckSimple(program: Program): TypedProgram {
         var context = TypeContext()
         val typedItems = mutableListOf<TypedItem>()
         
@@ -51,7 +77,20 @@ class TypeChecker {
                 }
                 is TypedEffectDeclaration -> {
                     // Update context with new effect binding
-                    val newEnv = context.env.copy(effects = context.env.effects + (typedItem.name to typedItem.effect))
+                    val effectFunctionType = FunkType.FunctionType(
+                        typedItem.inputType, 
+                        typedItem.resultType, 
+                        setOf(typedItem.effect)
+                    )
+                    val newEnv = context.env
+                        .copy(effects = context.env.effects + (typedItem.name to typedItem.effect))
+                        .extend(typedItem.name, TypeScheme.monomorphic(effectFunctionType))
+                    context.copy(env = newEnv)
+                }
+                is TypedAbilityDeclaration -> {
+                    // Update context with ability effects
+                    val newEffects = typedItem.effects.associateBy { it.name }
+                    val newEnv = context.env.copy(effects = context.env.effects + newEffects)
                     context.copy(env = newEnv)
                 }
                 is TypedModuleDeclaration -> {
@@ -169,10 +208,11 @@ class TypeChecker {
             is EffectDeclaration -> {
                 val effect = Effect(item.name)
                 
-                // Note: Effect environment update is handled in the main typeCheck method
-                // For now, use dummy types until effect system is fully implemented
-                val inputType = FunkType.VarType(TypeVar.fresh("effect_input"))
-                val resultType = FunkType.VarType(TypeVar.fresh("effect_result"))
+                // Convert the actual input and result types
+                val inputType = convertTypeAnnotation(item.inputType)
+                val resultType = convertTypeAnnotation(item.resultType)
+                
+                // Effect will be added to environment in context update phase
                 
                 TypedEffectDeclaration(
                     name = item.name,
@@ -266,13 +306,28 @@ class TypeChecker {
             }
             
             is AbilityDeclaration -> {
-                // For now, treat abilities as simple type declarations
-                // This is a placeholder until the effect system is fully implemented
+                // Process each effect in the ability
+                val effects = mutableSetOf<Effect>()
+                for (effectSig in item.effects) {
+                    val effect = Effect("${item.name}.${effectSig.name}")
+                    effects.add(effect)
+                    
+                    // Convert the effect signature types
+                    val inputType = convertTypeAnnotation(effectSig.inputType)
+                    val resultType = convertTypeAnnotation(effectSig.resultType)
+                    
+                    // Add effect to environment with qualified name
+                    context.env.extend("${item.name}.${effectSig.name}", TypeScheme.monomorphic(
+                        FunkType.FunctionType(inputType, resultType, setOf(effect))
+                    ))
+                }
+                
+                // Create ability type as a record of effects
                 val abilityType = FunkType.TypeConstructor(item.name, emptyList())
-                TypedTypeDeclaration(
+                TypedAbilityDeclaration(
                     name = item.name,
-                    type = abilityType,
-                    hash = ContentHash.compute(abilityType)
+                    effects = effects.toList(),
+                    abilityType = abilityType
                 )
             }
             
@@ -281,6 +336,32 @@ class TypeChecker {
                 TypedModuleDeclaration(
                     name = item.name,
                     statements = emptyList()
+                )
+            }
+            
+            is ModDeclaration -> {
+                // Rust-style mod declaration - for now, just ignore
+                TypedLetBinding(
+                    variableName = "mod_${item.moduleName}",
+                    declaredType = null,
+                    inferredType = FunkType.VarType(TypeVar.fresh("unit")),
+                    expression = TypedExpression(
+                        Literal("mod"),
+                        FunkType.StringType
+                    )
+                )
+            }
+            
+            is AccessModuleDeclaration -> {
+                // Rust-style access declaration - for now, just ignore
+                TypedLetBinding(
+                    variableName = "access_${item.modulePath.joinToString("_")}",
+                    declaredType = null,
+                    inferredType = FunkType.VarType(TypeVar.fresh("unit")),
+                    expression = TypedExpression(
+                        Literal("access"),
+                        FunkType.StringType
+                    )
                 )
             }
             
@@ -394,12 +475,27 @@ class TypeChecker {
     }
 
     private fun inferEffectInvocation(call: FunctionCall, effect: Effect, context: TypeContext): FunkType {
-        val argumentType = inferExpression(call.arguments, context)
+        // Look up the effect's function type
+        val effectScheme = context.env.lookup(effect.name)
+        if (effectScheme == null) {
+            throw TypeError.UnboundVariable("Effect ${effect.name} not found in environment")
+        }
         
-        // Check that arguments match effect input type
-        // For now, just return a fresh type variable for effect results
-        // TODO: Implement proper effect type checking when effect system is expanded
-        return FunkType.VarType(TypeVar.fresh("effect_result"))
+        val effectType = instantiate(effectScheme)
+        if (effectType !is FunkType.FunctionType) {
+            throw TypeError.UnboundVariable("${effect.name} is not a function type")
+        }
+        
+        // Check that the arguments match the effect's input type
+        val argumentType = inferExpression(call.arguments, context)
+        try {
+            Unification.unify(argumentType, effectType.paramType)
+        } catch (e: Exception) {
+            throw TypeError.UnboundVariable("Effect ${effect.name} expects ${effectType.paramType} but got $argumentType")
+        }
+        
+        // Return the effect's result type
+        return effectType.returnType
     }
     
     private fun inferLambda(lambda: LambdaExpression, context: TypeContext): FunkType {
@@ -1169,8 +1265,36 @@ class TypeChecker {
     }
     
     private fun inferHandleExpression(handleExpr: HandleExpression, context: TypeContext): FunkType {
-        // Simplified effect handling - would be more sophisticated in full implementation
-        return inferExpression(handleExpr.expression, context)
+        // Infer the type of the handled expression
+        val exprType = inferExpression(handleExpr.expression, context)
+        
+        // For each handle case, check that the effect pattern matches an available effect
+        for (case in handleExpr.cases) {
+            val effectName = case.effectName
+            
+            // Look up the effect in the environment
+            val effectScheme = context.env.lookup(effectName)
+            if (effectScheme == null) {
+                throw TypeError.UnboundVariable("Unknown effect: $effectName")
+            }
+            
+            // The effect should be a function type
+            val effectType = instantiate(effectScheme)
+            if (effectType !is FunkType.FunctionType) {
+                throw TypeError.UnboundVariable("$effectName is not an effect")
+            }
+            
+            // Check that the handler result type matches the effect result type
+            val handlerType = inferExpression(case.result, context)
+            try {
+                Unification.unify(handlerType, effectType.returnType)
+            } catch (e: Exception) {
+                throw TypeError.UnboundVariable("Handler result type $handlerType does not match effect result type ${effectType.returnType}")
+            }
+        }
+        
+        // The handle expression has the same type as the handled expression
+        return exprType
     }
     
     private fun inferFunctionCall(call: FunctionCall, context: TypeContext): FunkType {
@@ -1692,6 +1816,15 @@ class TypeChecker {
     }
     
     private fun inferFunctionCallWithConstraints(call: FunctionCall, context: TypeContext): InferenceResult {
+        // Check if this is an effect invocation
+        val function = call.function
+        if (function is Identifier) {
+            val effect = context.env.lookupEffect(function.name)
+            if (effect != null) {
+                return inferEffectInvocationWithConstraints(call, effect, context)
+            }
+        }
+        
         val funcResult = inferExpressionWithConstraints(call.function, context)
         val argResult = inferExpressionWithConstraints(call.arguments, context)
         
@@ -1703,6 +1836,28 @@ class TypeChecker {
         
         val allConstraints = funcResult.constraints + argResult.constraints + partialAppConstraint
         return InferenceResult(returnType, allConstraints)
+    }
+    
+    private fun inferEffectInvocationWithConstraints(call: FunctionCall, effect: Effect, context: TypeContext): InferenceResult {
+        // Look up the effect's function type
+        val effectScheme = context.env.lookup(effect.name)
+        if (effectScheme == null) {
+            throw TypeError.UnboundVariable("Effect ${effect.name} not found in environment")
+        }
+        
+        val effectType = instantiate(effectScheme)
+        if (effectType !is FunkType.FunctionType) {
+            throw TypeError.UnboundVariable("${effect.name} is not a function type")
+        }
+        
+        // Infer the arguments with constraints
+        val argResult = inferExpressionWithConstraints(call.arguments, context)
+        
+        // Create constraint that arguments match effect input type
+        val argConstraint = Constraint.Equality(argResult.type, effectType.paramType)
+        
+        val allConstraints = argResult.constraints + argConstraint
+        return InferenceResult(effectType.returnType, allConstraints)
     }
     
     private fun inferRecordLiteralWithConstraints(record: RecordLiteral, context: TypeContext): InferenceResult {
@@ -2238,6 +2393,12 @@ data class TypedEffectDeclaration(
     val inputType: FunkType,
     val resultType: FunkType,
     val effect: Effect
+) : TypedItem
+
+data class TypedAbilityDeclaration(
+    val name: String,
+    val effects: List<Effect>,
+    val abilityType: FunkType
 ) : TypedItem
 
 data class TypedModuleDeclaration(

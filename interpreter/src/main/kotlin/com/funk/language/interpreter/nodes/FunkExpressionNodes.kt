@@ -296,7 +296,7 @@ class FunkIfNode(
 }
 
 /**
- * Node for pipe expressions (placeholder for now)
+ * Node for pipe expressions
  */
 class FunkPipeNode(
     @Child private var leftNode: FunkExpressionNode,
@@ -304,8 +304,37 @@ class FunkPipeNode(
 ) : FunkExpressionNode() {
     
     override fun executeGeneric(frame: VirtualFrame): FunkValue {
-        // TODO: Implement proper pipe operator execution
-        throw FunkException.runtimeError("Pipe operator not yet implemented", this)
+        val leftValue = leftNode.executeGeneric(frame)
+        
+        // The right side should be a function that we call with the left value
+        val rightValue = rightNode.executeGeneric(frame)
+        
+        if (rightValue is FunkFunction) {
+            val context = getContext()
+            
+            // For pipe operations, we need to wrap the left value in a record
+            // with a parameter name that matches the function's parameter
+            val wrappedArg = when (rightValue.parameters) {
+                is com.funk.language.parser.UntypedParameters -> {
+                    if (rightValue.parameters.names.size == 1) {
+                        // Single parameter - create record with that parameter name
+                        val paramName = rightValue.parameters.names[0]
+                        FunkRecord(mapOf(paramName to leftValue))
+                    } else {
+                        // Multiple parameters - can't pipe to this function
+                        throw FunkException.typeError("Cannot pipe to function with multiple parameters", this)
+                    }
+                }
+                else -> {
+                    // For typed parameters, we'd need more complex logic
+                    throw FunkException.typeError("Pipe to typed parameters not yet supported", this)
+                }
+            }
+            
+            return rightValue.call(wrappedArg, context)
+        } else {
+            throw FunkException.typeError("Right side of pipe must be a function", this)
+        }
     }
 }
 
@@ -344,5 +373,137 @@ class FunkDoNode(
         
         // Return the result of the final expression
         return resultNode.executeGeneric(frame)
+    }
+}
+
+/**
+ * Node for match expressions
+ */
+class FunkMatchNode(
+    @Child private var valueNode: FunkExpressionNode,
+    @Children private val caseNodes: Array<FunkMatchCaseNode>
+) : FunkExpressionNode() {
+    
+    override fun executeGeneric(frame: VirtualFrame): FunkValue {
+        val value = valueNode.executeGeneric(frame)
+        
+        for (caseNode in caseNodes) {
+            val matchResult = caseNode.tryMatch(value, frame)
+            if (matchResult != null) {
+                return matchResult
+            }
+        }
+        
+        throw FunkException.runtimeError("No pattern matched the value: ${value.getDisplayString()}", this)
+    }
+}
+
+/**
+ * Node for individual match cases
+ */
+class FunkMatchCaseNode(
+    @Child private var patternNode: FunkPatternNode,
+    @Child private var expressionNode: FunkExpressionNode
+) : FunkNode() {
+    
+    fun tryMatch(value: FunkValue, frame: VirtualFrame): FunkValue? {
+        val context = getContext()
+        val childContext = context.createChildContext()
+        
+        return if (patternNode.matches(value, childContext)) {
+            // Switch to child context for expression evaluation
+            val oldContext = context.locals
+            try {
+                context.locals.putAll(childContext.locals)
+                expressionNode.executeGeneric(frame)
+            } finally {
+                context.locals.clear()
+                context.locals.putAll(oldContext)
+            }
+        } else {
+            null
+        }
+    }
+}
+
+/**
+ * Base class for pattern nodes
+ */
+abstract class FunkPatternNode : FunkNode() {
+    abstract fun matches(value: FunkValue, context: FunkContext): Boolean
+}
+
+/**
+ * Wildcard pattern node (_)
+ */
+class FunkWildcardPatternNode : FunkPatternNode() {
+    override fun matches(value: FunkValue, context: FunkContext): Boolean = true
+}
+
+/**
+ * Variable pattern node (binds value to variable)
+ */
+class FunkVariablePatternNode(private val variableName: String) : FunkPatternNode() {
+    override fun matches(value: FunkValue, context: FunkContext): Boolean {
+        context.defineLocal(variableName, value)
+        return true
+    }
+}
+
+/**
+ * Constructor pattern node (variant matching)
+ */
+class FunkConstructorPatternNode(
+    private val constructor: String,
+    @Child private var recordPatternNode: FunkRecordPatternNode?
+) : FunkPatternNode() {
+    
+    override fun matches(value: FunkValue, context: FunkContext): Boolean {
+        if (value is FunkVariant && value.constructor == constructor) {
+            return recordPatternNode?.let { recordPattern ->
+                value.value?.let { variantValue ->
+                    if (variantValue is FunkRecord) {
+                        recordPattern.matches(variantValue, context)
+                    } else false
+                } ?: false
+            } ?: (value.value == null)
+        }
+        return false
+    }
+}
+
+/**
+ * Record pattern node
+ */
+class FunkRecordPatternNode(
+    @Children private val entryNodes: Array<FunkRecordPatternEntryNode>
+) : FunkPatternNode() {
+    
+    override fun matches(value: FunkValue, context: FunkContext): Boolean {
+        if (value is FunkRecord) {
+            return entryNodes.all { entryNode ->
+                entryNode.matches(value, context)
+            }
+        }
+        return false
+    }
+}
+
+/**
+ * Record pattern entry node
+ */
+class FunkRecordPatternEntryNode(
+    private val fieldName: String,
+    @Child private var fieldPatternNode: FunkPatternNode?
+) : FunkNode() {
+    
+    fun matches(record: FunkRecord, context: FunkContext): Boolean {
+        val fieldValue = record.fields[fieldName] ?: return false
+        
+        return fieldPatternNode?.matches(fieldValue, context) ?: run {
+            // No pattern means bind the field value to the field name
+            context.defineLocal(fieldName, fieldValue)
+            true
+        }
     }
 }

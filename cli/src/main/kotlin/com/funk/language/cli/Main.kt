@@ -3,11 +3,14 @@ package com.funk.language.cli
 import com.funk.language.parser.FunkParserImpl
 import com.funk.language.typechecker.*
 import com.funk.language.interpreter.FunkException
+import com.funk.language.interpreter.ASTToTruffleConverter
+import com.funk.language.interpreter.FunkLanguage
 import com.funk.language.compiler.*
 import org.graalvm.polyglot.Context
 import org.graalvm.polyglot.Source
 import org.graalvm.polyglot.Value
 import java.io.File
+import java.nio.file.Path
 
 fun main(args: Array<String>) {
     if (args.isEmpty()) {
@@ -75,10 +78,10 @@ private fun handleParseCommand(args: List<String>) {
 }
 
 private fun handleCheckCommand(args: List<String>) {
-    val source = when {
+    val (source, filePath) = when {
         args.isEmpty() -> {
             // Read from stdin
-            readStdin()
+            Pair(readStdin(), null)
         }
         args.size == 1 -> {
             // Read from file
@@ -87,7 +90,7 @@ private fun handleCheckCommand(args: List<String>) {
                 println("Error: File not found at '${args[0]}'")
                 return
             }
-            file.readText()
+            Pair(file.readText(), file.toPath())
         }
         else -> {
             println("Error: check command takes at most 1 argument (filename)")
@@ -100,8 +103,16 @@ private fun handleCheckCommand(args: List<String>) {
         val parser = FunkParserImpl()
         val ast = parser.parse(source)
         
-        val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(ast)
+        // Use module-aware type checking if we have a file path
+        val result = if (filePath != null) {
+            val moduleManager = RustModuleManager()
+            val typeChecker = TypeChecker(moduleManager)
+            typeChecker.typeCheck(ast, filePath.parent ?: filePath)
+        } else {
+            // Fallback to simple type checking for stdin
+            val typeChecker = TypeChecker()
+            typeChecker.typeCheck(ast)
+        }
         
         println("✅ Type checking successful!")
         println()
@@ -260,10 +271,10 @@ private fun prettyPrintExpression(expr: com.funk.language.parser.Expression): St
 }
 
 private fun handleExecCommand(args: List<String>) {
-    val source = when {
+    val (source, filePath) = when {
         args.isEmpty() -> {
             // Read from stdin
-            readStdin()
+            Pair(readStdin(), null)
         }
         args.size == 1 -> {
             // Read from file
@@ -272,7 +283,7 @@ private fun handleExecCommand(args: List<String>) {
                 println("Error: File not found at '${args[0]}'")
                 return
             }
-            file.readText()
+            Pair(file.readText(), file.toPath())
         }
         else -> {
             println("Error: exec command takes at most 1 argument (filename)")
@@ -282,18 +293,18 @@ private fun handleExecCommand(args: List<String>) {
     }
 
     try {
-        // Use Truffle polyglot API to execute through FunkLanguage
-        val polyglotContext = org.graalvm.polyglot.Context.newBuilder("funk")
+        // For files with module imports, we need to use our module-aware compilation
+        // For now, let's use the simple polyglot API and improve module support later
+        val polyglotContext = Context.newBuilder("funk")
             .allowAllAccess(true)
             .build()
         
         try {
-            val polyglotSource = org.graalvm.polyglot.Source.newBuilder("funk", source, "<stdin>").build()
+            val polyglotSource = Source.newBuilder("funk", source, filePath?.toString() ?: "<stdin>").build()
             val result = polyglotContext.eval(polyglotSource)
             
             println("✅ Execution successful!")
             println()
-            // Temporarily bypass formatPolyglotValue to isolate the issue
             println("Result: ${result.toString()}")
         } finally {
             polyglotContext.close()
@@ -382,10 +393,10 @@ private fun handleCompileCommand(args: List<String>) {
         }
     }
     
-    val source = when {
+    val (source, filePath) = when {
         sourceFile == null -> {
             // Read from stdin
-            readStdin()
+            Pair(readStdin(), null)
         }
         else -> {
             // Read from file
@@ -394,7 +405,7 @@ private fun handleCompileCommand(args: List<String>) {
                 println("Error: File not found at '$sourceFile'")
                 return
             }
-            file.readText()
+            Pair(file.readText(), file.toPath())
         }
     }
     
@@ -403,9 +414,16 @@ private fun handleCompileCommand(args: List<String>) {
         val parser = FunkParserImpl()
         val ast = parser.parse(source)
         
-        // Type check
-        val typeChecker = TypeChecker()
-        val typedProgram = typeChecker.typeCheck(ast)
+        // Type check with module resolution
+        val typedProgram = if (filePath != null) {
+            val moduleManager = RustModuleManager()
+            val typeChecker = TypeChecker(moduleManager)
+            typeChecker.typeCheck(ast, filePath.parent ?: filePath)
+        } else {
+            // Fallback to simple type checking for stdin
+            val typeChecker = TypeChecker()
+            typeChecker.typeCheck(ast)
+        }
         
         // Compile
         val compiler = FunkCompiler()

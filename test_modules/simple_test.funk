@@ -1,0 +1,11 @@
+# Simple test for cross-module imports
+# File: test_modules/simple_test.funk
+
+# Declare modules
+mod utils
+
+# Import specific items
+access utils::add
+
+# Use imported items
+let result = add { x = 5, y = 3 }

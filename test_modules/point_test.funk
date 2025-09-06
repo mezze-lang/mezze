@@ -1,0 +1,12 @@
+# Test Point type import
+# File: test_modules/point_test.funk
+
+# Declare modules
+mod data
+
+# Import Point type
+access data::Point
+
+# Use Point type
+let point1 = { x = 0, y = 0 }
+let point2 = { x = 3, y = 4 }

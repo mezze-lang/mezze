@@ -54,14 +54,16 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
         val variableName = ctx.Identifier().text
         val typeAnnotation = ctx.typeAnnotation()?.let { visit(it) as TypeAnnotation }
         val expression = visit(ctx.expression()) as Expression
-        return LetBinding(variableName, typeAnnotation, expression)
+        val isExposed = ctx.EXPOSE() != null
+        return LetBinding(variableName, typeAnnotation, expression, isExposed)
     }
 
     override fun visitTypeDeclaration(ctx: FunkParser.TypeDeclarationContext): ASTNode {
         val name = ctx.Identifier().text
         val typeParams = ctx.typeParams()?.Identifier()?.map { it.text } ?: emptyList()
         val definition = visit(ctx.typeDefinition()) as TypeDefinition
-        return TypeDeclaration(name, typeParams, definition)
+        val isExposed = ctx.EXPOSE() != null
+        return TypeDeclaration(name, typeParams, definition, isExposed)
     }
 
     override fun visitVariantType(ctx: FunkParser.VariantTypeContext): ASTNode {
@@ -86,13 +88,32 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
         val name = ctx.Identifier().text
         val inputType = visit(ctx.recordType()) as RecordType
         val resultType = visit(ctx.variantType()) as VariantType
-        return EffectDeclaration(name, inputType, resultType)
+        val isExposed = ctx.EXPOSE() != null
+        return EffectDeclaration(name, inputType, resultType, isExposed)
     }
 
     override fun visitAbilityDeclaration(ctx: FunkParser.AbilityDeclarationContext): ASTNode {
         val name = ctx.Identifier().text
         val effects = ctx.effectSignature().map { visit(it) as EffectSignature }
-        return AbilityDeclaration(name, effects)
+        val isExposed = ctx.EXPOSE() != null
+        return AbilityDeclaration(name, effects, isExposed)
+    }
+
+    override fun visitModDeclaration(ctx: FunkParser.ModDeclarationContext): ASTNode {
+        val moduleName = ctx.Identifier().text
+        return ModDeclaration(moduleName)
+    }
+
+    override fun visitAccessModuleDeclaration(ctx: FunkParser.AccessModuleDeclarationContext): ASTNode {
+        val modulePath = ctx.modulePath().Identifier().map { it.text }
+        val alias = ctx.Identifier()?.text
+        val isExposed = ctx.EXPOSE() != null
+        return AccessModuleDeclaration(modulePath, alias, isExposed)
+    }
+
+    override fun visitModulePath(ctx: FunkParser.ModulePathContext): ASTNode {
+        // This method shouldn't be called directly since we handle it in visitUseDeclaration
+        throw UnsupportedOperationException("ModulePath should be handled in UseDeclaration")
     }
 
     override fun visitEffectSignature(ctx: FunkParser.EffectSignatureContext): ASTNode {

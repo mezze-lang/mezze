@@ -73,6 +73,10 @@ class ModuleRuntime {
                 is TypedEffectDeclaration -> {
                     // Effect declarations for the effect system
                 }
+                
+                is TypedAbilityDeclaration -> {
+                    // Ability declarations for the effect system
+                }
             }
         }
         

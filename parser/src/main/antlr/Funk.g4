@@ -10,6 +10,8 @@ statement:
     | effectDeclaration
     | abilityDeclaration
     | moduleDeclaration
+    | modDeclaration
+    | accessModuleDeclaration
     | exposeDeclaration
     | accessDeclaration
     | resumeStatement
@@ -45,13 +47,26 @@ accessItem:
     Identifier (AS Identifier)?
     ;
 
+// Rust-style Module System
+modDeclaration:
+    MOD Identifier NEWLINE?
+    ;
+
+accessModuleDeclaration:
+    EXPOSE? ACCESS modulePath (AS Identifier)? NEWLINE?
+    ;
+
+modulePath:
+    Identifier (DOUBLE_COLON Identifier)*
+    ;
+
 // Declarations
 letBinding:
-    LET Identifier (COLON typeAnnotation)? ASSIGN expression NEWLINE?
+    EXPOSE? LET Identifier (COLON typeAnnotation)? ASSIGN expression NEWLINE?
     ;
 
 typeDeclaration:
-    TYPE Identifier typeParams? ASSIGN typeDefinition NEWLINE?
+    EXPOSE? TYPE Identifier typeParams? ASSIGN typeDefinition NEWLINE?
     ;
 
 typeParams:
@@ -73,14 +88,15 @@ variantConstructor:
 
 qualifiedIdentifier:
     Identifier (DOT Identifier)*
+    | Identifier (DOUBLE_COLON Identifier)*
     ;
 
 effectDeclaration:
-    EFFECT Identifier COLON recordType ARROW variantType NEWLINE?
+    EXPOSE? EFFECT Identifier COLON recordType ARROW variantType NEWLINE?
     ;
 
 abilityDeclaration:
-    ABILITY Identifier WHERE NEWLINE
+    EXPOSE? ABILITY Identifier WHERE NEWLINE
     (effectSignature)*
     ;
 
@@ -258,6 +274,7 @@ EFFECT: 'effect';
 ABILITY: 'ability';
 WHERE: 'where';
 MODULE: 'module';
+MOD: 'mod';
 EXPOSE: 'expose';
 ACCESS: 'access';
 AS: 'as';
@@ -293,6 +310,7 @@ LBRACKET: '[';
 RBRACKET: ']';
 PIPE_DELIM: '|';
 COLON: ':';
+DOUBLE_COLON: '::';
 COMMA: ',';
 DOT: '.';
 

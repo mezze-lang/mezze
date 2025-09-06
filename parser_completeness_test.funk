@@ -1,0 +1,188 @@
+# Comprehensive Parser Test - All Core Features (No Effect System)
+# This file tests every core language feature supported by the parser
+
+# Module declarations
+mod utils
+mod data
+
+# Import statements  
+access utils::add
+access data::Point
+
+# Type declarations
+expose type Color = | Red, Blue, Green |
+expose type Person = { name: String, age: Int }
+
+# Let bindings with type annotations
+expose let pi: Float = 3.14159
+expose let greeting: String = "Hello, World!"
+let isActive: Boolean = true
+let count: Int = 42
+
+# Lambda expressions - untyped parameters
+let add = { x, y } -> x + y
+let multiply = { x, y } -> x * y
+
+# Lambda expressions - typed parameters  
+let divide = { x: Float, y: Float } -> x / y
+
+# Record literals
+let person = { name = "Alice", age = 30 }
+let point = { x = 10, y = 20 }
+
+# Record punning
+let name = "Bob"
+let age = 25
+let punned = { name, age }
+
+# Record updates
+let older = person { age = 31 }
+
+# Member access
+let personName = person.name
+let pointX = point.x
+
+# Variant construction
+let red = Red
+let blue = Blue
+let green = Green
+
+# Function calls
+let sum = add { x = 5, y = 3 }
+let product = multiply { x = 4, y = 6 }
+
+# Binary operations - arithmetic
+let arithmetic1 = 10 + 5
+let arithmetic2 = 20 - 8
+let arithmetic3 = 6 * 7
+let arithmetic4 = 15 / 3
+
+# Binary operations - string concatenation
+let fullName = "John" ++ " " ++ "Doe"
+
+# Binary operations - comparisons
+let greater = 10 > 5
+let less = 3 < 8
+let greaterEqual = 10 >= 10
+let lessEqual = 5 <= 7
+let equal = 42 == 42
+let notEqual = 10 != 20
+
+# If expressions
+let result1 = if true then "yes" else "no"
+let result2 = if 10 > 5 then 100 else 0
+
+# Pattern matching
+let colorName = match red {
+  Red -> "red"
+  Blue -> "blue"
+  Green -> "green"
+}
+
+# Pattern matching with record patterns
+let describe = match person {
+  { name, age } -> name ++ " is " ++ "years old"
+}
+
+# Pattern matching with wildcard
+let isRed = match red {
+  Red -> true
+  _ -> false
+}
+
+# Do expressions
+let computation = do
+  let x = 10
+  let y = 20
+  x + y
+
+# Block expressions
+let blockResult = {
+  let a = 5
+  let b = 10
+  a * b
+}
+
+# Pipe expressions
+let piped = 10 |> { x } -> x * 2 |> { y } -> y + 1
+
+# Pipe with placeholder
+let pipedPlaceholder = 10 |> add { x = @, y = 5 }
+
+# Nested expressions
+let complex = if (10 + 5) > (8 * 2) then {
+  let inner = match Red {
+    Red -> 1
+    _ -> 0
+  }
+  inner * 10
+} else 0
+
+# Function with complex body
+let complexFunction = { input } -> do
+  let processed = input |> { x } -> x * 2
+  let result = if processed > 10 then processed else 0
+  match result {
+    0 -> "zero"
+    _ -> "non-zero"
+  }
+
+# All literal types
+let intLit = 42
+let floatLit = 3.14
+let stringLit = "hello"
+let boolLit = true
+
+# Record with all field types
+let mixedRecord = {
+  id = 1,
+  name = "test",
+  score = 95.5,
+  active = true
+}
+
+# Variant with data
+expose type Result = | Success { value: Int }, Error { message: String } |
+let success = Success { value = 42 }
+let error = Error { message = "Something went wrong" }
+
+# Pattern matching on variants with data
+let handleResult = match success {
+  Success { value } -> value
+  Error { message } -> 0
+}
+
+# Parenthesized expressions
+let parenthesized = (10 + 5) * (20 - 15)
+
+# Member access chains
+let chainedAccess = mixedRecord.name
+
+# Complex record literal
+let complexRecord = {
+  person = { name = "Alice", age = 30 },
+  colors = Red,
+  calculation = 10 + 20,
+  nested = { inner = { value = 42 } }
+}
+
+# All comparison operators in action
+let allComparisons = {
+  gt = 10 > 5,
+  lt = 3 < 8,
+  gte = 10 >= 10,
+  lte = 5 <= 5,
+  eq = 42 == 42,
+  neq = 10 != 20
+}
+
+# Final complex expression combining multiple features
+let finalTest = do
+  let processColor = { color } -> match color {
+    Red -> { name = "red", value = 1 }
+    Blue -> { name = "blue", value = 2 }
+    Green -> { name = "green", value = 3 }
+  }
+  
+  let redInfo = processColor { color = Red }
+  redInfo.name ++ " has value " ++ "1"

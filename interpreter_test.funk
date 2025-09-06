@@ -1,0 +1,42 @@
+# Simple Interpreter Test - Core Features Only
+
+# Type declarations
+expose type Color = | Red, Blue, Green |
+
+# Let bindings
+let greeting = "Hello, World!"
+let count = 42
+let isActive = true
+
+# Lambda expressions
+let add = { x, y } -> x + y
+
+# Record operations
+let person = { name = "Alice", age = 30 }
+let personName = person.name
+
+# Variant operations
+let red = Red
+
+# Function calls
+let sum = add { x = 5, y = 3 }
+
+# Binary operations
+let arithmetic = 10 + 5
+let comparison = 10 > 5
+
+# If expressions
+let result = if true then "yes" else "no"
+
+# Pattern matching
+let colorName = match red {
+  Red -> "red"
+  Blue -> "blue" 
+  Green -> "green"
+}
+
+# Do expressions
+let computation = do
+  let x = 10
+  let y = 20
+  x + y
