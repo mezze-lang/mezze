@@ -42,6 +42,7 @@ fun main(args: Array<String>) {
             "parse" -> handleParseCommand(remainingArgs)
             "check" -> handleCheckCommand(remainingArgs)
             "exec" -> handleExecCommand(remainingArgs)
+            "compile" -> handleCompileCommand(remainingArgs)
             else -> {
                 println("❌ Unknown command: $command")
                 println()
@@ -72,7 +73,8 @@ private fun showHelp() {
     println("COMMANDS:")
     println("  parse     Parse Funk code and show AST")
     println("  check     Type check Funk code and show inferred types")
-    println("  exec      Execute Funk code using Truffle runtime")
+    println("  exec      Execute Funk code using Truffle runtime (fast startup)")
+    println("  compile   Compile Funk code to standalone JAR (with JIT optimization)")
     println()
     println("GLOBAL OPTIONS:")
     println("  -h, --help     Show this help message")
@@ -81,6 +83,7 @@ private fun showHelp() {
     println("EXAMPLES:")
     println("  funk parse program.funk              # Parse a file")
     println("  echo 'let x = 5 + 10' | funk exec    # Execute from stdin")
+    println("  funk compile program.funk            # Compile to standalone JAR")
     println("  funk check --help                    # Get help for check command")
     println()
     println("For command-specific help: funk <command> --help")
@@ -108,7 +111,7 @@ private fun showUsage() {
     println("USAGE:")
     println("  funk <command> [options] [file]")
     println()
-    println("COMMANDS: parse, check, exec")
+    println("COMMANDS: parse, check, exec, compile")
     println("For command-specific help: funk <command> --help")
 }
 
@@ -147,6 +150,7 @@ private fun showCommandHelp(command: String) {
             println("USAGE: funk exec [file]")
             println()
             println("Execute Funk source code using the Truffle runtime")
+            println("Fast startup, interpreter-only execution in native binary")
             println()
             println("OPTIONS:")
             println("  -h, --help         Show this help message")
@@ -154,6 +158,36 @@ private fun showCommandHelp(command: String) {
             println("EXAMPLES:")
             println("  funk exec program.funk              # Execute a file")
             println("  echo 'let x = 5 + 10' | funk exec   # Execute from stdin")
+        }
+        
+        "compile" -> {
+            println("USAGE: funk compile <file> [output]")
+            println()
+            println("Compile Funk source code to a standalone JAR with JIT optimization")
+            println("The resulting JAR includes the Truffle runtime for maximum performance")
+            println()
+            println("ARGUMENTS:")
+            println("  <file>             Input Funk source file")
+            println("  [output]           Output JAR name (default: same as input with .jar)")
+            println()
+            println("OPTIONS:")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  funk compile program.funk            # Creates program.jar")
+            println("  funk compile app.funk myapp.jar     # Creates myapp.jar")
+            println()
+            println("RUNNING COMPILED JARS:")
+            println("  java -jar program.jar                         # Basic execution (interpreter-only)")
+            println("  java -XX:+EnableJVMCI \\")
+            println("       -XX:+UnlockExperimentalVMOptions \\")
+            println("       -XX:+UseJVMCICompiler \\")
+            println("       -jar program.jar                         # With JIT optimization (recommended)")
+            println("  java -XX:+EnableJVMCI \\")
+            println("       -XX:+UnlockExperimentalVMOptions \\")
+            println("       -XX:+UseJVMCICompiler \\")
+            println("       --enable-native-access=ALL-UNNAMED \\")
+            println("       -jar program.jar                         # JIT + clean output")
         }
         
         else -> {
@@ -447,5 +481,310 @@ private fun handleExecCommand(args: List<String>) {
     }
 }
 
+private fun handleCompileCommand(args: List<String>) {
+    // Validate arguments
+    if (args.isEmpty()) {
+        println("❌ Error: compile command requires an input file")
+        println()
+        println("USAGE: funk compile <file> [output]")
+        println("Use 'funk compile --help' for more information")
+        return
+    }
+    
+    if (args.size > 2) {
+        println("❌ Error: compile command takes at most 2 arguments")
+        println()
+        println("USAGE: funk compile <file> [output]")
+        return
+    }
+    
+    val inputFile = File(args[0])
+    if (!inputFile.exists()) {
+        println("❌ Error: Input file not found at '${args[0]}'")
+        return
+    }
+    
+    // Determine output file name
+    val outputFile = if (args.size == 2) {
+        File(args[1])
+    } else {
+        // Default: replace .funk extension with .jar, or add .jar
+        val inputName = inputFile.nameWithoutExtension
+        File(inputFile.parent ?: ".", "$inputName.jar")
+    }
+    
+    try {
+        println("🔨 Compiling ${inputFile.name} to ${outputFile.name}...")
+        println()
+        
+        // Parse and type check the source
+        val source = inputFile.readText()
+        val parser = FunkParserImpl()
+        val ast = parser.parse(source)
+        
+        val typeChecker = TypeChecker()
+        val typedProgram = typeChecker.typeCheck(ast, inputFile.toPath().parent ?: inputFile.toPath())
+        
+        println("✅ Type checking successful")
+        
+        // Create a standalone JAR with embedded program and Truffle runtime
+        createStandaloneJar(inputFile, outputFile, source, typedProgram)
+        
+        println("✅ Compilation successful!")
+        println()
+        println("📦 Created: ${outputFile.absolutePath}")
+        println("📏 Size: ${outputFile.length() / 1024}KB")
+        println()
+        println("🚀 Run with JIT: java -XX:+EnableJVMCI -XX:+UnlockExperimentalVMOptions -XX:+UseJVMCICompiler -jar ${outputFile.name}")
+        println("   (Includes Truffle runtime optimization support)")
+        println()
+        println("💡 For cleaner output, add: --enable-native-access=ALL-UNNAMED")
+        
+    } catch (e: StructuredTypeError) {
+        println("❌ Type Error:")
+        println(ErrorPrettyPrinter.prettyPrintErrorSimple(e))
+        kotlin.system.exitProcess(1)
+    } catch (e: Exception) {
+        println("❌ Compilation Error:")
+        println(e.message ?: "Unknown error")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+private fun createStandaloneJar(inputFile: File, outputFile: File, source: String, typedProgram: TypedProgram) {
+    println("🔧 Creating standalone JAR with Truffle runtime...")
+    
+    // Create a temporary directory for JAR contents
+    val tempDir = kotlin.io.path.createTempDirectory("funk-compile").toFile()
+    
+    try {
+        // 1. Create a Kotlin main class that runs the embedded program
+        createKotlinMainClass(tempDir, inputFile, source)
+        
+        // 2. Build the JAR using Gradle task (which will compile Kotlin)
+        buildJarWithGradle(tempDir, outputFile, inputFile.nameWithoutExtension)
+        
+    } finally {
+        // Clean up temp directory
+        tempDir.deleteRecursively()
+    }
+}
+
+private fun createKotlinMainClass(tempDir: File, inputFile: File, source: String) {
+    val mainClassDir = File(tempDir, "src/main/kotlin/com/funk/standalone")
+    mainClassDir.mkdirs()
+    
+    val mainClassContent = """
+package com.funk.standalone
+
+import org.graalvm.polyglot.Context
+import org.graalvm.polyglot.Engine
+import org.graalvm.polyglot.Source
+
+/**
+ * Standalone executable for ${inputFile.name}
+ * Generated by Funk compiler with embedded source code
+ */
+object Main {
+    private const val EMBEDDED_SOURCE = ${escapeForKotlin(source)}
+    private const val PROGRAM_NAME = "${inputFile.name}"
+    
+    @JvmStatic
+    fun main(args: Array<String>) {
+        try {
+            // Create engine with JIT compilation enabled
+            val engine = Engine.newBuilder()
+                .allowExperimentalOptions(true)
+                .build()
+                
+            // Create context for Funk language
+            val context = Context.newBuilder("funk")
+                .engine(engine)
+                .allowAllAccess(true)
+                .allowExperimentalOptions(true)
+                .build()
+                
+            // Execute the embedded Funk program
+            val polyglotSource = Source.newBuilder("funk", EMBEDDED_SOURCE, PROGRAM_NAME).build()
+            val result = context.eval(polyglotSource)
+            
+            // Print result (last expression value)
+            if (result != null && result.toString() != "null") {
+                println("Result: ${'$'}{result}")
+            }
+            
+            context.close()
+            engine.close()
+            
+        } catch (e: Exception) {
+            System.err.println("Error executing ${'$'}PROGRAM_NAME: ${'$'}{e.message}")
+            if (args.isNotEmpty() && args[0] == "--debug") {
+                e.printStackTrace()
+            }
+            kotlin.system.exitProcess(1)
+        }
+    }
+}
+    """.trimIndent()
+    
+    File(mainClassDir, "Main.kt").writeText(mainClassContent)
+    
+    // Also create a simple build.gradle.kts for this standalone project
+    val buildGradleContent = """
+plugins {
+    kotlin("jvm") version "1.9.22"
+    application
+    id("com.github.johnrengelman.shadow") version "8.1.1"
+}
+
+application {
+    mainClass.set("com.funk.standalone.Main")
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Official GraalVM Polyglot dependencies for JIT optimization
+    implementation("org.graalvm.polyglot:polyglot:24.2.2")
+    implementation("org.graalvm.sdk:graal-sdk:24.2.2")
+    implementation("org.graalvm.truffle:truffle-api:24.2.2")
+    
+    // Runtime optimization support (this enables JIT compilation!)
+    runtimeOnly("org.graalvm.truffle:truffle-runtime:24.2.2")
+    
+    // Include our Funk language implementation (copy from parent project)
+    ${generateFunkDependencies()}
+}
+
+kotlin {
+    jvmToolchain(21)
+}
+
+tasks.shadowJar {
+    archiveClassifier.set("")
+    mergeServiceFiles()
+    
+    manifest {
+        attributes["Main-Class"] = "com.funk.standalone.Main"
+    }
+}
+    """.trimIndent()
+    
+    File(tempDir, "build.gradle.kts").writeText(buildGradleContent)
+    
+    // Copy our Funk language JARs to the temp directory
+    copyFunkLanguageJars(tempDir)
+    
+    println("✅ Created Kotlin main class wrapper")
+}
+
+private fun generateFunkDependencies(): String {
+    return """
+    // ANTLR runtime for parsing
+    implementation("org.antlr:antlr4-runtime:4.13.1")
+    
+    // Local Funk language JARs (copied from parent project)
+    implementation(files("libs/funk-parser.jar"))
+    implementation(files("libs/funk-typechecker.jar")) 
+    implementation(files("libs/funk-interpreter.jar"))
+    """.trimIndent()
+}
+
+
+private fun copyFunkLanguageJars(tempDir: File) {
+    val libsDir = File(tempDir, "libs")
+    libsDir.mkdirs()
+    
+    // Copy our built JARs (with version numbers)
+    val projectRoot = File(".")
+    
+    // Copy parser JAR
+    val parserJar = File(projectRoot, "parser/build/libs/parser-1.0.0.jar")
+    if (parserJar.exists()) {
+        parserJar.copyTo(File(libsDir, "funk-parser.jar"), overwrite = true)
+        println("📦 Copied parser JAR")
+    } else {
+        println("⚠️  Parser JAR not found: ${parserJar.absolutePath}")
+    }
+    
+    // Copy typechecker JAR
+    val typecheckerJar = File(projectRoot, "typechecker/build/libs/typechecker-1.0.0.jar")
+    if (typecheckerJar.exists()) {
+        typecheckerJar.copyTo(File(libsDir, "funk-typechecker.jar"), overwrite = true)
+        println("📦 Copied typechecker JAR")
+    } else {
+        println("⚠️  Typechecker JAR not found: ${typecheckerJar.absolutePath}")
+    }
+    
+    // Copy interpreter JAR
+    val interpreterJar = File(projectRoot, "interpreter/build/libs/interpreter-1.0.0.jar")
+    if (interpreterJar.exists()) {
+        interpreterJar.copyTo(File(libsDir, "funk-interpreter.jar"), overwrite = true)
+        println("📦 Copied interpreter JAR")
+    } else {
+        println("⚠️  Interpreter JAR not found: ${interpreterJar.absolutePath}")
+    }
+    
+    // Copy Truffle compiler JAR for JIT optimization
+    val truffleCompilerJar = File(System.getenv("JAVA_HOME"), "lib/truffle/truffle-compiler.jar")
+    if (truffleCompilerJar.exists()) {
+        truffleCompilerJar.copyTo(File(libsDir, "truffle-compiler.jar"), overwrite = true)
+        println("📦 Copied Truffle JIT compiler")
+    } else {
+        println("⚠️  Truffle compiler JAR not found - JAR will run in interpreter mode")
+    }
+}
+
+
+private fun buildJarWithGradle(tempDir: File, outputFile: File, programName: String) {
+    println("🔧 Building standalone JAR...")
+    
+    // Build the standalone Kotlin project
+    val gradleCmd = listOf(
+        "gradle", 
+        "shadowJar",
+        "--no-daemon"
+    )
+    
+    val process = ProcessBuilder(gradleCmd)
+        .directory(tempDir)
+        .redirectErrorStream(true)
+        .start()
+    
+    val output = process.inputStream.bufferedReader().readText()
+    val exitCode = process.waitFor()
+    
+    if (exitCode != 0) {
+        throw RuntimeException("Failed to build standalone JAR:\n$output")
+    }
+    
+    // Find the generated JAR and copy it to the output location
+    val buildLibsDir = File(tempDir, "build/libs")
+    val generatedJars = buildLibsDir.listFiles()?.filter { it.name.endsWith(".jar") }
+    
+    if (generatedJars.isNullOrEmpty()) {
+        throw RuntimeException("No JAR file was generated in ${buildLibsDir.absolutePath}")
+    }
+    
+    val sourceJar = generatedJars.first()
+    sourceJar.copyTo(outputFile, overwrite = true)
+    
+    println("✅ Built standalone JAR with Truffle runtime")
+}
+
+private fun escapeForKotlin(source: String): String {
+    return "\"\"\"" + source.replace("\"\"\"", "\\\"\\\"\\\"") + "\"\"\""
+}
+
+private fun escapeForJava(source: String): String {
+    return "\"" + source
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t") + "\""
+}
 
 

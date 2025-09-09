@@ -37,6 +37,60 @@ tasks.shadowJar {
     mergeServiceFiles()
 }
 
+// Task to build standalone JARs with Truffle runtime for compiled Funk programs
+tasks.register<Jar>("buildStandaloneJar") {
+    group = "build"
+    description = "Build a standalone JAR with Truffle runtime for a Funk program"
+    
+    // Configure dynamically based on project properties
+    val programName = project.findProperty("programName")?.toString() ?: "funk-program"
+    val tempDirPath = project.findProperty("tempDir")?.toString()
+    val outputFilePath = project.findProperty("outputFile")?.toString()
+    
+    archiveBaseName.set(programName)
+    
+    // Include compiled main class from temp directory
+    if (tempDirPath != null) {
+        from(File(tempDirPath, "classes"))
+    }
+    
+    // Include our language implementation
+    from(sourceSets.main.get().output)
+    from(project(":parser").tasks.jar.get().outputs.files.map { zipTree(it) })
+    from(project(":typechecker").tasks.jar.get().outputs.files.map { zipTree(it) })
+    from(project(":interpreter").tasks.jar.get().outputs.files.map { zipTree(it) })
+    
+    // Include all runtime dependencies (including Truffle API)
+    from(configurations.runtimeClasspath.get().map { zipTree(it) })
+    
+    // Include Truffle compiler JAR for JIT compilation
+    val truffleCompilerJar = File(System.getenv("JAVA_HOME"), "lib/truffle/truffle-compiler.jar")
+    if (truffleCompilerJar.exists()) {
+        from(zipTree(truffleCompilerJar))
+        println("✅ Including Truffle JIT compiler: ${truffleCompilerJar.name}")
+    } else {
+        println("⚠️  Truffle compiler JAR not found at: ${truffleCompilerJar}")
+    }
+    
+    // Merge service files properly
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    
+    manifest {
+        attributes(
+            "Main-Class" to "com.funk.standalone.Main",
+            "Implementation-Title" to "Funk Compiled Program",
+            "Implementation-Version" to "1.0.0",
+            "Created-By" to "Funk Compiler"
+        )
+    }
+    
+    // Set output file location if specified
+    if (outputFilePath != null) {
+        destinationDirectory.set(File(outputFilePath).parentFile)
+        archiveFileName.set(File(outputFilePath).name)
+    }
+}
+
 graalvmNative {
     binaries {
         named("main") {
