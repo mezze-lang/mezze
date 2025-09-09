@@ -14,8 +14,13 @@ class FunkLetBindingNode(
     override fun executeVoid(frame: VirtualFrame) {
         val value = expressionNode.executeGeneric(frame)
         val context = getContext()
+        
         // Use defineGlobal for top-level let bindings so they're accessible across statements
         context.defineGlobal(variableName, value)
+        
+        // WORKAROUND: Also store in native-compatible global store for Native Image
+        // This ensures variables are accessible even if Truffle context sharing is broken
+        NativeGlobalStore.defineGlobal(variableName, value)
     }
 }
 

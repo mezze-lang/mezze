@@ -131,8 +131,7 @@ object ErrorPrettyPrinter {
             "| $constructors$openMarker |"
         }
         is SerializableType.FunctionType -> {
-            val effects = if (type.effects.isNotEmpty()) " [${type.effects.joinToString()}]" else ""
-            "${prettyPrintSerializableType(type.paramType)} -> ${prettyPrintSerializableType(type.returnType)}$effects"
+            "${prettyPrintSerializableType(type.paramType)} -> ${prettyPrintSerializableType(type.returnType)}"
         }
         is SerializableType.TypeAlias -> type.name
         is SerializableType.TypeConstructor -> {

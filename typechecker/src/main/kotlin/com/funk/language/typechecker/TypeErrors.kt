@@ -184,8 +184,7 @@ sealed class SerializableType {
     @Serializable
     data class FunctionType(
         val paramType: SerializableType,
-        val returnType: SerializableType,
-        val effects: List<String> = emptyList()
+        val returnType: SerializableType
     ) : SerializableType()
     
     @Serializable
@@ -220,8 +219,7 @@ fun FunkType.toSerializable(): SerializableType = when (this) {
     )
     is FunkType.FunctionType -> SerializableType.FunctionType(
         this.paramType.toSerializable(),
-        this.returnType.toSerializable(),
-        this.effects.map { it.name }
+        this.returnType.toSerializable()
     )
     is FunkType.TypeConstructor -> SerializableType.TypeConstructor(
         this.name,
@@ -584,8 +582,7 @@ fun FunkType.prettyPrint(): String = when (this) {
         "| $constructors$suffix |"
     }
     is FunkType.FunctionType -> {
-        val effects = if (this.effects.isNotEmpty()) " [${this.effects.joinToString { it.name }}]" else ""
-        "${this.paramType.prettyPrint()} -> ${this.returnType.prettyPrint()}$effects"
+        "${this.paramType.prettyPrint()} -> ${this.returnType.prettyPrint()}"
     }
     is FunkType.TypeConstructor -> {
         if (this.args.isEmpty()) this.name

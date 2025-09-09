@@ -1,5 +1,0 @@
-# Test file demonstrating module system
-# This would use the module resolver to load Utils.String, Data.List, etc.
-
-let testString = "hello world"
-let testResult = { text = testString, length = 42 }

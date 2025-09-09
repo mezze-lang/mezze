@@ -1,7 +1,0 @@
-# Utils module - file-based module
-# File: test_modules/utils.funk
-
-expose let add = { x: Int, y: Int } -> x + y
-expose let multiply = { x: Int, y: Int } -> x * y
-
-let private_helper = { x: Int } -> x * 2  # Not exposed

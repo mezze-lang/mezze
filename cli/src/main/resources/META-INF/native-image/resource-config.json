@@ -1,0 +1,22 @@
+{
+  "resources": {
+    "includes": [
+      {
+        "pattern": "\\QMETA-INF/truffle/language\\E"
+      },
+      {
+        "pattern": "\\QMETA-INF/truffle/instrument\\E"
+      },
+      {
+        "pattern": "\\Q.*.g4\\E"
+      },
+      {
+        "pattern": "\\Q.*.tokens\\E"
+      },
+      {
+        "pattern": "\\Q.*.interp\\E"
+      }
+    ]
+  },
+  "bundles": []
+}

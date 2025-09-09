@@ -1,7 +1,0 @@
-// Test function definitions and calls
-let add = { x, y } -> x + y
-let multiply = { a, b } -> a * b
-let greet = { name } -> "Hello, " ++ name
-let square = { x } -> x * x
-let is_positive = { n } -> n > 0
-let complex_function = { person } -> person.name ++ " is " ++ "awesome"

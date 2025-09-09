@@ -84,20 +84,9 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
         return Identifier(qualifiedName)
     }
 
-    override fun visitEffectDeclaration(ctx: FunkParser.EffectDeclarationContext): ASTNode {
-        val name = ctx.Identifier().text
-        val inputType = visit(ctx.recordType()) as RecordType
-        val resultType = visit(ctx.variantType()) as VariantType
-        val isExposed = ctx.EXPOSE() != null
-        return EffectDeclaration(name, inputType, resultType, isExposed)
-    }
 
-    override fun visitAbilityDeclaration(ctx: FunkParser.AbilityDeclarationContext): ASTNode {
-        val name = ctx.Identifier().text
-        val effects = ctx.effectSignature().map { visit(it) as EffectSignature }
-        val isExposed = ctx.EXPOSE() != null
-        return AbilityDeclaration(name, effects, isExposed)
-    }
+
+
 
     override fun visitModDeclaration(ctx: FunkParser.ModDeclarationContext): ASTNode {
         val moduleName = ctx.Identifier().text
@@ -116,12 +105,7 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
         throw UnsupportedOperationException("ModulePath should be handled in UseDeclaration")
     }
 
-    override fun visitEffectSignature(ctx: FunkParser.EffectSignatureContext): ASTNode {
-        val name = ctx.Identifier().text
-        val inputType = visit(ctx.recordType()) as RecordType
-        val resultType = visit(ctx.variantType()) as VariantType
-        return EffectSignature(name, inputType, resultType)
-    }
+
 
     override fun visitModuleDeclaration(ctx: FunkParser.ModuleDeclarationContext): ASTNode {
         val name = ctx.Identifier().text
@@ -136,8 +120,6 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
     override fun visitExposeItem(ctx: FunkParser.ExposeItemContext): ASTNode {
         val kind = when {
             ctx.TYPE() != null -> ExposeKind.TYPE
-            ctx.EFFECT() != null -> ExposeKind.EFFECT
-            ctx.ABILITY() != null -> ExposeKind.ABILITY
             else -> null
         }
         val name = ctx.Identifier().text
@@ -233,7 +215,7 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
     }
 
     override fun visitHandleCase(ctx: FunkParser.HandleCaseContext): ASTNode {
-        val effectName = ctx.Identifier().text
+        val handlerName = ctx.Identifier().text
         val pattern = ctx.recordPattern()?.let { visit(it) as RecordPattern }
         val expression = visit(ctx.expression()) as Expression
         
@@ -243,7 +225,7 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
             else -> emptyList<Statement>() to expression
         }
         
-        return HandleCase(effectName, pattern, statements, result)
+        return HandleCase(handlerName, pattern, statements, result)
     }
 
     override fun visitIfExpression(ctx: FunkParser.IfExpressionContext): ASTNode {
@@ -365,6 +347,7 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
         return LambdaExpression(parameters, body)
     }
 
+
     override fun visitUntypedRecordParams(ctx: FunkParser.UntypedRecordParamsContext): ASTNode {
         val params = ctx.untypedParam().map { 
             val paramNode = visit(it)
@@ -433,22 +416,16 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
             ctx.recordType() != null -> visit(ctx.recordType())
             ctx.variantType() != null -> visit(ctx.variantType())
             ctx.functionType() != null -> visit(ctx.functionType())
-            ctx.effectList() != null -> {
-                val baseType = visit(ctx.typeAnnotation()) as TypeAnnotation
-                val effects = ctx.effectList().Identifier().map { it.text }
-                // This is a simplified representation - would need proper function type parsing
-                baseType
-            }
             else -> throw IllegalArgumentException("Unknown type annotation")
         }
     }
 
     override fun visitFunctionType(ctx: FunkParser.FunctionTypeContext): ASTNode {
         val paramType = visit(ctx.recordType()) as RecordType
-        val returnType = visit(ctx.variantType()) as VariantType
-        val effects = ctx.effectList().Identifier()?.map { it.text } ?: emptyList()
-        return FunctionType(paramType, returnType, effects)
+        val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
+        return FunctionType(paramType, returnType)
     }
+
 
     override fun visitLiteral(ctx: FunkParser.LiteralContext): ASTNode {
         return when {

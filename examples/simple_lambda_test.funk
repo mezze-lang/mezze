@@ -1,4 +1,0 @@
-# Simple Lambda Test
-
-let add = { x: Int, y: Int } -> x + y
-let double = { x: Int } -> x * 2

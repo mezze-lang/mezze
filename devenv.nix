@@ -1,57 +1,46 @@
-{ pkgs, lib, config, inputs, ... }:
-let pkgs-unstable = import inputs.nixpkgs-unstable { system = pkgs.stdenv.system; };
+{
+  pkgs,
+  lib,
+  config,
+  inputs,
+  ...
+}:
+let
+  pkgs-unstable = import inputs.nixpkgs-unstable { system = pkgs.stdenv.system; };
 in
 {
   packages = [
     pkgs-unstable.kotlin
+    pkgs-unstable.graalvmPackages.graalvm-oracle
   ];
-  
+
   languages = {
     java = {
       enable = true;
-      jdk.package = pkgs.graalvm-ce;
+      jdk.package = pkgs-unstable.graalvmPackages.graalvm-oracle;
       gradle.enable = true;
     };
   };
 
-  # https://devenv.sh/scripts/
   scripts = {
+    # Basic build commands
     build.exec = ''
-      echo "Building Kotlin language project..."
+      echo "🔨 Building Funk language..."
       ./gradlew build
     '';
-    
-    run.exec = ''
-      echo "Running Kotlin language project..."
-      ./gradlew run
-    '';
-    
-    test.exec = ''
-      echo "Running tests..."
-      ./gradlew test
-    '';
-    
+
     clean.exec = ''
-      echo "Cleaning project..."
+      echo "🧹 Cleaning project..."
       ./gradlew clean
     '';
-    
-    antlr.exec = ''
-      echo "Generating ANTLR parsers..."
-      ./gradlew generateGrammarSource
+
+    test.exec = ''
+      echo "🧪 Running tests..."
+      ./gradlew test
     '';
-    
-    funk.exec = ''
-      # Production funk command using native binary
-      if [ ! -f "./cli/build/native/nativeCompile/funk" ]; then
-        echo "❌ Native binary not found. Building it first..."
-        ./gradlew nativeCompile
-      fi
-      ./cli/build/native/nativeCompile/funk "$@"
-    '';
-    
+
+    # Development CLI (JAR-based, faster builds)
     funk-dev.exec = ''
-      # Development funk command using JAR (faster builds, easier debugging)
       if [ ! -f "./cli/build/libs/funk.jar" ]; then
         echo "❌ JAR not found. Building it first..."
         ./gradlew build
@@ -62,28 +51,51 @@ in
         -Dtruffle.TruffleRuntime=com.oracle.truffle.api.impl.DefaultTruffleRuntime \
         -jar ./cli/build/libs/funk.jar "$@"
     '';
+
+    # Native binary build and execution
+    build-native.exec = ''
+      echo "🚀 Building native Funk binary..."
+      ./gradlew build
+      ./gradlew :cli:nativeCompile
+      
+      if [ -f "./cli/build/native/nativeCompile/funk" ]; then
+        echo "✅ Native binary built: ./cli/build/native/nativeCompile/funk"
+        echo "📊 Size: $(du -h ./cli/build/native/nativeCompile/funk | cut -f1)"
+      else
+        echo "❌ Native compilation failed"
+        exit 1
+      fi
+    '';
+
+    funk-native.exec = ''
+      NATIVE_BINARY="./cli/build/native/nativeCompile/funk"
+      if [ -f "$NATIVE_BINARY" ]; then
+        "$NATIVE_BINARY" "$@"
+      else
+        echo "❌ Native binary not found. Run 'build-native' first."
+        exit 1
+      fi
+    '';
   };
 
   enterShell = ''
     echo "🚀 Funk Language Development Environment"
-    echo "Available commands:"
-    echo "  build     - Build the project"
-    echo "  run       - Run the project"
-    echo "  test      - Run tests"
-    echo "  clean     - Clean build artifacts"
-    echo "  antlr     - Generate ANTLR parsers"
     echo ""
-    echo "🎯 Funk Language Commands:"
-    echo "  funk      - Production command (native binary, fast execution)"
-    echo "  funk-dev  - Development command (JAR, faster builds)"
+    echo "📦 Build Commands:"
+    echo "  build        - Build the project"
+    echo "  clean        - Clean build artifacts"  
+    echo "  test         - Run tests"
     echo ""
-    echo "Examples:"
-    echo "  echo 'let x = 5 + 10' | funk exec"
-    echo "  echo 'let add = {x, y} -> x + y' | funk-dev check"
+    echo "🎯 Funk CLI:"
+    echo "  funk-dev     - Development CLI (JAR, faster builds)"
+    echo "  funk-native  - Native binary CLI (production)"
+    echo "  build-native - Build native binary"
     echo ""
-    echo "Java version: $(java -version 2>&1 | head -n 1)"
-    echo "Kotlin version: $(kotlin -version 2>&1)"
-    echo "Gradle version: $(gradle --version | grep 'Gradle' | head -n 1)"
+    echo "📝 Examples:"
+    echo "  funk-dev parse examples/basic/hello_world.funk"
+    echo "  funk-dev check examples/functions/lambda_examples.funk"
+    echo "  funk-dev exec examples/variants/color_examples.funk"
+    echo ""
   '';
 
   # https://devenv.sh/tests/

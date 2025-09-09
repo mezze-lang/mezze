@@ -1,4 +1,0 @@
-let test = { x: Int } -> {
-  let y = x * 2
-  y + 1
-}

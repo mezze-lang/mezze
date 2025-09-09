@@ -31,7 +31,7 @@ class FunkInterpreter {
             return executeProgram(typedProgram)
             
         } catch (e: Exception) {
-            throw FunkException("Execution error: ${e.message}", e, null)
+            throw FunkException("Execution error: ${e.message}", e)
         }
     }
     
@@ -70,10 +70,6 @@ class FunkInterpreter {
             }
             is com.funk.language.typechecker.TypedTypeDeclaration -> {
                 // Type declarations don't produce runtime values
-                FunkNull
-            }
-            is com.funk.language.typechecker.TypedEffectDeclaration -> {
-                // Effect declarations don't produce runtime values
                 FunkNull
             }
             is com.funk.language.typechecker.TypedModuleDeclaration -> {
@@ -127,6 +123,14 @@ class FunkInterpreter {
                 FunkRecord(fields)
             }
             is com.funk.language.parser.MemberAccess -> {
+                // Check if this is an ability method call (e.g., Encoder.encode)
+                val receiver = expr.receiver
+                if (receiver is com.funk.language.parser.Identifier) {
+                    val receiverName = receiver.name
+                    
+                }
+                
+                // Otherwise, treat as regular member access
                 val record = evaluateExpression(expr.receiver, context)
                 if (record is FunkRecord) {
                     record.readMember(expr.member)

@@ -1,0 +1,8 @@
+// Hello World - Basic Funk program
+let greeting = "Hello, World!"
+let number = 42
+let isAwesome = true
+
+// Simple arithmetic
+let sum = 10 + 32
+let product = 6 * 7

@@ -1,0 +1,10 @@
+{
+  "id": "funk",
+  "name": "Funk",
+  "version": "1.0.0",
+  "className": "com.funk.language.interpreter.FunkLanguage",
+  "mimeTypes": ["application/x-funk"],
+  "fileExtensions": [".funk"],
+  "interactive": true,
+  "internal": false
+}

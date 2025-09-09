@@ -5,42 +5,163 @@ import com.funk.language.typechecker.*
 import com.funk.language.interpreter.FunkException
 import com.funk.language.interpreter.ASTToTruffleConverter
 import com.funk.language.interpreter.FunkLanguage
-import com.funk.language.compiler.*
 import org.graalvm.polyglot.Context
+import org.graalvm.polyglot.Engine
 import org.graalvm.polyglot.Source
-import org.graalvm.polyglot.Value
 import java.io.File
 import java.nio.file.Path
 
 fun main(args: Array<String>) {
-    if (args.isEmpty()) {
-        printUsage()
+    // Handle global flags first
+    if (args.contains("--help") || args.contains("-h")) {
+        showHelp()
         return
     }
+    
+    if (args.contains("--version") || args.contains("-v")) {
+        showVersion()
+        return
+    }
+    
+    if (args.isEmpty()) {
+        showUsage()
+        kotlin.system.exitProcess(1)
+    }
 
-    when (args[0]) {
-        "parse" -> handleParseCommand(args.drop(1))
-        "check" -> handleCheckCommand(args.drop(1))
-        "exec" -> handleExecCommand(args.drop(1))
-        "compile" -> handleCompileCommand(args.drop(1))
-        else -> {
-            println("Error: Unknown command '${args[0]}'")
-            printUsage()
+    val command = args[0]
+    val remainingArgs = args.drop(1)
+    
+    // Handle command-specific help
+    if (remainingArgs.contains("--help") || remainingArgs.contains("-h")) {
+        showCommandHelp(command)
+        return
+    }
+    
+    try {
+        when (command) {
+            "parse" -> handleParseCommand(remainingArgs)
+            "check" -> handleCheckCommand(remainingArgs)
+            "exec" -> handleExecCommand(remainingArgs)
+            else -> {
+                println("❌ Unknown command: $command")
+                println()
+                showUsage()
+                kotlin.system.exitProcess(1)
+            }
         }
+    } catch (e: StructuredTypeError) {
+        println("❌ Type Error:")
+        println(ErrorPrettyPrinter.prettyPrintErrorSimple(e))
+        kotlin.system.exitProcess(1)
+    } catch (e: Exception) {
+        println("❌ Error:")
+        println(e.message ?: "Unknown error")
+        kotlin.system.exitProcess(1)
     }
 }
 
-private fun printUsage() {
-    println("Usage:")
-    println("  funk parse [file]    - Parse a file (or stdin if no file) and pretty-print the AST")
-    println("  funk check [file]    - Type check a file (or stdin if no file) and pretty-print the types")
-    println("  funk exec [file]     - Execute a file (or stdin if no file) and show the result")
-    println("  funk compile [options] [file] - Compile a file (or stdin if no file) to target language")
+/**
+ * Show main help information
+ */
+private fun showHelp() {
+    println("🚀 Funk Language v1.0.0")
+    println("A modern functional programming language with full Truffle support")
     println()
-    println("Compile options:")
-    println("  --target js|jvm|llvm|c  - Target language (default: js)")
-    println("  --output <file>         - Output file (default: stdout)")
-    println("  --optimize <level>      - Optimization level 0-3 (default: 1)")
+    showUsage()
+    println()
+    println("COMMANDS:")
+    println("  parse     Parse Funk code and show AST")
+    println("  check     Type check Funk code and show inferred types")
+    println("  exec      Execute Funk code using Truffle runtime")
+    println()
+    println("GLOBAL OPTIONS:")
+    println("  -h, --help     Show this help message")
+    println("  -v, --version  Show version information")
+    println()
+    println("EXAMPLES:")
+    println("  funk parse program.funk              # Parse a file")
+    println("  echo 'let x = 5 + 10' | funk exec    # Execute from stdin")
+    println("  funk check --help                    # Get help for check command")
+    println()
+    println("For command-specific help: funk <command> --help")
+}
+
+/**
+ * Show version information
+ */
+private fun showVersion() {
+    println("🚀 Funk Language v1.0.0")
+    println("Built with Oracle GraalVM 24.0.2")
+    println()
+    println("Features:")
+    println("  ✅ Bidirectional type inference")
+    println("  ✅ Pattern matching")
+    println("  ✅ Record types with row polymorphism")
+    println("  ✅ Variant types")
+    println("  ✅ Full Truffle polyglot interop")
+}
+
+/**
+ * Show basic usage
+ */
+private fun showUsage() {
+    println("USAGE:")
+    println("  funk <command> [options] [file]")
+    println()
+    println("COMMANDS: parse, check, exec")
+    println("For command-specific help: funk <command> --help")
+}
+
+/**
+ * Show command-specific help
+ */
+private fun showCommandHelp(command: String) {
+    when (command) {
+        "parse" -> {
+            println("USAGE: funk parse [file]")
+            println()
+            println("Parse Funk source code and display the Abstract Syntax Tree")
+            println()
+            println("OPTIONS:")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  funk parse program.funk       # Parse a file")
+            println("  echo 'let x = 5' | funk parse # Parse from stdin")
+        }
+        
+        "check" -> {
+            println("USAGE: funk check [file]")
+            println()
+            println("Type check Funk source code and show inferred types")
+            println()
+            println("OPTIONS:")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  funk check program.funk       # Type check a file")
+            println("  echo 'let x = 5 + 10' | funk check  # Type check from stdin")
+        }
+        
+        "exec" -> {
+            println("USAGE: funk exec [file]")
+            println()
+            println("Execute Funk source code using the Truffle runtime")
+            println()
+            println("OPTIONS:")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  funk exec program.funk              # Execute a file")
+            println("  echo 'let x = 5 + 10' | funk exec   # Execute from stdin")
+        }
+        
+        else -> {
+            println("❌ Unknown command: $command")
+            println()
+            showUsage()
+        }
+    }
 }
 
 private fun handleParseCommand(args: List<String>) {
@@ -60,7 +181,7 @@ private fun handleParseCommand(args: List<String>) {
         }
         else -> {
             println("Error: parse command takes at most 1 argument (filename)")
-            printUsage()
+            showUsage()
             return
         }
     }
@@ -94,7 +215,7 @@ private fun handleCheckCommand(args: List<String>) {
         }
         else -> {
             println("Error: check command takes at most 1 argument (filename)")
-            printUsage()
+            showUsage()
             return
         }
     }
@@ -105,8 +226,7 @@ private fun handleCheckCommand(args: List<String>) {
         
         // Use module-aware type checking if we have a file path
         val result = if (filePath != null) {
-            val moduleManager = RustModuleManager()
-            val typeChecker = TypeChecker(moduleManager)
+        val typeChecker = TypeChecker()
             typeChecker.typeCheck(ast, filePath.parent ?: filePath)
         } else {
             // Fallback to simple type checking for stdin
@@ -216,12 +336,6 @@ private fun prettyPrintItem(item: com.funk.language.parser.ProgramItem): String 
         is com.funk.language.parser.TypeDeclaration -> {
             "type ${item.name} = ${item.definition}"
         }
-        is com.funk.language.parser.EffectDeclaration -> {
-            "effect ${item.name} { ... }"
-        }
-        is com.funk.language.parser.AbilityDeclaration -> {
-            "ability ${item.name} { ... }"
-        }
         is com.funk.language.parser.ModuleDeclaration -> {
             "module ${item.name} { ... }"
         }
@@ -287,27 +401,35 @@ private fun handleExecCommand(args: List<String>) {
         }
         else -> {
             println("Error: exec command takes at most 1 argument (filename)")
-            printUsage()
+            showUsage()
             return
         }
     }
 
     try {
-        // For files with module imports, we need to use our module-aware compilation
-        // For now, let's use the simple polyglot API and improve module support later
-        val polyglotContext = Context.newBuilder("funk")
+        // Create Polyglot context with explicit language configuration
+        val engine = Engine.newBuilder()
+            .allowExperimentalOptions(true)
+            .build()
+            
+        println("Available languages: ${engine.languages.keys}")
+        
+        val context = Context.newBuilder("funk")
+            .engine(engine)
             .allowAllAccess(true)
+            .allowExperimentalOptions(true)
             .build()
         
         try {
             val polyglotSource = Source.newBuilder("funk", source, filePath?.toString() ?: "<stdin>").build()
-            val result = polyglotContext.eval(polyglotSource)
+            val result = context.eval(polyglotSource)
             
             println("✅ Execution successful!")
             println()
             println("Result: ${result.toString()}")
         } finally {
-            polyglotContext.close()
+            context.close()
+            engine.close()
         }
         
     } catch (e: StructuredTypeError) {
@@ -325,150 +447,5 @@ private fun handleExecCommand(args: List<String>) {
     }
 }
 
-private fun handleCompileCommand(args: List<String>) {
-    // Parse command line options
-    var target = CompilationTarget.JavaScript
-    var outputFile: String? = null
-    var optimizationLevel = OptimizationLevel.O1
-    var sourceFile: String? = null
-    
-    var i = 0
-    while (i < args.size) {
-        when (args[i]) {
-            "--target" -> {
-                if (i + 1 >= args.size) {
-                    println("Error: --target requires a value")
-                    return
-                }
-                target = when (args[i + 1].lowercase()) {
-                    "js", "javascript" -> CompilationTarget.JavaScript
-                    "jvm", "java" -> CompilationTarget.JVM
-                    "llvm" -> CompilationTarget.LLVM
-                    "c" -> CompilationTarget.C
-                    else -> {
-                        println("Error: Unknown target '${args[i + 1]}'. Supported: js, jvm, llvm, c")
-                        return
-                    }
-                }
-                i += 2
-            }
-            "--output" -> {
-                if (i + 1 >= args.size) {
-                    println("Error: --output requires a file path")
-                    return
-                }
-                outputFile = args[i + 1]
-                i += 2
-            }
-            "--optimize" -> {
-                if (i + 1 >= args.size) {
-                    println("Error: --optimize requires a level (0-3)")
-                    return
-                }
-                optimizationLevel = when (args[i + 1]) {
-                    "0" -> OptimizationLevel.O0
-                    "1" -> OptimizationLevel.O1
-                    "2" -> OptimizationLevel.O2
-                    "3" -> OptimizationLevel.O3
-                    else -> {
-                        println("Error: Invalid optimization level '${args[i + 1]}'. Use 0-3")
-                        return
-                    }
-                }
-                i += 2
-            }
-            else -> {
-                if (args[i].startsWith("--")) {
-                    println("Error: Unknown option '${args[i]}'")
-                    return
-                }
-                if (sourceFile == null) {
-                    sourceFile = args[i]
-                } else {
-                    println("Error: Multiple source files not supported")
-                    return
-                }
-                i++
-            }
-        }
-    }
-    
-    val (source, filePath) = when {
-        sourceFile == null -> {
-            // Read from stdin
-            Pair(readStdin(), null)
-        }
-        else -> {
-            // Read from file
-            val file = File(sourceFile)
-            if (!file.exists()) {
-                println("Error: File not found at '$sourceFile'")
-                return
-            }
-            Pair(file.readText(), file.toPath())
-        }
-    }
-    
-    try {
-        // Parse
-        val parser = FunkParserImpl()
-        val ast = parser.parse(source)
-        
-        // Type check with module resolution
-        val typedProgram = if (filePath != null) {
-            val moduleManager = RustModuleManager()
-            val typeChecker = TypeChecker(moduleManager)
-            typeChecker.typeCheck(ast, filePath.parent ?: filePath)
-        } else {
-            // Fallback to simple type checking for stdin
-            val typeChecker = TypeChecker()
-            typeChecker.typeCheck(ast)
-        }
-        
-        // Compile
-        val compiler = FunkCompiler()
-        val options = CompilerOptions(
-            optimizationLevel = optimizationLevel,
-            includeDebugInfo = false
-        )
-        
-        val result = compiler.compile(typedProgram, target, options)
-        
-        when (result) {
-            is CompilationResult.Success -> {
-                println("✅ Compilation successful!")
-                println()
-                println("Target: ${result.target}")
-                println("Generated ${result.metadata.generatedLines} lines")
-                println("Optimization: ${result.metadata.optimizationLevel}")
-                println()
-                
-                if (outputFile != null) {
-                    File(outputFile).writeText(result.code)
-                    println("Output written to: $outputFile")
-                } else {
-                    println("Generated code:")
-                    println("=" + "=".repeat(49))
-                    println(result.code)
-                }
-            }
-            is CompilationResult.Error -> {
-                println("❌ Compilation failed:")
-                println(result.message)
-                result.cause?.printStackTrace()
-                kotlin.system.exitProcess(1)
-            }
-        }
-        
-    } catch (e: StructuredTypeError) {
-        println("❌ Type Error:")
-        println(ErrorPrettyPrinter.prettyPrintErrorSimple(e))
-        kotlin.system.exitProcess(1)
-    } catch (e: Exception) {
-        println("❌ Error:")
-        println(e.message ?: "Unknown error")
-        e.printStackTrace()
-        kotlin.system.exitProcess(1)
-    }
-}
+
 

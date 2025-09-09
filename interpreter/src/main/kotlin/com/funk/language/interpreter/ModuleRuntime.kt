@@ -39,8 +39,7 @@ class ModuleRuntime {
         val source = moduleFile.readText()
         val ast = parser.parse(source)
         
-        // Type check with module environment
-        val moduleEnv = ModuleEnvironment(moduleName)
+        // Type check module
         val typedProgram = typeChecker.typeCheck(ast)
         
         // Create module context
@@ -70,13 +69,6 @@ class ModuleRuntime {
                     // Type declarations don't produce runtime values but could be exported
                 }
                 
-                is TypedEffectDeclaration -> {
-                    // Effect declarations for the effect system
-                }
-                
-                is TypedAbilityDeclaration -> {
-                    // Ability declarations for the effect system
-                }
             }
         }
         

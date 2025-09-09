@@ -1,9 +1,0 @@
-# Math utilities module
-
-expose let add = { x: Int, y: Int } -> x + y
-
-expose let multiply = { x: Int, y: Int } -> x * y
-
-expose let square = { x: Int } -> multiply { x, y = x }
-
-let private_helper = { x: Int } -> x + 1

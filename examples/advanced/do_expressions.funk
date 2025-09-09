@@ -1,0 +1,20 @@
+// Do Expressions for Sequential Operations
+
+// Simple do expression
+let computation = do
+  let x = 10
+  let y = 20
+  x + y
+
+// Do expression with multiple steps
+let complexComputation = do
+  let base = 5
+  let doubled = base * 2
+  let squared = doubled * doubled
+  squared + 1
+
+// Function returning do expression
+let processData = {input} -> do
+  let cleaned = input + 10
+  let processed = cleaned * 2
+  processed

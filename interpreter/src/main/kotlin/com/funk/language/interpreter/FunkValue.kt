@@ -112,14 +112,7 @@ data class FunkInt(val value: Long) : FunkValue() {
     @ExportMessage
     fun asDouble(): Double = value.toDouble()
     
-    @ExportMessage
-    fun fitsInBigInteger(): Boolean = false
-    
-    @ExportMessage
-    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
-    fun asBigInteger(): java.math.BigInteger {
-        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
-    }
+    // BigInteger methods removed for Oracle GraalVM 17 compatibility
 }
 
 /**
@@ -156,8 +149,7 @@ data class FunkFloat(val value: Double) : FunkValue() {
     @ExportMessage
     fun asFloat(): Float = value.toFloat()
     
-    @ExportMessage
-    fun fitsInBigInteger(): Boolean = false
+    // BigInteger methods removed for Oracle GraalVM 17 compatibility
     
     @ExportMessage
     @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
@@ -183,11 +175,7 @@ data class FunkFloat(val value: Double) : FunkValue() {
         throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
     }
     
-    @ExportMessage
-    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
-    fun asBigInteger(): java.math.BigInteger {
-        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
-    }
+    // asBigInteger method removed for Oracle GraalVM 17 compatibility
 }
 
 /**
@@ -221,35 +209,67 @@ data class FunkBoolean(val value: Boolean) : FunkValue() {
 /**
  * Record value (similar to objects/structs)
  */
-// Temporarily disable InteropLibrary to isolate the issue
-// @ExportLibrary(InteropLibrary::class)
+@ExportLibrary(InteropLibrary::class)
 data class FunkRecord(val fields: Map<String, FunkValue>) : FunkValue() {
     override fun getDisplayString(): String {
         val fieldStrings = fields.map { (key, value) -> "$key = ${value.getDisplayString()}" }
         return "{ ${fieldStrings.joinToString(", ")} }"
     }
     
-    // Temporarily disable all interop methods
-    // @ExportMessage
-    // fun hasMembers(): Boolean = false
+    @ExportMessage
+    fun hasMembers(): Boolean = true
     
-    // @ExportMessage
-    // fun getMembers(includeInternal: Boolean): Any {
-    //     throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
-    // }
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(fields.keys.toList())
+    }
     
-    // @ExportMessage
-    // fun isMemberReadable(member: String): Boolean = fields.containsKey(member)
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean = fields.containsKey(member)
     
-    // @ExportMessage
-    // fun readMember(member: String): FunkValue {
-    //     return fields[member] ?: throw FunkException.runtimeError("Field '$member' not found in record")
-    // }
+    @ExportMessage
+    fun readMember(member: String): FunkValue {
+        return fields[member] ?: throw FunkException.runtimeError("Field '$member' not found in record")
+    }
+    
+    @ExportMessage
+    fun isMemberModifiable(member: String): Boolean = true
+    
+    @ExportMessage
+    fun isMemberInsertable(member: String): Boolean = !fields.containsKey(member)
+    
+    @ExportMessage
+    fun writeMember(member: String, value: Any?): Unit {
+        // For immutable records, we don't support direct mutation
+        // This would need to be handled at a higher level
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+    
+    // Array-like access for better interop
+    @ExportMessage
+    fun hasArrayElements(): Boolean = true
+    
+    @ExportMessage
+    fun getArraySize(): Long = fields.size.toLong()
+    
+    @ExportMessage
+    fun isArrayElementReadable(index: Long): Boolean {
+        return index >= 0 && index < fields.size
+    }
+    
+    @ExportMessage
+    fun readArrayElement(index: Long): Any {
+        if (index < 0 || index >= fields.size) {
+            throw com.oracle.truffle.api.interop.InvalidArrayIndexException.create(index)
+        }
+        val key = fields.keys.elementAt(index.toInt())
+        return fields[key]!!
+    }
     
     /**
      * Read a member field (non-interop version)
      */
-    fun readMember(member: String): FunkValue {
+    fun readField(member: String): FunkValue {
         return fields[member] ?: throw FunkException.runtimeError("Field '$member' not found in record")
     }
     
@@ -367,7 +387,7 @@ data class FunkFunction(
             val bodyNode = converter.convertExpression(body)
             
             // Create a temporary frame for execution
-            val frameDescriptor = com.oracle.truffle.api.frame.FrameDescriptor.newBuilder().build()
+            val frameDescriptor = com.oracle.truffle.api.frame.FrameDescriptor()
             val frame = com.oracle.truffle.api.Truffle.getRuntime().createVirtualFrame(arrayOf(), frameDescriptor)
             
             return bodyNode.executeGeneric(frame)

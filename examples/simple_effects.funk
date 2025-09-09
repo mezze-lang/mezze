@@ -1,5 +1,0 @@
-# Simple Effects Test
-
-effect ReadFile : { path: String } -> | Ok { content: String }, NotFound |
-
-let readConfig = { path: String } -> ReadFile { path = path }

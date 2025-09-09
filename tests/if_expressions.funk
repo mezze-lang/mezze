@@ -1,6 +1,0 @@
-// Test if expressions
-let simple_if = if true then 1 else 0
-let number_check = if 5 > 3 then "greater" else "not greater"
-let nested_if = if true then if false then 1 else 2 else 3
-let complex_condition = if 10 + 5 > 12 then "big" else "small"
-let boolean_result = if "hello" == "hello" then true else false

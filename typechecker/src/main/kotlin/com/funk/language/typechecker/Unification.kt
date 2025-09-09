@@ -274,19 +274,6 @@ object Unification {
         var currentSubst = unifyTypes(func1.paramType, func2.paramType, subst)
         currentSubst = unifyTypes(func1.returnType, func2.returnType, currentSubst)
         
-        // Effects must match exactly for now (could be made more flexible)
-        if (func1.effects != func2.effects) {
-            throw StructuredTypeError(
-                TypeErrorInfo(
-                    TypeErrorKind.EffectMismatch(
-                        func1.effects.map { it.name },
-                        func2.effects.map { it.name }
-                    ),
-                    null,
-                    "Effect mismatch in function types"
-                )
-            )
-        }
         
         return currentSubst
     }
@@ -479,8 +466,7 @@ object ConstraintSolver {
                                         // Return function with remaining parameters
                                         FunkType.FunctionType(
                                             FunkType.RecordType(remainingFields, paramType.rowVar),
-                                            functionType.returnType,
-                                            functionType.effects
+                                            functionType.returnType
                                         )
                                     }
                                     
@@ -507,13 +493,13 @@ object ConstraintSolver {
             is FunkType.VarType -> {
                 // Function type is unknown - create a fresh function type
                 val returnType = FunkType.VarType(TypeVar.fresh())
-                val expectedFuncType = FunkType.FunctionType(argumentType, returnType, emptySet())
+                val expectedFuncType = FunkType.FunctionType(argumentType, returnType)
                 Unification.unify(functionType, expectedFuncType)
                 returnType
             }
             else -> {
                 throw StructuredTypeError.unificationError(functionType, 
-                    FunkType.FunctionType(argumentType, FunkType.VarType(TypeVar.fresh()), emptySet()))
+                    FunkType.FunctionType(argumentType, FunkType.VarType(TypeVar.fresh())))
             }
         }
     }

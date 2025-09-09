@@ -1,8 +1,0 @@
-# Data module declaration - like mod.rs in Rust
-
-# Declare submodules  
-mod list
-
-# Re-export public items
-expose access list::IntList
-expose access list::empty

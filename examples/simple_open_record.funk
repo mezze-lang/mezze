@@ -1,4 +1,0 @@
-# Simple Open Record Test
-
-let config = { retries = 3, timeout = 30, ...rest }
-let person = { name = "Alice", age = 30 }

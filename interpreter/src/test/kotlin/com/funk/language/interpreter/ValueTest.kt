@@ -53,7 +53,7 @@ class ValueTest {
         assertTrue(members.contains("age"))
         
         assertTrue(record.isMemberReadable("name"))
-        assertEquals(FunkString("John"), record.readMember("name"))
+        assertEquals(FunkString("John"), record.readField("name"))
     }
     
     @Test
@@ -91,12 +91,12 @@ class ValueTest {
         ))
         
         // Original should be unchanged
-        assertEquals(FunkInt(30L), original.readMember("age"))
-        assertThrows(FunkException::class.java) { original.readMember("city") }
+        assertEquals(FunkInt(30L), original.readField("age"))
+        assertThrows(FunkException::class.java) { original.readField("city") }
         
         // Updated should have new values
-        assertEquals(FunkString("John"), updated.readMember("name")) // unchanged
-        assertEquals(FunkInt(31L), updated.readMember("age")) // updated
-        assertEquals(FunkString("New York"), updated.readMember("city")) // new
+        assertEquals(FunkString("John"), updated.readField("name")) // unchanged
+        assertEquals(FunkInt(31L), updated.readField("age")) // updated
+        assertEquals(FunkString("New York"), updated.readField("city")) // new
     }
 }

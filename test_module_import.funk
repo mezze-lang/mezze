@@ -1,2 +1,0 @@
-let result = math.add { x = 5, y = 3 }
-let squared = math.square { x = 4 }

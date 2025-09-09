@@ -192,42 +192,7 @@ class AdvancedFeaturesTest {
         println("✅ Access declarations parsing works (syntax recognized)")
     }
 
-    // Effect System Tests
-    @Test
-    fun `parses effect declarations`() {
-        val code = "effect ReadFile : { path: String } -> | Ok { content: String }, NotFound |"
-        val ast = parser.parse(code)
-        
-        assertEquals(1, ast.items.size)
-        val effectDecl = ast.items[0] as EffectDeclaration
-        assertEquals("ReadFile", effectDecl.name)
-        
-        println("✅ Effect declarations parsing works")
-    }
 
-    @Test
-    fun `parses ability declarations`() {
-        val code = """
-            ability Console where
-                print : { msg: String } -> | Ok |
-                readLn : {} -> | Ok { line: String } |
-        """.trimIndent()
-        
-        val ast = parser.parse(code)
-        assertEquals(1, ast.items.size)
-        
-        val abilityDecl = ast.items[0] as AbilityDeclaration
-        assertEquals("Console", abilityDecl.name)
-        assertEquals(2, abilityDecl.effects.size)
-        
-        val printSig = abilityDecl.effects[0]
-        assertEquals("print", printSig.name)
-        
-        val readLnSig = abilityDecl.effects[1]
-        assertEquals("readLn", readLnSig.name)
-        
-        println("✅ Ability declarations parsing works")
-    }
 
     // Integration Test
     @Test
@@ -256,13 +221,9 @@ class AdvancedFeaturesTest {
         // Verify we have different types of declarations
         val hasTypeDecl = ast.items.any { it is TypeDeclaration }
         val hasLetBinding = ast.items.any { it is LetBinding }
-        val hasEffectDecl = ast.items.any { it is EffectDeclaration }
-        val hasAbilityDecl = ast.items.any { it is AbilityDeclaration }
         
         assertTrue(hasTypeDecl, "Should have type declarations")
         assertTrue(hasLetBinding, "Should have let bindings")
-        assertTrue(hasEffectDecl, "Should have effect declarations")
-        assertTrue(hasAbilityDecl, "Should have ability declarations")
         
         println("✅ Combined advanced features parsing works")
     }
@@ -275,8 +236,6 @@ class AdvancedFeaturesTest {
         println("  - Open records with ...rest syntax")
         println("  - Partial application (function calls with subset of arguments)")
         println("  - Basic type annotations (: Type)")
-        println("  - Effect declarations")
-        println("  - Ability declarations")
         println("  - Basic module declarations")
         println("  - Expose/Access syntax (recognized)")
         

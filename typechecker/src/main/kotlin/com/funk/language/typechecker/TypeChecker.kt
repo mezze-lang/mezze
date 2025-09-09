@@ -4,13 +4,13 @@ import com.funk.language.parser.*
 import java.nio.file.Path
 import java.nio.file.Paths
 
+class TypeCheckError(message: String) : Exception(message)
+
 /**
  * Main type checker for Funk language with row polymorphism and effects
  */
 
-class TypeChecker(
-    private val moduleManager: RustModuleManager? = null
-) {
+class TypeChecker {
     
     /**
      * Type check a program and return the typed AST with inferred types
@@ -23,15 +23,8 @@ class TypeChecker(
      * Type check a program with module resolution support
      */
     fun typeCheck(program: Program, currentPath: Path): TypedProgram {
-        // If we have a module manager, use it to resolve imports first
-        val resolvedProgram = if (moduleManager != null) {
-            moduleManager.compileProgram(program, currentPath)
-        } else {
-            // Fallback to simple type checking without module resolution
-            typeCheckSimple(program)
-        }
-        
-        return resolvedProgram
+        // Simple type checking without module resolution
+        return typeCheckSimple(program)
     }
     
     /**
@@ -73,24 +66,6 @@ class TypeChecker(
                         }
                     }
                     
-                    context.copy(env = newEnv)
-                }
-                is TypedEffectDeclaration -> {
-                    // Update context with new effect binding
-                    val effectFunctionType = FunkType.FunctionType(
-                        typedItem.inputType, 
-                        typedItem.resultType, 
-                        setOf(typedItem.effect)
-                    )
-                    val newEnv = context.env
-                        .copy(effects = context.env.effects + (typedItem.name to typedItem.effect))
-                        .extend(typedItem.name, TypeScheme.monomorphic(effectFunctionType))
-                    context.copy(env = newEnv)
-                }
-                is TypedAbilityDeclaration -> {
-                    // Update context with ability effects
-                    val newEffects = typedItem.effects.associateBy { it.name }
-                    val newEnv = context.env.copy(effects = context.env.effects + newEffects)
                     context.copy(env = newEnv)
                 }
                 is TypedModuleDeclaration -> {
@@ -160,8 +135,7 @@ class TypeChecker(
                 is FunkType.FunctionType -> {
                     FunkType.FunctionType(
                         cleanupType(t.paramType),
-                        cleanupType(t.returnType),
-                        t.effects
+                        cleanupType(t.returnType)
                     )
                 }
                 is FunkType.TypeConstructor -> {
@@ -205,22 +179,6 @@ class TypeChecker(
                 )
             }
             
-            is EffectDeclaration -> {
-                val effect = Effect(item.name)
-                
-                // Convert the actual input and result types
-                val inputType = convertTypeAnnotation(item.inputType)
-                val resultType = convertTypeAnnotation(item.resultType)
-                
-                // Effect will be added to environment in context update phase
-                
-                TypedEffectDeclaration(
-                    name = item.name,
-                    inputType = inputType,
-                    resultType = resultType,
-                    effect = effect
-                )
-            }
             
             is ModuleDeclaration -> {
                 // For now, just process the module statements as regular items
@@ -241,10 +199,6 @@ class TypeChecker(
                         is TypedLetBinding -> {
                             val scheme = generalize(moduleContext.env, typedStatement.inferredType)
                             val newEnv = moduleContext.env.extend(typedStatement.variableName, scheme)
-                            moduleContext.copy(env = newEnv)
-                        }
-                        is TypedEffectDeclaration -> {
-                            val newEnv = moduleContext.env.copy(effects = moduleContext.env.effects + (typedStatement.name to typedStatement.effect))
                             moduleContext.copy(env = newEnv)
                         }
                         else -> moduleContext
@@ -292,44 +246,9 @@ class TypeChecker(
                 )
             }
             
-            is EffectDeclaration -> {
-                val inputType = convertRecordType(item.inputType)
-                val resultType = convertVariantType(item.resultType)
-                val effect = Effect(item.name)
-                
-                TypedEffectDeclaration(
-                    name = item.name,
-                    inputType = inputType,
-                    resultType = resultType,
-                    effect = effect
-                )
-            }
             
-            is AbilityDeclaration -> {
-                // Process each effect in the ability
-                val effects = mutableSetOf<Effect>()
-                for (effectSig in item.effects) {
-                    val effect = Effect("${item.name}.${effectSig.name}")
-                    effects.add(effect)
-                    
-                    // Convert the effect signature types
-                    val inputType = convertTypeAnnotation(effectSig.inputType)
-                    val resultType = convertTypeAnnotation(effectSig.resultType)
-                    
-                    // Add effect to environment with qualified name
-                    context.env.extend("${item.name}.${effectSig.name}", TypeScheme.monomorphic(
-                        FunkType.FunctionType(inputType, resultType, setOf(effect))
-                    ))
-                }
-                
-                // Create ability type as a record of effects
-                val abilityType = FunkType.TypeConstructor(item.name, emptyList())
-                TypedAbilityDeclaration(
-                    name = item.name,
-                    effects = effects.toList(),
-                    abilityType = abilityType
-                )
-            }
+            
+            
             
             is ModuleDeclaration -> {
                 // For now, modules are simplified
@@ -447,8 +366,10 @@ class TypeChecker(
         // Then check if it's an effect
         val effect = context.env.lookupEffect(identifier.name)
         if (effect != null) {
-            // For now, return a placeholder type - effects need special handling in function calls
-            throw TypeError.UnboundVariable("Effect '${identifier.name}' cannot be used as a standalone expression")
+            // Effects are spiritually like records - they can be referenced as identifiers
+            // For now, we'll represent them as a special effect type
+            // In a full implementation, this would be a proper effect type
+            return FunkType.VarType(TypeVar.fresh()) // Placeholder for effect type
         }
         
         // Check if it's an uppercase identifier (potential variant constructor)
@@ -510,9 +431,7 @@ class TypeChecker(
                 val bodyType = inferExpression(lambda.body, paramContext)
                 
                 // Collect effects from body
-                val effects = collectEffects(lambda.body)
-                
-                FunkType.FunctionType(paramType, bodyType, effects)
+                FunkType.FunctionType(paramType, bodyType)
             }
             is UntypedParameters -> {
                 // Create fresh type variables for untyped parameters (bidirectional inference)
@@ -528,13 +447,12 @@ class TypeChecker(
                 val originalParamVars = paramTypes.values.toSet()
                 
                 val bodyType = inferExpression(lambda.body, paramContext)
-                val effects = collectEffects(lambda.body)
                 
                 // After body inference, try to refine parameter types from usage
                 val refinedParamTypes = refineParameterTypes(lambda.body, parameters.names, paramTypes)
                 val refinedParamType = FunkType.RecordType(refinedParamTypes)
                 
-                FunkType.FunctionType(refinedParamType, bodyType, effects)
+                FunkType.FunctionType(refinedParamType, bodyType)
             }
         }
     }
@@ -1252,16 +1170,33 @@ class TypeChecker(
     }
     
     private fun inferDoExpression(doExpr: DoExpression, context: TypeContext): FunkType {
-        // Create new scope for the do block with fresh constraints
-        var doContext = context.copy(constraints = mutableSetOf())
+        // Process statements in sequence, updating context
+        var currentContext = context
         
-        // Process all statements (for side effects/bindings)
         for (statement in doExpr.statements) {
-            doContext = inferStatementWithContext(statement, doContext)
+            when (statement) {
+                is LetBinding -> {
+                    // Infer the let binding expression
+                    val exprType = inferExpression(statement.expression, currentContext)
+                    
+                    // Add the variable to the context for subsequent statements
+                    val scheme = TypeScheme.monomorphic(exprType)
+                    val newEnv = currentContext.env.extend(statement.variableName, scheme)
+                    currentContext = currentContext.copy(env = newEnv)
+                }
+                is ExpressionStatement -> {
+                    // Expression statements don't bind variables
+                    inferExpression(statement.expression, currentContext)
+                }
+                else -> {
+                    // Other statement types - process with current context
+                    // This is a simplified approach
+                }
+            }
         }
         
-        // Return type of the final expression
-        return inferExpression(doExpr.result, doContext)
+        // Return type of the final expression with updated context
+        return inferExpression(doExpr.result, currentContext)
     }
     
     private fun inferHandleExpression(handleExpr: HandleExpression, context: TypeContext): FunkType {
@@ -1332,8 +1267,7 @@ class TypeChecker(
                                     } else {
                                         FunkType.FunctionType(
                                             FunkType.RecordType(remainingFields),
-                                            functionType.returnType,
-                                            functionType.effects
+                                            functionType.returnType
                                         )
                                     }
                                 } else {
@@ -1374,6 +1308,24 @@ class TypeChecker(
     }
     
     private fun inferMemberAccess(access: MemberAccess, context: TypeContext): FunkType {
+        // Check if this is a qualified effect call (e.g., Logging.log)
+        val receiver = access.receiver
+        if (receiver is Identifier) {
+            val receiverName = receiver.name
+            val effect = context.env.lookupEffect(receiverName)
+            if (effect != null) {
+                // Look up the qualified effect operation (e.g., "Logging.log")
+                val qualifiedName = "${receiverName}.${access.member}"
+                val methodScheme = context.env.lookup(qualifiedName)
+                if (methodScheme != null) {
+                    return instantiate(methodScheme)
+                } else {
+                    throw TypeError.UnboundVariable("Effect operation '${access.member}' not found in effect '${receiverName}'")
+                }
+            }
+        }
+        
+        // Otherwise, treat as regular record field access
         val recordType = inferExpression(access.receiver, context)
         
         return when (recordType) {
@@ -1524,12 +1476,6 @@ class TypeChecker(
             is TypeDeclaration -> {
                 // Type declarations are handled at the module level
             }
-            is EffectDeclaration -> {
-                // Effect declarations are handled at the module level
-            }
-            is AbilityDeclaration -> {
-                // Ability declarations are handled at the module level
-            }
         }
     }
     
@@ -1551,14 +1497,6 @@ class TypeChecker(
             }
             is TypeDeclaration -> {
                 // Type declarations are handled at the module level
-                context
-            }
-            is EffectDeclaration -> {
-                // Effect declarations are handled at the module level
-                context
-            }
-            is AbilityDeclaration -> {
-                // Ability declarations are handled at the module level
                 context
             }
             else -> {
@@ -1583,8 +1521,7 @@ class TypeChecker(
         is VariantType -> convertVariantType(annotation)
         is FunctionType -> FunkType.FunctionType(
             convertTypeAnnotation(annotation.paramType),
-            convertTypeAnnotation(annotation.returnType),
-            annotation.effects.map { Effect(it) }.toSet()
+            convertTypeAnnotation(annotation.returnType)
         )
         
         else -> throw TypeError.UnboundVariable("Unsupported type annotation: ${annotation::class.simpleName}")
@@ -1698,8 +1635,7 @@ class TypeChecker(
         )
         is FunkType.FunctionType -> FunkType.FunctionType(
             substituteInType(type.paramType, typeSubst, rowSubst),
-            substituteInType(type.returnType, typeSubst, rowSubst),
-            type.effects
+            substituteInType(type.returnType, typeSubst, rowSubst)
         )
         else -> type
     }
@@ -1733,9 +1669,7 @@ class TypeChecker(
                 val paramType = convertRecordType(parameters.recordType)
                 val paramContext = bindRecordParameters(parameters.recordType, context)
                 val bodyResult = inferExpressionWithConstraints(lambda.body, paramContext)
-                val effects = collectEffects(lambda.body)
-                
-                val funcType = FunkType.FunctionType(paramType, bodyResult.type, effects)
+                val funcType = FunkType.FunctionType(paramType, bodyResult.type)
                 InferenceResult(funcType, bodyResult.constraints)
             }
             is UntypedParameters -> {
@@ -1750,10 +1684,9 @@ class TypeChecker(
                 
                 // Infer body with constraints
                 val bodyResult = inferExpressionWithConstraints(lambda.body, paramContext)
-                val effects = collectEffects(lambda.body)
                 
                 // Create function type
-                val funcType = FunkType.FunctionType(paramType, bodyResult.type, effects)
+                val funcType = FunkType.FunctionType(paramType, bodyResult.type)
                 
                 // Return result with all constraints from body
                 InferenceResult(funcType, bodyResult.constraints)
@@ -1762,6 +1695,25 @@ class TypeChecker(
     }
     
     private fun inferMemberAccessWithConstraints(access: MemberAccess, context: TypeContext): InferenceResult {
+        // Check if this is a qualified effect call (e.g., Logging.log)
+        val receiver = access.receiver
+        if (receiver is Identifier) {
+            val receiverName = receiver.name
+            val effect = context.env.lookupEffect(receiverName)
+            if (effect != null) {
+                // Look up the qualified effect operation (e.g., "Logging.log")
+                val qualifiedName = "${receiverName}.${access.member}"
+                val methodScheme = context.env.lookup(qualifiedName)
+                if (methodScheme != null) {
+                    val methodType = instantiate(methodScheme)
+                    return InferenceResult(methodType, emptySet())
+                } else {
+                    throw TypeError.UnboundVariable("Effect operation '${access.member}' not found in effect '${receiverName}'")
+                }
+            }
+        }
+        
+        // Otherwise, use constraint-based member access for record fields
         // Infer the receiver type
         val receiverResult = inferExpressionWithConstraints(access.receiver, context)
         
@@ -2368,6 +2320,127 @@ class TypeChecker(
         
         return InferenceResult(resultType, allConstraints + unificationConstraints)
     }
+    
+    
+    // Helper methods for ability type checking
+    private fun convertFunctionType(functionType: com.funk.language.parser.FunctionType): FunkType.FunctionType {
+        val paramType = convertTypeAnnotation(functionType.paramType)
+        val returnType = convertTypeAnnotation(functionType.returnType)
+        
+        return FunkType.FunctionType(
+            paramType = paramType,
+            returnType = returnType
+        )
+    }
+    
+    private fun resolveType(typeName: String, context: TypeContext): FunkType {
+        return when (typeName) {
+            "Int" -> FunkType.IntType
+            "String" -> FunkType.StringType
+            "Float" -> FunkType.FloatType
+            "Boolean" -> FunkType.BooleanType
+            else -> context.env.lookupType(typeName) ?: throw TypeCheckError("Unknown type: $typeName")
+        }
+    }
+    
+    private fun substituteAbilityType(
+        signature: FunkType.FunctionType,
+        typeParams: List<String>,
+        concreteType: FunkType
+    ): FunkType.FunctionType {
+        if (typeParams.isEmpty()) return signature
+        
+        // Create substitution map (for now, assume single type param)
+        val substitution = if (typeParams.size == 1) {
+            mapOf(typeParams[0] to concreteType)
+        } else {
+            // For multiple type params, this needs more sophisticated handling
+            mapOf(typeParams[0] to concreteType)
+        }
+        
+        return FunkType.FunctionType(
+            paramType = substituteType(signature.paramType, substitution),
+            returnType = substituteType(signature.returnType, substitution)
+        )
+    }
+    
+    private fun substituteType(type: FunkType, substitution: Map<String, FunkType>): FunkType {
+        return when (type) {
+            is FunkType.VarType -> {
+                substitution[type.variable.name] ?: type
+            }
+            is FunkType.RecordType -> {
+                val newFields = type.fields.mapValues { (_, fieldType) ->
+                    substituteType(fieldType, substitution)
+                }
+                FunkType.RecordType(newFields, type.rowVar)
+            }
+            is FunkType.VariantType -> {
+                val newConstructors = type.constructors.mapValues { (_, constructorType) ->
+                    constructorType?.let { substituteType(it, substitution) }
+                }
+                FunkType.VariantType(newConstructors, type.rowVar)
+            }
+            is FunkType.FunctionType -> {
+                FunkType.FunctionType(
+                    paramType = substituteType(type.paramType, substitution),
+                    returnType = substituteType(type.returnType, substitution)
+                )
+            }
+            is FunkType.TypeConstructor -> {
+                // Check if this is a type parameter reference
+                if (type.args.isEmpty() && substitution.containsKey(type.name)) {
+                    substitution[type.name]!!
+                } else {
+                    val newArgs = type.args.map { substituteType(it, substitution) }
+                    FunkType.TypeConstructor(type.name, newArgs)
+                }
+            }
+            // For primitive types and others, return as-is
+            else -> type
+        }
+    }
+    
+    private fun unify(type1: FunkType, type2: FunkType, context: TypeContext) {
+        when {
+            type1 == type2 -> return // Same types unify
+            
+            type1 is FunkType.VarType && type2 is FunkType.VarType -> {
+                // Unify type variables by name
+                if (type1.variable.name == type2.variable.name) return
+            }
+            
+            type1 is FunkType.VarType -> {
+                // Type variable can unify with any type
+                return
+            }
+            
+            type2 is FunkType.VarType -> {
+                // Type variable can unify with any type
+                return
+            }
+            
+            type1 is FunkType.FunctionType && type2 is FunkType.FunctionType -> {
+                unify(type1.paramType, type2.paramType, context)
+                unify(type1.returnType, type2.returnType, context)
+                return
+            }
+            
+            type1 is FunkType.RecordType && type2 is FunkType.RecordType -> {
+                // Check that all fields in type1 exist in type2 with compatible types
+                for ((fieldName, fieldType1) in type1.fields) {
+                    val fieldType2 = type2.fields[fieldName]
+                        ?: throw TypeCheckError("Field $fieldName not found in record type")
+                    unify(fieldType1, fieldType2, context)
+                }
+                return
+            }
+            
+            else -> {
+                throw TypeCheckError("Cannot unify types: $type1 and $type2")
+            }
+        }
+    }
 }
 
 // Typed AST nodes
@@ -2388,18 +2461,7 @@ data class TypedTypeDeclaration(
     val hash: ContentHash
 ) : TypedItem
 
-data class TypedEffectDeclaration(
-    val name: String,
-    val inputType: FunkType,
-    val resultType: FunkType,
-    val effect: Effect
-) : TypedItem
 
-data class TypedAbilityDeclaration(
-    val name: String,
-    val effects: List<Effect>,
-    val abilityType: FunkType
-) : TypedItem
 
 data class TypedModuleDeclaration(
     val name: String,

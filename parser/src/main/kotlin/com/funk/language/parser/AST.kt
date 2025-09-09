@@ -25,7 +25,7 @@ data class ExposeItem(
     val name: String
 ) : ASTNode
 
-enum class ExposeKind { TYPE, EFFECT, ABILITY }
+enum class ExposeKind { TYPE }
 
 data class AccessDeclaration(
     val moduleName: String,
@@ -67,24 +67,8 @@ data class TypeDeclaration(
 
 sealed interface TypeDefinition : ASTNode
 
-data class EffectDeclaration(
-    val name: String,
-    val inputType: RecordType,
-    val resultType: VariantType,
-    val isExposed: Boolean = false
-) : Declaration
 
-data class AbilityDeclaration(
-    val name: String,
-    val effects: List<EffectSignature>,
-    val isExposed: Boolean = false
-) : Declaration
 
-data class EffectSignature(
-    val name: String,
-    val inputType: RecordType,
-    val resultType: VariantType
-) : ASTNode
 
 // Expressions
 sealed interface Expression : ASTNode
@@ -205,6 +189,7 @@ data class Identifier(val name: String) : Expression
 
 object PlaceholderExpression : Expression
 
+
 // Variant Construction
 data class VariantConstruction(
     val constructor: String,
@@ -249,6 +234,5 @@ data class VariantConstructor(
 
 data class FunctionType(
     val paramType: RecordType,
-    val returnType: VariantType,
-    val effects: List<String>
+    val returnType: TypeAnnotation
 ) : TypeAnnotation

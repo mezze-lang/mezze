@@ -56,11 +56,10 @@ sealed interface FunkType {
         val isClosed: Boolean get() = rowVar == null
     }
     
-    // Function types with effects
+    // Function types
     data class FunctionType(
         val paramType: FunkType,
-        val returnType: FunkType, 
-        val effects: Set<Effect> = emptySet()
+        val returnType: FunkType
     ) : FunkType
     
     // Higher-kinded types
@@ -78,6 +77,7 @@ sealed interface FunkType {
 
 // Effect system
 data class Effect(val name: String, val hash: String? = null)
+
 
 // Row constraints for polymorphism
 sealed interface RowConstraint {
@@ -114,7 +114,7 @@ data class ContentHash(val hash: String) {
 data class TypeEnvironment(
     val bindings: Map<String, TypeScheme> = emptyMap(),
     val typeAliases: Map<String, FunkType> = emptyMap(),
-    val effects: Map<String, Effect> = emptyMap()
+    val effects: Map<String, Effect> = emptyMap(),
 ) {
     fun extend(name: String, scheme: TypeScheme) = 
         copy(bindings = bindings + (name to scheme))
@@ -122,11 +122,20 @@ data class TypeEnvironment(
     fun extendType(name: String, type: FunkType) = 
         extend(name, TypeScheme.monomorphic(type))
     
+    
     fun lookup(name: String): TypeScheme? = bindings[name]
     
     fun lookupType(name: String): FunkType? = typeAliases[name]
     
     fun lookupEffect(name: String): Effect? = effects[name]
+    
+    fun extendEffect(name: String, effect: Effect): TypeEnvironment {
+        return TypeEnvironment(
+            bindings = bindings,
+            typeAliases = typeAliases,
+            effects = effects + (name to effect)
+        )
+    }
 }
 
 // Variant registry for hoisting variants within a module/context
@@ -200,8 +209,7 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
         )
         is FunkType.FunctionType -> FunkType.FunctionType(
             apply(type.paramType),
-            apply(type.returnType),
-            type.effects
+            apply(type.returnType)
         )
         is FunkType.TypeConstructor -> FunkType.TypeConstructor(
             type.name,
@@ -265,3 +273,9 @@ sealed class TypeError(message: String) : Exception(message) {
     class PartialApplicationError(val expected: FunkType, val provided: FunkType) : 
         TypeError("Partial application error: expected $expected, provided $provided")
 }
+
+// Inference result for constraint-based type inference
+data class InferenceResult(
+    val type: FunkType,
+    val constraints: Set<Constraint> = emptySet()
+)

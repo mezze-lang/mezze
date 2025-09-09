@@ -19,13 +19,21 @@ class FunkReadVariableNode(private val identifier: String) : FunkExpressionNode(
             }
         }
         
-        // Regular variable lookup
-        return context.lookupGlobal(identifier) ?: run {
+        // Regular variable lookup - try context first, then native store as fallback
+        var result = context.lookupGlobal(identifier)
+        
+        // WORKAROUND: If not found in context, try native-compatible global store
+        // This handles the case where Native Image breaks Truffle context sharing
+        if (result == null) {
+            result = NativeGlobalStore.lookupGlobal(identifier)
+        }
+        
+        return result ?: run {
             // If it's an uppercase identifier, treat it as a variant constructor
             if (identifier.first().isUpperCase()) {
                 FunkVariant(identifier, null) // Simple constructor with no data
             } else {
-                throw FunkException.unboundVariable(identifier, this)
+                throw FunkException.unboundVariable(identifier)
             }
         }
     }
@@ -57,19 +65,13 @@ class FunkFunctionCallNode(
                     }
                     else -> {
                         throw FunkException.typeError(
-                            "Cannot call non-function value: ${function::class.simpleName}",
-                            this
+                            "Cannot call non-function value: ${function::class.simpleName}"
                         )
                     }
                 }
             } catch (e: FunkException) {
                 if (e.message?.contains("Unbound variable") == true) {
-                    // Try as effect invocation
-                    val variableName = extractVariableName(e.message)
-                    if (variableName != null && isKnownEffect(variableName, context)) {
-                        val arguments = argumentsNode.executeGeneric(frame)
-                        return context.effectRuntime.invokeEffect(variableName, arguments, context)
-                    }
+                    // Effect invocations not supported - skip
                 }
                 throw e
             }
@@ -85,8 +87,7 @@ class FunkFunctionCallNode(
             }
             else -> {
                 throw FunkException.typeError(
-                    "Cannot call non-function value: ${function::class.simpleName}",
-                    this
+                    "Cannot call non-function value: ${function::class.simpleName}"
                 )
             }
         }
@@ -147,7 +148,7 @@ class FunkMemberAccessNode(
     
     override fun executeGeneric(frame: VirtualFrame): FunkValue {
         val record = recordNode.executeTyped<FunkRecord>(frame)
-        return record.readMember(fieldName)
+        return record.readField(fieldName)
     }
 }
 
@@ -186,67 +187,67 @@ class FunkBinaryOperationNode(
                 left is FunkInt && right is FunkInt -> FunkInt(left.value + right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value + right.value)
                 left is FunkString && right is FunkString -> FunkString(left.value + right.value)
-                else -> throw FunkException.typeError("Cannot add ${left::class.simpleName} and ${right::class.simpleName}", this)
+                else -> throw FunkException.typeError("Cannot add ${left::class.simpleName} and ${right::class.simpleName}")
             }
             "-" -> when {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value - right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value - right.value)
-                else -> throw FunkException.typeError("Cannot subtract ${right::class.simpleName} from ${left::class.simpleName}", this)
+                else -> throw FunkException.typeError("Cannot subtract ${right::class.simpleName} from ${left::class.simpleName}")
             }
             "*" -> when {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value * right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value * right.value)
-                else -> throw FunkException.typeError("Cannot multiply ${left::class.simpleName} and ${right::class.simpleName}", this)
+                else -> throw FunkException.typeError("Cannot multiply ${left::class.simpleName} and ${right::class.simpleName}")
             }
             "/" -> when {
                 left is FunkInt && right is FunkInt -> {
-                    if (right.value == 0L) throw FunkException.runtimeError("Division by zero", this)
+                    if (right.value == 0L) throw FunkException.runtimeError("Division by zero")
                     FunkInt(left.value / right.value)
                 }
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value / right.value)
-                else -> throw FunkException.typeError("Cannot divide ${left::class.simpleName} by ${right::class.simpleName}", this)
+                else -> throw FunkException.typeError("Cannot divide ${left::class.simpleName} by ${right::class.simpleName}")
             }
             "++" -> when {
                 left is FunkString && right is FunkString -> FunkString(left.value + right.value)
-                else -> throw FunkException.typeError("Cannot concatenate ${left::class.simpleName} and ${right::class.simpleName}", this)
+                else -> throw FunkException.typeError("Cannot concatenate ${left::class.simpleName} and ${right::class.simpleName}")
             }
             "==" -> FunkBoolean(valuesEqual(left, right))
             "!=" -> FunkBoolean(!valuesEqual(left, right))
             "<" -> when {
                 left is FunkInt && right is FunkInt -> FunkBoolean(left.value < right.value)
                 left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value < right.value)
-                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}", this)
+                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
             ">" -> when {
                 left is FunkInt && right is FunkInt -> FunkBoolean(left.value > right.value)
                 left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value > right.value)
-                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}", this)
+                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
             "<=" -> when {
                 left is FunkInt && right is FunkInt -> FunkBoolean(left.value <= right.value)
                 left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value <= right.value)
-                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}", this)
+                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
             ">=" -> when {
                 left is FunkInt && right is FunkInt -> FunkBoolean(left.value >= right.value)
                 left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value >= right.value)
-                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}", this)
+                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
             "&&" -> {
-                val leftBool = left as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for &&", this)
+                val leftBool = left as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for &&")
                 if (!leftBool.value) FunkBoolean(false) else {
-                    val rightBool = right as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for &&", this)
+                    val rightBool = right as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for &&")
                     FunkBoolean(rightBool.value)
                 }
             }
             "||" -> {
-                val leftBool = left as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for ||", this)
+                val leftBool = left as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for ||")
                 if (leftBool.value) FunkBoolean(true) else {
-                    val rightBool = right as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for ||", this)
+                    val rightBool = right as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for ||")
                     FunkBoolean(rightBool.value)
                 }
             }
-            else -> throw FunkException.runtimeError("Unsupported binary operator: $operator", this)
+            else -> throw FunkException.runtimeError("Unsupported binary operator: $operator")
         }
     }
     
@@ -322,18 +323,18 @@ class FunkPipeNode(
                         FunkRecord(mapOf(paramName to leftValue))
                     } else {
                         // Multiple parameters - can't pipe to this function
-                        throw FunkException.typeError("Cannot pipe to function with multiple parameters", this)
+                        throw FunkException.typeError("Cannot pipe to function with multiple parameters")
                     }
                 }
                 else -> {
                     // For typed parameters, we'd need more complex logic
-                    throw FunkException.typeError("Pipe to typed parameters not yet supported", this)
+                    throw FunkException.typeError("Pipe to typed parameters not yet supported")
                 }
             }
             
             return rightValue.call(wrappedArg, context)
         } else {
-            throw FunkException.typeError("Right side of pipe must be a function", this)
+            throw FunkException.typeError("Right side of pipe must be a function")
         }
     }
 }
@@ -394,7 +395,7 @@ class FunkMatchNode(
             }
         }
         
-        throw FunkException.runtimeError("No pattern matched the value: ${value.getDisplayString()}", this)
+        throw FunkException.runtimeError("No pattern matched the value: ${value.getDisplayString()}")
     }
 }
 

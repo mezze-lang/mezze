@@ -19,9 +19,13 @@ import com.funk.language.parser.generated.FunkParser
 @Registration(
     id = FunkLanguage.ID,
     name = "Funk",
+    implementationName = "Funk",
+    version = "1.0.0",
     defaultMimeType = FunkLanguage.MIME_TYPE,
     characterMimeTypes = [FunkLanguage.MIME_TYPE],
-    fileTypeDetectors = [FunkFileDetector::class]
+    fileTypeDetectors = [FunkFileDetector::class],
+    interactive = true,
+    internal = false
 )
 class FunkLanguage : TruffleLanguage<FunkContext>() {
     
@@ -46,6 +50,10 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
         val source = request.source
         val sourceCode = source.characters.toString()
         
+        // Clear native global store for new program execution
+        // This ensures clean state for each program run
+        NativeGlobalStore.clear()
+        
         try {
             // Parse the source code using our existing ANTLR parser
             val lexer = FunkLexer(CharStreams.fromString(sourceCode))
@@ -65,7 +73,7 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             
             return rootNode.callTarget
         } catch (e: Exception) {
-            throw FunkException("Parse error: ${e.message}", e, null)
+            throw FunkException("Parse error: ${e.message}", e)
         }
     }
     

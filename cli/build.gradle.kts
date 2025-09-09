@@ -1,71 +1,74 @@
 plugins {
+    kotlin("jvm")
     application
     id("com.github.johnrengelman.shadow") version "8.1.1"
-    id("org.graalvm.buildtools.native") version "0.10.2"
+    id("org.graalvm.buildtools.native") version "0.10.3"
+}
+
+application {
+    mainClass.set("com.funk.language.cli.MainKt")
+    applicationName = "funk"
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
+    kotlinOptions {
+        jvmTarget = "21"  // GraalVM 24.0.2 supports JDK 21 features
+    }
+}
+
+kotlin {
+    jvmToolchain(21)
 }
 
 dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":interpreter"))
-    implementation(project(":compiler"))
     
-    // GraalVM Truffle dependencies (needed for FunkValue and FunkException)
-    implementation("org.graalvm.truffle:truffle-api:24.2.1")
-    implementation("org.graalvm.polyglot:polyglot:24.2.1")
+    // Polyglot API (Context, Value, Source) - host API - match native-image version
+    implementation("org.graalvm.sdk:graal-sdk:24.2.2")
+    
+    // Truffle API (Language, Node, etc.) - guest language API - match native-image version
+    implementation("org.graalvm.truffle:truffle-api:24.2.2")
 }
 
-// Note: Configuration removed due to build conflicts
-
-application {
-    mainClass.set("com.funk.language.cli.MainKt")
-}
-
-tasks.named<JavaExec>("run") {
-    standardInput = System.`in`
-}
-
-tasks.named<JavaExec>("run") {
-    workingDir = rootDir
-}
-
-// Shadow JAR configuration for executable JAR
 tasks.shadowJar {
-    archiveBaseName.set("funk")
-    archiveClassifier.set("")
-    archiveVersion.set("")
-    manifest {
-        attributes["Main-Class"] = "com.funk.language.cli.MainKt"
-    }
+    archiveFileName.set("funk.jar")
+    mergeServiceFiles()
 }
 
-// GraalVM Native Image configuration
 graalvmNative {
     binaries {
         named("main") {
             imageName.set("funk")
             mainClass.set("com.funk.language.cli.MainKt")
-            buildArgs.add("--no-fallback")
-            buildArgs.add("--enable-preview")
-            buildArgs.add("-H:+UnlockExperimentalVMOptions")
-            buildArgs.add("-H:+ReportExceptionStackTraces")
-            buildArgs.add("-H:IncludeResources=.*\\.g4")
-            buildArgs.add("-H:IncludeResources=.*\\.tokens")
-            buildArgs.add("--initialize-at-build-time")
-            buildArgs.add("-H:-CheckToolchain")
+            buildArgs.addAll(
+                // Core native image settings for GraalVM 24.0.2
+                "--no-fallback",
+                "-H:+ReportExceptionStackTraces",
+                "-H:+AllowVMInspection",
+                "-H:-CheckToolchain",
+                
+                // Essential Polyglot support
+                "-H:IncludeResources=META-INF/truffle-languages/.*",
+                "-H:IncludeResources=META-INF/services/.*",
+                
+                // Enable experimental options
+                "-H:+UnlockExperimentalVMOptions",
+                
+                // Include all charsets for language support
+                "-H:+AddAllCharsets",
+                
+                // Debug output
+                "-H:+PrintClassInitialization",
+                
+                // Initialize our language classes at build time
+                "--initialize-at-build-time=com.funk.language.interpreter.FunkLanguageProvider",
+                "--initialize-at-build-time=com.funk.language.interpreter.FunkValueGen\$InteropLibraryExports",
+                
+                // Initialize all our interpreter classes at build time (safer approach)
+                "--initialize-at-build-time=com.funk.language.interpreter"
+            )
         }
-    }
-}
-
-// Create a shell script wrapper
-tasks.register("createFunkScript") {
-    dependsOn("shadowJar")
-    doLast {
-        val jarFile = tasks.shadowJar.get().archiveFile.get().asFile
-        val scriptFile = file("${rootDir}/funk")
-        scriptFile.writeText("""#!/bin/bash
-exec java -jar "${jarFile.absolutePath}" "$@"
-""")
-        scriptFile.setExecutable(true)
     }
 }

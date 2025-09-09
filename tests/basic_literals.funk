@@ -1,6 +1,0 @@
-// Test basic literal types
-let int_val = 42
-let float_val = 3.14
-let string_val = "hello world"
-let bool_true = true
-let bool_false = false

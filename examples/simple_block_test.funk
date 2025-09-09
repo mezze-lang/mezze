@@ -1,7 +1,0 @@
-# Simple Block Test
-
-let simple = { x: Int } -> x + 1
-
-let withBlock = { x: Int } -> do
-  let doubled = x * 2
-  doubled + 1

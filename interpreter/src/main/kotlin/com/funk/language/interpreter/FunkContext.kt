@@ -31,15 +31,12 @@ class FunkContext(
      */
     private val builtins = ConcurrentHashMap<String, FunkValue>()
     
+    
     /**
      * Module runtime for handling imports and exports
      */
     val moduleRuntime = ModuleRuntime()
     
-    /**
-     * Effect runtime for handling effects and continuations
-     */
-    val effectRuntime = EffectRuntime()
     
     init {
         initializeBuiltins()
@@ -75,9 +72,7 @@ class FunkContext(
         // Built-in effects and functions will be added here
         
         // Register built-in effects
-        effectRuntime.registerHandler("Print", BuiltinEffects.createPrintEffect())
-        effectRuntime.registerHandler("ReadFile", BuiltinEffects.createReadFileEffect())
-        effectRuntime.registerHandler("WriteFile", BuiltinEffects.createWriteFileEffect())
+        // Built-in effects initialization removed
     }
     
     /**
@@ -116,4 +111,5 @@ class FunkContext(
         captured.putAll(globals)
         return captured
     }
+    
 }

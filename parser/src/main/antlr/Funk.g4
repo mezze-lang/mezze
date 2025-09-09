@@ -7,8 +7,6 @@ program: (statement | NEWLINE)* EOF;
 statement:
     letBinding
     | typeDeclaration
-    | effectDeclaration
-    | abilityDeclaration
     | moduleDeclaration
     | modDeclaration
     | accessModuleDeclaration
@@ -32,7 +30,7 @@ exposeList:
     ;
 
 exposeItem:
-    (TYPE | EFFECT | ABILITY)? Identifier
+    TYPE? Identifier
     ;
 
 accessDeclaration:
@@ -91,18 +89,8 @@ qualifiedIdentifier:
     | Identifier (DOUBLE_COLON Identifier)*
     ;
 
-effectDeclaration:
-    EXPOSE? EFFECT Identifier COLON recordType ARROW variantType NEWLINE?
-    ;
 
-abilityDeclaration:
-    EXPOSE? ABILITY Identifier WHERE NEWLINE
-    (effectSignature)*
-    ;
 
-effectSignature:
-    Identifier COLON recordType ARROW variantType NEWLINE?
-    ;
 
 resumeStatement:
     RESUME expression NEWLINE?
@@ -196,6 +184,7 @@ lambdaExpression:
     | untypedRecordParams ARROW NEWLINE? expression         // Untyped parameters: { x, y } -> x + y
     ;
 
+
 untypedRecordParams:
     LBRACE (untypedParam (COMMA untypedParam)*)? RBRACE
     ;
@@ -239,17 +228,14 @@ typeAnnotation:
     Identifier                             // Simple type
     | recordType                           // Record type
     | variantType                          // Variant type
-    | functionType                         // Function type with effects
-    | typeAnnotation LBRACKET effectList RBRACKET    // Simple type with effects
+    | functionType                         // Function type
     ;
 
 functionType:
-    recordType ARROW variantType LBRACKET effectList RBRACKET    // { params } -> | results | [ effects ]
+    recordType ARROW typeAnnotation         // { params } -> ReturnType
     ;
 
-effectList:
-    (Identifier (COMMA Identifier)*)?
-    ;
+
 
 literal:
     Integer
@@ -270,8 +256,6 @@ ELSE: 'else';
 MATCH: 'match';
 HANDLE: 'handle';
 RESUME: 'resume';
-EFFECT: 'effect';
-ABILITY: 'ability';
 WHERE: 'where';
 MODULE: 'module';
 MOD: 'mod';
@@ -279,6 +263,8 @@ EXPOSE: 'expose';
 ACCESS: 'access';
 AS: 'as';
 DO: 'do';
+IN: 'in';
+FOR: 'for';
 
 // Operators
 PLUS: '+';

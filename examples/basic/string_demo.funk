@@ -1,0 +1,14 @@
+# String operations demo
+let firstName = "Alice"
+let lastName = "Smith"
+let greeting = "Hello, " ++ firstName ++ " " ++ lastName ++ "!"
+
+
+let addColor = {x, y, color} -> do
+  match color {
+    Red -> x + y
+    Blue {val} -> val
+    _ -> 0
+  }
+
+let ans = addColor { x = 5, y = 6, color = Red }

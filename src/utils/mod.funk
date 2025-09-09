@@ -1,9 +1,0 @@
-# Utils module declaration - like mod.rs in Rust
-
-# Declare submodules
-mod string
-mod math
-
-# Re-export public items
-expose access string::capitalize
-expose access string::length
