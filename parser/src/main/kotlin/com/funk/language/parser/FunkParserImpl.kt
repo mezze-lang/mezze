@@ -122,7 +122,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
     override fun visitTypeDeclaration(ctx: FunkParser.TypeDeclarationContext): Any {
         val name = ctx.Identifier().text
-        val typeParams = ctx.typeParams()?.Identifier()?.map { it.text } ?: emptyList()
+        val typeParams = ctx.typeParams()?.TypeVariable()?.map { it.text } ?: emptyList()
         val definition = visit(ctx.typeDefinition()) as TypeDefinition
         return TypeDeclaration(name, typeParams, definition)
     }
@@ -311,7 +311,6 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
                     recordLiteral
                 }
             }
-            ctx.blockExpression() != null -> visit(ctx.blockExpression())
             ctx.doExpression() != null -> visit(ctx.doExpression())
             ctx.lambdaExpression() != null -> visit(ctx.lambdaExpression())
             else -> throw IllegalArgumentException("Unknown primary expression: ${ctx.text}")
@@ -370,12 +369,6 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
 
     // Control flow
-    override fun visitBlockExpression(ctx: FunkParser.BlockExpressionContext): Any {
-        val statements = ctx.statement().map { visit(it) as Statement }
-        val result = visit(ctx.expression()) as Expression
-        return BlockExpression(statements, result)
-    }
-
     override fun visitDoExpression(ctx: FunkParser.DoExpressionContext): Any {
         val statements = ctx.doStatement().map { visit(it) as Statement }
         val result = visit(ctx.expression()) as Expression
@@ -432,7 +425,16 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     // Type annotations
     override fun visitTypeAnnotation(ctx: FunkParser.TypeAnnotationContext): Any {
         return when {
-            ctx.Identifier() != null -> IdentifierTypeAnnotation(ctx.Identifier().text)
+            ctx.Identifier() != null -> {
+                val constructor = ctx.Identifier().text
+                val args = ctx.typeAnnotation().map { visit(it) as TypeAnnotation }
+                if (args.isEmpty()) {
+                    IdentifierTypeAnnotation(constructor)
+                } else {
+                    TypeApplicationAnnotation(constructor, args)
+                }
+            }
+            ctx.TypeVariable() != null -> IdentifierTypeAnnotation(ctx.TypeVariable().text)
             ctx.recordType() != null -> visit(ctx.recordType())
             ctx.variantType() != null -> visit(ctx.variantType())
             ctx.functionType() != null -> visit(ctx.functionType())

@@ -74,7 +74,78 @@ sealed interface FunkType {
 }
 
 @Serializable
-data class TypeVar(val name: String)
+data class TypeVar(val name: String, val level: Int = 0) {
+    companion object {
+        private var globalCounter = 0
+        private var currentLevel = 0
+        private val scopeCounters = mutableMapOf<Int, Int>()
+        
+        fun fresh(level: Int = currentLevel): TypeVar {
+            // For nested scopes, use a shared counter across all scopes in the same function
+            val scopeCounter = if (level == 0) {
+                // Top-level scope uses its own counter
+                scopeCounters.getOrPut(level) { 0 }
+            } else {
+                // All nested scopes share a counter that continues from where we left off
+                val sharedCounter = scopeCounters.values.maxOrNull() ?: 0
+                sharedCounter
+            }
+            val name = "'${('a' + scopeCounter)}"
+            
+            // Update all scope counters to the next value
+            if (level == 0) {
+                scopeCounters[level] = scopeCounter + 1
+            } else {
+                // Update all nested scope counters
+                for (i in 1..currentLevel) {
+                    scopeCounters[i] = scopeCounter + 1
+                }
+            }
+            return TypeVar(name, level)
+        }
+        
+        fun freshNamed(baseName: String, level: Int = currentLevel): TypeVar {
+            val scopeCounter = scopeCounters.getOrPut(level) { 0 }
+            val name = "'${baseName}${scopeCounter}"
+            scopeCounters[level] = scopeCounter + 1
+            return TypeVar(name, level)
+        }
+        
+        fun resetCounter() {
+            globalCounter = 0
+            currentLevel = 0
+            scopeCounters.clear()
+        }
+        
+        fun enterScope(): Int {
+            currentLevel++
+            // Nested scopes inherit the parent's counter, top-level scopes start at 0
+            if (currentLevel == 1) {
+                // Top-level scope (inside a function) starts at 0
+                scopeCounters[currentLevel] = 0
+            } else {
+                // Nested scopes continue from parent's counter
+                val parentCounter = scopeCounters[currentLevel - 1] ?: 0
+                scopeCounters[currentLevel] = parentCounter
+            }
+            return currentLevel
+        }
+        
+        fun exitScope() {
+            if (currentLevel > 0) {
+                // Clean up the scope counter when exiting
+                scopeCounters.remove(currentLevel)
+                currentLevel--
+            }
+        }
+        
+        fun getCurrentLevel(): Int = currentLevel
+        
+        fun resetScopeCounter(level: Int = currentLevel) {
+            scopeCounters[level] = 0
+        }
+    }
+}
 
 @Serializable
 data class RowVar(val name: String)
@@ -353,13 +424,6 @@ data class MatchCase(
 
 // Blocks
 @Serializable
-data class BlockExpression(
-    val statements: List<Statement>,
-    val result: Expression,
-    override val inferredType: FunkType? = null
-) : Expression
-
-@Serializable
 data class DoExpression(
     val statements: List<Statement>,
     val result: Expression,
@@ -432,6 +496,12 @@ sealed interface TypeAnnotation
 @Serializable
 data class IdentifierTypeAnnotation(
     val name: String
+) : TypeAnnotation
+
+@Serializable
+data class TypeApplicationAnnotation(
+    val constructor: String,
+    val args: List<TypeAnnotation>
 ) : TypeAnnotation
 
 @Serializable

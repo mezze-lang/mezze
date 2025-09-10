@@ -10,10 +10,24 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int = nextId())
         private var counter = 0
         private fun nextId() = counter++
         
-        fun fresh(prefix: String = "t", level: Int = 0): TypeVar {
-            val name = "$prefix${counter}"
+        fun fresh(prefix: String = "'", level: Int = 0): TypeVar {
+            val name = if (prefix.startsWith("'")) {
+                "$prefix${('a' + counter)}"
+            } else {
+                "'${('a' + counter)}"
+            }
             counter++
             return TypeVar(name, level, counter - 1)
+        }
+        
+        fun freshNamed(baseName: String, level: Int = 0): TypeVar {
+            val name = "'${baseName}${counter}"
+            counter++
+            return TypeVar(name, level, counter - 1)
+        }
+        
+        fun resetCounter() {
+            counter = 0
         }
     }
 }
@@ -23,7 +37,7 @@ data class RowVar(val name: String, val id: Int = nextId()) {
         private var counter = 0
         private fun nextId() = counter++
         
-        fun fresh(prefix: String = "r") = RowVar("$prefix${nextId()}")
+        fun fresh(prefix: String = "'r") = RowVar("$prefix${nextId()}")
     }
 }
 

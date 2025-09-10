@@ -178,13 +178,6 @@ class FunkInterpreter {
                 }
                 evaluateExpression(expr.result, context)
             }
-            is BlockExpression -> {
-                var result: FunkValue = FunkNull
-                for (stmt in expr.statements) {
-                    result = executeStatement(stmt, context)
-                }
-                evaluateExpression(expr.result, context)
-            }
             // PipeExpression and PlaceholderExpression removed - desugared during parsing
             is MatchExpression -> {
                 val value = evaluateExpression(expr.expression, context)

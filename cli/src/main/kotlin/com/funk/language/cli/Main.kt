@@ -3,6 +3,7 @@ package com.funk.language.cli
 import com.funk.language.parser.FunkParserImpl
 import com.funk.language.ast.*
 import com.funk.language.ast.prettyPrintType
+import com.funk.language.ast.prettyPrintTypeWithAliases
 import com.funk.language.typechecker.*
 import com.funk.language.interpreter.FunkException
 import com.funk.language.interpreter.FunkLanguage
@@ -260,6 +261,7 @@ private fun handleCheckCommand(args: List<String>) {
         } else {
             typeChecker.typeCheck(ast)
         }
+        val typeAliases = typeChecker.getTypeAliases()
         
         println("✅ Type checking successful!")
         println()
@@ -267,11 +269,16 @@ private fun handleCheckCommand(args: List<String>) {
         for (item in result.items) {
             when (item) {
                 is LetBinding -> {
-                    val typeStr = item.inferredType?.let { prettyPrintType(it) } ?: "unknown"
+                    val typeStr = item.inferredType?.let { 
+                        prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false) 
+                    } ?: "unknown"
                     println("  ${item.variableName} : $typeStr")
                 }
                 is TypeDeclaration -> {
-                    println("  type ${item.name}")
+                    val expansionStr = item.inferredType?.let { 
+                        ": ${prettyPrintType(it)}" 
+                    } ?: ""
+                    println("  ${item.name}$expansionStr")
                 }
                 else -> {
                     // Skip other items for now

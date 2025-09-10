@@ -68,7 +68,7 @@ typeDeclaration:
     ;
 
 typeParams:
-    Identifier+
+    TypeVariable+
     ;
 
 typeDefinition:
@@ -177,7 +177,6 @@ primaryExpression:
     | PLACEHOLDER                          // Pipe placeholder
     | LPAREN expression RPAREN
     | recordLiteral
-    | blockExpression
     | doExpression                         // Do block
     | lambdaExpression                     // Lambda function
     | primaryExpression recordLiteral      // Function call or record update (disambiguated in AST builder)
@@ -195,10 +194,6 @@ untypedRecordParams:
 
 untypedParam:
     Identifier
-    ;
-
-blockExpression:
-    LBRACE (statement | NEWLINE)* expression RBRACE
     ;
 
 doExpression:
@@ -229,7 +224,8 @@ recordTypeEntry:
     ;
 
 typeAnnotation:
-    Identifier                             // Simple type
+    Identifier typeAnnotation*             // Type application (Color, Maybe Int, etc.)
+    | TypeVariable                         // Type variable ('a, 'b, etc.)
     | recordType                           // Record type
     | variantType                          // Variant type
     | functionType                         // Function type
@@ -267,8 +263,6 @@ EXPOSE: 'expose';
 ACCESS: 'access';
 AS: 'as';
 DO: 'do';
-IN: 'in';
-FOR: 'for';
 
 // Operators
 PLUS: '+';
@@ -312,6 +306,7 @@ Boolean: 'true' | 'false';
 
 // Identifiers
 Identifier: [a-zA-Z_] [a-zA-Z0-9_]*;
+TypeVariable: '\'' [a-zA-Z] [a-zA-Z0-9_]*;
 
 // Comments and Whitespace
 Comment: '#' ~[\r\n]* -> skip;

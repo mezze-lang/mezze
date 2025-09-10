@@ -2,6 +2,8 @@ package com.funk.language.typechecker
 
 import com.funk.language.ast.*
 import com.funk.language.ast.prettyPrintType
+import com.funk.language.ast.prettyPrintTypeWithAliases
+import com.funk.language.ast.TypeAliasInfo
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -15,6 +17,14 @@ class TypeChecker {
     
     // Context for tracking variable types
     private val context = mutableMapOf<String, com.funk.language.ast.FunkType>()
+    
+    // Registry for type aliases
+    private val typeAliases = mutableMapOf<String, TypeAliasInfo>()
+
+    /**
+     * Get the current type aliases registry (for enhanced printing)
+     */
+    fun getTypeAliases(): Map<String, TypeAliasInfo> = typeAliases.toMap()
 
     /**
      * Type check a program and return the enhanced AST with inferred types
@@ -27,6 +37,8 @@ class TypeChecker {
      * Type check a program with module resolution support
      */
     fun typeCheck(program: Program, currentPath: Path): Program {
+        // Reset type variable counter for consistent naming
+        com.funk.language.ast.TypeVar.resetCounter()
         // Simple type checking without module resolution for now
         return typeCheckSimple(program)
     }
@@ -36,6 +48,7 @@ class TypeChecker {
      */
     private fun typeCheckSimple(program: Program): Program {
         context.clear() // Reset context for each program
+        typeAliases.clear() // Reset type aliases for each program
         
         // Add built-in functions to the context
         context["intToString"] = com.funk.language.ast.FunkType.FunctionType(
@@ -46,20 +59,47 @@ class TypeChecker {
         val enhancedItems = program.items.map { item ->
             when (item) {
                 is LetBinding -> {
-                    // Use explicit type annotation if available, otherwise infer from expression
-                    val typeAnnotation = item.typeAnnotation
-                    val inferredType = if (typeAnnotation != null) {
-                        convertTypeAnnotation(typeAnnotation)
-                    } else {
-                        inferBasicType(item.expression)
-                    }
+                    // Reset scope counter for each top-level function to start fresh with 'a
+                    com.funk.language.ast.TypeVar.resetScopeCounter(0)
+                    
+                    // Always infer the actual type from the expression
+                    val actualType = inferBasicType(item.expression)
+                    
+                    // Try to match the inferred type against known type aliases
+                    val matchedType = actualType // We'll handle alias matching in the pretty printer
+                    
+                    val finalType = item.typeAnnotation?.let { annotation ->
+                        // If there's a type annotation, check compatibility and unify
+                        val declaredType = convertTypeAnnotation(annotation)
+                        
+                        if (isTypeCompatible(matchedType, declaredType)) {
+                            // If declared type is a type variable, unify it with the actual type
+                            if (declaredType is com.funk.language.ast.FunkType.VarType) {
+                                matchedType // Use the matched type (with alias if found)
+                            } else {
+                                declaredType // Use the declared type
+                            }
+                        } else {
+                            throw RuntimeException("Type error: Declared type ${prettyPrintType(declaredType)} does not match inferred type ${prettyPrintType(matchedType)}")
+                        }
+                    } ?: matchedType
+                    
                     // Update context with this binding
-                    context[item.variableName] = inferredType
-                    item.copy(inferredType = inferredType)
+                    context[item.variableName] = finalType
+                    item.copy(inferredType = finalType)
                 }
                 is TypeDeclaration -> {
-                    // For now, just set a basic inferred type
-                    item.copy(inferredType = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar("type_${item.name}")))
+                    // Convert the type definition to a FunkType
+                    val definitionType = convertTypeDefinition(item.definition)
+                    
+                    // Register the type alias
+                    typeAliases[item.name] = TypeAliasInfo(
+                        name = item.name,
+                        typeParams = item.typeParams,
+                        definition = definitionType
+                    )
+                    
+                    item.copy(inferredType = definitionType)
                 }
                 else -> item
             }
@@ -152,12 +192,12 @@ class TypeChecker {
                 if (expr.cases.isNotEmpty()) {
                     inferBasicType(expr.cases.first().expression)
                 } else {
-                    com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar("empty_match"))
+                    com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
                 }
             }
             is RecordLiteral -> {
                 val fields = expr.entries.associate { (name, fieldExpr) ->
-                    name to (fieldExpr?.let { inferBasicType(it) } ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar("missing_field")))
+                    name to (fieldExpr?.let { inferBasicType(it) } ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh()))
                 }
                 com.funk.language.ast.FunkType.RecordType(fields)
             }
@@ -196,7 +236,7 @@ class TypeChecker {
                     }
                     "==", "!=", "<", ">", "<=", ">=" -> com.funk.language.ast.FunkType.BooleanType
                     "&&", "||" -> com.funk.language.ast.FunkType.BooleanType
-                    else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar("binop_result"))
+                    else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
                 }
             }
             is VariantConstruction -> {
@@ -217,8 +257,10 @@ class TypeChecker {
                     }
                 }
                 
-                // Add lambda parameters to context temporarily
+                // Enter new scope for lambda parameters
                 val originalContext = context.toMap()
+                val scopeLevel = com.funk.language.ast.TypeVar.enterScope()
+                
                 when (val params = expr.parameters) {
                     is UntypedParameters -> {
                         // For untyped parameters, add them with inferred types
@@ -240,26 +282,66 @@ class TypeChecker {
                 
                 val returnType = inferBasicType(expr.body)
                 
-                // Restore original context
+                // Exit scope and restore original context
+                com.funk.language.ast.TypeVar.exitScope()
                 context.clear()
                 context.putAll(originalContext)
                 
                 com.funk.language.ast.FunkType.FunctionType(paramType, returnType)
             }
             is DoExpression -> {
-                // Return type of the final expression
-                inferBasicType(expr.result)
-            }
-            is BlockExpression -> {
-                // Return type of the final expression
-                inferBasicType(expr.result)
+                // Enter a new scope for the do block
+                val scopeLevel = com.funk.language.ast.TypeVar.enterScope()
+                
+                // Save current context
+                val originalContext = context.toMap()
+                
+                try {
+                    // Process statements in the do block
+                    for (statement in expr.statements) {
+                        when (statement) {
+                            is LetStatement -> {
+                                val actualType = inferBasicType(statement.expression)
+                                val matchedType = actualType // We'll handle alias matching in the pretty printer
+                                
+                                val finalType = statement.typeAnnotation?.let { annotation ->
+                                    val declaredType = convertTypeAnnotation(annotation)
+                                    if (isTypeCompatible(matchedType, declaredType)) {
+                                        if (declaredType is com.funk.language.ast.FunkType.VarType) {
+                                            matchedType
+                                        } else {
+                                            declaredType
+                                        }
+                                    } else {
+                                        throw RuntimeException("Type error: Declared type ${prettyPrintType(declaredType)} does not match inferred type ${prettyPrintType(matchedType)}")
+                                    }
+                                } ?: matchedType
+                                
+                                // Update context with this binding
+                                context[statement.variableName] = finalType
+                            }
+                            is ExpressionStatement -> {
+                                // Just type check the expression, don't bind anything
+                                inferBasicType(statement.expression)
+                            }
+                        }
+                    }
+                    
+                    // Return type of the final expression
+                    inferBasicType(expr.result)
+                } finally {
+                    // Exit the scope and restore context
+                    com.funk.language.ast.TypeVar.exitScope()
+                    context.clear()
+                    context.putAll(originalContext)
+                }
             }
             // PipeExpression and PlaceholderExpression removed - desugared during parsing
             is PartiallyAppliedFunction -> {
                 // Partially applied function - return its inferred type
-                expr.inferredType ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar("partial_function"))
+                expr.inferredType ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
             }
-            else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar("unknown"))
+            else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
         }
     }
     
@@ -269,9 +351,9 @@ class TypeChecker {
     private fun inferParameterTypesFromUsage(body: Expression, paramNames: List<String>): Map<String, com.funk.language.ast.FunkType> {
         val paramTypes = mutableMapOf<String, com.funk.language.ast.FunkType>()
         
-        // Initialize with generic types
+        // Initialize with fresh type variables
         for (name in paramNames) {
-            paramTypes[name] = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar(name))
+            paramTypes[name] = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
         }
         
         // Analyze match expressions to infer variant types
@@ -545,10 +627,35 @@ class TypeChecker {
                 }
             }
             
-            // Type variables are compatible with anything (for now)
-            actualType is com.funk.language.ast.FunkType.VarType || expectedType is com.funk.language.ast.FunkType.VarType -> true
+            // Type variables can unify with any type
+            actualType is com.funk.language.ast.FunkType.VarType -> true
+            expectedType is com.funk.language.ast.FunkType.VarType -> true
             
             else -> false
+        }
+    }
+    
+    /**
+     * Convert a TypeDefinition to a FunkType
+     */
+    private fun convertTypeDefinition(definition: TypeDefinition): com.funk.language.ast.FunkType {
+        return when (definition) {
+            is RecordDefinition -> {
+                val fields = definition.fields.associate { field ->
+                    field.name to convertTypeAnnotation(field.type)
+                }
+                com.funk.language.ast.FunkType.RecordType(fields)
+            }
+            is VariantDefinition -> {
+                val constructors = definition.constructors.associate { constructor ->
+                    constructor.name to constructor.dataType?.let { convertTypeAnnotation(it) }
+                }
+                com.funk.language.ast.FunkType.VariantType(constructors)
+            }
+            is AliasDefinition -> {
+                // Type alias - convert the aliased type
+                convertTypeAnnotation(definition.aliasedType)
+            }
         }
     }
     
@@ -558,13 +665,42 @@ class TypeChecker {
     private fun convertTypeAnnotation(annotation: TypeAnnotation): com.funk.language.ast.FunkType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
-                when (annotation.name) {
-                    "Int" -> com.funk.language.ast.FunkType.IntType
-                    "Float" -> com.funk.language.ast.FunkType.FloatType
-                    "String" -> com.funk.language.ast.FunkType.StringType
-                    "Boolean" -> com.funk.language.ast.FunkType.BooleanType
-                    else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar(annotation.name))
+                when {
+                    annotation.name == "Int" -> com.funk.language.ast.FunkType.IntType
+                    annotation.name == "Float" -> com.funk.language.ast.FunkType.FloatType
+                    annotation.name == "String" -> com.funk.language.ast.FunkType.StringType
+                    annotation.name == "Boolean" -> com.funk.language.ast.FunkType.BooleanType
+                    annotation.name.startsWith("'") -> {
+                        // Explicit type variable - use the exact name provided
+                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar(annotation.name))
+                    }
+                    typeAliases.containsKey(annotation.name) -> {
+                        // Type alias without parameters
+                        val alias = typeAliases[annotation.name]!!
+                        if (alias.typeParams.isEmpty()) {
+                            alias.definition
+                        } else {
+                            throw RuntimeException("Type error: Type alias '${annotation.name}' requires ${alias.typeParams.size} type parameters")
+                        }
+                    }
+                    else -> {
+                        // Other identifiers (custom types) - treat as fresh type variables for now
+                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.freshNamed(annotation.name))
+                    }
                 }
+            }
+            is TypeApplicationAnnotation -> {
+                // Handle type application like Maybe Int
+                val alias = typeAliases[annotation.constructor]
+                    ?: throw RuntimeException("Type error: Unknown type '${annotation.constructor}'")
+                
+                if (alias.typeParams.size != annotation.args.size) {
+                    throw RuntimeException("Type error: Type '${annotation.constructor}' expects ${alias.typeParams.size} parameters, got ${annotation.args.size}")
+                }
+                
+                // Substitute type parameters with actual arguments
+                val argTypes = annotation.args.map { convertTypeAnnotation(it) }
+                substituteTypeParameters(alias.definition, alias.typeParams, argTypes)
             }
             is RecordTypeAnnotation -> {
                 val fields = annotation.entries.associate { entry ->
@@ -592,7 +728,53 @@ class TypeChecker {
                 val returnType = convertTypeAnnotation(annotation.returnType)
                 com.funk.language.ast.FunkType.FunctionType(paramType, returnType)
             }
-            else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar("unknown_annotation"))
+            else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
         }
     }
+    
+    /**
+     * Substitute type parameters in a type with actual type arguments
+     */
+    private fun substituteTypeParameters(
+        type: com.funk.language.ast.FunkType,
+        typeParams: List<String>,
+        argTypes: List<com.funk.language.ast.FunkType>
+    ): com.funk.language.ast.FunkType {
+        val substitution = typeParams.zip(argTypes).toMap()
+        return substituteInType(type, substitution)
+    }
+    
+    /**
+     * Recursively substitute type variables in a type
+     */
+    private fun substituteInType(
+        type: com.funk.language.ast.FunkType,
+        substitution: Map<String, com.funk.language.ast.FunkType>
+    ): com.funk.language.ast.FunkType {
+        return when (type) {
+            is com.funk.language.ast.FunkType.VarType -> {
+                substitution[type.variable.name] ?: type
+            }
+            is com.funk.language.ast.FunkType.RecordType -> {
+                val newFields = type.fields.mapValues { (_, fieldType) ->
+                    substituteInType(fieldType, substitution)
+                }
+                com.funk.language.ast.FunkType.RecordType(newFields, type.rowVar)
+            }
+            is com.funk.language.ast.FunkType.VariantType -> {
+                val newConstructors = type.constructors.mapValues { (_, constructorType) ->
+                    constructorType?.let { substituteInType(it, substitution) }
+                }
+                com.funk.language.ast.FunkType.VariantType(newConstructors, type.rowVar)
+            }
+            is com.funk.language.ast.FunkType.FunctionType -> {
+                com.funk.language.ast.FunkType.FunctionType(
+                    substituteInType(type.paramType, substitution),
+                    substituteInType(type.returnType, substitution)
+                )
+            }
+            else -> type
+        }
+    }
+    
 }
