@@ -1,0 +1,8 @@
+# Nested function calls and complex expressions
+let multiply = {x, y} -> x * y
+let add = {x, y} -> x + y
+let compose = {f, g, x} -> f {x = g {x = x, y = 1}, y = 2}
+
+let result = compose {f = multiply, g = add, x = 5}
+
+result

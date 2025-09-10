@@ -1,0 +1,9 @@
+# Should fail: variant constructor with wrong data type
+let processColor = {color} -> match color {
+  Red -> 10
+  Blue {val} -> val
+}
+
+let result = processColor {color = Blue {name = "wrong"}}
+
+result

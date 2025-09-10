@@ -1,0 +1,9 @@
+# Function parameter type inference from usage
+let intToString = { val: Int} -> "number"
+
+let add = {x, y} -> x + y
+let concat = {a, b} -> a ++ b
+let getAge = {person} -> person.age
+let processUser = {user} -> user.name ++ " is " ++ intToString {val = user.age}
+
+add

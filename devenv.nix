@@ -26,24 +26,24 @@ in
     # Basic build commands
     build.exec = ''
       echo "🔨 Building Funk language..."
-      ./gradlew build
+      gradle build
     '';
 
     clean.exec = ''
       echo "🧹 Cleaning project..."
-      ./gradlew clean
+      gradle clean
     '';
 
     test.exec = ''
       echo "🧪 Running tests..."
-      ./gradlew test
+      gradle test
     '';
 
     # Development CLI (JAR-based, faster builds)
     funk-dev.exec = ''
       if [ ! -f "./cli/build/libs/funk.jar" ]; then
         echo "❌ JAR not found. Building it first..."
-        ./gradlew build
+        gradle build
       fi
       java \
         --enable-native-access=ALL-UNNAMED \
@@ -55,8 +55,8 @@ in
     # Native binary build and execution
     build-native.exec = ''
       echo "🚀 Building native Funk binary..."
-      ./gradlew build
-      ./gradlew :cli:nativeCompile
+      gradle build
+      gradle :cli:nativeCompile
       
       if [ -f "./cli/build/native/nativeCompile/funk" ]; then
         echo "✅ Native binary built: ./cli/build/native/nativeCompile/funk"

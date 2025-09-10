@@ -1,0 +1,10 @@
+# Edge cases that should work
+let identity = {x} -> x
+let constant = {x, y} -> x
+let flip = {f, x, y} -> f {x = y, y = x}
+
+let result1 = identity {x = 42}
+let result2 = constant {x = "hello", y = 123}
+let result3 = flip {f = constant, x = 1, y = 2}
+
+result1

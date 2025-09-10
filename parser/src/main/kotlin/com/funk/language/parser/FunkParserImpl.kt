@@ -1,5 +1,6 @@
 package com.funk.language.parser
 
+import com.funk.language.ast.*
 import com.funk.language.parser.generated.FunkLexer
 import com.funk.language.parser.generated.FunkParser
 import com.funk.language.parser.generated.FunkBaseVisitor
@@ -16,7 +17,7 @@ class FunkParserImpl {
     }
 }
 
-private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
+private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
     /**
      * Heuristic to determine if an identifier is likely a record variable vs a function.
@@ -44,291 +45,272 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
         }
     }
 
-    override fun visitProgram(ctx: FunkParser.ProgramContext): ASTNode {
+    override fun visitProgram(ctx: FunkParser.ProgramContext): Any {
         val items = ctx.statement().mapNotNull { visit(it) as? ProgramItem }
         return Program(items)
     }
 
-    // Declarations
-    override fun visitLetBinding(ctx: FunkParser.LetBindingContext): ASTNode {
-        val variableName = ctx.Identifier().text
-        val typeAnnotation = ctx.typeAnnotation()?.let { visit(it) as TypeAnnotation }
+    override fun visitStatement(ctx: FunkParser.StatementContext): Any {
+        return when {
+            ctx.letBinding() != null -> visit(ctx.letBinding())
+            ctx.typeDeclaration() != null -> visit(ctx.typeDeclaration())
+            ctx.moduleDeclaration() != null -> visit(ctx.moduleDeclaration())
+            ctx.modDeclaration() != null -> visit(ctx.modDeclaration())
+            ctx.accessModuleDeclaration() != null -> visit(ctx.accessModuleDeclaration())
+            ctx.exposeDeclaration() != null -> visit(ctx.exposeDeclaration())
+            ctx.accessDeclaration() != null -> visit(ctx.accessDeclaration())
+            ctx.resumeStatement() != null -> visit(ctx.resumeStatement())
+            ctx.expressionStatement() != null -> visit(ctx.expressionStatement())
+            else -> throw IllegalArgumentException("Unknown statement: ${ctx.text}")
+        }
+    }
+
+    override fun visitExpressionStatement(ctx: FunkParser.ExpressionStatementContext): Any {
+        // Expression statements are standalone expressions that should be evaluated
         val expression = visit(ctx.expression()) as Expression
-        val isExposed = ctx.EXPOSE() != null
-        return LetBinding(variableName, typeAnnotation, expression, isExposed)
+        return TopLevelExpression(expression)
     }
 
-    override fun visitTypeDeclaration(ctx: FunkParser.TypeDeclarationContext): ASTNode {
+    // Module system (simplified for now)
+    override fun visitModuleDeclaration(ctx: FunkParser.ModuleDeclarationContext): Any {
         val name = ctx.Identifier().text
-        val typeParams = ctx.typeParams()?.Identifier()?.map { it.text } ?: emptyList()
-        val definition = visit(ctx.typeDefinition()) as TypeDefinition
-        val isExposed = ctx.EXPOSE() != null
-        return TypeDeclaration(name, typeParams, definition, isExposed)
+        return ModuleDeclaration(name, emptyList())
     }
 
-    override fun visitVariantType(ctx: FunkParser.VariantTypeContext): ASTNode {
-        val constructors = ctx.variantConstructor().map { visit(it) as VariantConstructor }
-        val isOpen = ctx.ELLIPSIS() != null
-        return VariantType(constructors, isOpen)
+    override fun visitExposeDeclaration(ctx: FunkParser.ExposeDeclarationContext): Any {
+        val items = ctx.exposeList().exposeItem().map { visit(it) as ExposeItem }
+        return ExposeDeclaration(items)
     }
 
-    override fun visitVariantConstructor(ctx: FunkParser.VariantConstructorContext): ASTNode {
-        val nameIdentifier = visit(ctx.qualifiedIdentifier()) as Identifier
-        val recordType = ctx.recordType()?.let { visit(it) as RecordType }
-        return VariantConstructor(nameIdentifier.name, recordType)
+    override fun visitExposeItem(ctx: FunkParser.ExposeItemContext): Any {
+        val kind = if (ctx.TYPE() != null) ExposeKind.TYPE else null
+        val name = ctx.Identifier().text
+        return ExposeItem(kind, name)
     }
 
-    override fun visitQualifiedIdentifier(ctx: FunkParser.QualifiedIdentifierContext): ASTNode {
-        // Return a simple identifier for now, but join the parts with dots
-        val qualifiedName = ctx.Identifier().joinToString(".") { it.text }
-        return Identifier(qualifiedName)
+    override fun visitAccessDeclaration(ctx: FunkParser.AccessDeclarationContext): Any {
+        val moduleName = ctx.Identifier().text
+        val items = ctx.accessList().accessItem().map { visit(it) as AccessItem }
+        return AccessDeclaration(moduleName, items)
     }
 
+    override fun visitAccessItem(ctx: FunkParser.AccessItemContext): Any {
+        val name = ctx.Identifier(0).text
+        val alias = ctx.Identifier(1)?.text
+        return AccessItem(name, alias)
+    }
 
-
-
-
-    override fun visitModDeclaration(ctx: FunkParser.ModDeclarationContext): ASTNode {
+    override fun visitModDeclaration(ctx: FunkParser.ModDeclarationContext): Any {
         val moduleName = ctx.Identifier().text
         return ModDeclaration(moduleName)
     }
 
-    override fun visitAccessModuleDeclaration(ctx: FunkParser.AccessModuleDeclarationContext): ASTNode {
+    override fun visitAccessModuleDeclaration(ctx: FunkParser.AccessModuleDeclarationContext): Any {
         val modulePath = ctx.modulePath().Identifier().map { it.text }
         val alias = ctx.Identifier()?.text
         val isExposed = ctx.EXPOSE() != null
         return AccessModuleDeclaration(modulePath, alias, isExposed)
     }
 
-    override fun visitModulePath(ctx: FunkParser.ModulePathContext): ASTNode {
-        // This method shouldn't be called directly since we handle it in visitUseDeclaration
-        throw UnsupportedOperationException("ModulePath should be handled in UseDeclaration")
+    // Declarations
+    override fun visitLetBinding(ctx: FunkParser.LetBindingContext): Any {
+        val variableName = ctx.Identifier().text
+        val typeAnnotation = ctx.typeAnnotation()?.let { visit(it) as TypeAnnotation }
+        val expression = visit(ctx.expression()) as Expression
+        return LetBinding(variableName, typeAnnotation, null, expression)
     }
 
-
-
-    override fun visitModuleDeclaration(ctx: FunkParser.ModuleDeclarationContext): ASTNode {
+    override fun visitTypeDeclaration(ctx: FunkParser.TypeDeclarationContext): Any {
         val name = ctx.Identifier().text
-        return ModuleDeclaration(name, emptyList()) // Simplified for now
+        val typeParams = ctx.typeParams()?.Identifier()?.map { it.text } ?: emptyList()
+        val definition = visit(ctx.typeDefinition()) as TypeDefinition
+        return TypeDeclaration(name, typeParams, definition)
     }
 
-    override fun visitExposeDeclaration(ctx: FunkParser.ExposeDeclarationContext): ASTNode {
-        val items = ctx.exposeList().exposeItem().map { visit(it) as ExposeItem }
-        return ExposeDeclaration(items)
-    }
-
-    override fun visitExposeItem(ctx: FunkParser.ExposeItemContext): ASTNode {
-        val kind = when {
-            ctx.TYPE() != null -> ExposeKind.TYPE
-            else -> null
+    override fun visitTypeDefinition(ctx: FunkParser.TypeDefinitionContext): Any {
+        return when {
+            ctx.recordType() != null -> {
+                val recordType = visit(ctx.recordType()) as RecordTypeAnnotation
+                RecordDefinition(recordType.entries.map { 
+                    RecordFieldDef(it.name, it.type)
+                })
+            }
+            ctx.variantType() != null -> visit(ctx.variantType())
+            else -> throw IllegalArgumentException("Unknown type definition: ${ctx.text}")
         }
-        val name = ctx.Identifier().text
-        return ExposeItem(kind, name)
     }
 
-    override fun visitAccessDeclaration(ctx: FunkParser.AccessDeclarationContext): ASTNode {
-        val moduleName = ctx.Identifier().text
-        val items = ctx.accessList().accessItem().map { visit(it) as AccessItem }
-        return AccessDeclaration(moduleName, items)
+    override fun visitVariantType(ctx: FunkParser.VariantTypeContext): Any {
+        val constructors = ctx.variantConstructor().map { visit(it) as VariantConstructorDef }
+        return VariantDefinition(constructors)
     }
 
-    override fun visitAccessItem(ctx: FunkParser.AccessItemContext): ASTNode {
-        val name = ctx.Identifier(0).text
-        val alias = ctx.Identifier(1)?.text
-        return AccessItem(name, alias)
+    override fun visitVariantConstructor(ctx: FunkParser.VariantConstructorContext): Any {
+        val name = ctx.qualifiedIdentifier().text
+        val dataType = ctx.recordType()?.let { visit(it) as TypeAnnotation }
+        return VariantConstructorDef(name, dataType)
     }
+
+    // Statements
+    override fun visitResumeStatement(ctx: FunkParser.ResumeStatementContext): Any {
+        val expression = visit(ctx.expression()) as Expression
+        return ExpressionStatement(expression) // For now, treat as expression statement
+    }
+
 
     // Expressions
-    override fun visitExpression(ctx: FunkParser.ExpressionContext): ASTNode {
-        return visit(ctx.pipeExpression())
+    override fun visitExpression(ctx: FunkParser.ExpressionContext): Any {
+        return visit(ctx.pipeOperatorExpression())
     }
 
-    override fun visitPipeExpression(ctx: FunkParser.PipeExpressionContext): ASTNode {
-        var result = visit(ctx.matchExpression(0)) as Expression
+    override fun visitPipeOperatorExpression(ctx: FunkParser.PipeOperatorExpressionContext): Any {
+        var result = visit(ctx.variantExpression(0)) as Expression
         
-        for (i in 1 until ctx.matchExpression().size) {
-            val right = visit(ctx.matchExpression(i)) as Expression
-            result = PipeExpression(result, right)
+        for (i in 1 until ctx.variantExpression().size) {
+            val right = visit(ctx.variantExpression(i)) as Expression
+            // Desugar pipe: substitute placeholders in right expression with left value
+            result = substitutePlaceholdersInExpression(right, result)
         }
         
         return result
     }
 
-    override fun visitMatchExpression(ctx: FunkParser.MatchExpressionContext): ASTNode {
-        return if (ctx.MATCH() != null) {
-            val expression = visit(ctx.expression()) as Expression
-            val cases = ctx.matchCase().map { visit(it) as MatchCase }
-            MatchExpression(expression, cases)
-        } else {
-            visit(ctx.handleExpression())
-        }
+    override fun visitVariantExpression(ctx: FunkParser.VariantExpressionContext): Any {
+        return visit(ctx.matchExpression())
     }
 
-    override fun visitMatchCase(ctx: FunkParser.MatchCaseContext): ASTNode {
+    override fun visitMatchExpression(ctx: FunkParser.MatchExpressionContext): Any {
+        if (ctx.MATCH() != null) {
+            val expression = visit(ctx.expression()) as Expression
+            val cases = ctx.matchCase().map { visit(it) as MatchCase }
+            return MatchExpression(expression, cases)
+        }
+        return visit(ctx.handleExpression())
+    }
+
+    override fun visitMatchCase(ctx: FunkParser.MatchCaseContext): Any {
         val pattern = visit(ctx.pattern()) as Pattern
         val expression = visit(ctx.expression()) as Expression
         return MatchCase(pattern, expression)
     }
 
-    override fun visitPattern(ctx: FunkParser.PatternContext): ASTNode {
-        return when {
-            ctx.WILDCARD() != null -> WildcardPattern
-            ctx.Identifier() != null -> {
-                val identifier = ctx.Identifier().text
-                val recordPattern = ctx.recordPattern()?.let { visit(it) as RecordPattern }
-                
-                // Use capitalization convention: uppercase = constructor, lowercase = variable
-                if (identifier.first().isUpperCase()) {
-                    ConstructorPattern(identifier, recordPattern)
-                } else {
-                    if (recordPattern != null) {
-                        throw IllegalArgumentException("Variable patterns cannot have record patterns: $identifier")
-                    }
-                    VariablePattern(identifier)
-                }
-            }
-            ctx.recordPattern() != null -> visit(ctx.recordPattern())
-            else -> throw IllegalArgumentException("Unknown pattern type")
-        }
+    override fun visitHandleExpression(ctx: FunkParser.HandleExpressionContext): Any {
+        // For now, skip handle expressions and go to if expressions
+        return visit(ctx.ifExpression())
     }
 
-    override fun visitRecordPattern(ctx: FunkParser.RecordPatternContext): ASTNode {
-        val entries = ctx.recordPatternEntry().map { visit(it) as RecordPatternEntry }
-        return RecordPattern(entries)
-    }
-
-    override fun visitRecordPatternEntry(ctx: FunkParser.RecordPatternEntryContext): ASTNode {
-        val name = ctx.Identifier().text
-        val pattern = ctx.pattern()?.let { visit(it) as Pattern }
-        return RecordPatternEntry(name, pattern)
-    }
-
-    override fun visitHandleExpression(ctx: FunkParser.HandleExpressionContext): ASTNode {
-        return if (ctx.HANDLE() != null) {
-            val expression = visit(ctx.expression()) as Expression
-            val cases = ctx.handleCase().map { visit(it) as HandleCase }
-            val withClause = ctx.recordLiteral()?.let { visit(it) as RecordLiteral }
-            HandleExpression(expression, cases, withClause)
-        } else {
-            visit(ctx.ifExpression())
-        }
-    }
-
-    override fun visitHandleCase(ctx: FunkParser.HandleCaseContext): ASTNode {
-        val handlerName = ctx.Identifier().text
-        val pattern = ctx.recordPattern()?.let { visit(it) as RecordPattern }
-        val expression = visit(ctx.expression()) as Expression
-        
-        // Convert expression to statements and result
-        val (statements, result) = when (expression) {
-            is DoExpression -> expression.statements to expression.result
-            else -> emptyList<Statement>() to expression
-        }
-        
-        return HandleCase(handlerName, pattern, statements, result)
-    }
-
-    override fun visitIfExpression(ctx: FunkParser.IfExpressionContext): ASTNode {
-        return if (ctx.IF() != null) {
+    override fun visitIfExpression(ctx: FunkParser.IfExpressionContext): Any {
+        if (ctx.IF() != null) {
             val condition = visit(ctx.expression(0)) as Expression
             val thenBranch = visit(ctx.expression(1)) as Expression
             val elseBranch = visit(ctx.expression(2)) as Expression
-            IfExpression(condition, thenBranch, elseBranch)
-        } else {
-            visit(ctx.updateExpression())
+            return IfExpression(condition, thenBranch, elseBranch)
         }
+        return visit(ctx.updateExpression())
     }
 
-    override fun visitUpdateExpression(ctx: FunkParser.UpdateExpressionContext): ASTNode {
-        val baseExpr = visit(ctx.comparisonExpression()) as Expression
-        return if (ctx.recordLiteral() != null) {
+    override fun visitUpdateExpression(ctx: FunkParser.UpdateExpressionContext): Any {
+        val expr = visit(ctx.comparisonExpression()) as Expression
+        if (ctx.recordLiteral() != null) {
             val updates = visit(ctx.recordLiteral()) as RecordLiteral
-            RecordUpdate(baseExpr, updates.entries)
-        } else {
-            baseExpr
+            return RecordUpdate(expr, updates.entries)
         }
+        return expr
     }
 
-    override fun visitComparisonExpression(ctx: FunkParser.ComparisonExpressionContext): ASTNode {
-        var left = visit(ctx.additiveExpression(0)) as Expression
+    override fun visitComparisonExpression(ctx: FunkParser.ComparisonExpressionContext): Any {
+        var result = visit(ctx.additiveExpression(0)) as Expression
         
         for (i in 1 until ctx.additiveExpression().size) {
-            val operator = ctx.getChild(i * 2 - 1).text
             val right = visit(ctx.additiveExpression(i)) as Expression
-            left = BinaryOperation(left, operator, right)
+            val operator = when {
+                ctx.GT(i-1) != null -> ">"
+                ctx.LT(i-1) != null -> "<"
+                ctx.GTE(i-1) != null -> ">="
+                ctx.LTE(i-1) != null -> "<="
+                ctx.EQ(i-1) != null -> "=="
+                ctx.NEQ(i-1) != null -> "!="
+                else -> "=="
+            }
+            result = BinaryOperation(result, operator, right)
         }
         
-        return left
+        return result
     }
 
-    override fun visitAdditiveExpression(ctx: FunkParser.AdditiveExpressionContext): ASTNode {
-        var left = visit(ctx.multiplicativeExpression(0)) as Expression
+    override fun visitAdditiveExpression(ctx: FunkParser.AdditiveExpressionContext): Any {
+        var result = visit(ctx.multiplicativeExpression(0)) as Expression
         
         for (i in 1 until ctx.multiplicativeExpression().size) {
-            val operator = ctx.getChild(i * 2 - 1).text
             val right = visit(ctx.multiplicativeExpression(i)) as Expression
-            left = BinaryOperation(left, operator, right)
+            val operator = when {
+                ctx.PLUS(i-1) != null -> "+"
+                ctx.MINUS(i-1) != null -> "-"
+                ctx.CONCAT(i-1) != null -> "++"
+                else -> "+"
+            }
+            result = BinaryOperation(result, operator, right)
         }
         
-        return left
+        return result
     }
 
-    override fun visitMultiplicativeExpression(ctx: FunkParser.MultiplicativeExpressionContext): ASTNode {
-        var left = visit(ctx.memberAccessExpression(0)) as Expression
+    override fun visitMultiplicativeExpression(ctx: FunkParser.MultiplicativeExpressionContext): Any {
+        var result = visit(ctx.memberAccessExpression(0)) as Expression
         
         for (i in 1 until ctx.memberAccessExpression().size) {
-            val operator = ctx.getChild(i * 2 - 1).text
             val right = visit(ctx.memberAccessExpression(i)) as Expression
-            left = BinaryOperation(left, operator, right)
+            val operator = when {
+                ctx.MULTIPLY(i-1) != null -> "*"
+                ctx.DIVIDE(i-1) != null -> "/"
+                else -> "*"
+            }
+            result = BinaryOperation(result, operator, right)
         }
         
-        return left
+        return result
     }
 
-    override fun visitMemberAccessExpression(ctx: FunkParser.MemberAccessExpressionContext): ASTNode {
-        var receiver = visit(ctx.primaryExpression()) as Expression
+    override fun visitMemberAccessExpression(ctx: FunkParser.MemberAccessExpressionContext): Any {
+        var result = visit(ctx.primaryExpression()) as Expression
         
         ctx.Identifier().forEach { identifier ->
-            receiver = MemberAccess(receiver, identifier.text)
+            result = MemberAccess(result, identifier.text)
         }
         
-        return receiver
+        return result
     }
 
-    override fun visitPrimaryExpression(ctx: FunkParser.PrimaryExpressionContext): ASTNode {
-        // Handle function calls and record updates
-        if (ctx.primaryExpression() != null && ctx.recordLiteral() != null) {
-            val leftExpr = visit(ctx.primaryExpression()) as Expression
-            val recordLiteral = visit(ctx.recordLiteral()) as RecordLiteral
-            
-            // Disambiguation logic for expr { ... }:
-            if (leftExpr is Identifier && recordLiteral.entries.all { it.value != null }) {
-                when {
-                    // Variant construction: Ok { value = 42 }
-                    leftExpr.name.first().isUpperCase() -> {
-                        return VariantConstruction(leftExpr.name, recordLiteral)
-                    }
-                    // Record update: person { age = 26 }
-                    isLikelyRecordVariable(leftExpr.name) -> {
-                        return RecordUpdate(leftExpr, recordLiteral.entries)
-                    }
-                    // Function call: func { x = 5, y = 10 }
-                    else -> {
-                        return FunctionCall(leftExpr, recordLiteral)
-                    }
-                }
-            } else {
-                // Function call (default case)
-                return FunctionCall(leftExpr, recordLiteral)
-            }
-        }
-
+    override fun visitPrimaryExpression(ctx: FunkParser.PrimaryExpressionContext): Any {
         return when {
             ctx.literal() != null -> visit(ctx.literal())
-            ctx.Identifier() != null -> Identifier(ctx.Identifier().text)
-            ctx.PLACEHOLDER() != null -> PlaceholderExpression
-            ctx.expression() != null -> visit(ctx.expression()) // Parenthesized
-            ctx.recordLiteral() != null -> visit(ctx.recordLiteral())
+            ctx.Identifier() != null -> {
+                val name = ctx.Identifier().text
+                Identifier(name)
+            }
+            ctx.PLACEHOLDER() != null -> {
+                // Pipe placeholder
+                PlaceholderExpression()
+            }
+            ctx.expression() != null -> visit(ctx.expression())
+            ctx.recordLiteral() != null -> {
+                // Check if this is a function call or record literal
+                val recordLiteral = visit(ctx.recordLiteral()) as RecordLiteral
+                if (ctx.primaryExpression() != null) {
+                    val primaryExpr = visit(ctx.primaryExpression()) as Expression
+                    
+                    // Disambiguate between function call and variant construction
+                    if (primaryExpr is Identifier && primaryExpr.name.first().isUpperCase()) {
+                        // Uppercase identifier + record = variant construction (e.g., Blue {val = 10})
+                        VariantConstruction(primaryExpr.name, recordLiteral)
+                    } else {
+                        // Lowercase identifier + record = function call (e.g., func {x = 1})
+                        FunctionCall(primaryExpr, recordLiteral)
+                    }
+                } else {
+                    recordLiteral
+                }
+            }
             ctx.blockExpression() != null -> visit(ctx.blockExpression())
             ctx.doExpression() != null -> visit(ctx.doExpression())
             ctx.lambdaExpression() != null -> visit(ctx.lambdaExpression())
@@ -336,113 +318,194 @@ private class FunkASTBuilder : FunkBaseVisitor<ASTNode>() {
         }
     }
 
-    override fun visitLambdaExpression(ctx: FunkParser.LambdaExpressionContext): ASTNode {
-        val parameters = if (ctx.recordType() != null) {
-            TypedParameters(visit(ctx.recordType()) as RecordType)
-        } else {
-            val untypedParams = visit(ctx.untypedRecordParams()) as UntypedParameters
-            untypedParams
-        }
-        val body = visit(ctx.expression()) as Expression
-        return LambdaExpression(parameters, body)
-    }
-
-
-    override fun visitUntypedRecordParams(ctx: FunkParser.UntypedRecordParamsContext): ASTNode {
-        val params = ctx.untypedParam().map { 
-            val paramNode = visit(it)
-            when (paramNode) {
-                is String -> paramNode
-                else -> (paramNode as Identifier).name
-            }
-        }
-        return UntypedParameters(params)
-    }
-
-    override fun visitUntypedParam(ctx: FunkParser.UntypedParamContext): ASTNode {
-        return Identifier(ctx.Identifier().text)
-    }
-
-    override fun visitBlockExpression(ctx: FunkParser.BlockExpressionContext): ASTNode {
-        val statements = ctx.statement().map { visit(it) as Statement }
-        val result = ctx.expression()?.let { visit(it) as Expression } 
-            ?: throw IllegalArgumentException("Block expression must have a final expression")
-        return BlockExpression(statements, result)
-    }
-
-    override fun visitDoExpression(ctx: FunkParser.DoExpressionContext): ASTNode {
-        val statements = ctx.doStatement().map { visit(it) as Statement }
-        val result = ctx.expression()?.let { visit(it) as Expression } 
-            ?: throw IllegalArgumentException("Do expression must have a final expression")
-        return DoExpression(statements, result)
-    }
-
-    override fun visitDoStatement(ctx: FunkParser.DoStatementContext): ASTNode {
+    // Literals
+    override fun visitLiteral(ctx: FunkParser.LiteralContext): Any {
         return when {
-            ctx.letBinding() != null -> visit(ctx.letBinding())
-            ctx.resumeStatement() != null -> visit(ctx.resumeStatement())
-            ctx.expressionStatement() != null -> visit(ctx.expressionStatement())
-            else -> throw IllegalArgumentException("Unknown do statement type")
+            ctx.Integer() != null -> {
+                val value = ctx.Integer().text.toLong()
+                IntLiteral(value)
+            }
+            ctx.Float() != null -> {
+                val value = ctx.Float().text.toDouble()
+                FloatLiteral(value)
+            }
+            ctx.String() != null -> {
+                val value = ctx.String().text.removeSurrounding("\"")
+                StringLiteral(value)
+            }
+            ctx.Boolean() != null -> {
+                val value = ctx.Boolean().text.toBoolean()
+                BooleanLiteral(value)
+            }
+            else -> throw IllegalArgumentException("Unknown literal: ${ctx.text}")
         }
     }
 
-    override fun visitRecordLiteral(ctx: FunkParser.RecordLiteralContext): ASTNode {
+    // Records
+    override fun visitRecordLiteral(ctx: FunkParser.RecordLiteralContext): Any {
         val entries = ctx.recordEntry().map { visit(it) as RecordEntry }
         val restField = ctx.Identifier()?.text
         return RecordLiteral(entries, restField)
     }
 
-    override fun visitRecordEntry(ctx: FunkParser.RecordEntryContext): ASTNode {
+    override fun visitRecordEntry(ctx: FunkParser.RecordEntryContext): Any {
         val name = ctx.Identifier().text
         val value = ctx.expression()?.let { visit(it) as Expression }
         return RecordEntry(name, value)
     }
 
-    override fun visitRecordType(ctx: FunkParser.RecordTypeContext): ASTNode {
-        val entries = ctx.recordTypeEntry().map { visit(it) as RecordTypeEntry }
-        val restField = ctx.Identifier()?.text
-        return RecordType(entries, restField)
+    // Lambda expressions
+    override fun visitLambdaExpression(ctx: FunkParser.LambdaExpressionContext): Any {
+        val body = visit(ctx.expression()) as Expression
+        
+        return if (ctx.recordType() != null) {
+            val recordType = visit(ctx.recordType()) as RecordTypeAnnotation
+            val parameters = TypedParameters(recordType)
+            LambdaExpression(parameters, body)
+        } else {
+            val params = ctx.untypedRecordParams().untypedParam().map { it.Identifier().text }
+            val parameters = UntypedParameters(params)
+            LambdaExpression(parameters, body)
+        }
     }
 
-    override fun visitRecordTypeEntry(ctx: FunkParser.RecordTypeEntryContext): ASTNode {
+    // Control flow
+    override fun visitBlockExpression(ctx: FunkParser.BlockExpressionContext): Any {
+        val statements = ctx.statement().map { visit(it) as Statement }
+        val result = visit(ctx.expression()) as Expression
+        return BlockExpression(statements, result)
+    }
+
+    override fun visitDoExpression(ctx: FunkParser.DoExpressionContext): Any {
+        val statements = ctx.doStatement().map { visit(it) as Statement }
+        val result = visit(ctx.expression()) as Expression
+        return DoExpression(statements, result)
+    }
+
+    override fun visitDoStatement(ctx: FunkParser.DoStatementContext): Any {
+        return when {
+            ctx.letBinding() != null -> {
+                val letBinding = visit(ctx.letBinding()) as LetBinding
+                LetStatement(letBinding.variableName, letBinding.typeAnnotation, letBinding.expression)
+            }
+            ctx.resumeStatement() != null -> visit(ctx.resumeStatement())
+            ctx.expressionStatement() != null -> visit(ctx.expressionStatement())
+            else -> throw IllegalArgumentException("Unknown do statement: ${ctx.text}")
+        }
+    }
+
+    // Patterns
+    override fun visitPattern(ctx: FunkParser.PatternContext): Any {
+        return when {
+            ctx.WILDCARD() != null -> WildcardPattern()
+            ctx.Identifier() != null && ctx.recordPattern() == null -> {
+                val identifier = ctx.Identifier().text
+                if (identifier.first().isUpperCase()) {
+                    // Uppercase identifiers are constructor patterns (e.g., Red, Blue)
+                    ConstructorPattern(identifier, null)
+                } else {
+                    // Lowercase identifiers are variable patterns (e.g., x, val)
+                    VariablePattern(identifier)
+                }
+            }
+            ctx.Identifier() != null && ctx.recordPattern() != null -> {
+                val constructor = ctx.Identifier().text
+                val recordPattern = visit(ctx.recordPattern()) as RecordPattern
+                ConstructorPattern(constructor, recordPattern)
+            }
+            ctx.recordPattern() != null -> visit(ctx.recordPattern())
+            else -> throw IllegalArgumentException("Unknown pattern: ${ctx.text}")
+        }
+    }
+
+    override fun visitRecordPattern(ctx: FunkParser.RecordPatternContext): Any {
+        val entries = ctx.recordPatternEntry().map { visit(it) as RecordPatternEntry }
+        return RecordPattern(entries)
+    }
+
+    override fun visitRecordPatternEntry(ctx: FunkParser.RecordPatternEntryContext): Any {
+        val name = ctx.Identifier().text
+        val pattern = ctx.pattern()?.let { visit(it) as Pattern }
+        return RecordPatternEntry(name, pattern)
+    }
+
+    // Type annotations
+    override fun visitTypeAnnotation(ctx: FunkParser.TypeAnnotationContext): Any {
+        return when {
+            ctx.Identifier() != null -> IdentifierTypeAnnotation(ctx.Identifier().text)
+            ctx.recordType() != null -> visit(ctx.recordType())
+            ctx.variantType() != null -> visit(ctx.variantType())
+            ctx.functionType() != null -> visit(ctx.functionType())
+            else -> throw IllegalArgumentException("Unknown type annotation: ${ctx.text}")
+        }
+    }
+
+    override fun visitRecordType(ctx: FunkParser.RecordTypeContext): Any {
+        val entries = ctx.recordTypeEntry().map { visit(it) as RecordTypeEntry }
+        val hasEllipsis = ctx.ELLIPSIS() != null
+        return RecordTypeAnnotation(entries, if (hasEllipsis) "..." else null)
+    }
+
+    override fun visitRecordTypeEntry(ctx: FunkParser.RecordTypeEntryContext): Any {
         val name = ctx.Identifier().text
         val type = visit(ctx.typeAnnotation()) as TypeAnnotation
         return RecordTypeEntry(name, type)
     }
 
-    override fun visitTypeAnnotation(ctx: FunkParser.TypeAnnotationContext): ASTNode {
-        return when {
-            ctx.Identifier() != null -> SimpleType(ctx.Identifier().text)
-            ctx.recordType() != null -> visit(ctx.recordType())
-            ctx.variantType() != null -> visit(ctx.variantType())
-            ctx.functionType() != null -> visit(ctx.functionType())
-            else -> throw IllegalArgumentException("Unknown type annotation")
-        }
-    }
 
-    override fun visitFunctionType(ctx: FunkParser.FunctionTypeContext): ASTNode {
-        val paramType = visit(ctx.recordType()) as RecordType
+    override fun visitFunctionType(ctx: FunkParser.FunctionTypeContext): Any {
+        val paramType = visit(ctx.recordType()) as TypeAnnotation
         val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
-        return FunctionType(paramType, returnType)
+        return FunctionTypeAnnotation(paramType, returnType)
     }
-
-
-    override fun visitLiteral(ctx: FunkParser.LiteralContext): ASTNode {
-        return when {
-            ctx.Integer() != null -> Literal(ctx.Integer().text.toInt())
-            ctx.Float() != null -> Literal(ctx.Float().text.toFloat())
-            ctx.String() != null -> Literal(ctx.String().text.removeSurrounding("\""))
-            ctx.Boolean() != null -> Literal(ctx.Boolean().text.toBoolean())
-            else -> throw IllegalArgumentException("Unknown literal type")
+    
+    /**
+     * Substitute placeholders (@) in an expression with the given value expression.
+     * This implements pipe operator desugaring.
+     */
+    private fun substitutePlaceholdersInExpression(expr: Expression, valueExpr: Expression): Expression {
+        return when (expr) {
+            is PlaceholderExpression -> {
+                // Replace placeholder with the piped value
+                valueExpr
+            }
+            is FunctionCall -> {
+                // Recursively substitute in function calls
+                FunctionCall(
+                    substitutePlaceholdersInExpression(expr.function, valueExpr),
+                    substitutePlaceholdersInExpression(expr.arguments, valueExpr),
+                    expr.inferredType
+                )
+            }
+            is RecordLiteral -> {
+                // Recursively substitute in record entries
+                val newEntries = expr.entries.map { entry ->
+                    RecordEntry(
+                        entry.name,
+                        entry.value?.let { substitutePlaceholdersInExpression(it, valueExpr) }
+                    )
+                }
+                RecordLiteral(newEntries, expr.restField, expr.inferredType)
+            }
+            is BinaryOperation -> {
+                // Recursively substitute in binary operations
+                BinaryOperation(
+                    substitutePlaceholdersInExpression(expr.left, valueExpr),
+                    expr.operator,
+                    substitutePlaceholdersInExpression(expr.right, valueExpr),
+                    expr.inferredType
+                )
+            }
+            is MemberAccess -> {
+                // Recursively substitute in member access
+                MemberAccess(
+                    substitutePlaceholdersInExpression(expr.receiver, valueExpr),
+                    expr.member,
+                    expr.inferredType
+                )
+            }
+            // For other expressions, return as-is (no placeholders to substitute)
+            else -> expr
         }
-    }
-
-    override fun visitResumeStatement(ctx: FunkParser.ResumeStatementContext): ASTNode {
-        val expression = visit(ctx.expression()) as Expression
-        return ResumeStatement(expression)
-    }
-
-    override fun visitExpressionStatement(ctx: FunkParser.ExpressionStatementContext): ASTNode {
-        return ExpressionStatement(visit(ctx.expression()) as Expression)
     }
 }

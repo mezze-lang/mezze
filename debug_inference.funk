@@ -1,0 +1,5 @@
+let test = {user} -> user.age
+
+let result = test {user = {name = "Alice", age = 30}}
+
+result

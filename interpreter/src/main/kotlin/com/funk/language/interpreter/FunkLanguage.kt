@@ -4,8 +4,10 @@ import com.oracle.truffle.api.CallTarget
 import com.oracle.truffle.api.TruffleLanguage
 import com.oracle.truffle.api.TruffleLanguage.Registration
 import com.oracle.truffle.api.nodes.Node
+import com.oracle.truffle.api.nodes.RootNode
+import com.oracle.truffle.api.frame.VirtualFrame
 import com.funk.language.parser.FunkParserImpl
-import com.funk.language.parser.Program
+import com.funk.language.ast.Program
 import com.funk.language.typechecker.TypeChecker
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
@@ -67,10 +69,9 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             val typeChecker = TypeChecker()
             val typedProgram = typeChecker.typeCheck(ast)
             
-            // Convert AST to Truffle nodes
-            val converter = ASTToTruffleConverter()
-            val rootNode = converter.convertProgram(typedProgram, this)
-            
+            // Create a proper Truffle execution root node
+            val interpreter = FunkInterpreter()
+            val rootNode = FunkProgramRootNode(this, typedProgram, interpreter)
             return rootNode.callTarget
         } catch (e: Exception) {
             throw FunkException("Parse error: ${e.message}", e)
@@ -82,4 +83,32 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
     // override fun isObjectOfLanguage(`object`: Any): Boolean {
     //     return `object` is FunkValue
     // }
+}
+
+/**
+ * Truffle root node for program execution using the unified AST
+ */
+class FunkProgramRootNode(
+    language: FunkLanguage,
+    private val program: Program,
+    private val interpreter: FunkInterpreter
+) : RootNode(language) {
+    
+    override fun execute(frame: VirtualFrame): Any {
+        // Execute the program using the Funk interpreter with shared AST
+        return try {
+            val result = interpreter.execute(program)
+            // Convert FunkValue to appropriate return type for Truffle
+            when (result) {
+                is FunkInt -> result.value as Any
+                is FunkFloat -> result.value as Any
+                is FunkString -> result.value as Any
+                is FunkBoolean -> result.value as Any
+                is FunkNull -> null as Any
+                else -> result.getDisplayString() as Any
+            }
+        } catch (e: Exception) {
+            throw FunkException("Execution error: ${e.message}", e)
+        }
+    }
 }

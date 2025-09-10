@@ -1,0 +1,11 @@
+# Explicit closed record type annotations
+let processPoint: { point: { x: Int, y: Int } } -> Int = {point} -> point.x + point.y
+let formatPerson: { person: { name: String, age: Int } } -> String = {person} -> person.name ++ " is " ++ intToString {val = person.age}
+
+let point1 = {x = 10, y = 20}
+let person1 = {name = "Bob", age = 25}
+
+let result1 = processPoint {point = point1}
+let result2 = formatPerson {person = person1}
+
+result1

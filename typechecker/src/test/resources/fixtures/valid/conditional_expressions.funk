@@ -1,0 +1,8 @@
+# If expressions and conditional logic
+let max = {x, y} -> if x > y then x else y
+let classify = {age} -> if age < 18 then "minor" else "adult"
+
+let result1 = max {x = 10, y = 20}
+let result2 = classify {age = 25}
+
+result1

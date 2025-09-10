@@ -1,0 +1,8 @@
+# Should fail: missing required fields
+let processUser = {user} -> user.name ++ " is " ++ user.age
+
+let user1 = {name = "Alice"}
+
+let result = processUser {user = user1}
+
+result

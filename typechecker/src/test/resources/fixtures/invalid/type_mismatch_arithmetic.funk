@@ -1,0 +1,7 @@
+# Should fail: string + int arithmetic mismatch
+let name = "Alice"
+let age = 30
+
+let result = name + age
+
+result

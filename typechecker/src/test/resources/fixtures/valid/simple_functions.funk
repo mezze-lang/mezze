@@ -1,0 +1,8 @@
+# Simple function definitions and calls
+let add = {x, y} -> x + y
+let greet = {name} -> "Hello " ++ name
+
+let result1 = add {x = 10, y = 20}
+let result2 = greet {name = "World"}
+
+result1 + 100

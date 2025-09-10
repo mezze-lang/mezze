@@ -1,0 +1,6 @@
+# Should fail: function called with wrong number of arguments
+let add = {x, y} -> x + y
+
+let result = add {x = 10}
+
+result

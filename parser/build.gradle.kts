@@ -3,6 +3,7 @@ plugins {
 }
 
 dependencies {
+    implementation(project(":ast"))
     antlr("org.antlr:antlr4:4.13.1")
     implementation("org.antlr:antlr4-runtime:4.13.1")
 

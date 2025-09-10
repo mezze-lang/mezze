@@ -102,11 +102,15 @@ expressionStatement:
 
 // Expressions
 expression:
-    pipeExpression
+    pipeOperatorExpression
     ;
 
-pipeExpression:
-    matchExpression (PIPE matchExpression)*
+pipeOperatorExpression:
+    variantExpression (PIPE variantExpression)*
+    ;
+
+variantExpression:
+    matchExpression
     ;
 
 matchExpression:
@@ -217,7 +221,7 @@ recordEntry:
     ;
 
 recordType:
-    LBRACE (recordTypeEntry (COMMA recordTypeEntry)*)? (COMMA ELLIPSIS Identifier)? RBRACE
+    LBRACE (recordTypeEntry (COMMA recordTypeEntry)*)? (COMMA ELLIPSIS)? RBRACE
     ;
 
 recordTypeEntry:

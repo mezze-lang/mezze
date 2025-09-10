@@ -1,0 +1,12 @@
+let intToString = { val: Int} -> "number"
+
+# Complex type inference with nested structures
+let calculator = {operation, x, y} -> match operation {
+  Add -> x + y
+  Multiply -> x * y
+  Divide -> if y == 0 then 0 else x / y
+}
+
+let formatResult = {calc, op, a, b} -> "Result: " ++ intToString {val = calc {operation = op, x = a, y = b} }
+
+formatResult

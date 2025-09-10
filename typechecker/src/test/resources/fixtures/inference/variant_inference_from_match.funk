@@ -1,0 +1,9 @@
+# Variant type inference from match patterns
+let processColor = {color} -> match color {
+  Red -> 25
+  Blue {val} -> val * 2
+  Yellow -> 10
+  _ -> 0
+}
+
+processColor

@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm")
+    kotlin("plugin.serialization")
     application
     id("com.github.johnrengelman.shadow") version "8.1.1"
     id("org.graalvm.buildtools.native") version "0.10.3"
@@ -21,6 +22,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":ast"))
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":interpreter"))
@@ -30,6 +32,9 @@ dependencies {
     
     // Truffle API (Language, Node, etc.) - guest language API - match native-image version
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
+    
+    // JSON serialization for enhanced AST
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
 }
 
 tasks.shadowJar {

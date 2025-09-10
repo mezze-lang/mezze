@@ -32,10 +32,7 @@ class FunkContext(
     private val builtins = ConcurrentHashMap<String, FunkValue>()
     
     
-    /**
-     * Module runtime for handling imports and exports
-     */
-    val moduleRuntime = ModuleRuntime()
+    // Module runtime removed for simplified stub implementation
     
     
     init {

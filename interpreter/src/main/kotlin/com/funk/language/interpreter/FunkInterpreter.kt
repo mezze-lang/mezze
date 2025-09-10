@@ -1,51 +1,63 @@
 package com.funk.language.interpreter
 
 import com.funk.language.parser.FunkParserImpl
-import com.funk.language.parser.Program
+import com.funk.language.ast.*
 import com.funk.language.typechecker.TypeChecker
-import com.funk.language.typechecker.TypedProgram
 import com.oracle.truffle.api.frame.FrameDescriptor
+import com.oracle.truffle.api.frame.VirtualFrame
+import com.oracle.truffle.api.nodes.RootNode
 
 /**
- * Simple direct interpreter interface that bypasses the polyglot API
- * for easier integration with the CLI.
+ * Truffle-integrated interpreter that works with the shared AST
+ * This provides proper Truffle execution while using the unified AST architecture
  */
 class FunkInterpreter {
     
-    private val parser = FunkParserImpl()
-    private val typeChecker = TypeChecker()
-    private val converter = ASTToTruffleConverter()
+    private val parser: FunkParserImpl?
+    private val typeChecker: TypeChecker?
     
-    /**
-     * Parse, typecheck, and execute a Funk program from source code
-     */
-    fun execute(source: String): FunkValue {
-        try {
-            // Parse the source code
-            val ast = parser.parse(source)
-            
-            // Type check the program
-            val typedProgram = typeChecker.typeCheck(ast)
-            
-            // Convert to Truffle nodes and execute
-            return executeProgram(typedProgram)
-            
-        } catch (e: Exception) {
-            throw FunkException("Execution error: ${e.message}", e)
+    // Constructor for full parsing/typechecking (used by funk exec)
+    constructor() {
+        parser = FunkParserImpl()
+        typeChecker = TypeChecker()
+    }
+    
+    // Constructor for pre-processed AST (used by compiled JARs)
+    constructor(skipParserSetup: Boolean) {
+        if (skipParserSetup) {
+            parser = null
+            typeChecker = null
+        } else {
+            parser = FunkParserImpl()
+            typeChecker = TypeChecker()
         }
     }
     
     /**
-     * Execute a typed program
+     * Parse, typecheck, and execute a Funk program from source code
      */
-    private fun executeProgram(program: TypedProgram): FunkValue {
-        // For now, we'll create a simple execution context
-        // In a full implementation, this would use proper Truffle frames
-        
-        val context = FunkContext(
-            FunkLanguage(), // We'll need to create a dummy language instance
-            null // Dummy environment for now
-        )
+    fun run(source: String): FunkValue {
+        require(parser != null && typeChecker != null) { 
+            "Parser and typechecker not available. Use constructor without skipParserSetup for source code execution." 
+        }
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program)
+        return execute(typedProgram)
+    }
+    
+    /**
+     * Execute a pre-parsed and typechecked program directly
+     */
+    fun execute(program: Program): FunkValue {
+        return executeProgram(program)
+    }
+    
+    /**
+     * Execute a program (enhanced with type information)
+     */
+    private fun executeProgram(program: Program): FunkValue {
+        // Simple execution context
+        val context = mutableMapOf<String, FunkValue>()
         
         // Execute each item in the program
         var lastResult: FunkValue = FunkNull
@@ -60,24 +72,28 @@ class FunkInterpreter {
     /**
      * Execute a single program item
      */
-    private fun executeItem(item: com.funk.language.typechecker.TypedItem, context: FunkContext): FunkValue {
+    private fun executeItem(item: ProgramItem, context: MutableMap<String, FunkValue>): FunkValue {
         return when (item) {
-            is com.funk.language.typechecker.TypedLetBinding -> {
-                // For now, we'll just evaluate the expression and store it in context
-                val value = evaluateExpression(item.expression.expression, context)
-                context.defineGlobal(item.variableName, value)
+            is LetBinding -> {
+                // Evaluate the expression and store it in context
+                val value = evaluateExpression(item.expression, context)
+                context[item.variableName] = value
                 value
             }
-            is com.funk.language.typechecker.TypedTypeDeclaration -> {
+            is TypeDeclaration -> {
                 // Type declarations don't produce runtime values
                 FunkNull
             }
-            is com.funk.language.typechecker.TypedModuleDeclaration -> {
+            is ModuleDeclaration -> {
                 // Module declarations don't produce runtime values
                 FunkNull
             }
+            is TopLevelExpression -> {
+                // Top-level expressions are evaluated and their result is returned
+                evaluateExpression(item.expression, context)
+            }
             else -> {
-                throw FunkException.runtimeError("Unsupported program item: ${item::class.simpleName}")
+                throw RuntimeException("Unsupported program item: ${item::class.simpleName}")
             }
         }
     }
@@ -85,141 +101,199 @@ class FunkInterpreter {
     /**
      * Evaluate an expression (simplified version)
      */
-    fun evaluateExpression(expr: com.funk.language.parser.Expression, context: FunkContext): FunkValue {
+    private fun evaluateExpression(expr: Expression, context: MutableMap<String, FunkValue>): FunkValue {
         return when (expr) {
-            is com.funk.language.parser.Literal<*> -> {
-                when (val value = expr.value) {
-                    is Int -> FunkInt(value.toLong())
-                    is Long -> FunkInt(value)
-                    is Float -> FunkFloat(value.toDouble())
-                    is Double -> FunkFloat(value)
-                    is String -> FunkString(value)
-                    is Boolean -> FunkBoolean(value)
-                    null -> FunkNull
-                    else -> throw FunkException.runtimeError("Unsupported literal type: ${value::class.simpleName}")
-                }
-            }
-            is com.funk.language.parser.Identifier -> {
-                context.lookupGlobal(expr.name) ?: run {
+            is IntLiteral -> FunkInt(expr.value)
+            is FloatLiteral -> FunkFloat(expr.value)
+            is StringLiteral -> FunkString(expr.value)
+            is BooleanLiteral -> FunkBoolean(expr.value)
+            is Identifier -> {
+                context[expr.name] ?: run {
                     // If it's an uppercase identifier, treat it as a variant constructor
                     if (expr.name.first().isUpperCase()) {
                         FunkVariant(expr.name, null) // Simple constructor with no data
                     } else {
-                        throw FunkException.unboundVariable(expr.name)
+                        throw RuntimeException("Undefined variable: ${expr.name}")
                     }
                 }
             }
-            is com.funk.language.parser.BinaryOperation -> {
+            is BinaryOperation -> {
                 val left = evaluateExpression(expr.left, context)
                 val right = evaluateExpression(expr.right, context)
                 evaluateBinaryOperation(left, expr.operator, right)
             }
-            is com.funk.language.parser.RecordLiteral -> {
-                val fields = expr.entries.associate { entry ->
-                    entry.name to (entry.value?.let { evaluateExpression(it, context) } 
-                        ?: context.lookupGlobal(entry.name) 
-                        ?: throw FunkException.unboundVariable(entry.name))
+            is RecordLiteral -> {
+                val fields = expr.entries.associate { (name, fieldExpr) ->
+                    name to (fieldExpr?.let { evaluateExpression(it, context) } ?: FunkNull)
                 }
                 FunkRecord(fields)
             }
-            is com.funk.language.parser.MemberAccess -> {
-                // Check if this is an ability method call (e.g., Encoder.encode)
-                val receiver = expr.receiver
-                if (receiver is com.funk.language.parser.Identifier) {
-                    val receiverName = receiver.name
-                    
-                }
-                
-                // Otherwise, treat as regular member access
+            is MemberAccess -> {
                 val record = evaluateExpression(expr.receiver, context)
-                if (record is FunkRecord) {
-                    record.readMember(expr.member)
-                } else {
-                    throw FunkException.typeError("Cannot access member '${expr.member}' on ${record::class.simpleName}")
+                when (record) {
+                    is FunkRecord -> record.fields[expr.member] 
+                        ?: throw RuntimeException("Field '${expr.member}' not found in record")
+                    else -> throw RuntimeException("Cannot access member '${expr.member}' on non-record value")
                 }
             }
-            is com.funk.language.parser.VariantConstruction -> {
-                val value = expr.value?.let { evaluateExpression(it, context) }
-                FunkVariant(expr.constructor, value)
+            is VariantConstruction -> {
+                val data = expr.value?.let { evaluateExpression(it, context) }
+                FunkVariant(expr.constructor, data)
             }
-            is com.funk.language.parser.IfExpression -> {
+            is IfExpression -> {
                 val condition = evaluateExpression(expr.condition, context)
-                if (condition is FunkBoolean) {
-                    if (condition.value) {
-                        evaluateExpression(expr.thenBranch, context)
-                    } else {
-                        evaluateExpression(expr.elseBranch, context)
-                    }
+                if (isTruthy(condition)) {
+                    evaluateExpression(expr.thenBranch, context)
                 } else {
-                    throw FunkException.typeError("If condition must be boolean, got ${condition::class.simpleName}")
+                    evaluateExpression(expr.elseBranch, context)
                 }
             }
-            is com.funk.language.parser.RecordUpdate -> {
-                val originalRecord = evaluateExpression(expr.record, context)
-                if (originalRecord is FunkRecord) {
-                    val updatedFields = expr.updates.associate { update ->
-                        update.name to (update.value?.let { evaluateExpression(it, context) }
-                            ?: context.lookupGlobal(update.name)
-                            ?: throw FunkException.unboundVariable(update.name))
-                    }
-                    // Create new record with updated fields (immutable update)
-                    val newFields = originalRecord.fields.toMutableMap()
-                    newFields.putAll(updatedFields)
-                    FunkRecord(newFields)
-                } else {
-                    throw FunkException.typeError("Cannot update non-record value: ${originalRecord::class.simpleName}")
-                }
-            }
-            is com.funk.language.parser.LambdaExpression -> {
-                FunkFunction(expr.parameters, expr.body, context.captureEnvironment())
-            }
-            is com.funk.language.parser.FunctionCall -> {
+            is FunctionCall -> {
                 val function = evaluateExpression(expr.function, context)
-                val arguments = evaluateExpression(expr.arguments, context)
+                val argumentsValue = evaluateExpression(expr.arguments, context)
                 
-                if (function is FunkFunction) {
-                    callFunction(function, arguments, context)
+                // Handle record arguments for partial application
+                if (argumentsValue is FunkRecord) {
+                    callFunctionWithRecord(function, argumentsValue, context)
                 } else {
-                    throw FunkException.typeError("Cannot call non-function value: ${function::class.simpleName}")
+                    // Otherwise treat as single argument (legacy)
+                    val args = listOf(argumentsValue)
+                    callFunction(function, args, context)
                 }
             }
-            is com.funk.language.parser.MatchExpression -> {
+            is LambdaExpression -> {
+                val paramNames = when (val params = expr.parameters) {
+                    is UntypedParameters -> params.names
+                    is TypedParameters -> {
+                        // Extract parameter names from the typed parameters
+                        params.recordType.entries.map { it.name }
+                    }
+                }
+                SimpleFunkFunction(paramNames, expr.body, context.toMap()) // Capture current context
+            }
+            is DoExpression -> {
+                var result: FunkValue = FunkNull
+                for (stmt in expr.statements) {
+                    result = executeStatement(stmt, context)
+                }
+                evaluateExpression(expr.result, context)
+            }
+            is BlockExpression -> {
+                var result: FunkValue = FunkNull
+                for (stmt in expr.statements) {
+                    result = executeStatement(stmt, context)
+                }
+                evaluateExpression(expr.result, context)
+            }
+            // PipeExpression and PlaceholderExpression removed - desugared during parsing
+            is MatchExpression -> {
                 val value = evaluateExpression(expr.expression, context)
                 evaluateMatchExpression(value, expr.cases, context)
             }
-            is com.funk.language.parser.BlockExpression -> {
-                val blockContext = context.createChildContext()
-                
-                // Execute all statements
-                for (statement in expr.statements) {
-                    executeStatement(statement, blockContext)
-                }
-                
-                // Return the result expression
-                evaluateExpression(expr.result, blockContext)
+            else -> {
+                throw RuntimeException("Unsupported expression: ${expr::class.simpleName}")
             }
-            is com.funk.language.parser.DoExpression -> {
-                // Do expressions are similar to block expressions but with effect handling
-                val doContext = context.createChildContext()
-                
-                // Execute all statements
-                for (statement in expr.statements) {
-                    executeStatement(statement, doContext)
-                }
-                
-                // Return the result expression
-                evaluateExpression(expr.result, doContext)
+        }
+    }
+    
+    // substitutePlaceholders method removed - pipe operator now desugared during parsing
+
+    /**
+     * Evaluate a match expression with pattern matching
+     */
+    private fun evaluateMatchExpression(value: FunkValue, cases: List<MatchCase>, context: MutableMap<String, FunkValue>): FunkValue {
+        for (case in cases) {
+            val patternContext = mutableMapOf<String, FunkValue>()
+            if (matchesPattern(value, case.pattern, patternContext)) {
+                // Create new context with pattern bindings
+                val newContext = context.toMutableMap()
+                newContext.putAll(patternContext)
+                return evaluateExpression(case.expression, newContext)
             }
-            is com.funk.language.parser.PipeExpression -> {
-                // Evaluate left side first
-                val leftValue = evaluateExpression(expr.left, context)
-                
-                // Replace placeholder in right side with left value
-                val rightWithPlaceholder = replacePlaceholder(expr.right, leftValue, context)
-                evaluateExpression(rightWithPlaceholder, context)
+        }
+        throw RuntimeException("No matching pattern found for value: $value")
+    }
+    
+    /**
+     * Check if a value matches a pattern and extract bindings
+     */
+    private fun matchesPattern(value: FunkValue, pattern: Pattern, bindings: MutableMap<String, FunkValue>): Boolean {
+        return when (pattern) {
+            is ConstructorPattern -> {
+                if (value is FunkVariant) {
+                    if (value.constructor == pattern.constructor) {
+                        // If pattern has record data, match it
+                        val recordPattern = pattern.recordPattern
+                        if (recordPattern != null) {
+                            val valueData = value.value
+                            if (valueData != null) {
+                                matchesPattern(valueData, recordPattern, bindings)
+                            } else {
+                                false
+                            }
+                        } else {
+                            // No record pattern means no data expected
+                            value.value == null
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            is RecordPattern -> {
+                if (value is FunkRecord) {
+                    // Match all fields in the pattern
+                    pattern.entries.all { entry ->
+                        val fieldValue = value.fields[entry.name]
+                        if (fieldValue != null) {
+                            val entryPattern = entry.pattern
+                            if (entryPattern != null) {
+                                matchesPattern(fieldValue, entryPattern, bindings)
+                            } else {
+                                // Shorthand pattern {x} binds the field value to variable x
+                                bindings[entry.name] = fieldValue
+                                true
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                } else {
+                    false
+                }
+            }
+            is VariablePattern -> {
+                // Bind the value to the variable
+                bindings[pattern.name] = value
+                true
+            }
+            is WildcardPattern -> {
+                // Wildcard matches anything
+                true
             }
             else -> {
-                throw FunkException.runtimeError("Expression evaluation not yet implemented for: ${expr::class.simpleName}")
+                throw RuntimeException("Unsupported pattern: ${pattern::class.simpleName}")
+            }
+        }
+    }
+
+    /**
+     * Execute a statement
+     */
+    private fun executeStatement(stmt: Statement, context: MutableMap<String, FunkValue>): FunkValue {
+        return when (stmt) {
+            is LetStatement -> {
+                val value = evaluateExpression(stmt.expression, context)
+                context[stmt.variableName] = value
+                value
+            }
+            is ExpressionStatement -> {
+                evaluateExpression(stmt.expression, context)
+            }
+            else -> {
+                throw RuntimeException("Unsupported statement: ${stmt::class.simpleName}")
             }
         }
     }
@@ -233,339 +307,120 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value + right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value + right.value)
                 left is FunkString && right is FunkString -> FunkString(left.value + right.value)
-                else -> throw FunkException.typeError("Cannot add ${left::class.simpleName} and ${right::class.simpleName}")
+                else -> throw RuntimeException("Cannot add ${left::class.simpleName} and ${right::class.simpleName}")
             }
             "-" -> when {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value - right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value - right.value)
-                else -> throw FunkException.typeError("Cannot subtract ${right::class.simpleName} from ${left::class.simpleName}")
+                else -> throw RuntimeException("Cannot subtract ${right::class.simpleName} from ${left::class.simpleName}")
             }
             "*" -> when {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value * right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value * right.value)
-                else -> throw FunkException.typeError("Cannot multiply ${left::class.simpleName} and ${right::class.simpleName}")
+                else -> throw RuntimeException("Cannot multiply ${left::class.simpleName} and ${right::class.simpleName}")
             }
             "/" -> when {
-                left is FunkInt && right is FunkInt -> {
-                    if (right.value == 0L) throw FunkException.runtimeError("Division by zero")
-                    FunkInt(left.value / right.value)
-                }
+                left is FunkInt && right is FunkInt -> FunkInt(left.value / right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value / right.value)
-                else -> throw FunkException.typeError("Cannot divide ${left::class.simpleName} by ${right::class.simpleName}")
+                else -> throw RuntimeException("Cannot divide ${left::class.simpleName} by ${right::class.simpleName}")
             }
-            "++" -> when {
-                left is FunkString && right is FunkString -> FunkString(left.value + right.value)
-                else -> throw FunkException.typeError("Cannot concatenate ${left::class.simpleName} and ${right::class.simpleName}")
-            }
-            "==" -> FunkBoolean(valuesEqual(left, right))
-            "!=" -> FunkBoolean(!valuesEqual(left, right))
+            "==" -> FunkBoolean(left == right)
+            "!=" -> FunkBoolean(left != right)
             "<" -> when {
                 left is FunkInt && right is FunkInt -> FunkBoolean(left.value < right.value)
                 left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value < right.value)
-                left is FunkString && right is FunkString -> FunkBoolean(left.value < right.value)
-                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+                else -> throw RuntimeException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
             ">" -> when {
                 left is FunkInt && right is FunkInt -> FunkBoolean(left.value > right.value)
                 left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value > right.value)
-                left is FunkString && right is FunkString -> FunkBoolean(left.value > right.value)
-                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+                else -> throw RuntimeException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
-            "<=" -> when {
-                left is FunkInt && right is FunkInt -> FunkBoolean(left.value <= right.value)
-                left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value <= right.value)
-                left is FunkString && right is FunkString -> FunkBoolean(left.value <= right.value)
-                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
-            }
-            ">=" -> when {
-                left is FunkInt && right is FunkInt -> FunkBoolean(left.value >= right.value)
-                left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value >= right.value)
-                left is FunkString && right is FunkString -> FunkBoolean(left.value >= right.value)
-                else -> throw FunkException.typeError("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
-            }
-            "&&" -> {
-                val leftBool = left as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for &&")
-                if (!leftBool.value) FunkBoolean(false) else {
-                    val rightBool = right as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for &&")
-                    FunkBoolean(rightBool.value)
-                }
-            }
-            "||" -> {
-                val leftBool = left as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for ||")
-                if (leftBool.value) FunkBoolean(true) else {
-                    val rightBool = right as? FunkBoolean ?: throw FunkException.typeError("Expected boolean for ||")
-                    FunkBoolean(rightBool.value)
-                }
-            }
-            else -> throw FunkException.runtimeError("Unsupported binary operator: $operator")
-        }
-    }
-    
-    private fun valuesEqual(left: FunkValue, right: FunkValue): Boolean {
-        return when {
-            left is FunkNull && right is FunkNull -> true
-            left is FunkInt && right is FunkInt -> left.value == right.value
-            left is FunkFloat && right is FunkFloat -> left.value == right.value
-            left is FunkString && right is FunkString -> left.value == right.value
-            left is FunkBoolean && right is FunkBoolean -> left.value == right.value
-            left is FunkRecord && right is FunkRecord -> recordsEqual(left, right)
-            left is FunkVariant && right is FunkVariant -> variantsEqual(left, right)
-            else -> false
-        }
-    }
-    
-    private fun recordsEqual(left: FunkRecord, right: FunkRecord): Boolean {
-        if (left.fields.keys != right.fields.keys) return false
-        return left.fields.all { (key, value) ->
-            val rightValue = right.fields[key] ?: return false
-            valuesEqual(value, rightValue)
-        }
-    }
-    
-    private fun variantsEqual(left: FunkVariant, right: FunkVariant): Boolean {
-        if (left.constructor != right.constructor) return false
-        return when {
-            left.value == null && right.value == null -> true
-            left.value != null && right.value != null -> valuesEqual(left.value, right.value)
-            else -> false
+            "&&" -> FunkBoolean(isTruthy(left) && isTruthy(right))
+            "||" -> FunkBoolean(isTruthy(left) || isTruthy(right))
+            else -> throw RuntimeException("Unknown binary operator: $operator")
         }
     }
     
     /**
      * Call a function with arguments
      */
-    private fun callFunction(function: FunkFunction, arguments: FunkValue, context: FunkContext): FunkValue {
-        // Create a new context for function execution with captured environment
-        val functionContext = context.createChildContext()
-        
-        // Add captured environment to function context
-        function.capturedEnvironment.forEach { (name, value) ->
-            functionContext.defineLocal(name, value)
-        }
-        
-        // Bind parameters
-        when (val params = function.parameters) {
-            is com.funk.language.parser.TypedParameters -> {
-                // For typed parameters, we expect a record argument
-                if (arguments is FunkRecord) {
-                    bindRecordParameters(params.recordType, arguments, functionContext)
+    /**
+     * Call a function with record arguments, supporting partial application
+     */
+    private fun callFunctionWithRecord(function: FunkValue, arguments: FunkRecord, context: MutableMap<String, FunkValue>): FunkValue {
+        return when (function) {
+            is SimpleFunkFunction -> {
+                val providedParams = arguments.fields.keys
+                val requiredParams = function.parameters.toSet()
+                val missingParams = requiredParams - providedParams
+                
+                if (missingParams.isEmpty()) {
+                    // All parameters provided - execute function
+                    val newContext = function.closure.toMutableMap()
+                    // Bind all parameters
+                    for (param in function.parameters) {
+                        newContext[param] = arguments.fields[param] ?: FunkNull
+                    }
+                    evaluateExpression(function.body, newContext)
                 } else {
-                    throw FunkException.typeError("Expected record argument for typed function parameters")
-                }
-            }
-            is com.funk.language.parser.UntypedParameters -> {
-                // For untyped parameters, we expect a record argument
-                if (arguments is FunkRecord) {
-                    bindUntypedParameters(params.names, arguments, functionContext)
-                } else {
-                    throw FunkException.typeError("Expected record argument for untyped function parameters")
-                }
-            }
-        }
-        
-        // Execute function body
-        return evaluateExpression(function.body, functionContext)
-    }
-    
-    private fun bindRecordParameters(recordType: com.funk.language.parser.RecordType, arguments: FunkRecord, context: FunkContext) {
-        for (entry in recordType.entries) {
-            val value = arguments.fields[entry.name] 
-                ?: throw FunkException.runtimeError("Missing argument: ${entry.name}")
-            context.defineLocal(entry.name, value)
-        }
-    }
-    
-    private fun bindUntypedParameters(paramNames: List<String>, arguments: FunkRecord, context: FunkContext) {
-        for (paramName in paramNames) {
-            val value = arguments.fields[paramName]
-                ?: throw FunkException.runtimeError("Missing argument: $paramName")
-            context.defineLocal(paramName, value)
-        }
-    }
-    
-    /**
-     * Evaluate match expression
-     */
-    private fun evaluateMatchExpression(value: FunkValue, cases: List<com.funk.language.parser.MatchCase>, context: FunkContext): FunkValue {
-        for (case in cases) {
-            val matchContext = context.createChildContext()
-            if (matchesPattern(value, case.pattern, matchContext)) {
-                return evaluateExpression(case.expression, matchContext)
-            }
-        }
-        throw FunkException.runtimeError("No pattern matched the value: ${value.getDisplayString()}")
-    }
-    
-    /**
-     * Check if value matches pattern and bind variables
-     */
-    private fun matchesPattern(value: FunkValue, pattern: com.funk.language.parser.Pattern, context: FunkContext): Boolean {
-        return when (pattern) {
-            is com.funk.language.parser.WildcardPattern -> true
-            is com.funk.language.parser.VariablePattern -> {
-                context.defineLocal(pattern.name, value)
-                true
-            }
-            is com.funk.language.parser.ConstructorPattern -> {
-                if (value is FunkVariant && value.constructor == pattern.constructor) {
-                    pattern.recordPattern?.let { recordPattern ->
-                        value.value?.let { variantValue ->
-                            if (variantValue is FunkRecord) {
-                                matchesRecordPattern(variantValue, recordPattern, context)
-                            } else false
-                        } ?: false
-                    } ?: (value.value == null)
-                } else false
-            }
-            is com.funk.language.parser.RecordPattern -> {
-                if (value is FunkRecord) {
-                    matchesRecordPattern(value, pattern, context)
-                } else false
-            }
-        }
-    }
-    
-    private fun matchesRecordPattern(record: FunkRecord, pattern: com.funk.language.parser.RecordPattern, context: FunkContext): Boolean {
-        return pattern.entries.all { entry ->
-            val fieldValue = record.fields[entry.name] ?: return false
-            entry.pattern?.let { fieldPattern ->
-                matchesPattern(fieldValue, fieldPattern, context)
-            } ?: run {
-                // No pattern means bind the field value to the field name
-                context.defineLocal(entry.name, fieldValue)
-                true
-            }
-        }
-    }
-    
-    /**
-     * Execute a statement
-     */
-    private fun executeStatement(statement: com.funk.language.parser.Statement, context: FunkContext): FunkValue {
-        return when (statement) {
-            is com.funk.language.parser.LetBinding -> {
-                val value = evaluateExpression(statement.expression, context)
-                context.defineLocal(statement.variableName, value)
-                value
-            }
-            is com.funk.language.parser.ExpressionStatement -> {
-                evaluateExpression(statement.expression, context)
-            }
-            is com.funk.language.parser.ResumeStatement -> {
-                // For now, just evaluate the expression (proper effect handling would be more complex)
-                evaluateExpression(statement.expression, context)
-            }
-            else -> {
-                throw FunkException.runtimeError("Unsupported statement type: ${statement::class.simpleName}")
-            }
-        }
-    }
-    
-    /**
-* Replace placeholder with value in pipe expressions
-     */
-    private fun replacePlaceholder(expr: com.funk.language.parser.Expression, value: FunkValue, context: FunkContext): com.funk.language.parser.Expression {
-        return when (expr) {
-            is com.funk.language.parser.PlaceholderExpression -> {
-                // Create a temporary identifier for the value
-                val tempName = "_pipe_${System.nanoTime()}"
-                context.defineLocal(tempName, value)
-                com.funk.language.parser.Identifier(tempName)
-            }
-            is com.funk.language.parser.FunctionCall -> {
-                // Replace placeholder in function and arguments
-                val newFunction = replacePlaceholder(expr.function, value, context)
-                val newArgs = replacePlaceholder(expr.arguments, value, context)
-                com.funk.language.parser.FunctionCall(newFunction, newArgs)
-            }
-            is com.funk.language.parser.RecordLiteral -> {
-                val newEntries = expr.entries.map { entry ->
-                    com.funk.language.parser.RecordEntry(
-                        entry.name,
-                        entry.value?.let { replacePlaceholder(it, value, context) }
+                    // Partial application - create partial function
+                    FunkPartialFunction(
+                        function,
+                        arguments.fields,
+                        missingParams.toList()
                     )
                 }
-                com.funk.language.parser.RecordLiteral(newEntries, expr.restField)
             }
-            is com.funk.language.parser.BinaryOperation -> {
-                val newLeft = replacePlaceholder(expr.left, value, context)
-                val newRight = replacePlaceholder(expr.right, value, context)
-                com.funk.language.parser.BinaryOperation(newLeft, expr.operator, newRight)
+            is FunkPartialFunction -> {
+                // Calling a partial function - combine arguments
+                val combinedArgs = function.providedArguments + arguments.fields
+                val newRecord = FunkRecord(combinedArgs)
+                callFunctionWithRecord(function.originalFunction, newRecord, context)
             }
-            is com.funk.language.parser.IfExpression -> {
-                val newCondition = replacePlaceholder(expr.condition, value, context)
-                val newThen = replacePlaceholder(expr.thenBranch, value, context)
-                val newElse = replacePlaceholder(expr.elseBranch, value, context)
-                com.funk.language.parser.IfExpression(newCondition, newThen, newElse)
-            }
-            is com.funk.language.parser.LambdaExpression -> {
-                val newBody = replacePlaceholder(expr.body, value, context)
-                com.funk.language.parser.LambdaExpression(expr.parameters, newBody)
-            }
-            is com.funk.language.parser.MemberAccess -> {
-                val newReceiver = replacePlaceholder(expr.receiver, value, context)
-                com.funk.language.parser.MemberAccess(newReceiver, expr.member)
-            }
-            is com.funk.language.parser.RecordUpdate -> {
-                val newRecord = replacePlaceholder(expr.record, value, context)
-                val newUpdates = expr.updates.map { entry ->
-                    com.funk.language.parser.RecordEntry(
-                        entry.name,
-                        entry.value?.let { replacePlaceholder(it, value, context) }
-                    )
-                }
-                com.funk.language.parser.RecordUpdate(newRecord, newUpdates)
-            }
-            is com.funk.language.parser.VariantConstruction -> {
-                val newValue = expr.value?.let { replacePlaceholder(it, value, context) }
-                com.funk.language.parser.VariantConstruction(expr.constructor, newValue)
-            }
-            is com.funk.language.parser.MatchExpression -> {
-                val newExpression = replacePlaceholder(expr.expression, value, context)
-                val newCases = expr.cases.map { case ->
-                    com.funk.language.parser.MatchCase(
-                        case.pattern,
-                        replacePlaceholder(case.expression, value, context)
-                    )
-                }
-                com.funk.language.parser.MatchExpression(newExpression, newCases)
-            }
-            is com.funk.language.parser.DoExpression -> {
-                val newStatements = expr.statements.map { stmt ->
-                    when (stmt) {
-                        is com.funk.language.parser.LetBinding -> com.funk.language.parser.LetBinding(
-                            stmt.variableName,
-                            stmt.typeAnnotation,
-                            replacePlaceholder(stmt.expression, value, context)
-                        )
-                        is com.funk.language.parser.ExpressionStatement -> com.funk.language.parser.ExpressionStatement(
-                            replacePlaceholder(stmt.expression, value, context)
-                        )
-                        else -> stmt
+            else -> throw RuntimeException("Cannot call non-function value: ${function::class.simpleName}")
+        }
+    }
+
+    private fun callFunction(function: FunkValue, args: List<FunkValue>, context: MutableMap<String, FunkValue>): FunkValue {
+        return when (function) {
+            is SimpleFunkFunction -> {
+                // Create new context with captured closure and parameters
+                val newContext = function.closure.toMutableMap()
+                
+                // Bind parameters (simplified - assume list of parameter names)
+                function.parameters.forEachIndexed { index, param ->
+                    if (index < args.size) {
+                        newContext[param] = args[index]
                     }
                 }
-                val newResult = replacePlaceholder(expr.result, value, context)
-                com.funk.language.parser.DoExpression(newStatements, newResult)
+                
+                evaluateExpression(function.body, newContext)
             }
-            is com.funk.language.parser.BlockExpression -> {
-                val newStatements = expr.statements.map { stmt ->
-                    when (stmt) {
-                        is com.funk.language.parser.LetBinding -> com.funk.language.parser.LetBinding(
-                            stmt.variableName,
-                            stmt.typeAnnotation,
-                            replacePlaceholder(stmt.expression, value, context)
-                        )
-                        is com.funk.language.parser.ExpressionStatement -> com.funk.language.parser.ExpressionStatement(
-                            replacePlaceholder(stmt.expression, value, context)
-                        )
-                        else -> stmt
-                    }
-                }
-                val newResult = replacePlaceholder(expr.result, value, context)
-                com.funk.language.parser.BlockExpression(newStatements, newResult)
-            }
-            // For all other expressions (literals, identifiers, etc.), return as-is
-            else -> expr
+            else -> throw RuntimeException("Cannot call non-function value: ${function::class.simpleName}")
         }
     }
+    
+    /**
+     * Check if a value is truthy
+     */
+    private fun isTruthy(value: FunkValue): Boolean {
+        return when (value) {
+            is FunkBoolean -> value.value
+            is FunkNull -> false
+            else -> true
+        }
+    }
+}
+
+/**
+ * Simplified function value for the stub interpreter
+ */
+data class SimpleFunkFunction(
+    val parameters: List<String>,
+    val body: Expression,
+    val closure: Map<String, FunkValue>,
+    val name: String? = null
+) : FunkValue() {
+    override fun getDisplayString(): String = name ?: "<function>"
 }

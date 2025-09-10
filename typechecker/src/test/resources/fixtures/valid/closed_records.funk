@@ -1,0 +1,12 @@
+# Closed record types (exact field matching)
+let intToString = { val: Int} -> "number"
+
+let processUser = {user} -> user.name ++ " is " ++ intToString {val = user.age}
+
+let user1 = {name = "Alice", age = 30}
+let user2 = {name = "Bob", age = 25}
+
+let result1 = processUser {user = user1}
+let result2 = processUser {user = user2}
+
+result1

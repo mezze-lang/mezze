@@ -16,6 +16,7 @@ kotlin {
 
 dependencies {
     // Core project dependencies
+    implementation(project(":ast"))
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     
