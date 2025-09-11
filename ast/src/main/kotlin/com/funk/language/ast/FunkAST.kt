@@ -65,12 +65,6 @@ sealed interface FunkType {
         val returnType: FunkType
     ) : FunkType
     
-    // Higher-kinded types
-    @Serializable
-    data class TypeConstructor(
-        val name: String,
-        val args: List<FunkType>
-    ) : FunkType
 }
 
 @Serializable
@@ -189,54 +183,6 @@ data class TopLevelExpression(
 ) : ProgramItem
 
 
-// Module System
-@Serializable
-data class ModuleDeclaration(
-    val name: String,
-    val statements: List<ModuleStatement>
-) : ProgramItem
-
-@Serializable
-@JsonClassDiscriminator("moduleStmtKind")
-sealed interface ModuleStatement
-
-@Serializable
-data class ExposeDeclaration(
-    val items: List<ExposeItem>
-) : ModuleStatement
-
-@Serializable
-data class ExposeItem(
-    val kind: ExposeKind?,
-    val name: String
-)
-
-@Serializable
-enum class ExposeKind { TYPE }
-
-@Serializable
-data class AccessDeclaration(
-    val moduleName: String,
-    val items: List<AccessItem>
-) : ModuleStatement
-
-@Serializable
-data class AccessItem(
-    val name: String,
-    val alias: String?
-)
-
-@Serializable
-data class ModDeclaration(
-    val moduleName: String
-) : ProgramItem, ModuleStatement
-
-@Serializable
-data class AccessModuleDeclaration(
-    val modulePath: List<String>,
-    val alias: String?,
-    val isExposed: Boolean = false
-) : ProgramItem, ModuleStatement
 
 @Serializable
 @JsonClassDiscriminator("typeDefKind")
@@ -252,10 +198,6 @@ data class VariantDefinition(
     val constructors: List<VariantConstructorDef>
 ) : TypeDefinition
 
-@Serializable
-data class AliasDefinition(
-    val aliasedType: TypeAnnotation
-) : TypeDefinition
 
 @Serializable
 data class RecordFieldDef(
@@ -371,13 +313,6 @@ data class LambdaExpression(
     override val inferredType: FunkType? = null
 ) : Expression
 
-@Serializable
-data class PartiallyAppliedFunction(
-    val originalFunction: Expression,
-    val providedArguments: RecordLiteral,
-    val remainingParameters: Map<String, FunkType>,
-    override val inferredType: FunkType? = null
-) : Expression
 
 @Serializable
 @JsonClassDiscriminator("paramKind")

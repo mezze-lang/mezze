@@ -54,7 +54,7 @@ fun main(args: Array<String>) {
                 kotlin.system.exitProcess(1)
             }
         }
-    } catch (e: StructuredTypeError) {
+    } catch (e: TypeCheckError) {
         println("❌ Type Error:")
         println(ErrorPrettyPrinter.prettyPrint(e))
         kotlin.system.exitProcess(1)
@@ -285,7 +285,7 @@ private fun handleCheckCommand(args: List<String>) {
                 }
             }
         }
-    } catch (e: StructuredTypeError) {
+    } catch (e: TypeCheckError) {
         // For demonstration, show both simple and detailed error formats
         println(ErrorPrettyPrinter.prettyPrint(e))
         
@@ -330,15 +330,6 @@ private fun prettyPrintItem(item: ProgramItem): String {
         }
         is TypeDeclaration -> {
             "type ${item.name} = ${item.definition}"
-        }
-        is ModuleDeclaration -> {
-            "module ${item.name} { ... }"
-        }
-        is ExposeDeclaration -> {
-            "expose { ... }"
-        }
-        is AccessDeclaration -> {
-            "access ${item.moduleName}"
         }
         else -> item.toString()
     }
@@ -430,7 +421,7 @@ private fun handleExecCommand(args: List<String>) {
             engine.close()
         }
         
-    } catch (e: StructuredTypeError) {
+    } catch (e: TypeCheckError) {
         println("❌ Type Error:")
         println(ErrorPrettyPrinter.prettyPrint(e))
         kotlin.system.exitProcess(1)
@@ -504,7 +495,7 @@ private fun handleCompileCommand(args: List<String>) {
         println("🚀 Run: java -jar ${outputFile.name}")
         println("   (Pre-compiled AST, smaller size, faster startup)")
         
-    } catch (e: StructuredTypeError) {
+    } catch (e: TypeCheckError) {
         println("❌ Type Error:")
         println(ErrorPrettyPrinter.prettyPrint(e))
         kotlin.system.exitProcess(1)

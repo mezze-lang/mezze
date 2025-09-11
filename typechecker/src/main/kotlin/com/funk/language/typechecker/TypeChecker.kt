@@ -653,10 +653,6 @@ class TypeChecker {
                 }
             }
             // PipeExpression and PlaceholderExpression removed - desugared during parsing
-            is PartiallyAppliedFunction -> {
-                // Partially applied function - return its inferred type
-                expr.inferredType ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
-            }
             else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
         }
     }
@@ -1078,10 +1074,6 @@ class TypeChecker {
                     constructor.name to constructor.dataType?.let { convertTypeAnnotation(it) }
                 }
                 com.funk.language.ast.FunkType.VariantType(constructors)
-            }
-            is AliasDefinition -> {
-                // Type alias - convert the aliased type
-                convertTypeAnnotation(definition.aliasedType)
             }
         }
     }

@@ -1,9 +1,0 @@
-# This should fail if scoping works
-
-module TestModule where
-    expose nothing  # Expose nothing
-    
-    let secretFunction = { x: Int } -> x + 42
-
-# This should fail - trying to access non-exposed function
-let result = secretFunction { x = 5 }

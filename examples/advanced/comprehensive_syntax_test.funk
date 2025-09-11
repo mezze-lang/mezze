@@ -61,12 +61,10 @@ let piped = 5 |> square { n = @ } |> add { x = 10, y = @ }
 # 12. Type Declarations
 type Person = { name: String, age: Int }
 
-# 13. Module System - not yet implemented
-# module MyModule where
-# expose add, Person
+# 13. Module System - removed for simplicity
 
-# 14. Resume Statements (NEW!) - simplified for now
-let exampleResume = do
+# 14. Do Expressions - simplified block expressions
+let exampleDo = do
   let value = 42
   value
 

@@ -1,6 +1,0 @@
-# Handle Expression Test
-
-# Simple handle expression with do blocks
-let result = do
-  let value = 42
-  value

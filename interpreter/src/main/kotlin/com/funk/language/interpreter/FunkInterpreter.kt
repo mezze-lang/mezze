@@ -84,10 +84,6 @@ class FunkInterpreter {
                 // Type declarations don't produce runtime values
                 FunkNull
             }
-            is ModuleDeclaration -> {
-                // Module declarations don't produce runtime values
-                FunkNull
-            }
             is TopLevelExpression -> {
                 // Top-level expressions are evaluated and their result is returned
                 evaluateExpression(item.expression, context)

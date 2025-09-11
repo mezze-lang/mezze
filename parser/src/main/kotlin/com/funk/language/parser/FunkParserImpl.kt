@@ -54,12 +54,6 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         return when {
             ctx.letBinding() != null -> visit(ctx.letBinding())
             ctx.typeDeclaration() != null -> visit(ctx.typeDeclaration())
-            ctx.moduleDeclaration() != null -> visit(ctx.moduleDeclaration())
-            ctx.modDeclaration() != null -> visit(ctx.modDeclaration())
-            ctx.accessModuleDeclaration() != null -> visit(ctx.accessModuleDeclaration())
-            ctx.exposeDeclaration() != null -> visit(ctx.exposeDeclaration())
-            ctx.accessDeclaration() != null -> visit(ctx.accessDeclaration())
-            ctx.resumeStatement() != null -> visit(ctx.resumeStatement())
             ctx.expressionStatement() != null -> visit(ctx.expressionStatement())
             else -> throw IllegalArgumentException("Unknown statement: ${ctx.text}")
         }
@@ -71,46 +65,6 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         return TopLevelExpression(expression)
     }
 
-    // Module system (simplified for now)
-    override fun visitModuleDeclaration(ctx: FunkParser.ModuleDeclarationContext): Any {
-        val name = ctx.Identifier().text
-        return ModuleDeclaration(name, emptyList())
-    }
-
-    override fun visitExposeDeclaration(ctx: FunkParser.ExposeDeclarationContext): Any {
-        val items = ctx.exposeList().exposeItem().map { visit(it) as ExposeItem }
-        return ExposeDeclaration(items)
-    }
-
-    override fun visitExposeItem(ctx: FunkParser.ExposeItemContext): Any {
-        val kind = if (ctx.TYPE() != null) ExposeKind.TYPE else null
-        val name = ctx.Identifier().text
-        return ExposeItem(kind, name)
-    }
-
-    override fun visitAccessDeclaration(ctx: FunkParser.AccessDeclarationContext): Any {
-        val moduleName = ctx.Identifier().text
-        val items = ctx.accessList().accessItem().map { visit(it) as AccessItem }
-        return AccessDeclaration(moduleName, items)
-    }
-
-    override fun visitAccessItem(ctx: FunkParser.AccessItemContext): Any {
-        val name = ctx.Identifier(0).text
-        val alias = ctx.Identifier(1)?.text
-        return AccessItem(name, alias)
-    }
-
-    override fun visitModDeclaration(ctx: FunkParser.ModDeclarationContext): Any {
-        val moduleName = ctx.Identifier().text
-        return ModDeclaration(moduleName)
-    }
-
-    override fun visitAccessModuleDeclaration(ctx: FunkParser.AccessModuleDeclarationContext): Any {
-        val modulePath = ctx.modulePath().Identifier().map { it.text }
-        val alias = ctx.Identifier()?.text
-        val isExposed = ctx.EXPOSE() != null
-        return AccessModuleDeclaration(modulePath, alias, isExposed)
-    }
 
     // Declarations
     override fun visitLetBinding(ctx: FunkParser.LetBindingContext): Any {
@@ -146,16 +100,11 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
 
     override fun visitVariantConstructor(ctx: FunkParser.VariantConstructorContext): Any {
-        val name = ctx.qualifiedIdentifier().text
+        val name = ctx.Identifier().text
         val dataType = ctx.recordType()?.let { visit(it) as TypeAnnotation }
         return VariantConstructorDef(name, dataType)
     }
 
-    // Statements
-    override fun visitResumeStatement(ctx: FunkParser.ResumeStatementContext): Any {
-        val expression = visit(ctx.expression()) as Expression
-        return ExpressionStatement(expression) // For now, treat as expression statement
-    }
 
 
     // Expressions
@@ -185,7 +134,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             val cases = ctx.matchCase().map { visit(it) as MatchCase }
             return MatchExpression(expression, cases)
         }
-        return visit(ctx.handleExpression())
+        return visit(ctx.ifExpression())
     }
 
     override fun visitMatchCase(ctx: FunkParser.MatchCaseContext): Any {
@@ -194,10 +143,6 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         return MatchCase(pattern, expression)
     }
 
-    override fun visitHandleExpression(ctx: FunkParser.HandleExpressionContext): Any {
-        // For now, skip handle expressions and go to if expressions
-        return visit(ctx.ifExpression())
-    }
 
     override fun visitIfExpression(ctx: FunkParser.IfExpressionContext): Any {
         if (ctx.IF() != null) {
@@ -381,7 +326,6 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
                 val letBinding = visit(ctx.letBinding()) as LetBinding
                 LetStatement(letBinding.variableName, letBinding.typeAnnotation, letBinding.expression)
             }
-            ctx.resumeStatement() != null -> visit(ctx.resumeStatement())
             ctx.expressionStatement() != null -> visit(ctx.expressionStatement())
             else -> throw IllegalArgumentException("Unknown do statement: ${ctx.text}")
         }

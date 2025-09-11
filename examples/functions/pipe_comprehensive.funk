@@ -44,7 +44,7 @@ let chain5 = "test" |> prefix { pre = "DEBUG", text = @ } |> shout { text = @ }
 let complex1 = (10 + 5) |> square { n = @ }           # 225
 let complex2 = (8 - 3) |> add { x = 7, y = @ }        # 12
 
-# Pipe with record access
+# Pipe with record member access
 let complex3 = person |> getName { p = @ } |> greet { name = @ }
 let complex4 = person |> getAge { p = @ } |> square { n = @ }
 

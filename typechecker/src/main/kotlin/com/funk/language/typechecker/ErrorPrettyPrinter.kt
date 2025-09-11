@@ -5,8 +5,8 @@ package com.funk.language.typechecker
  */
 object ErrorPrettyPrinter {
     
-    fun prettyPrint(error: StructuredTypeError): String {
-        return "Type error: ${error.kind}"
+    fun prettyPrint(error: Exception): String {
+        return "Type error: ${error.message}"
     }
     
     fun prettyPrintType(type: com.funk.language.ast.FunkType): String {

@@ -7,64 +7,17 @@ program: (statement | NEWLINE)* EOF;
 statement:
     letBinding
     | typeDeclaration
-    | moduleDeclaration
-    | modDeclaration
-    | accessModuleDeclaration
-    | exposeDeclaration
-    | accessDeclaration
-    | resumeStatement
     | expressionStatement
     ;
 
-// Module System
-moduleDeclaration:
-    MODULE Identifier WHERE NEWLINE
-    ;
-
-exposeDeclaration:
-    EXPOSE exposeList NEWLINE?
-    ;
-
-exposeList:
-    exposeItem (COMMA exposeItem)*
-    ;
-
-exposeItem:
-    TYPE? Identifier
-    ;
-
-accessDeclaration:
-    ACCESS Identifier DOT LBRACE accessList RBRACE NEWLINE?
-    ;
-
-accessList:
-    accessItem (COMMA accessItem)*
-    ;
-
-accessItem:
-    Identifier (AS Identifier)?
-    ;
-
-// Rust-style Module System
-modDeclaration:
-    MOD Identifier NEWLINE?
-    ;
-
-accessModuleDeclaration:
-    EXPOSE? ACCESS modulePath (AS Identifier)? NEWLINE?
-    ;
-
-modulePath:
-    Identifier (DOUBLE_COLON Identifier)*
-    ;
 
 // Declarations
 letBinding:
-    EXPOSE? LET Identifier (COLON typeAnnotation)? ASSIGN expression NEWLINE?
+    LET Identifier (COLON typeAnnotation)? ASSIGN expression NEWLINE?
     ;
 
 typeDeclaration:
-    EXPOSE? TYPE Identifier typeParams? ASSIGN typeDefinition NEWLINE?
+    TYPE Identifier typeParams? ASSIGN typeDefinition NEWLINE?
     ;
 
 typeParams:
@@ -81,20 +34,12 @@ variantType:
     ;
 
 variantConstructor:
-    qualifiedIdentifier (recordType)?
-    ;
-
-qualifiedIdentifier:
-    Identifier (DOT Identifier)*
-    | Identifier (DOUBLE_COLON Identifier)*
+    Identifier (recordType)?
     ;
 
 
 
 
-resumeStatement:
-    RESUME expression NEWLINE?
-    ;
 
 expressionStatement:
     expression NEWLINE?
@@ -115,7 +60,7 @@ variantExpression:
 
 matchExpression:
     MATCH expression LBRACE NEWLINE? (matchCase NEWLINE?)* RBRACE
-    | handleExpression
+    | ifExpression
     ;
 
 matchCase:
@@ -137,14 +82,6 @@ recordPatternEntry:
     Identifier (ASSIGN pattern)?
     ;
 
-handleExpression:
-    HANDLE expression LBRACE handleCase* RBRACE (WITH recordLiteral)?
-    | ifExpression
-    ;
-
-handleCase:
-    Identifier recordPattern? ARROW expression NEWLINE?
-    ;
 
 ifExpression:
     IF expression THEN expression ELSE expression
@@ -202,7 +139,6 @@ doExpression:
 
 doStatement:
     letBinding
-    | resumeStatement
     | expressionStatement
     ;
 
@@ -254,14 +190,6 @@ IF: 'if';
 THEN: 'then';
 ELSE: 'else';
 MATCH: 'match';
-HANDLE: 'handle';
-RESUME: 'resume';
-WHERE: 'where';
-MODULE: 'module';
-MOD: 'mod';
-EXPOSE: 'expose';
-ACCESS: 'access';
-AS: 'as';
 DO: 'do';
 
 // Operators
@@ -294,7 +222,6 @@ LBRACKET: '[';
 RBRACKET: ']';
 PIPE_DELIM: '|';
 COLON: ':';
-DOUBLE_COLON: '::';
 COMMA: ',';
 DOT: '.';
 
