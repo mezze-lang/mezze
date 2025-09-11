@@ -53,6 +53,20 @@ class FunkInterpreter {
     }
     
     /**
+     * Public method for testing - executes a program and returns both result and context
+     */
+    fun executeWithContext(program: Program): Pair<FunkValue, Map<String, FunkValue>> {
+        val context = mutableMapOf<String, FunkValue>()
+        var lastResult: FunkValue = FunkNull
+        
+        for (item in program.items) {
+            lastResult = executeItem(item, context)
+        }
+        
+        return Pair(lastResult, context.toMap())
+    }
+    
+    /**
      * Execute a program (enhanced with type information)
      */
     private fun executeProgram(program: Program): FunkValue {
@@ -117,6 +131,10 @@ class FunkInterpreter {
                 val left = evaluateExpression(expr.left, context)
                 val right = evaluateExpression(expr.right, context)
                 evaluateBinaryOperation(left, expr.operator, right)
+            }
+            is UnaryOperation -> {
+                val operand = evaluateExpression(expr.operand, context)
+                evaluateUnaryOperation(expr.operator, operand)
             }
             is RecordLiteral -> {
                 val fields = expr.entries.associate { (name, fieldExpr) ->
@@ -190,9 +208,8 @@ class FunkInterpreter {
                         1 -> {
                             // Simple field update: x = v
                             val fieldName = update.fieldPath[0]
-                            if (!baseRecord.fields.containsKey(fieldName)) {
-                                throw RuntimeException("Field '$fieldName' does not exist in record")
-                            }
+                            // For open records, we allow adding new fields
+                            // The type checker has already validated this is allowed
                             val newValue = evaluateExpression(update.value, context)
                             updatedFields[fieldName] = newValue
                         }
@@ -348,8 +365,11 @@ class FunkInterpreter {
             "+" -> when {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value + right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value + right.value)
-                left is FunkString && right is FunkString -> FunkString(left.value + right.value)
                 else -> throw RuntimeException("Cannot add ${left::class.simpleName} and ${right::class.simpleName}")
+            }
+            "++" -> when {
+                left is FunkString && right is FunkString -> FunkString(left.value + right.value)
+                else -> throw RuntimeException("Cannot concatenate ${left::class.simpleName} and ${right::class.simpleName}")
             }
             "-" -> when {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value - right.value)
@@ -366,6 +386,10 @@ class FunkInterpreter {
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value / right.value)
                 else -> throw RuntimeException("Cannot divide ${left::class.simpleName} by ${right::class.simpleName}")
             }
+            "%" -> when {
+                left is FunkInt && right is FunkInt -> FunkInt(left.value % right.value)
+                else -> throw RuntimeException("Cannot take modulo of ${left::class.simpleName} and ${right::class.simpleName}")
+            }
             "==" -> FunkBoolean(left == right)
             "!=" -> FunkBoolean(left != right)
             "<" -> when {
@@ -381,6 +405,20 @@ class FunkInterpreter {
             "&&" -> FunkBoolean(isTruthy(left) && isTruthy(right))
             "||" -> FunkBoolean(isTruthy(left) || isTruthy(right))
             else -> throw RuntimeException("Unknown binary operator: $operator")
+        }
+    }
+    
+    /**
+     * Evaluate unary operations
+     */
+    private fun evaluateUnaryOperation(operator: String, operand: FunkValue): FunkValue {
+        return when (operator) {
+            "-" -> when (operand) {
+                is FunkInt -> FunkInt(-operand.value)
+                is FunkFloat -> FunkFloat(-operand.value)
+                else -> throw RuntimeException("Cannot negate ${operand::class.simpleName}")
+            }
+            else -> throw RuntimeException("Unknown unary operator: $operator")
         }
     }
     

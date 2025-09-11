@@ -61,7 +61,7 @@ matchExpression:
     ;
 
 matchCase:
-    pattern ARROW expression
+    PIPE_DELIM? pattern ARROW expression
     ;
 
 pattern:
@@ -81,7 +81,7 @@ recordPatternEntry:
 
 
 ifExpression:
-    IF expression THEN expression ELSE expression
+    IF expression NEWLINE? THEN NEWLINE? expression NEWLINE? ELSE NEWLINE? expression
     | updateExpression
     ;
 
@@ -98,7 +98,12 @@ additiveExpression:
     ;
 
 multiplicativeExpression:
-    memberAccessExpression ((MULTIPLY | DIVIDE) memberAccessExpression)*
+    unaryExpression ((MULTIPLY | DIVIDE) unaryExpression)*
+    ;
+
+unaryExpression:
+    MINUS memberAccessExpression               // Unary minus (no double negatives)
+    | memberAccessExpression
     ;
 
 memberAccessExpression:

@@ -196,10 +196,10 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
 
     override fun visitMultiplicativeExpression(ctx: FunkParser.MultiplicativeExpressionContext): Any {
-        var result = visit(ctx.memberAccessExpression(0)) as Expression
+        var result = visit(ctx.unaryExpression(0)) as Expression
         
-        for (i in 1 until ctx.memberAccessExpression().size) {
-            val right = visit(ctx.memberAccessExpression(i)) as Expression
+        for (i in 1 until ctx.unaryExpression().size) {
+            val right = visit(ctx.unaryExpression(i)) as Expression
             val operator = when {
                 ctx.MULTIPLY(i-1) != null -> "*"
                 ctx.DIVIDE(i-1) != null -> "/"
@@ -209,6 +209,15 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         }
         
         return result
+    }
+
+    override fun visitUnaryExpression(ctx: FunkParser.UnaryExpressionContext): Any {
+        return if (ctx.MINUS() != null) {
+            val operand = visit(ctx.memberAccessExpression()) as Expression
+            UnaryOperation("-", operand)
+        } else {
+            visit(ctx.memberAccessExpression()) as Expression
+        }
     }
 
     override fun visitMemberAccessExpression(ctx: FunkParser.MemberAccessExpressionContext): Any {

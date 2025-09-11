@@ -277,6 +277,13 @@ data class BinaryOperation(
     override val inferredType: FunkType? = null
 ) : Expression
 
+@Serializable
+data class UnaryOperation(
+    val operator: String,
+    val operand: Expression,
+    override val inferredType: FunkType? = null
+) : Expression
+
 // PipeExpression removed - pipe operator is now desugared during parsing
 
 // Records
