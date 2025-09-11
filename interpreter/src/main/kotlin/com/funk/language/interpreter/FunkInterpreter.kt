@@ -175,6 +175,59 @@ class FunkInterpreter {
                 evaluateExpression(expr.result, context)
             }
             // PipeExpression and PlaceholderExpression removed - desugared during parsing
+            is RecordUpdateExpression -> {
+                // Evaluate record update: { baseRecord | field = value, ... }
+                val baseRecord = evaluateExpression(expr.baseRecord, context)
+                if (baseRecord !is FunkRecord) {
+                    throw RuntimeException("Cannot update non-record value: $baseRecord")
+                }
+                
+                // Create updated record with new field values
+                val updatedFields = baseRecord.fields.toMutableMap()
+                
+                expr.updates.forEach { update ->
+                    when (update.fieldPath.size) {
+                        1 -> {
+                            // Simple field update: x = v
+                            val fieldName = update.fieldPath[0]
+                            if (!baseRecord.fields.containsKey(fieldName)) {
+                                throw RuntimeException("Field '$fieldName' does not exist in record")
+                            }
+                            val newValue = evaluateExpression(update.value, context)
+                            updatedFields[fieldName] = newValue
+                        }
+                        2 -> {
+                            // Nested field update: y.z = v
+                            val outerField = update.fieldPath[0]
+                            val innerField = update.fieldPath[1]
+                            
+                            if (!baseRecord.fields.containsKey(outerField)) {
+                                throw RuntimeException("Field '$outerField' does not exist in record")
+                            }
+                            
+                            val outerValue = baseRecord.fields[outerField]
+                            if (outerValue !is FunkRecord) {
+                                throw RuntimeException("Cannot access field '$innerField' on non-record value: $outerValue")
+                            }
+                            
+                            if (!outerValue.fields.containsKey(innerField)) {
+                                throw RuntimeException("Field '$innerField' does not exist in nested record")
+                            }
+                            
+                            // Update the nested record
+                            val updatedNestedFields = outerValue.fields.toMutableMap()
+                            val newValue = evaluateExpression(update.value, context)
+                            updatedNestedFields[innerField] = newValue
+                            updatedFields[outerField] = FunkRecord(updatedNestedFields)
+                        }
+                        else -> {
+                            throw RuntimeException("Nested field updates beyond one level are not supported")
+                        }
+                    }
+                }
+                
+                FunkRecord(updatedFields)
+            }
             is MatchExpression -> {
                 val value = evaluateExpression(expr.expression, context)
                 evaluateMatchExpression(value, expr.cases, context)

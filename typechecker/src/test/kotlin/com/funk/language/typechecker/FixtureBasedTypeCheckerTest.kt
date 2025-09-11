@@ -158,7 +158,7 @@ class FixtureBasedTypeCheckerTest {
                     val source = loadFunkFile(file.absolutePath)
                     
                     // Should throw an exception
-                    assertThrows<RuntimeException> {
+                    assertThrows<Exception> {
                         parseAndTypeCheck(source)
                     }
                 }

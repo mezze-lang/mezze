@@ -1,0 +1,23 @@
+# Record Update Inference Tests
+
+# Type inference with record updates
+let inferredBase = {x = 42, y = "hello"}
+let inferredUpdate = {inferredBase | x = 100}
+# expected: inferredUpdate : { x: Int, y: String }
+
+# Inference with nested updates
+let inferredNested = { a = 1, b = { c = "test", d = true } }
+let inferredNestedUpdate = { inferredNested | b.c = "updated" }
+# expected: inferredNestedUpdate : { a: Int, b: { c: String, d: Boolean } }
+
+# Complex inference with expressions
+let complex = { value = 10, data = { count = 5, flag = false } }
+let complexUpdate = { complex | value = complex.data.count * 2, data.flag = true }
+# expected: complexUpdate : { value: Int, data: { count: Int, flag: Boolean } }
+
+# Update with function parameter inference
+let updateFunc = {record} -> {record | x = 99}
+let testRecord = {x = 1, y = 2}
+let funcResult = updateFunc {record = testRecord}
+# expected: updateFunc : { record: 'a } -> { x: Int }
+# expected: funcResult : { x: Int }

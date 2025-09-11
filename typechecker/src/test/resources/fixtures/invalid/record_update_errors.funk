@@ -1,0 +1,25 @@
+# Record Update Tests - Invalid Cases
+
+# Trying to update non-existent field
+let person = {name = "Alice", age = 30}
+let invalidField = {person | salary = 50000}
+# This should fail: Field 'salary' does not exist
+
+# Trying to update with wrong type
+let wrongType = {person | age = "thirty"}
+# This should fail: Field 'age' expects Int but got String
+
+# Trying to update non-existent nested field
+let nested = { x = 1, y = { z = 2 } }
+let invalidNested = { nested | y.missing = 42 }
+# This should fail: Field 'missing' does not exist in nested record
+
+# Trying to update nested field on non-record
+let primitive = { x = 1, y = 42 }
+let invalidNestedType = { primitive | y.z = 10 }
+# This should fail: Cannot access field 'z' on non-record type
+
+# Trying to update non-record
+let notRecord = 42
+let invalidBase = {notRecord | x = 10}
+# This should fail: Cannot update non-record type

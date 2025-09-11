@@ -142,7 +142,17 @@ data class TypeVar(val name: String, val level: Int = 0) {
 }
 
 @Serializable
-data class RowVar(val name: String)
+data class RowVar(val name: String) {
+    companion object {
+        private var counter = 0
+        
+        fun fresh(): RowVar {
+            val name = "row${counter}"
+            counter++
+            return RowVar(name)
+        }
+    }
+}
 
 // ============================================================================
 // PROGRAM STRUCTURE
@@ -296,6 +306,19 @@ data class RecordUpdate(
     val updates: List<RecordEntry>,
     override val inferredType: FunkType? = null
 ) : Expression
+
+@Serializable
+data class RecordUpdateExpression(
+    val baseRecord: Expression,
+    val updates: List<RecordUpdateEntry>,
+    override val inferredType: FunkType? = null
+) : Expression
+
+@Serializable
+data class RecordUpdateEntry(
+    val fieldPath: List<String>, // ["x"] for x = v, ["y", "z"] for y.z = v
+    val value: Expression
+)
 
 // Variants
 @Serializable

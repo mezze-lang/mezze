@@ -1,0 +1,42 @@
+# Open Record Updates - Valid Cases
+
+# Basic open record creation and updates
+let openRecord = {name = "Alice", age = 30, ...}
+# expected: openRecord : { name: String, age: Int, ... }
+
+let updatedAge = {openRecord | age = 31}
+# expected: updatedAge : { name: String, age: Int, ... }
+
+let addedField = {openRecord | city = "NYC"}
+# expected: addedField : { name: String, age: Int, city: String, ... }
+
+let multipleUpdates = {openRecord | age = 32, city = "Boston", salary = 75000}
+# expected: multipleUpdates : { name: String, age: Int, city: String, salary: Int, ... }
+
+# Closed record updates (only existing fields)
+let closedRecord = {name = "Bob", age = 25}
+# expected: closedRecord : { name: String, age: Int }
+
+let closedUpdated = {closedRecord | name = "Robert", age = 26}
+# expected: closedUpdated : { name: String, age: Int }
+
+# Empty updates should preserve record type
+let emptyUpdateOpen = {openRecord | }
+# expected: emptyUpdateOpen : { name: String, age: Int, ... }
+
+let emptyUpdateClosed = {closedRecord | }
+# expected: emptyUpdateClosed : { name: String, age: Int }
+
+# Nested record updates with open records
+let nestedOpen = {user = {name = "Carol", age = 28}, department = "Engineering", ...}
+# expected: nestedOpen : { user: { name: String, age: Int }, department: String, ... }
+
+let nestedUpdated = {nestedOpen | user.age = 29, location = "Remote"}
+# expected: nestedUpdated : { user: { name: String, age: Int }, department: String, location: String, ... }
+
+# Open record with complex types
+let configOpen = {timeout = 30, retries = 3, debug = false, ...}
+# expected: configOpen : { timeout: Int, retries: Int, debug: Boolean, ... }
+
+let extendedConfig = {configOpen | maxMemory = 512, logLevel = "info", features = {cache = true, metrics = false}}
+# expected: extendedConfig : { timeout: Int, retries: Int, debug: Boolean, maxMemory: Int, logLevel: String, features: { cache: Boolean, metrics: Boolean }, ... }

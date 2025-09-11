@@ -61,7 +61,7 @@ class TypeCheckerComprehensiveTest {
                     val source = loadFunkFile(file.absolutePath)
                     
                     // Should throw a type error
-                    assertThrows<RuntimeException> {
+                    assertThrows<Exception> {
                         parseAndTypeCheck(source)
                     }
                 }

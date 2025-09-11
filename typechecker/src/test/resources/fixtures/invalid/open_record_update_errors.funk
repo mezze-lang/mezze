@@ -1,0 +1,33 @@
+# Open Record Updates - Invalid Cases
+
+# Trying to add field to closed record should fail
+let closedRecord = {name = "Alice", age = 30}
+let invalidAddition = {closedRecord | salary = 50000}
+# This should fail: Field 'salary' does not exist in closed record type
+
+# Type mismatch in updates should fail for both open and closed
+let openRecord = {name = "Bob", age = 25, ...}
+let invalidTypeOpen = {openRecord | age = "twenty-five"}
+# This should fail: Field 'age' expects Int but got String
+
+let invalidTypeClosed = {closedRecord | name = 42}
+# This should fail: Field 'name' expects String but got Int
+
+# Trying to update non-existent field in closed record
+let nonExistentField = {closedRecord | department = "Engineering"}
+# This should fail: Field 'department' does not exist in closed record type
+
+# Trying to update nested field that doesn't exist
+let nestedClosed = {user = {name = "Carol", age = 28}, active = true}
+let invalidNested = {nestedClosed | user.salary = 75000}
+# This should fail: Field 'salary' does not exist in nested record type
+
+# Trying to update nested field on non-record type
+let primitiveField = {count = 42, active = true}
+let invalidNestedType = {primitiveField | count.value = 100}
+# This should fail: Cannot access field 'value' on non-record type
+
+# Updating non-record should fail
+let notRecord = 42
+let invalidBase = {notRecord | x = 10}
+# This should fail: Cannot update non-record type

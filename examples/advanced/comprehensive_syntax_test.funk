@@ -27,7 +27,7 @@ let complexCalc = { a: Int, b: Int } -> do
 # 5. Records
 let person = { name = "Alice", age = 30 }
 let personName = person.name
-let olderPerson = person with { age = 31 }
+let olderPerson = {person | age = 31}
 
 # 6. Open Records (NEW!) - not yet implemented
 # let config = { retries = 3, timeout = 30, ...rest }

@@ -155,12 +155,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
 
     override fun visitUpdateExpression(ctx: FunkParser.UpdateExpressionContext): Any {
-        val expr = visit(ctx.comparisonExpression()) as Expression
-        if (ctx.recordLiteral() != null) {
-            val updates = visit(ctx.recordLiteral()) as RecordLiteral
-            return RecordUpdate(expr, updates.entries)
-        }
-        return expr
+        return visit(ctx.comparisonExpression())
     }
 
     override fun visitComparisonExpression(ctx: FunkParser.ComparisonExpressionContext): Any {
@@ -239,21 +234,27 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             }
             ctx.expression() != null -> visit(ctx.expression())
             ctx.recordLiteral() != null -> {
-                // Check if this is a function call or record literal
-                val recordLiteral = visit(ctx.recordLiteral()) as RecordLiteral
+                // Check if this is a function call or record literal/update
+                val recordExpr = visit(ctx.recordLiteral()) as Expression
                 if (ctx.primaryExpression() != null) {
                     val primaryExpr = visit(ctx.primaryExpression()) as Expression
                     
-                    // Disambiguate between function call and variant construction
-                    if (primaryExpr is Identifier && primaryExpr.name.first().isUpperCase()) {
-                        // Uppercase identifier + record = variant construction (e.g., Blue {val = 10})
-                        VariantConstruction(primaryExpr.name, recordLiteral)
+                    // Only function calls and variant construction work with RecordLiteral, not RecordUpdateExpression
+                    if (recordExpr is RecordLiteral) {
+                        // Disambiguate between function call and variant construction
+                        if (primaryExpr is Identifier && primaryExpr.name.first().isUpperCase()) {
+                            // Uppercase identifier + record = variant construction (e.g., Blue {val = 10})
+                            VariantConstruction(primaryExpr.name, recordExpr)
+                        } else {
+                            // Lowercase identifier + record = function call (e.g., func {x = 1})
+                            FunctionCall(primaryExpr, recordExpr)
+                        }
                     } else {
-                        // Lowercase identifier + record = function call (e.g., func {x = 1})
-                        FunctionCall(primaryExpr, recordLiteral)
+                        // RecordUpdateExpression cannot be used in function calls or variant construction
+                        throw IllegalArgumentException("Record update expressions cannot be used in function calls or variant construction")
                     }
                 } else {
-                    recordLiteral
+                    recordExpr
                 }
             }
             ctx.doExpression() != null -> visit(ctx.doExpression())
@@ -287,9 +288,27 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
     // Records
     override fun visitRecordLiteral(ctx: FunkParser.RecordLiteralContext): Any {
-        val entries = ctx.recordEntry().map { visit(it) as RecordEntry }
-        val restField = ctx.Identifier()?.text
-        return RecordLiteral(entries, restField)
+        // Check if this is a record update syntax: { expr | field = value, ... }
+        if (ctx.expression() != null && ctx.PIPE_DELIM() != null) {
+            val baseRecord = visit(ctx.expression()) as Expression
+            val updates = ctx.recordUpdateEntry().map { updateEntry ->
+                val fieldPath = if (updateEntry.DOT() != null) {
+                    // Nested field update: y.z = v
+                    listOf(updateEntry.Identifier(0).text, updateEntry.Identifier(1).text)
+                } else {
+                    // Simple field update: x = v
+                    listOf(updateEntry.Identifier(0).text)
+                }
+                val value = visit(updateEntry.expression()) as Expression
+                RecordUpdateEntry(fieldPath, value)
+            }
+            return RecordUpdateExpression(baseRecord, updates)
+        } else {
+            // Regular record literal: { field = value, ... }
+            val entries = ctx.recordEntry().map { visit(it) as RecordEntry }
+            val hasEllipsis = ctx.ELLIPSIS() != null
+            return RecordLiteral(entries, if (hasEllipsis) "..." else null)
+        }
     }
 
     override fun visitRecordEntry(ctx: FunkParser.RecordEntryContext): Any {

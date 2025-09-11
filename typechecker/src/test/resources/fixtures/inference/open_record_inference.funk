@@ -1,0 +1,33 @@
+# Open Record Type Inference Tests
+
+# Basic open record inference
+let inferredOpen = {x = 42, y = "hello", ...}
+# expected: inferredOpen : { x: Int, y: String, ... }
+
+# Open record update inference
+let updateResult = {inferredOpen | z = true, w = 3.14}
+# expected: updateResult : { x: Int, y: String, z: Boolean, w: Float, ... }
+
+# Function parameter inference with open records
+let processOpen = {record} -> {record | processed = true}
+# expected: processOpen : { record: 'a } -> { processed: Boolean }
+
+let testOpen = {name = "test", value = 123, ...}
+let processedOpen = processOpen {record = testOpen}
+# expected: processedOpen : { processed: Boolean }
+
+# Mixed closed and open record inference
+let mixedFunc = {closed, open} -> {open | fromClosed = closed.name}
+# expected: mixedFunc : { closed: 'a, open: 'b } -> { fromClosed: String }
+
+let closedInput = {name = "Alice", age = 30}
+let openInput = {kind = "user", active = true, ...}
+let mixedResult = mixedFunc {closed = closedInput, open = openInput}
+# expected: mixedResult : { fromClosed: String }
+
+# Simple nested inference with existing fields only
+let simpleNested = {data = {count = 5, active = false}, meta = {version = 1, timestamp = 0}, ...}
+# expected: simpleNested : { data: { count: Int, active: Boolean }, meta: { version: Int, timestamp: Int }, ... }
+
+let simpleUpdated = {simpleNested | meta.timestamp = 1234567890, newField = "added"}
+# expected: simpleUpdated : { data: { count: Int, active: Boolean }, meta: { version: Int, timestamp: Int }, newField: String, ... }

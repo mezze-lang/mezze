@@ -38,9 +38,6 @@ variantConstructor:
     ;
 
 
-
-
-
 expressionStatement:
     expression NEWLINE?
     ;
@@ -89,7 +86,7 @@ ifExpression:
     ;
 
 updateExpression:
-    comparisonExpression (WITH recordLiteral)?
+    comparisonExpression
     ;
 
 comparisonExpression:
@@ -143,7 +140,13 @@ doStatement:
     ;
 
 recordLiteral:
-    LBRACE (recordEntry (COMMA recordEntry)*)? (COMMA ELLIPSIS Identifier)? RBRACE
+    LBRACE (recordEntry (COMMA recordEntry)*)? (COMMA ELLIPSIS)? RBRACE
+    | LBRACE expression PIPE_DELIM (recordUpdateEntry (COMMA recordUpdateEntry)*)? RBRACE
+    ;
+
+recordUpdateEntry:
+    Identifier ASSIGN expression
+    | Identifier DOT Identifier ASSIGN expression  // For nested updates like y.z = v
     ;
 
 recordEntry:
@@ -185,7 +188,6 @@ literal:
 // Keywords
 LET: 'let';
 TYPE: 'type';
-WITH: 'with';
 IF: 'if';
 THEN: 'then';
 ELSE: 'else';

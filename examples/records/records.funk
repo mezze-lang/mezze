@@ -11,7 +11,7 @@ let person = { name = "Alice", age = 30 }
 let name = person.name
 
 # Update a field in the record
-let olderPerson = person with { age = 31 }
+let olderPerson = {person | age = 31}
 
 # Use a do expression to do multiple things
 let message = do

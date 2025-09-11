@@ -1,0 +1,59 @@
+# Open Record Updates - Comprehensive Examples
+
+# ========== CLOSED VS OPEN RECORDS ==========
+
+# Closed record (no ...)
+let closedPerson = {name = "Alice", age = 30}
+
+# Open record (with ...)  
+let openPerson = {name = "Bob", age = 25, ...}
+
+# ========== UPDATES ON CLOSED RECORDS ==========
+
+# ✅ Update existing fields in closed record
+let olderAlice = {closedPerson | age = 31}
+
+# ✅ Update multiple existing fields
+let updatedAlice = {closedPerson | name = "Alice Smith", age = 32}
+
+# ❌ This would fail: {closedPerson | salary = 50000}
+# Error: Field 'salary' does not exist in closed record type
+
+# ========== UPDATES ON OPEN RECORDS ==========
+
+# ✅ Update existing fields in open record
+let olderBob = {openPerson | age = 26}
+
+# ✅ Add new fields to open record!
+let enrichedBob = {openPerson | age = 26, city = "NYC", salary = 75000}
+
+# ✅ Add multiple new fields
+let fullProfile = {openPerson | department = "Engineering", level = "Senior", remote = true}
+
+# ========== COMPLEX OPEN RECORD SCENARIOS ==========
+
+# Open record with nested structure
+let openEmployee = {personal = {name = "Carol", age = 28}, work = {title = "Developer", team = "Backend"}, ...}
+
+# ✅ Update existing nested field + add new top-level field
+let promotedCarol = {openEmployee | work.title = "Senior Developer", salary = 90000, bonus = 5000}
+
+# ✅ Add completely new nested structure  
+let detailedEmployee = {openEmployee | location = {city = "Boston", state = "MA", remote = false}}
+
+# ========== FUNCTION PARAMETERS WITH OPEN RECORDS ==========
+
+# Function accepting open record - works with any record that has 'name' field
+let greetUser = {user: {name: String, ...}} -> "Hello, " ++ user.name ++ "!"
+
+# Works with both closed and extended records
+let greeting1 = greetUser {user = {name = "Dave", age = 35}}
+let greeting2 = greetUser {user = {name = "Eve", age = 29, city = "Seattle", role = "Manager"}}
+
+# ========== OPEN RECORD INFERENCE ==========
+
+# Open record inferred from literal with ...
+let config = {timeout = 30, retries = 3, ...}
+
+# Can add new configuration options
+let extendedConfig = {config | debug = true, logLevel = "info", maxMemory = 512}

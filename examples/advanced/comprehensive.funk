@@ -15,7 +15,7 @@ let person = { name = "Alice", age = 30 }
 let personName = person.name
 
 # Record updates
-let olderPerson = person with { age = 31 }
+let olderPerson = {person | age = 31}
 
 # If expressions
 let status = if isReady then "Ready" else "Not ready"

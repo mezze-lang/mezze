@@ -426,7 +426,8 @@ class TypeChecker {
                 val fields = expr.entries.associate { (name, fieldExpr) ->
                     name to (fieldExpr?.let { inferBasicType(it) } ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh()))
                 }
-                com.funk.language.ast.FunkType.RecordType(fields)
+                val rowVar = if (expr.restField == "...") com.funk.language.ast.RowVar.fresh() else null
+                com.funk.language.ast.FunkType.RecordType(fields, rowVar)
             }
             is MemberAccess -> {
                 val receiverType = inferBasicType(expr.receiver)
@@ -653,6 +654,93 @@ class TypeChecker {
                 }
             }
             // PipeExpression and PlaceholderExpression removed - desugared during parsing
+            is RecordUpdateExpression -> {
+                // Type check record update: { baseRecord | field = value, ... }
+                val baseType = inferTypeWithUnification(expr.baseRecord)
+                
+                // Base record must be a record type
+                val recordType = when (baseType) {
+                    is com.funk.language.ast.FunkType.RecordType -> baseType
+                    is com.funk.language.ast.FunkType.VarType -> {
+                        // Create a record type constraint for the variable
+                        val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                        expr.updates.forEach { update ->
+                            if (update.fieldPath.size == 1) {
+                                val fieldType = inferTypeWithUnification(update.value)
+                                fields[update.fieldPath[0]] = fieldType
+                            }
+                        }
+                        val constraintType = com.funk.language.ast.FunkType.RecordType(fields)
+                        addConstraint(baseType, constraintType)
+                        constraintType
+                    }
+                    else -> throw TypeCheckError("Cannot update non-record type: ${prettyPrintType(baseType)}")
+                }
+                
+                // Check each update
+                val resultFields = recordType.fields.toMutableMap()
+                
+                expr.updates.forEach { update ->
+                    when (update.fieldPath.size) {
+                        1 -> {
+                            // Simple field update: x = v
+                            val fieldName = update.fieldPath[0]
+                            val valueType = inferTypeWithUnification(update.value)
+                            
+                            if (recordType.fields.containsKey(fieldName)) {
+                                // Updating existing field
+                                val expectedType = recordType.fields[fieldName]!!
+                                if (!unifyTypes(valueType, expectedType)) {
+                                    throw TypeCheckError("Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(valueType)}")
+                                }
+                                resultFields[fieldName] = valueType
+                            } else if (recordType.isOpen) {
+                                // Adding new field to open record
+                                resultFields[fieldName] = valueType
+                            } else {
+                                // Trying to add field to closed record
+                                throw TypeCheckError("Field '$fieldName' does not exist in closed record type ${prettyPrintType(recordType)}")
+                            }
+                        }
+                        2 -> {
+                            // Nested field update: y.z = v (desugar to { r | y = { r.y | z = v } })
+                            val outerField = update.fieldPath[0]
+                            val innerField = update.fieldPath[1]
+                            
+                            if (!recordType.fields.containsKey(outerField)) {
+                                throw TypeCheckError("Field '$outerField' does not exist in record type ${prettyPrintType(recordType)}")
+                            }
+                            
+                            val outerFieldType = recordType.fields[outerField]!!
+                            val innerRecordType = when (outerFieldType) {
+                                is com.funk.language.ast.FunkType.RecordType -> outerFieldType
+                                else -> throw TypeCheckError("Cannot access field '$innerField' on non-record type ${prettyPrintType(outerFieldType)}")
+                            }
+                            
+                            if (!innerRecordType.fields.containsKey(innerField)) {
+                                throw TypeCheckError("Field '$innerField' does not exist in nested record type ${prettyPrintType(innerRecordType)}")
+                            }
+                            
+                            val valueType = inferTypeWithUnification(update.value)
+                            val expectedType = innerRecordType.fields[innerField]!!
+                            if (!unifyTypes(valueType, expectedType)) {
+                                throw TypeCheckError("Field '$outerField.$innerField' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(valueType)}")
+                            }
+                            
+                            // Update the nested record type
+                            val updatedInnerFields = innerRecordType.fields.toMutableMap()
+                            updatedInnerFields[innerField] = valueType
+                            val updatedInnerType = com.funk.language.ast.FunkType.RecordType(updatedInnerFields, innerRecordType.rowVar)
+                            resultFields[outerField] = updatedInnerType
+                        }
+                        else -> {
+                            throw TypeCheckError("Nested field updates beyond one level are not supported")
+                        }
+                    }
+                }
+                
+                com.funk.language.ast.FunkType.RecordType(resultFields, recordType.rowVar)
+            }
             else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
         }
     }
