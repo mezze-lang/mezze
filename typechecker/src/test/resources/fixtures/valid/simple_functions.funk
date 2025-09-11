@@ -1,8 +1,8 @@
 # Simple function definitions and calls
-let add = {x, y} -> x + y
-let greet = {name} -> "Hello " ++ name
+let add = {x, y} -> x + y               # expected: add : { x: Int, y: Int } -> Int
+let greet = {name} -> "Hello " ++ name  # expected: greet : { name: String } -> String
 
-let result1 = add {x = 10, y = 20}
-let result2 = greet {name = "World"}
+let result1 = add {x = 10, y = 20}      # expected: result1 : Int
+let result2 = greet {name = "World"}    # expected: result2 : String
 
 result1 + 100

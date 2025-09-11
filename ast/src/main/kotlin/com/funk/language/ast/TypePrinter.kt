@@ -173,10 +173,10 @@ private fun unifyTypes(
                     pattern.constructors.all { (name, _) -> concrete.constructors.containsKey(name) }
                 }
                 concrete.isOpen == pattern.isOpen -> {
-                    // Both same openness - for closed, must have same constructors; for open, subset is fine
+                    // Both same openness - for type aliases, allow subset matching
                     if (!concrete.isOpen) {
-                        // Both closed - must match exactly
-                        concrete.constructors.size == pattern.constructors.size
+                        // Both closed - concrete can be a subset of pattern (for type alias matching)
+                        concrete.constructors.all { (name, _) -> pattern.constructors.containsKey(name) }
                     } else {
                         // Both open - concrete must be subset of pattern
                         concrete.constructors.all { (name, _) -> pattern.constructors.containsKey(name) }

@@ -1,6 +1,6 @@
-# Should fail: function called with wrong number of arguments
+# Should fail: function called with extra arguments
 let add = {x, y} -> x + y
 
-let result = add {x = 10}
+let result = add {x = 10, y = 20, z = 30}
 
 result
