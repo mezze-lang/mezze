@@ -1,0 +1,20 @@
+# Working Handle Example
+
+# 1. Effect declaration
+effect Log {
+  print : {msg: String} -> {}
+}
+
+# 2. Implementation  
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> {}
+}
+
+# 3. Function that uses the effect
+let greet = {name} ->
+  Log.print {msg = "Hello"}
+
+# 4. Execute with handler
+let result = handle greet {name = "World"} with Console
+
+result

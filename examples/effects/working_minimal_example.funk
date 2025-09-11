@@ -1,0 +1,17 @@
+# Working Minimal Effect Example
+
+# 1. Effect declaration
+effect Log {
+  print : {msg: String} -> {}
+}
+
+# 2. Implementation as record of functions  
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> {}
+}
+
+# 3. Use the effect through function call syntax
+let printHello = Log.print
+let result = printHello {msg = "Hello World"}
+
+result

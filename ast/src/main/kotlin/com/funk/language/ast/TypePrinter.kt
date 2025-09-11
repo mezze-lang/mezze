@@ -34,7 +34,13 @@ fun prettyPrintType(type: FunkType): String = when (type) {
         }
     }
     is FunkType.FunctionType -> {
-        "${prettyPrintType(type.paramType)} -> ${prettyPrintType(type.returnType)}"
+        val baseType = "${prettyPrintType(type.paramType)} -> ${prettyPrintType(type.returnType)}"
+        if (type.effects != null && type.effects.effects.isNotEmpty()) {
+            val effectList = type.effects.effects.sorted().joinToString(", ")
+            "$baseType <$effectList>"
+        } else {
+            baseType
+        }
     }
     else -> type.toString() // Fallback for any other types
 }
@@ -200,7 +206,8 @@ private fun unifyTypes(
         
         concrete is FunkType.FunctionType && pattern is FunkType.FunctionType -> {
             unifyTypes(concrete.paramType, pattern.paramType, substitutions) &&
-            unifyTypes(concrete.returnType, pattern.returnType, substitutions)
+            unifyTypes(concrete.returnType, pattern.returnType, substitutions) &&
+            effectRowsMatch(concrete.effects, pattern.effects)
         }
         
         // Base case - types must be equal
@@ -240,9 +247,24 @@ private fun typesAreStructurallyEqual(type1: FunkType, type2: FunkType): Boolean
         
         type1 is FunkType.FunctionType && type2 is FunkType.FunctionType -> {
             typesAreStructurallyEqual(type1.paramType, type2.paramType) &&
-            typesAreStructurallyEqual(type1.returnType, type2.returnType)
+            typesAreStructurallyEqual(type1.returnType, type2.returnType) &&
+            effectRowsMatch(type1.effects, type2.effects)
         }
         
         else -> false
+    }
+}
+
+/**
+ * Check if two effect rows match (for type unification)
+ */
+private fun effectRowsMatch(
+    effects1: FunkType.EffectRow?,
+    effects2: FunkType.EffectRow?
+): Boolean {
+    return when {
+        effects1 == null && effects2 == null -> true
+        effects1 != null && effects2 != null -> effects1.effects == effects2.effects
+        else -> false // One has effects, the other doesn't
     }
 }

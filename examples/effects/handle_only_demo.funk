@@ -1,0 +1,50 @@
+# Handle-Only Effect System Demo
+# This demonstrates the simplified effect system using only 'handle ... with' syntax
+
+effect Log {
+  print : {msg: String} -> {}
+  debug : {msg: String} -> {}
+}
+
+effect Random {
+  nextInt : {min: Int, max: Int} -> Int
+}
+
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> native_print {msg = "[CONSOLE] " + msg}
+  debug : {msg: String} -> {} = {msg} -> native_print {msg = "[DEBUG] " + msg}
+}
+
+impl Random for MathRandom {
+  nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random {min = min, max = max}
+}
+
+# Example 1: Simple effect handling
+let example1 = handle Log.print {msg = "Hello World!"} with Console
+
+# Example 2: Multiple effect calls with the same handler
+let example2 = handle do
+  Log.print {msg = "Starting process"}
+  Log.debug {msg = "Process initialized"}
+  Log.print {msg = "Process complete"}
+  "Done"
+with Console
+
+# Example 3: Multiple effects in one handle block
+let example3 = handle do
+  Log.print {msg = "Generating random number..."}
+  let num = Random.nextInt {min = 1, max = 100}
+  Log.print {msg = "Generated: " + intToString {val = num}}
+  num
+with Console, MathRandom
+
+# Example 4: Nested handle expressions
+let example4 = handle do
+  Log.print {msg = "Outer scope"}
+  let innerResult = handle Log.debug {msg = "Inner scope"} with Console
+  Log.print {msg = "Back to outer scope"}
+  innerResult
+with Console
+
+# Run all examples
+example1

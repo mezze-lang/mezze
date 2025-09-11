@@ -1,0 +1,14 @@
+# Parameterized Implementation Test
+
+# Declare a logging effect
+effect Logging {
+  log : {msg: String} -> {}
+}
+
+# Parameterized implementation - FileLogger with path parameter
+impl FileLogger {path: String} for Logging {
+  log : {msg: String} -> {} = {msg} -> native_print {msg = "[FILE:" + path + "] " + msg}
+}
+
+# Test the parameterized handler (for now, uses empty params)
+handle Logging.log {msg = "Test message"} with FileLogger

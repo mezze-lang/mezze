@@ -1,0 +1,21 @@
+effect Log { print : {msg: String} -> {} }
+effect Random { nextInt : {min: Int, max: Int} -> Int }
+
+impl Log for Console { 
+  print : {msg: String} -> {} = {msg} -> native_print {msg = msg} 
+}
+
+impl Random for MathRandom {
+  nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random {min = min, max = max}
+}
+
+# This function has both Log and Random effects
+let logAndRandom = {msg, min, max} -> do
+  Log.print {msg = msg}
+  Random.nextInt {min = min, max = max}
+
+# This handles the Log effect, leaving only Random
+let handleLogOnly = handle logAndRandom {msg = "test", min = 1, max = 10} with Console
+
+# This should handle both effects, leaving no effects
+let handleBothEffects = handle logAndRandom {msg = "test", min = 1, max = 10} with Console, MathRandom

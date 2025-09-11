@@ -1,0 +1,16 @@
+# Debug Simple Effect
+
+# 1. Effect
+effect Log {
+  print : {msg: String} -> {}
+}
+
+# 2. Implementation (this creates Console handler)
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> {}
+}
+
+# 3. Let's see if Console is available
+let console_check = "Console handler created"
+
+console_check

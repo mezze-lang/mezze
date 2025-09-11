@@ -1,0 +1,6 @@
+# Simplest Working Example
+
+# Just a basic computation
+let result = 42
+
+result

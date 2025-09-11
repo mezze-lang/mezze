@@ -1,0 +1,3 @@
+# Truly minimal test - just call native function directly
+
+native_print {msg = "This should work!"}

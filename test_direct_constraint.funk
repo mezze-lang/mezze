@@ -1,0 +1,1 @@
+let directTest = {x, y} -> x + y

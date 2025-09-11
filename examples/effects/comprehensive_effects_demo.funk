@@ -1,0 +1,45 @@
+# Comprehensive Effects Demo - Funk Language
+# Demonstrates the complete effect system with native functions
+
+# 1. Declare effects
+effect Logging {
+  info : {msg: String} -> {}
+  debug : {msg: String} -> {}
+}
+
+effect Random {
+  nextInt : {min: Int, max: Int} -> Int
+  nextDouble : {} -> Float
+}
+
+# 2. Implementations using native Kotlin functions
+impl Logging for Console {
+  info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " + msg}
+  debug : {msg: String} -> {} = {msg} -> native_debug {msg = msg}
+}
+
+impl Random for MathRandom {
+  nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
+  nextDouble : {} -> Float = {} -> native_random_double {}
+}
+
+# 3. Functions using effects
+let generateGreeting = {name} ->
+  do
+    Logging.info {msg = "Generating greeting for " + name}
+    let luckyNumber = Random.nextInt {min = 1, max = 100}
+    let randomFactor = Random.nextDouble {}
+    Logging.debug {msg = "Lucky number: " + intToString {val = luckyNumber}}
+    "Hello " + name + "! Your lucky number is " + intToString {val = luckyNumber}
+
+let testBasicEffects = {} ->
+  do
+    Logging.info {msg = "Starting basic effects test"}
+    Random.nextInt {min = 1, max = 10}
+
+# 4. Execute with handlers
+let greeting = handle generateGreeting {name = "World"} with Console, MathRandom
+let basicTest = handle testBasicEffects {} with Console, MathRandom
+
+# Output the results
+basicTest

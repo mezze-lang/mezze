@@ -1,0 +1,3 @@
+# Test random native function
+
+native_random_int {min = 1, max = 10}

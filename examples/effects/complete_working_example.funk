@@ -1,0 +1,19 @@
+# Complete Working Effect Example
+
+# 1. Effect declaration
+effect Log {
+  print : {msg: String} -> {}
+}
+
+# 2. Implementation as record of functions
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> {}
+}
+
+# 3. Simple function that will use the effect
+let sayHello = {name} -> "Hello " + name
+
+# 4. Test the basic function first
+let result = sayHello {name = "World"}
+
+result

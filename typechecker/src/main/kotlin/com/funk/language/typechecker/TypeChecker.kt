@@ -30,6 +30,9 @@ class TypeChecker {
     
     // Simple constraint collection for basic unification
     private val constraints = mutableListOf<Pair<com.funk.language.ast.FunkType, com.funk.language.ast.FunkType>>()
+    
+    // Current program being type checked (for looking up ImplDeclarations)
+    private var currentProgram: Program? = null
 
     /**
      * Get the current type aliases registry (for enhanced printing)
@@ -60,6 +63,7 @@ class TypeChecker {
         context.clear() // Reset context for each program
         typeAliases.clear() // Reset type aliases for each program
         constraints.clear() // Reset constraints
+        currentProgram = program // Store current program for impl lookup
         
         // Add built-in functions to the context
         context["intToString"] = com.funk.language.ast.FunkType.FunctionType(
@@ -104,6 +108,33 @@ class TypeChecker {
                     )
                     
                     item.copy(inferredType = definitionType)
+                }
+                is EffectDeclaration -> {
+                    // Register effect in context
+                    // Effects are represented as a record of operation signatures
+                    val operationTypes = item.operations.associate { op ->
+                        op.name to com.funk.language.ast.FunkType.FunctionType(
+                            convertTypeAnnotation(op.paramType),
+                            convertTypeAnnotation(op.returnType)
+                        )
+                    }
+                    val effectType = com.funk.language.ast.FunkType.RecordType(operationTypes)
+                    context[item.name] = effectType
+                    
+                    item.copy(inferredType = effectType)
+                }
+                is ImplDeclaration -> {
+                    // Register implementation in context
+                    val operationTypes = item.operations.associate { op ->
+                        op.name to com.funk.language.ast.FunkType.FunctionType(
+                            convertTypeAnnotation(op.paramType),
+                            convertTypeAnnotation(op.returnType)
+                        )
+                    }
+                    val implType = com.funk.language.ast.FunkType.RecordType(operationTypes)
+                    context[item.handlerName] = implType
+                    
+                    item.copy(inferredType = implType)
                 }
                 else -> item
             }
@@ -256,7 +287,8 @@ class TypeChecker {
             is com.funk.language.ast.FunkType.FunctionType -> {
                 com.funk.language.ast.FunkType.FunctionType(
                     applySubstitution(type.paramType, substitutions),
-                    applySubstitution(type.returnType, substitutions)
+                    applySubstitution(type.returnType, substitutions),
+                    type.effects?.let { applySubstitution(it, substitutions) as com.funk.language.ast.FunkType.EffectRow }
                 )
             }
             is com.funk.language.ast.FunkType.RecordType -> {
@@ -312,6 +344,7 @@ class TypeChecker {
      * Basic type inference for expressions - this is a simplified stub
      */
     private fun inferBasicType(expr: Expression): com.funk.language.ast.FunkType {
+        // Debug output removed
         return when (expr) {
             is IntLiteral -> com.funk.language.ast.FunkType.IntType
             is FloatLiteral -> com.funk.language.ast.FunkType.FloatType
@@ -331,6 +364,29 @@ class TypeChecker {
                 }
             }
             is FunctionCall -> {
+                // Check if this is an effect call (function is a member access like Log.log)
+                if (expr.function is MemberAccess) {
+                    val memberAccess = expr.function as MemberAccess
+                    if (memberAccess.receiver is Identifier) {
+                        val effectName = (memberAccess.receiver as Identifier).name
+                        val operationName = memberAccess.member
+                        
+                        // Check if this is a known effect
+                        val effectType = context[effectName]
+                        if (effectType is com.funk.language.ast.FunkType.RecordType) {
+                            val operationType = effectType.fields[operationName]
+                            if (operationType is com.funk.language.ast.FunkType.FunctionType) {
+                                val argType = inferBasicType(expr.arguments)
+                                if (isTypeCompatible(argType, operationType.paramType)) {
+                                    return operationType.returnType
+                                } else {
+                                    throw RuntimeException("Effect call ${effectName}.${operationName} expects ${prettyPrintType(operationType.paramType)} but got ${prettyPrintType(argType)}")
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 // Try to infer return type from function type and validate arguments
                 val functionType = inferBasicType(expr.function)
                 val argumentType = inferBasicType(expr.arguments)
@@ -357,7 +413,7 @@ class TypeChecker {
                                 // Partial application - return function type for remaining parameters
                                 val remainingFields = expectedFields.filterKeys { it in missingFields }
                                 val remainingParamType = com.funk.language.ast.FunkType.RecordType(remainingFields)
-                                com.funk.language.ast.FunkType.FunctionType(remainingParamType, functionType.returnType)
+                                com.funk.language.ast.FunkType.FunctionType(remainingParamType, functionType.returnType, functionType.effects)
                             } else {
                                 // All parameters provided - validate types and return result type
                                 for ((fieldName, providedType) in providedFields) {
@@ -519,6 +575,11 @@ class TypeChecker {
                 val originalContext = context.toMap()
                 val scopeLevel = com.funk.language.ast.TypeVar.enterScope()
                 
+                // Variables to store heuristic results
+                var heuristicParamType: com.funk.language.ast.FunkType? = null
+                var heuristicReturnType: com.funk.language.ast.FunkType? = null
+                var heuristicEffectRow: com.funk.language.ast.FunkType.EffectRow? = null
+                
                 // Create parameter type with type variables for untyped parameters
                 val paramType = when (val params = expr.parameters) {
                     is UntypedParameters -> {
@@ -549,9 +610,18 @@ class TypeChecker {
                     }
                 }
                 
-                // Analyze the body to infer parameter types from usage patterns (like match expressions)
-                if (paramType is com.funk.language.ast.FunkType.RecordType) {
+                // Special handling for do expressions to ensure constraint propagation works
+                if (paramType is com.funk.language.ast.FunkType.RecordType && expr.body is DoExpression) {
                     val paramTypes = paramType.fields.toMutableMap()
+                    
+                    // Direct constraint extraction for do expressions
+                    val paramNames = paramType.fields.keys
+                    val directConstraints = extractParameterConstraints(expr.body, paramNames)
+                    directConstraints.forEach { (name, type) ->
+                        paramTypes[name] = type
+                    }
+                    
+                    // Also run the regular heuristic analysis
                     analyzeExpressionForParameterTypes(expr.body, paramTypes)
                     
                     // Update context with refined parameter types
@@ -565,12 +635,31 @@ class TypeChecker {
                     // Infer the return type from the body (this will add constraints)
                     val returnType = inferBasicType(expr.body)
                     
-                    // Exit scope and restore original context
-                    com.funk.language.ast.TypeVar.exitScope()
-                    context.clear()
-                    context.putAll(originalContext)
+                    // Collect effects from the lambda body
+                    val usedEffects = mutableSetOf<String>()
+                    collectEffectsFromExpression(expr.body, usedEffects)
                     
-                    return com.funk.language.ast.FunkType.FunctionType(refinedParamType, returnType)
+                    // Create effect row if effects are present
+                    val effectRow = if (usedEffects.isNotEmpty()) {
+                        com.funk.language.ast.FunkType.EffectRow(usedEffects)
+                    } else {
+                        null
+                    }
+                    
+                    // For simple cases, return the heuristic result if it has concrete types
+                    if (hasConcreteTypes(refinedParamType)) {
+                        // Exit scope and restore original context
+                        com.funk.language.ast.TypeVar.exitScope()
+                        context.clear()
+                        context.putAll(originalContext)
+                        
+                        return com.funk.language.ast.FunkType.FunctionType(refinedParamType, returnType, effectRow)
+                    }
+                    
+                    // Store the heuristic result for comparison with constraint solver
+                    heuristicParamType = refinedParamType
+                    heuristicReturnType = returnType
+                    heuristicEffectRow = effectRow
                 }
                 
                 // Infer the return type from the body (this will add constraints)
@@ -588,7 +677,7 @@ class TypeChecker {
                 constraints.clear()
                 
                 // Apply substitutions to get the final parameter types
-                val finalParamType = if (paramType is com.funk.language.ast.FunkType.RecordType) {
+                val constraintParamType = if (paramType is com.funk.language.ast.FunkType.RecordType) {
                     // Reconstruct parameter type from the updated context
                     val updatedFields = paramType.fields.mapValues { (name, _) ->
                         context[name] ?: paramType.fields[name]!!
@@ -597,60 +686,137 @@ class TypeChecker {
                 } else {
                     applySubstitution(paramType, substitutions)
                 }
-                val finalReturnType = applySubstitution(returnType, substitutions)
+                val constraintReturnType = applySubstitution(returnType, substitutions)
+                
+                // Apply direct constraint extraction to get better parameter types
+                val paramNames = if (paramType is com.funk.language.ast.FunkType.RecordType) {
+                    paramType.fields.keys
+                } else {
+                    emptySet()
+                }
+                val directConstraints = extractParameterConstraints(expr.body, paramNames)
+                
+                // Use direct constraints if available, otherwise use heuristic or constraint result
+                val finalParamType = if (directConstraints.isNotEmpty() && paramType is com.funk.language.ast.FunkType.RecordType) {
+                    val updatedFields = paramType.fields.toMutableMap()
+                    directConstraints.forEach { (name, type) ->
+                        updatedFields[name] = type
+                    }
+                    com.funk.language.ast.FunkType.RecordType(updatedFields, paramType.rowVar)
+                } else if (heuristicParamType != null && hasConcreteTypes(heuristicParamType)) {
+                    heuristicParamType
+                } else {
+                    constraintParamType
+                }
+                val finalReturnType = if (heuristicReturnType != null) {
+                    heuristicReturnType
+                } else {
+                    constraintReturnType
+                }
+                
+                // Collect effects from the lambda body
+                val usedEffects = mutableSetOf<String>()
+                collectEffectsFromExpression(expr.body, usedEffects)
+                
+                // Create effect row if effects are present
+                val effectRow = if (usedEffects.isNotEmpty()) {
+                    com.funk.language.ast.FunkType.EffectRow(usedEffects)
+                } else if (heuristicEffectRow != null) {
+                    heuristicEffectRow
+                } else {
+                    null
+                }
                 
                 // Exit scope and restore original context
                 com.funk.language.ast.TypeVar.exitScope()
                 context.clear()
                 context.putAll(originalContext)
                 
-                com.funk.language.ast.FunkType.FunctionType(finalParamType, finalReturnType)
+                com.funk.language.ast.FunkType.FunctionType(finalParamType, finalReturnType, effectRow)
             }
             is DoExpression -> {
-                // Enter a new scope for the do block
-                val scopeLevel = com.funk.language.ast.TypeVar.enterScope()
+                // Process statements to add variables to context, but don't create new scopes
+                for (statement in expr.statements) {
+                    when (statement) {
+                        is LetStatement -> {
+                            val actualType = inferBasicType(statement.expression)
+                            context[statement.variableName] = actualType
+                        }
+                        is ExpressionStatement -> {
+                            inferBasicType(statement.expression)
+                        }
+                    }
+                }
                 
-                // Save current context
-                val originalContext = context.toMap()
+                // Return type of the final expression
+                inferBasicType(expr.result)
+            }
+            is HandleExpression -> {
+                // Handle expressions execute effectful code with specific handlers
+                val exprType = inferBasicType(expr.expression)
                 
-                try {
-                    // Process statements in the do block
-                    for (statement in expr.statements) {
-                        when (statement) {
-                            is LetStatement -> {
-                                val actualType = inferBasicType(statement.expression)
-                                val matchedType = actualType // We'll handle alias matching in the pretty printer
-                                
-                                val finalType = statement.typeAnnotation?.let { annotation ->
-                                    val declaredType = convertTypeAnnotation(annotation)
-                                    if (isTypeCompatible(matchedType, declaredType)) {
-                                        if (declaredType is com.funk.language.ast.FunkType.VarType) {
-                                            matchedType
-                                        } else {
-                                            declaredType
-                                        }
-                                    } else {
-                                        throw RuntimeException("Type error: Declared type ${prettyPrintType(declaredType)} does not match inferred type ${prettyPrintType(matchedType)}")
-                                    }
-                                } ?: matchedType
-                                
-                                // Update context with this binding
-                                context[statement.variableName] = finalType
-                            }
-                            is ExpressionStatement -> {
-                                // Just type check the expression, don't bind anything
-                                inferBasicType(statement.expression)
+                // If the expression type is a function with effects, remove the handled effects
+                if (exprType is com.funk.language.ast.FunkType.FunctionType && exprType.effects != null) {
+                    // Find which effects are being handled by looking up the handler names
+                    val handlerNames = expr.handlers
+                    val handledEffects = mutableSetOf<String>()
+                    
+                    // Look for impl declarations to find which effects these handlers implement
+                    for (handlerName in handlerNames) {
+                        for (item in currentProgram?.items ?: emptyList()) {
+                            if (item is ImplDeclaration && item.handlerName == handlerName) {
+                                handledEffects.add(item.effectName)
+                                break
                             }
                         }
                     }
                     
-                    // Return type of the final expression
-                    inferBasicType(expr.result)
-                } finally {
-                    // Exit the scope and restore context
-                    com.funk.language.ast.TypeVar.exitScope()
-                    context.clear()
-                    context.putAll(originalContext)
+                    if (handledEffects.isNotEmpty()) {
+                        // Remove the handled effects from the effect row
+                        val currentEffects = exprType.effects!!.effects.toMutableSet()
+                        currentEffects.removeAll(handledEffects)
+                        
+                        val newEffectRow = if (currentEffects.isEmpty()) {
+                            null // No effects left
+                        } else {
+                            com.funk.language.ast.FunkType.EffectRow(currentEffects, exprType.effects!!.rowVar)
+                        }
+                        
+                        com.funk.language.ast.FunkType.FunctionType(
+                            exprType.paramType,
+                            exprType.returnType,
+                            newEffectRow
+                        )
+                    } else {
+                        // No handlers found, return original type
+                        exprType
+                    }
+                } else {
+                    // Not a function with effects, return as-is
+                    exprType
+                }
+            }
+            is EffectCallExpression -> {
+                // Effect calls perform operations
+                val effectType = context[expr.effectName]
+                    ?: throw RuntimeException("Undefined effect: ${expr.effectName}")
+                
+                if (effectType is com.funk.language.ast.FunkType.RecordType) {
+                    val operationType = effectType.fields[expr.operationName]
+                        ?: throw RuntimeException("Effect ${expr.effectName} has no operation ${expr.operationName}")
+                    
+                    if (operationType is com.funk.language.ast.FunkType.FunctionType) {
+                        val argType = inferBasicType(expr.arguments)
+                        if (isTypeCompatible(argType, operationType.paramType)) {
+                            operationType.returnType
+                        } else {
+                            throw RuntimeException("Effect call ${expr.effectName}.${expr.operationName} expects ${prettyPrintType(operationType.paramType)} but got ${prettyPrintType(argType)}")
+                        }
+                    } else {
+                        throw RuntimeException("Effect operation ${expr.effectName}.${expr.operationName} is not a function")
+                    }
+                } else {
+                    throw RuntimeException("Effect ${expr.effectName} is not properly defined")
                 }
             }
             // PipeExpression and PlaceholderExpression removed - desugared during parsing
@@ -966,6 +1132,17 @@ class TypeChecker {
                     entry.value?.let { analyzeExpressionForParameterTypes(it, paramTypes) }
                 }
             }
+            is DoExpression -> {
+                // Analyze all statements in the do block
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is LetStatement -> analyzeExpressionForParameterTypes(stmt.expression, paramTypes)
+                        is ExpressionStatement -> analyzeExpressionForParameterTypes(stmt.expression, paramTypes)
+                    }
+                }
+                // Analyze the result expression
+                analyzeExpressionForParameterTypes(expr.result, paramTypes)
+            }
             is LambdaExpression -> {
                 // Analyze the lambda body
                 analyzeExpressionForParameterTypes(expr.body, paramTypes)
@@ -976,6 +1153,91 @@ class TypeChecker {
         }
     }
     
+    /**
+     * Extract type constraints from an expression for lambda parameters
+     */
+    private fun extractParameterConstraints(expr: Expression, paramNames: Set<String>): Map<String, com.funk.language.ast.FunkType> {
+        val constraints = mutableMapOf<String, com.funk.language.ast.FunkType>()
+        
+        fun analyzeExpression(e: Expression) {
+            when (e) {
+                is BinaryOperation -> {
+                    // For arithmetic operations, constrain operands to Int
+                    if (e.operator in setOf("+", "-", "*", "/")) {
+                        val left = e.left
+                        val right = e.right
+                        if (left is Identifier && paramNames.contains(left.name)) {
+                            constraints[left.name] = com.funk.language.ast.FunkType.IntType
+                        }
+                        if (right is Identifier && paramNames.contains(right.name)) {
+                            constraints[right.name] = com.funk.language.ast.FunkType.IntType
+                        }
+                    }
+                    // For string concatenation, constrain operands to String
+                    else if (e.operator == "++") {
+                        val left = e.left
+                        val right = e.right
+                        if (left is Identifier && paramNames.contains(left.name)) {
+                            constraints[left.name] = com.funk.language.ast.FunkType.StringType
+                        }
+                        if (right is Identifier && paramNames.contains(right.name)) {
+                            constraints[right.name] = com.funk.language.ast.FunkType.StringType
+                        }
+                    }
+                    analyzeExpression(e.left)
+                    analyzeExpression(e.right)
+                }
+                is DoExpression -> {
+                    e.statements.forEach { stmt ->
+                        when (stmt) {
+                            is LetStatement -> analyzeExpression(stmt.expression)
+                            is ExpressionStatement -> analyzeExpression(stmt.expression)
+                        }
+                    }
+                    analyzeExpression(e.result)
+                }
+                is IfExpression -> {
+                    analyzeExpression(e.condition)
+                    analyzeExpression(e.thenBranch)
+                    analyzeExpression(e.elseBranch)
+                }
+                is FunctionCall -> {
+                    analyzeExpression(e.function)
+                    analyzeExpression(e.arguments)
+                }
+                is RecordLiteral -> {
+                    e.entries.forEach { entry ->
+                        entry.value?.let { analyzeExpression(it) }
+                    }
+                }
+                // Add more cases as needed
+                else -> {} // Ignore other expression types
+            }
+        }
+        
+        analyzeExpression(expr)
+        return constraints
+    }
+
+    /**
+     * Check if a type has concrete types (no type variables)
+     */
+    private fun hasConcreteTypes(type: com.funk.language.ast.FunkType): Boolean {
+        return when (type) {
+            is com.funk.language.ast.FunkType.VarType -> false
+            is com.funk.language.ast.FunkType.RecordType -> {
+                type.fields.values.all { hasConcreteTypes(it) }
+            }
+            is com.funk.language.ast.FunkType.FunctionType -> {
+                hasConcreteTypes(type.paramType) && hasConcreteTypes(type.returnType)
+            }
+            is com.funk.language.ast.FunkType.VariantType -> {
+                type.constructors.values.all { it == null || hasConcreteTypes(it) }
+            }
+            else -> true // Primitive types are concrete
+        }
+    }
+
     /**
      * Infer field type from field name - simple heuristics
      */
@@ -1093,7 +1355,8 @@ class TypeChecker {
                 } else {
                     // Both types are concrete, require exact compatibility
                     isTypeCompatible(actualType.paramType, expectedType.paramType) &&
-                    isTypeCompatible(actualType.returnType, expectedType.returnType)
+                    isTypeCompatible(actualType.returnType, expectedType.returnType) &&
+                    effectRowsCompatible(actualType.effects, expectedType.effects)
                 }
             }
             
@@ -1113,7 +1376,7 @@ class TypeChecker {
             is com.funk.language.ast.FunkType.VarType -> true
             is com.funk.language.ast.FunkType.RecordType -> type.fields.values.any { containsTypeVariables(it) }
             is com.funk.language.ast.FunkType.VariantType -> type.constructors.values.any { it != null && containsTypeVariables(it) }
-            is com.funk.language.ast.FunkType.FunctionType -> containsTypeVariables(type.paramType) || containsTypeVariables(type.returnType)
+            is com.funk.language.ast.FunkType.FunctionType -> containsTypeVariables(type.paramType) || containsTypeVariables(type.returnType) || (type.effects?.let { containsTypeVariables(it) } ?: false)
             else -> false
         }
     }
@@ -1233,7 +1496,13 @@ class TypeChecker {
             is FunctionTypeAnnotation -> {
                 val paramType = convertTypeAnnotation(annotation.paramType)
                 val returnType = convertTypeAnnotation(annotation.returnType)
-                com.funk.language.ast.FunkType.FunctionType(paramType, returnType)
+                val effects = annotation.effects?.let { 
+                    com.funk.language.ast.FunkType.EffectRow(it.effects.toSet())
+                }
+                com.funk.language.ast.FunkType.FunctionType(paramType, returnType, effects)
+            }
+            is EffectRowAnnotation -> {
+                com.funk.language.ast.FunkType.EffectRow(annotation.effects.toSet())
             }
             else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
         }
@@ -1277,10 +1546,96 @@ class TypeChecker {
             is com.funk.language.ast.FunkType.FunctionType -> {
                 com.funk.language.ast.FunkType.FunctionType(
                     substituteInType(type.paramType, substitution),
-                    substituteInType(type.returnType, substitution)
+                    substituteInType(type.returnType, substitution),
+                    type.effects?.let { substituteInType(it, substitution) as com.funk.language.ast.FunkType.EffectRow }
                 )
             }
             else -> type
+        }
+    }
+    
+    /**
+     * Collect effects used in an expression
+     */
+    private fun collectEffectsFromExpression(expr: Expression, effects: MutableSet<String>) {
+        when (expr) {
+            is EffectCallExpression -> {
+                effects.add(expr.effectName)
+            }
+            is DoExpression -> {
+                expr.statements.forEach { stmt ->
+                    when (stmt) {
+                        is LetStatement -> collectEffectsFromExpression(stmt.expression, effects)
+                        is ExpressionStatement -> collectEffectsFromExpression(stmt.expression, effects)
+                    }
+                }
+                collectEffectsFromExpression(expr.result, effects)
+            }
+            is FunctionCall -> {
+                // Check if this is an effect call (function is a member access like Log.log)
+                if (expr.function is MemberAccess) {
+                    val memberAccess = expr.function as MemberAccess
+                    if (memberAccess.receiver is Identifier) {
+                        val effectName = (memberAccess.receiver as Identifier).name
+                        // Add to effects if it's a known effect
+                        effects.add(effectName)
+                    }
+                }
+                collectEffectsFromExpression(expr.function, effects)
+                collectEffectsFromExpression(expr.arguments, effects)
+            }
+            is BinaryOperation -> {
+                collectEffectsFromExpression(expr.left, effects)
+                collectEffectsFromExpression(expr.right, effects)
+            }
+            is IfExpression -> {
+                collectEffectsFromExpression(expr.condition, effects)
+                collectEffectsFromExpression(expr.thenBranch, effects)
+                collectEffectsFromExpression(expr.elseBranch, effects)
+            }
+            is MatchExpression -> {
+                collectEffectsFromExpression(expr.expression, effects)
+                expr.cases.forEach { case ->
+                    collectEffectsFromExpression(case.expression, effects)
+                }
+            }
+            is RecordLiteral -> {
+                expr.entries.forEach { entry ->
+                    entry.value?.let { collectEffectsFromExpression(it, effects) }
+                }
+            }
+            is LambdaExpression -> {
+                collectEffectsFromExpression(expr.body, effects)
+            }
+            is MemberAccess -> {
+                collectEffectsFromExpression(expr.receiver, effects)
+            }
+            is RecordUpdateExpression -> {
+                collectEffectsFromExpression(expr.baseRecord, effects)
+                expr.updates.forEach { update ->
+                    collectEffectsFromExpression(update.value, effects)
+                }
+            }
+            is HandleExpression -> {
+                collectEffectsFromExpression(expr.expression, effects)
+            }
+            // Literals and identifiers don't have effects
+            else -> {}
+        }
+    }
+    
+    /**
+     * Check if two effect rows are compatible
+     * For now, we use simple set equality, but this could be extended for effect row polymorphism
+     */
+    private fun effectRowsCompatible(
+        actualEffects: com.funk.language.ast.FunkType.EffectRow?,
+        expectedEffects: com.funk.language.ast.FunkType.EffectRow?
+    ): Boolean {
+        return when {
+            actualEffects == null && expectedEffects == null -> true
+            actualEffects != null && expectedEffects != null -> actualEffects.effects == expectedEffects.effects
+            else -> false // One has effects, the other doesn't
         }
     }
     

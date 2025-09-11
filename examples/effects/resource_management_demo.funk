@@ -1,0 +1,72 @@
+# Resource Management with Effects Demo
+
+# Resource management effect
+effect Resource {
+  bracket : {
+    acquire: {} -> 'resource <'effects>,
+    use: {'resource} -> 'result <'effects>, 
+    release: {'resource} -> {} <'effects>
+  } -> 'result <'effects>
+}
+
+# Error handling effect
+effect Error {
+  throw : {'error} -> 'never
+  catch : {
+    computation: {} -> 'result <'effects>,
+    handler: {'error} -> 'result <'effects>
+  } -> 'result <'effects>
+}
+
+# File handle type (simulated)
+type FileHandle = { path: String, handle: Int }
+
+# Implementations
+impl Resource for SafeResource {
+  bracket : {acquire, use, release} -> 'result = {acquire, use, release} ->
+    do
+      let resource = acquire {}
+      let result = Error.catch {
+        computation = {} -> use {resource = resource},
+        handler = {error} -> do
+          release {resource = resource}
+          Error.throw {error = error}
+      }
+      release {resource = resource}
+      result
+}
+
+impl Error for ErrorHandler {
+  throw : {error} -> 'never = {error} ->
+    native_throw_error {error = error}
+  
+  catch : {computation, handler} -> 'result = {computation, handler} ->
+    native_try_catch {computation = computation, handler = handler}
+}
+
+# Safe file processing with automatic cleanup
+let safeFileProcessing : {path: String} -> String <AsyncIO, Resource, Error> = {path} ->
+  Resource.bracket {
+    acquire = {} -> do
+      AsyncIO.openFile {path = path}  # This could fail
+    ,
+    use = {fileHandle} -> do
+      let content = AsyncIO.readAll {handle = fileHandle}
+      "Processed: " + content
+    ,
+    release = {fileHandle} -> do
+      AsyncIO.closeFile {handle = fileHandle}
+  }
+
+# Error handling with graceful fallback
+let robustFileProcessing : {path: String} -> String <AsyncIO, Resource, Error> = {path} ->
+  Error.catch {
+    computation = {} -> safeFileProcessing {path = path},
+    handler = {error} -> "Failed to process file: " + error.message
+  }
+
+# Execute with all handlers
+let result = handle robustFileProcessing {path = "data.txt"} 
+  with FileSystem, SafeResource, ErrorHandler
+
+result

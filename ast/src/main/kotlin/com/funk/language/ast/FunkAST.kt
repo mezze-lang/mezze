@@ -62,8 +62,19 @@ sealed interface FunkType {
     @Serializable
     data class FunctionType(
         val paramType: FunkType,
-        val returnType: FunkType
+        val returnType: FunkType,
+        val effects: EffectRow? = null  // null = pure function, non-null = effectful function
     ) : FunkType
+    
+    // Effect rows
+    @Serializable
+    data class EffectRow(
+        val effects: Set<String>,
+        val rowVar: RowVar? = null // null = closed, non-null = open
+    ) : FunkType {
+        val isOpen: Boolean get() = rowVar != null
+        val isClosed: Boolean get() = rowVar == null
+    }
     
 }
 
@@ -188,6 +199,22 @@ data class TypeDeclaration(
 ) : ProgramItem
 
 @Serializable
+data class EffectDeclaration(
+    val name: String,
+    val operations: List<EffectOperation>,
+    val inferredType: FunkType? = null           // From typechecker
+) : ProgramItem
+
+@Serializable
+data class ImplDeclaration(
+    val effectName: String,
+    val handlerName: String,
+    val handlerParams: RecordTypeAnnotation? = null, // For parameterized handlers like FileLogger {path: String}
+    val operations: List<ImplOperation>,
+    val inferredType: FunkType? = null           // From typechecker
+) : ProgramItem
+
+@Serializable
 data class TopLevelExpression(
     val expression: Expression
 ) : ProgramItem
@@ -219,6 +246,21 @@ data class RecordFieldDef(
 data class VariantConstructorDef(
     val name: String,
     val dataType: TypeAnnotation? = null
+)
+
+@Serializable
+data class EffectOperation(
+    val name: String,
+    val paramType: TypeAnnotation,
+    val returnType: TypeAnnotation
+)
+
+@Serializable
+data class ImplOperation(
+    val name: String,
+    val paramType: TypeAnnotation,
+    val returnType: TypeAnnotation,
+    val implementation: Expression
 )
 
 // ============================================================================
@@ -395,6 +437,23 @@ data class DoExpression(
     override val inferredType: FunkType? = null
 ) : Expression
 
+// Effect handling
+@Serializable
+data class HandleExpression(
+    val expression: Expression,
+    val handlers: List<String>,
+    override val inferredType: FunkType? = null
+) : Expression
+
+
+@Serializable
+data class EffectCallExpression(
+    val effectName: String,
+    val operationName: String,
+    val arguments: Expression,
+    override val inferredType: FunkType? = null
+) : Expression
+
 // ============================================================================
 // PATTERNS
 // ============================================================================
@@ -483,7 +542,13 @@ data class VariantTypeAnnotation(
 @Serializable
 data class FunctionTypeAnnotation(
     val paramType: TypeAnnotation,
-    val returnType: TypeAnnotation
+    val returnType: TypeAnnotation,
+    val effects: EffectRowAnnotation? = null
+) : TypeAnnotation
+
+@Serializable
+data class EffectRowAnnotation(
+    val effects: List<String>
 ) : TypeAnnotation
 
 @Serializable

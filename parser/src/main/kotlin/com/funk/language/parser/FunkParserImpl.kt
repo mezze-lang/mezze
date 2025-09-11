@@ -54,6 +54,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         return when {
             ctx.letBinding() != null -> visit(ctx.letBinding())
             ctx.typeDeclaration() != null -> visit(ctx.typeDeclaration())
+            ctx.effectDeclaration() != null -> visit(ctx.effectDeclaration())
+            ctx.implDeclaration() != null -> visit(ctx.implDeclaration())
             ctx.expressionStatement() != null -> visit(ctx.expressionStatement())
             else -> throw IllegalArgumentException("Unknown statement: ${ctx.text}")
         }
@@ -79,6 +81,38 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val typeParams = ctx.typeParams()?.TypeVariable()?.map { it.text } ?: emptyList()
         val definition = visit(ctx.typeDefinition()) as TypeDefinition
         return TypeDeclaration(name, typeParams, definition)
+    }
+    
+    override fun visitEffectDeclaration(ctx: FunkParser.EffectDeclarationContext): Any {
+        val name = ctx.Identifier().text
+        val operations = ctx.effectOperation().map { visit(it) as EffectOperation }
+        return EffectDeclaration(name, operations)
+    }
+    
+    override fun visitEffectOperation(ctx: FunkParser.EffectOperationContext): Any {
+        val name = ctx.Identifier().text
+        val paramType = visit(ctx.recordType()) as TypeAnnotation
+        val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
+        return EffectOperation(name, paramType, returnType)
+    }
+    
+    override fun visitImplDeclaration(ctx: FunkParser.ImplDeclarationContext): Any {
+        val effectName = ctx.Identifier(0).text  // First identifier is effect name
+        val handlerName = ctx.Identifier(1).text // Second identifier is handler name
+        
+        // Check if there's a recordType for handler parameters
+        val handlerParams = ctx.recordType()?.let { visit(it) as RecordTypeAnnotation }
+        
+        val operations = ctx.implOperation().map { visit(it) as ImplOperation }
+        return ImplDeclaration(effectName, handlerName, handlerParams, operations)
+    }
+    
+    override fun visitImplOperation(ctx: FunkParser.ImplOperationContext): Any {
+        val name = ctx.Identifier().text
+        val paramType = visit(ctx.recordType()) as TypeAnnotation
+        val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
+        val implementation = visit(ctx.expression()) as Expression
+        return ImplOperation(name, paramType, returnType, implementation)
     }
 
     override fun visitTypeDefinition(ctx: FunkParser.TypeDefinitionContext): Any {
@@ -227,6 +261,12 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             result = MemberAccess(result, identifier.text)
         }
         
+        // Check if this is a function call (member access followed by record literal)
+        if (ctx.recordLiteral() != null) {
+            val arguments = visit(ctx.recordLiteral()) as Expression
+            result = FunctionCall(result, arguments)
+        }
+        
         return result
     }
 
@@ -268,6 +308,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             }
             ctx.doExpression() != null -> visit(ctx.doExpression())
             ctx.lambdaExpression() != null -> visit(ctx.lambdaExpression())
+            ctx.handleExpression() != null -> visit(ctx.handleExpression())
             else -> throw IllegalArgumentException("Unknown primary expression: ${ctx.text}")
         }
     }
@@ -354,7 +395,10 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
                 val letBinding = visit(ctx.letBinding()) as LetBinding
                 LetStatement(letBinding.variableName, letBinding.typeAnnotation, letBinding.expression)
             }
-            ctx.expressionStatement() != null -> visit(ctx.expressionStatement())
+            ctx.expressionStatement() != null -> {
+                val topLevelExpr = visit(ctx.expressionStatement()) as TopLevelExpression
+                ExpressionStatement(topLevelExpr.expression)
+            }
             else -> throw IllegalArgumentException("Unknown do statement: ${ctx.text}")
         }
     }
@@ -430,8 +474,22 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitFunctionType(ctx: FunkParser.FunctionTypeContext): Any {
         val paramType = visit(ctx.recordType()) as TypeAnnotation
         val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
-        return FunctionTypeAnnotation(paramType, returnType)
+        val effects = ctx.effectRow()?.let { visit(it) as EffectRowAnnotation }
+        return FunctionTypeAnnotation(paramType, returnType, effects)
     }
+    
+    override fun visitEffectRow(ctx: FunkParser.EffectRowContext): Any {
+        val effects = ctx.Identifier().map { it.text }
+        return EffectRowAnnotation(effects)
+    }
+    
+    override fun visitHandleExpression(ctx: FunkParser.HandleExpressionContext): Any {
+        val expression = visit(ctx.expression()) as Expression
+        val handlers = ctx.Identifier().map { it.text }
+        return HandleExpression(expression, handlers)
+    }
+    
+    
     
     /**
      * Substitute placeholders (@) in an expression with the given value expression.

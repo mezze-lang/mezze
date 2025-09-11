@@ -1,0 +1,12 @@
+# Simple Handle Expression Demo
+
+effect Log {
+  print : {msg: String} -> {}
+}
+
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+}
+
+# Simple handle expression
+handle Log.print {msg = "Hello from handle expression!"} with Console

@@ -7,6 +7,8 @@ program: (statement | NEWLINE)* EOF;
 statement:
     letBinding
     | typeDeclaration
+    | effectDeclaration
+    | implDeclaration
     | expressionStatement
     ;
 
@@ -18,6 +20,22 @@ letBinding:
 
 typeDeclaration:
     TYPE Identifier typeParams? ASSIGN typeDefinition NEWLINE?
+    ;
+
+effectDeclaration:
+    EFFECT Identifier LBRACE NEWLINE? (effectOperation NEWLINE?)* RBRACE NEWLINE?
+    ;
+
+effectOperation:
+    Identifier COLON recordType ARROW typeAnnotation
+    ;
+
+implDeclaration:
+    IMPL Identifier recordType? FOR Identifier LBRACE NEWLINE? (implOperation NEWLINE?)* RBRACE NEWLINE?
+    ;
+
+implOperation:
+    Identifier COLON recordType ARROW typeAnnotation ASSIGN expression
     ;
 
 typeParams:
@@ -107,7 +125,7 @@ unaryExpression:
     ;
 
 memberAccessExpression:
-    primaryExpression (DOT Identifier)*
+    primaryExpression (DOT Identifier)* (recordLiteral)?  // Allow function calls on member access
     ;
 
 primaryExpression:
@@ -118,8 +136,14 @@ primaryExpression:
     | recordLiteral
     | doExpression                         // Do block
     | lambdaExpression                     // Lambda function
+    | handleExpression                     // Handle expression
     | primaryExpression recordLiteral      // Function call or record update (disambiguated in AST builder)
     ;
+
+handleExpression:
+    HANDLE expression WITH (Identifier (COMMA Identifier)*)?
+    ;
+
 
 lambdaExpression:
     recordType ARROW NEWLINE? expression                    // Typed parameters: { x: Int, y: Int } -> x + y
@@ -176,7 +200,11 @@ typeAnnotation:
     ;
 
 functionType:
-    recordType ARROW typeAnnotation         // { params } -> ReturnType
+    recordType ARROW typeAnnotation effectRow?    // { params } -> ReturnType <Effects>
+    ;
+
+effectRow:
+    LT (Identifier (COMMA Identifier)*)? GT
     ;
 
 
@@ -198,6 +226,11 @@ THEN: 'then';
 ELSE: 'else';
 MATCH: 'match';
 DO: 'do';
+EFFECT: 'effect';
+IMPL: 'impl';
+FOR: 'for';
+HANDLE: 'handle';
+WITH: 'with';
 
 // Operators
 PLUS: '+';

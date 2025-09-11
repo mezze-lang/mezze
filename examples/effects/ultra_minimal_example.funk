@@ -1,0 +1,16 @@
+# Ultra Minimal Effect Example - No Do Blocks
+
+# 1. Declare effect
+effect Log {
+  print : {msg: String} -> {}
+}
+
+# 2. Implementation (record of functions)
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> {}
+}
+
+# 3. Simple effectful call
+let result = Log.print {msg = "Hello"}
+
+result

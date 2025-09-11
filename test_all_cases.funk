@@ -1,0 +1,13 @@
+# Direct binary operation - works
+let direct = {x, y} -> x + y
+
+# If expression - works  
+let ifExpr = {x, y} -> if true then x + y else 0
+
+# Do expression - doesn't work
+let doExpr = {x, y} -> do x + y
+
+# Do with let statement - test this case
+let doLet = {x, y} -> do
+  let sum = x + y
+  sum

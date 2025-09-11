@@ -1,0 +1,14 @@
+# Random Effect Example
+
+# Declare random effect
+effect Random {
+  nextInt : {min: Int, max: Int} -> Int
+}
+
+# Implementation using native Kotlin Random
+impl Random for MathRandom {
+  nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
+}
+
+# Use the effect
+handle Random.nextInt {min = 1, max = 100} with MathRandom

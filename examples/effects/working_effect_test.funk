@@ -1,0 +1,14 @@
+# Working effect with proper handler
+
+# Declare the Log effect
+effect Log {
+  print : {msg: String} -> {}
+}
+
+# Implementation using native function
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+}
+
+# Test the effect with handler
+handle Log.print {msg = "Hello from effect!"} with Console

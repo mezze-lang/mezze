@@ -1,0 +1,1 @@
+let simpleAdd = {x, y} -> x + y

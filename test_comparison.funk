@@ -1,0 +1,17 @@
+# This works correctly
+let simpleAdd = {x, y} -> x + y
+
+# This doesn't constrain parameter types properly  
+let doAdd = {x, y} -> do
+  x + y
+
+# This has the same issue plus effects
+let addLog = {x, y} -> do
+  let sum = x + y
+  Log.print { msg = "logged"}
+  sum
+
+effect Log { print : {msg: String} -> {} }
+impl Log for Console { 
+  print : {msg: String} -> {} = {msg} -> native_print {msg = msg} 
+}

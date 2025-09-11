@@ -1,0 +1,43 @@
+# Basic effect system example
+
+# Declare a Log effect
+effect Log {
+  log : {msg: String} -> {}
+}
+
+# Declare a Random effect
+effect Random {
+  randInt : {min: Int, max: Int} -> Int
+}
+
+# Implementation for Console logging
+impl Log for Console {
+  log : {msg: String} -> {} = {msg} -> intToString {val = 42}  # Placeholder implementation
+}
+
+# Implementation for JVM random
+impl Random for JVM {
+  randInt : {min: Int, max: Int} -> Int = {min, max} -> 42  # Placeholder implementation
+}
+
+# Pure function (no effects)
+let pureAdd : {x: Int, y: Int} -> Int = {x, y} -> x + y
+
+# Effectful function that uses Log
+let noisyAdd : {x: Int, y: Int} -> Int <Log> = {x, y} ->
+  do
+    let result = x + y
+    Log.log {msg = "Computed sum"}
+    result
+
+# Function that uses multiple effects
+let randomWithLogging : {} -> Int <Log, Random> = {} ->
+  do
+    let n = Random.randInt {min = 1, max = 10}
+    Log.log {msg = "Generated random number"}
+    n
+
+# Handle effects explicitly
+let result = handle randomWithLogging {} with Console, JVM
+
+result

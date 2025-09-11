@@ -1,0 +1,7 @@
+# Test constraint generation in different contexts
+let directBinary = {x, y} -> x + y
+let ifBinary = {x, y} -> if true then x + y else x
+let doBinary = {x, y} -> do x + y
+let doLetBinary = {x, y} -> do
+  let result = x + y
+  result

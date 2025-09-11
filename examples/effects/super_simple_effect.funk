@@ -1,0 +1,16 @@
+# Super Simple Effect Test
+
+# 1. Effect
+effect Log {
+  print : {msg: String} -> {}
+}
+
+# 2. Implementation
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> {}
+}
+
+# 3. Direct effect call (this should work!)
+let result = handle Log.print {msg = "Hello"} with Console
+
+result

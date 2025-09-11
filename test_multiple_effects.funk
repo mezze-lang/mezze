@@ -1,0 +1,35 @@
+# Define multiple effects
+effect Log {
+  print : {msg: String} -> {}
+}
+
+effect Random {
+  nextInt : {max: Int} -> Int
+}
+
+effect FileIO {
+  writeFile : {path: String, content: String} -> {}
+}
+
+# Implementations
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+}
+
+impl Random for SystemRandom {
+  nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+}
+
+impl FileIO for SystemFileIO {
+  writeFile : {path: String, content: String} -> {} = {path, content} -> native_write_file {path = path, content = content}
+}
+
+# Function using multiple effects in one do statement
+let multiEffectFunction = {x, y} -> do
+  let sum = x + y
+  Log.print {msg = "Computing sum"}
+  let randomValue = Random.nextInt {max = sum}
+  let result = sum + randomValue
+  FileIO.writeFile {path = "result.txt", content = intToString {val = result}}
+  Log.print {msg = "Done!"}
+  result

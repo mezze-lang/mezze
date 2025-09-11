@@ -1,0 +1,45 @@
+# Define multiple effects
+effect Log {
+  print : {msg: String} -> {}
+}
+
+effect Random {
+  nextInt : {max: Int} -> Int
+}
+
+effect FileIO {
+  writeFile : {path: String, content: String} -> {}
+}
+
+# Implementations
+impl Log for Console {
+  print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+}
+
+impl Random for SystemRandom {
+  nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+}
+
+impl FileIO for SystemFileIO {
+  writeFile : {path: String, content: String} -> {} = {path, content} -> native_write_file {path = path, content = content}
+}
+
+# Original function with all three effects
+let originalFunction = {x, y} -> do
+  let sum = x + y
+  Log.print {msg = "Computing"}
+  let randomValue = Random.nextInt {max = sum}
+  FileIO.writeFile {path = "out.txt", content = intToString {val = randomValue}}
+  sum + randomValue
+
+# Step 1: Handle only Log effect - should result in: () -> Int <FileIO, Random>
+let afterHandlingLog = handle originalFunction with Console
+
+# Step 2: Handle Random effect - should result in: () -> Int <FileIO>  
+let afterHandlingRandom = handle afterHandlingLog with SystemRandom
+
+# Step 3: Handle FileIO effect - should result in: () -> Int (no effects)
+let fullyHandled = handle afterHandlingRandom with SystemFileIO
+
+# Now we can call the fully handled function
+let finalResult = fullyHandled {}
