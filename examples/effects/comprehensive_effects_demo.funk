@@ -13,12 +13,12 @@ effect Random {
 }
 
 # 2. Implementations using native Kotlin functions
-impl Logging for Console {
+impl Console for Logging {
   info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " + msg}
   debug : {msg: String} -> {} = {msg} -> native_debug {msg = msg}
 }
 
-impl Random for MathRandom {
+impl MathRandom for Random {
   nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
   nextDouble : {} -> Float = {} -> native_random_double {}
 }

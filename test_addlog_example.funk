@@ -1,9 +1,0 @@
-effect Log { print : {msg: String} -> {} }
-impl Log for Console { 
-  print : {msg: String} -> {} = {msg} -> native_print {msg = msg} 
-}
-
-let addLog = {x, y} -> do
-  let sum = x + y
-  Log.print { msg = "logged"}
-  sum

@@ -97,14 +97,22 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
     
     override fun visitImplDeclaration(ctx: FunkParser.ImplDeclarationContext): Any {
-        val effectName = ctx.Identifier(0).text  // First identifier is effect name
-        val handlerName = ctx.Identifier(1).text // Second identifier is handler name
-        
-        // Check if there's a recordType for handler parameters
-        val handlerParams = ctx.recordType()?.let { visit(it) as RecordTypeAnnotation }
+        // New syntax: impl EffectName for HandlerName {params?} where {}
+        val effectName = ctx.Identifier(0).text    // First identifier is effect name
+        val handlerName = ctx.Identifier(1).text   // Second identifier is handler name (after FOR)
+        val handlerParams = ctx.implParams()?.let { visit(it) as RecordTypeAnnotation }
         
         val operations = ctx.implOperation().map { visit(it) as ImplOperation }
         return ImplDeclaration(effectName, handlerName, handlerParams, operations)
+    }
+    
+    override fun visitImplParams(ctx: FunkParser.ImplParamsContext): Any {
+        val entries = ctx.recordTypeEntry().map { entry ->
+            val name = entry.Identifier().text
+            val type = visit(entry.typeAnnotation()) as TypeAnnotation
+            RecordTypeEntry(name, type)
+        }
+        return RecordTypeAnnotation(entries, null) // No rest field for handler params
     }
     
     override fun visitImplOperation(ctx: FunkParser.ImplOperationContext): Any {

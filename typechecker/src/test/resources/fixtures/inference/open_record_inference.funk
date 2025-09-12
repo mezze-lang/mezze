@@ -18,7 +18,7 @@ let processedOpen = processOpen {record = testOpen}
 
 # Mixed closed and open record inference
 let mixedFunc = {closed, open} -> {open | fromClosed = closed.name}
-# expected: mixedFunc : { closed: 'a, open: 'b } -> { fromClosed: String }
+# expected: mixedFunc : { closed: { name: String }, open: 'b } -> { fromClosed: String }
 
 let closedInput = {name = "Alice", age = 30}
 let openInput = {kind = "user", active = true, ...}

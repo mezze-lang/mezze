@@ -1,2 +1,0 @@
-# Test if constraint solver works for nested expressions
-let nestedAdd = {x, y} -> if true then x + y else 0

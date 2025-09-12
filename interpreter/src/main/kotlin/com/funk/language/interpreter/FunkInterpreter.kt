@@ -6,6 +6,8 @@ import com.funk.language.typechecker.TypeChecker
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.RootNode
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executors
 
 /**
  * Truffle-integrated interpreter that works with the shared AST
@@ -134,6 +136,7 @@ class FunkInterpreter {
      * Evaluate an expression (simplified version)
      */
     private fun evaluateExpression(expr: Expression, context: MutableMap<String, FunkValue>): FunkValue {
+        // println("DEBUG: Evaluating expression: ${expr::class.simpleName}")
         return when (expr) {
             is IntLiteral -> FunkInt(expr.value)
             is FloatLiteral -> FunkFloat(expr.value)
@@ -231,7 +234,7 @@ class FunkInterpreter {
                         params.recordType.entries.map { it.name }
                     }
                 }
-                SimpleFunkFunction(paramNames, expr.body, context.toMap()) // Capture current context
+                SimpleFunkFunction(paramNames, expr.body, context.toMap(), inferredType = expr.inferredType) // Capture current context and type
             }
             is DoExpression -> {
                 // Check if this do block contains effect calls - if so, lower to state machine
@@ -274,16 +277,37 @@ class FunkInterpreter {
                     val effectName = findEffectForHandler(handlerName, context)
                     handlerMap[effectName] = handler
                 }
-                // Store handlers in context for effect calls
-                val originalHandlers = context["__handlers"]
-                context["__handlers"] = FunkRecord(handlerMap)
-                try {
-                    evaluateExpression(expr.expression, context)
-                } finally {
-                    if (originalHandlers != null) {
-                        context["__handlers"] = originalHandlers
-                    } else {
-                        context.remove("__handlers")
+                
+                // Evaluate the expression to get the function
+                val function = evaluateExpression(expr.expression, context)
+                
+                // If it's a function, wrap it with handlers
+                when (function) {
+                    is SimpleFunkFunction -> {
+                        // Create a new function that carries the handlers in its closure
+                        val newClosure = function.closure.toMutableMap()
+                        
+                        // Merge with existing handlers if any
+                        val existingHandlers = (newClosure["__handlers"] as? FunkRecord)?.fields ?: emptyMap()
+                        val mergedHandlers = existingHandlers.toMutableMap()
+                        mergedHandlers.putAll(handlerMap)
+                        
+                        // println("MERGE DEBUG: Existing handlers: ${existingHandlers.keys}, New handlers: ${handlerMap.keys}, Merged: ${mergedHandlers.keys}")
+                        
+                        newClosure["__handlers"] = FunkRecord(mergedHandlers)
+                        
+                        SimpleFunkFunction(
+                            parameters = function.parameters,
+                            body = function.body,
+                            closure = newClosure,
+                            name = function.name,
+                            inferredType = function.inferredType
+                        )
+                    }
+                    else -> {
+                        // For non-functions, just return as-is
+                        // This shouldn't happen in normal handle expressions, but handle gracefully
+                        function
                     }
                 }
             }
@@ -539,11 +563,24 @@ class FunkInterpreter {
                 val missingParams = requiredParams - providedParams
                 
                 if (missingParams.isEmpty()) {
-                    // All parameters provided - execute function
+                    // All parameters provided - check for unhandled effects before execution
+                    if (function.hasUnhandledEffects()) {
+                        val unhandledEffects = function.getUnhandledEffects()
+                        throw RuntimeException(
+                            "Cannot execute function with unhandled effects: ${unhandledEffects.joinToString(", ")}. " +
+                            "Use 'handle ... with ...' to provide handlers for these effects."
+                        )
+                    }
+                    
+                    // Execute function
                     val newContext = function.closure.toMutableMap()
                     // Bind all parameters
                     for (param in function.parameters) {
                         newContext[param] = arguments.fields[param] ?: FunkNull
+                    }
+                    // Propagate effect handlers from current context
+                    context["__handlers"]?.let { 
+                        newContext["__handlers"] = it 
                     }
                     evaluateExpression(function.body, newContext)
                 } else {
@@ -578,17 +615,31 @@ class FunkInterpreter {
                 function.call(argsRecord)
             }
             is SimpleFunkFunction -> {
-                // Create new context with captured closure and parameters
-                val newContext = function.closure.toMutableMap()
-                
-                // Bind parameters (simplified - assume list of parameter names)
-                function.parameters.forEachIndexed { index, param ->
-                    if (index < args.size) {
-                        newContext[param] = args[index]
-                    }
+                // RUNTIME EFFECT VALIDATION: Check if function has unhandled effects
+                if (function.hasUnhandledEffects()) {
+                    val unhandledEffects = function.getUnhandledEffects()
+                    throw RuntimeException(
+                        "Cannot execute function with unhandled effects: ${unhandledEffects.joinToString(", ")}. " +
+                        "Use 'handle ... with ...' to provide handlers for these effects."
+                    )
                 }
                 
-                evaluateExpression(function.body, newContext)
+                        // Create new context with captured closure and parameters
+                        val newContext = function.closure.toMutableMap()
+                        
+                        // Bind parameters (simplified - assume list of parameter names)
+                        function.parameters.forEachIndexed { index, param ->
+                            if (index < args.size) {
+                                newContext[param] = args[index]
+                            }
+                        }
+                        
+                        // Propagate effect handlers from current context
+                        context["__handlers"]?.let { 
+                            newContext["__handlers"] = it 
+                        }
+                        
+                        evaluateExpression(function.body, newContext)
             }
             else -> throw RuntimeException("Cannot call non-function value: ${function::class.simpleName}")
         }
@@ -722,22 +773,100 @@ class FunkInterpreter {
     }
     
     /**
-     * Execute a state machine (simplified implementation)
+     * Execute a state machine with async support using Project Loom
      */
     private fun executeStateMachine(stateMachine: StateMachine, expr: DoExpression, context: MutableMap<String, FunkValue>): FunkValue {
-        // This is a simplified synchronous implementation
-        // A full async implementation would use virtual threads and proper suspension
-        
         var currentMachine = stateMachine
         val localContext = currentMachine.localVariables
         
-        // Execute statements
-        for (stmt in expr.statements) {
-            executeStatement(stmt, localContext)
+        // Execute statements sequentially, handling async effects
+        for ((index, stmt) in expr.statements.withIndex()) {
+            when (stmt) {
+                is LetStatement -> {
+                    // Check if the expression contains async effects
+                    if (containsEffectCallsInExpression(stmt.expression)) {
+                        val result = executeExpressionWithAsyncSupport(stmt.expression, localContext, currentMachine)
+                        localContext[stmt.variableName] = result
+                    } else {
+                        val result = evaluateExpression(stmt.expression, localContext)
+                        localContext[stmt.variableName] = result
+                    }
+                }
+                is ExpressionStatement -> {
+                    if (containsEffectCallsInExpression(stmt.expression)) {
+                        executeExpressionWithAsyncSupport(stmt.expression, localContext, currentMachine)
+                    } else {
+                        evaluateExpression(stmt.expression, localContext)
+                    }
+                }
+            }
         }
         
         // Execute result expression
-        return evaluateExpression(expr.result, localContext)
+        return if (containsEffectCallsInExpression(expr.result)) {
+            executeExpressionWithAsyncSupport(expr.result, localContext, currentMachine)
+        } else {
+            evaluateExpression(expr.result, localContext)
+        }
+    }
+    
+    /**
+     * Execute an expression with async effect support using virtual threads
+     */
+    private fun executeExpressionWithAsyncSupport(
+        expr: Expression, 
+        context: MutableMap<String, FunkValue>,
+        stateMachine: StateMachine
+    ): FunkValue {
+        return when (expr) {
+            is EffectCallExpression -> {
+                executeAsyncEffectCall(expr, context, stateMachine)
+            }
+            is DoExpression -> {
+                executeStateMachine(stateMachine, expr, context)
+            }
+            else -> {
+                // For non-effect expressions, execute normally
+                evaluateExpression(expr, context)
+            }
+        }
+    }
+    
+    /**
+     * Execute an effect call with async support
+     */
+    private fun executeAsyncEffectCall(
+        expr: EffectCallExpression,
+        context: MutableMap<String, FunkValue>,
+        stateMachine: StateMachine
+    ): FunkValue {
+        // Look up handler from context
+        val handlersRecord = context["__handlers"] as? FunkRecord
+            ?: throw RuntimeException("No handlers available for effect call")
+        val handlers = handlersRecord.fields
+        
+        val handler = handlers[expr.effectName]
+            ?: throw RuntimeException("No handler found for effect: ${expr.effectName}")
+        
+        // Check if handler supports async execution
+        if (handler is AsyncEffectHandler && handler.canHandle(expr.effectName)) {
+            // Execute asynchronously using virtual threads
+            val arguments = evaluateExpression(expr.arguments, context)
+            val future = VirtualThreadExecutor.submitSuspending {
+                handler.handle(expr.operationName, arguments)
+            }
+            
+            // Use virtual thread to wait for result without blocking OS threads
+            return try {
+                // This uses Project Loom's virtual threads via VirtualThreadExecutor
+                future.get()
+            } catch (e: Exception) {
+                throw RuntimeException("Async effect execution failed: ${e.message}", e)
+            }
+        } else {
+            // Fall back to synchronous execution
+            return executeEffectCall(expr, context)
+        }
     }
     
     /**
@@ -956,7 +1085,35 @@ data class SimpleFunkFunction(
     val parameters: List<String>,
     val body: Expression,
     val closure: Map<String, FunkValue>,
-    val name: String? = null
+    val name: String? = null,
+    val inferredType: FunkType? = null  // Add type information for effect validation
 ) : FunkValue() {
     override fun getDisplayString(): String = name ?: "<function>"
+    
+    /**
+     * Check if this function has unhandled effects
+     */
+    fun hasUnhandledEffects(): Boolean {
+        return when (val type = inferredType) {
+            is FunkType.FunctionType -> {
+                val effects = type.effects
+                effects != null && effects.effects.isNotEmpty()
+            }
+            else -> false
+        }
+    }
+    
+    /**
+     * Get the unhandled effects of this function
+     */
+    fun getUnhandledEffects(): Set<String> {
+        return when (val type = inferredType) {
+            is FunkType.FunctionType -> {
+                val effects = type.effects
+                effects?.effects ?: emptySet()
+            }
+            else -> emptySet()
+        }
+    }
 }
+

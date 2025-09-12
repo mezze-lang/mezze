@@ -1,2 +1,0 @@
-# Test if the if expression really uses constraint solver
-let testIf = {x, y} -> if x == 5 then x + y else 0

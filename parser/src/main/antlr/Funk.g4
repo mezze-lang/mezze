@@ -31,7 +31,11 @@ effectOperation:
     ;
 
 implDeclaration:
-    IMPL Identifier recordType? FOR Identifier LBRACE NEWLINE? (implOperation NEWLINE?)* RBRACE NEWLINE?
+    IMPL Identifier FOR Identifier implParams? WHERE LBRACE NEWLINE? (implOperation NEWLINE?)* RBRACE NEWLINE?
+    ;
+
+implParams:
+    LBRACE (recordTypeEntry (COMMA recordTypeEntry)*)? RBRACE
     ;
 
 implOperation:
@@ -229,6 +233,7 @@ DO: 'do';
 EFFECT: 'effect';
 IMPL: 'impl';
 FOR: 'for';
+WHERE: 'where';
 HANDLE: 'handle';
 WITH: 'with';
 

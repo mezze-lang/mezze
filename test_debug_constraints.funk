@@ -1,2 +1,0 @@
-let testConstraints = {x, y} -> do
-  x + y

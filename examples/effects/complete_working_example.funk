@@ -6,7 +6,7 @@ effect Log {
 }
 
 # 2. Implementation as record of functions
-impl Log for Console {
+impl Console for Log {
   print : {msg: String} -> {} = {msg} -> {}
 }
 

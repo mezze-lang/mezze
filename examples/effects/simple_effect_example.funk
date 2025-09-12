@@ -1,0 +1,23 @@
+# Simple Effect Example
+# This demonstrates basic effect usage with do expressions and constraint propagation.
+# The addLog function should have type: {x: Int, y: Int} -> Int <Log>
+
+effect Log { 
+  print : {msg: String} -> {} 
+}
+
+impl Console for Log { 
+  print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+}
+
+# Function with effect - type should be inferred as {x: Int, y: Int} -> Int <Log>
+let addLog = {x, y} -> do
+  let sum = x + y
+  Log.print { msg = "logged"}
+  sum
+
+# Handle the effect to get a pure function
+let pureAddLog = handle addLog with Console
+
+# Now we can call it
+let result = pureAddLog {x = 5, y = 3}

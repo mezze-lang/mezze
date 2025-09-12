@@ -1,0 +1,53 @@
+# Progressive Effect Handling Demo
+# This example demonstrates how effects are progressively removed from function signatures
+# as they are handled one by one, showcasing effect row polymorphism.
+
+# Define multiple effects
+effect Log {
+  print : {msg: String} -> {}
+}
+
+effect Random {
+  nextInt : {max: Int} -> Int
+}
+
+effect FileIO {
+  writeFile : {path: String, content: String} -> {}
+}
+
+# Implementations
+impl Console for Log {
+  print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+}
+
+impl SystemRandom for Random {
+  nextInt : {max: Int} -> Int = {max} -> native_random_int {min = 0, max = max}
+}
+
+impl SystemFileIO for FileIO {
+  writeFile : {path: String, content: String} -> {} = {path, content} -> native_print {msg = "File written"}
+}
+
+# Original function with all three effects
+# Type: {x: Int, y: Int} -> Int <FileIO, Log, Random>
+let originalFunction = {x, y} -> do
+  let sum = x + y
+  Log.print {msg = "Computing"}
+  let randomValue = Random.nextInt {max = sum}
+  FileIO.writeFile {path = "out.txt", content = "result"}
+  sum + randomValue
+
+# Step 1: Handle only Log effect
+# Type: {x: Int, y: Int} -> Int <FileIO, Random>
+let afterHandlingLog = handle originalFunction with Console
+
+# Step 2: Handle Random effect  
+# Type: {x: Int, y: Int} -> Int <FileIO>
+let afterHandlingRandom = handle afterHandlingLog with SystemRandom
+
+# Step 3: Handle FileIO effect
+# Type: {x: Int, y: Int} -> Int (no effects - pure function)
+let fullyHandled = handle afterHandlingRandom with SystemFileIO
+
+# Now we can call the fully handled function
+let finalResult = fullyHandled {x = 10, y = 20}

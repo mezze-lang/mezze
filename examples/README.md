@@ -26,6 +26,12 @@ This directory contains comprehensive examples of the Funk programming language,
 - `variant_syntax_demo.funk` - Variant syntax demonstrations
 - `test_variants_correct.funk` - Correct variant usage
 
+### `effects/`
+- `simple_effect_example.funk` - Basic effect usage with constraint propagation
+- `progressive_effect_handling.funk` - Step-by-step effect removal demo
+- `basic_effects.funk` - Comprehensive effect system examples
+- `working_*.funk` - Various working effect demonstrations
+
 ### `abilities/`
 - `ability_examples.funk` - Typeclass-like abilities (Work in Progress)
 
@@ -66,6 +72,8 @@ funk exec examples/variants/color_examples.funk
 - ✅ **Records**: Record literals, field access, punning
 - ✅ **Variants**: Pattern matching with match expressions
 - ✅ **Do Expressions**: Sequential computation blocks
+- ✅ **Effects**: Algebraic effects with direct-style programming
+- ✅ **Effect Rows**: Effect row polymorphism and progressive handling
 - ✅ **Arithmetic**: Basic mathematical operations
 - ✅ **Boolean Logic**: Logical operations and conditionals
 - 🚧 **Abilities**: Typeclass-like behavior (partial)

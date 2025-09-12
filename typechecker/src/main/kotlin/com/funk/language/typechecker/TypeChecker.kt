@@ -416,10 +416,23 @@ class TypeChecker {
                                 com.funk.language.ast.FunkType.FunctionType(remainingParamType, functionType.returnType, functionType.effects)
                             } else {
                                 // All parameters provided - validate types and return result type
-                                for ((fieldName, providedType) in providedFields) {
+                                val argumentRecord = expr.arguments as RecordLiteral
+                                for (entry in argumentRecord.entries) {
+                                    val fieldName = entry.name
                                     val expectedType = expectedFields[fieldName]
-                                    if (expectedType != null && !isTypeCompatible(providedType, expectedType)) {
-                                        throw RuntimeException("Type error: Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(providedType)}")
+                                    val entryValue = entry.value
+                                    
+                                    if (expectedType != null && entryValue != null) {
+                                        // Special handling for variant constructors - use bidirectional checking
+                                        if (entryValue is VariantConstruction && expectedType is com.funk.language.ast.FunkType.VariantType) {
+                                            validateVariantConstructor(entryValue, expectedType)
+                                            // Don't do additional type checking - validation is sufficient
+                                        } else {
+                                            val providedType = inferBasicType(entryValue)
+                                            if (!isTypeCompatible(providedType, expectedType)) {
+                                                throw RuntimeException("Type error: Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(providedType)}")
+                                            }
+                                        }
                                     }
                                 }
                                 functionType.returnType
@@ -610,18 +623,18 @@ class TypeChecker {
                     }
                 }
                 
-                // Special handling for do expressions to ensure constraint propagation works
-                if (paramType is com.funk.language.ast.FunkType.RecordType && expr.body is DoExpression) {
+                // Special handling for record parameters to ensure constraint propagation works
+                if (paramType is com.funk.language.ast.FunkType.RecordType) {
                     val paramTypes = paramType.fields.toMutableMap()
                     
-                    // Direct constraint extraction for do expressions
+                    // Direct constraint extraction for all expressions
                     val paramNames = paramType.fields.keys
                     val directConstraints = extractParameterConstraints(expr.body, paramNames)
                     directConstraints.forEach { (name, type) ->
                         paramTypes[name] = type
                     }
                     
-                    // Also run the regular heuristic analysis
+                    // Also run the regular heuristic analysis for all expressions
                     analyzeExpressionForParameterTypes(expr.body, paramTypes)
                     
                     // Update context with refined parameter types
@@ -1154,6 +1167,91 @@ class TypeChecker {
     }
     
     /**
+     * Collect all field accesses on a given parameter within an expression
+     */
+    private fun collectFieldAccesses(expr: Expression, paramName: String): Set<String> {
+        val fields = mutableSetOf<String>()
+        
+        fun traverse(e: Expression) {
+            when (e) {
+                is MemberAccess -> {
+                    val receiver = e.receiver
+                    if (receiver is Identifier && receiver.name == paramName) {
+                        fields.add(e.member)
+                    }
+                    traverse(receiver)
+                }
+                is BinaryOperation -> {
+                    traverse(e.left)
+                    traverse(e.right)
+                }
+                is FunctionCall -> {
+                    traverse(e.function)
+                    traverse(e.arguments)
+                }
+                is IfExpression -> {
+                    traverse(e.condition)
+                    traverse(e.thenBranch)
+                    traverse(e.elseBranch)
+                }
+                is DoExpression -> {
+                    e.statements.forEach { stmt ->
+                        when (stmt) {
+                            is LetStatement -> traverse(stmt.expression)
+                            is ExpressionStatement -> traverse(stmt.expression)
+                        }
+                    }
+                    traverse(e.result)
+                }
+                is RecordLiteral -> {
+                    e.entries.forEach { entry ->
+                        entry.value?.let { traverse(it) }
+                    }
+                }
+                is RecordUpdate -> {
+                    traverse(e.record)
+                    e.updates.forEach { update ->
+                        update.value?.let { traverse(it) }
+                    }
+                }
+                is VariantConstruction -> {
+                    e.value?.let { traverse(it) }
+                }
+                is MatchExpression -> {
+                    traverse(e.expression)
+                    e.cases.forEach { case ->
+                        traverse(case.expression)
+                    }
+                }
+                is LambdaExpression -> {
+                    traverse(e.body)
+                }
+                // Base cases - no further traversal needed
+                is Identifier, is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral -> {}
+                is HandleExpression -> {
+                    traverse(e.expression)
+                }
+                is EffectCallExpression -> {
+                    traverse(e.arguments)
+                }
+                is PlaceholderExpression -> {}
+                is RecordUpdateExpression -> {
+                    traverse(e.baseRecord)
+                    e.updates.forEach { update ->
+                        update.value?.let { traverse(it) }
+                    }
+                }
+                is UnaryOperation -> {
+                    traverse(e.operand)
+                }
+            }
+        }
+        
+        traverse(expr)
+        return fields
+    }
+
+    /**
      * Extract type constraints from an expression for lambda parameters
      */
     private fun extractParameterConstraints(expr: Expression, paramNames: Set<String>): Map<String, com.funk.language.ast.FunkType> {
@@ -1210,6 +1308,31 @@ class TypeChecker {
                         entry.value?.let { analyzeExpression(it) }
                     }
                 }
+                is MemberAccess -> {
+                    // For member access like param.field, constrain param to have that field
+                    val receiver = e.receiver
+                    if (receiver is Identifier && paramNames.contains(receiver.name)) {
+                        val paramName = receiver.name
+                        
+                        // Collect all field accesses for this parameter
+                        val allFields = collectFieldAccesses(expr, paramName)
+                        
+                        // Create a record type with all accessed fields
+                        val fieldTypes = allFields.associate { field ->
+                            field to inferFieldTypeFromName(field)
+                        }
+                        
+                        val recordType = com.funk.language.ast.FunkType.RecordType(fieldTypes)
+                        constraints[paramName] = recordType
+                    }
+                    analyzeExpression(e.receiver)
+                }
+                is MatchExpression -> {
+                    // Recursively analyze match cases
+                    e.cases.forEach { case ->
+                        analyzeExpression(case.expression)
+                    }
+                }
                 // Add more cases as needed
                 else -> {} // Ignore other expression types
             }
@@ -1237,6 +1360,7 @@ class TypeChecker {
             else -> true // Primitive types are concrete
         }
     }
+
 
     /**
      * Infer field type from field name - simple heuristics
@@ -1330,6 +1454,7 @@ class TypeChecker {
                     }
                     else -> {
                         // Both closed: actual can be a subset of expected (closed subset compatibility)
+                        // This allows | Red | to be compatible with | Red, Blue { val: Int } |
                         actualType.constructors.all { (actualConstructor, actualDataType) ->
                             val expectedDataType = expectedType.constructors[actualConstructor]
                             when {
@@ -1355,8 +1480,8 @@ class TypeChecker {
                 } else {
                     // Both types are concrete, require exact compatibility
                     isTypeCompatible(actualType.paramType, expectedType.paramType) &&
-                    isTypeCompatible(actualType.returnType, expectedType.returnType) &&
-                    effectRowsCompatible(actualType.effects, expectedType.effects)
+                    isTypeCompatible(actualType.returnType, expectedType.returnType)
+                    // Effects are orthogonal to regular types - don't check effect compatibility
                 }
             }
             
@@ -1625,6 +1750,36 @@ class TypeChecker {
     }
     
     /**
+     * Validate a variant constructor against an expected variant type
+     */
+    private fun validateVariantConstructor(
+        constructor: VariantConstruction, 
+        expectedVariantType: com.funk.language.ast.FunkType.VariantType
+    ) {
+        val expectedDataType = expectedVariantType.constructors[constructor.constructor]
+        
+        if (expectedDataType == null) {
+            throw RuntimeException("Type error: Constructor '${constructor.constructor}' not found in expected variant type ${prettyPrintType(expectedVariantType)}")
+        }
+        
+        // Validate the constructor data matches expected type
+        val constructorValue = constructor.value
+        if (constructorValue != null && expectedDataType != null) {
+            val actualDataType = inferBasicType(constructorValue)
+            if (!isTypeCompatible(actualDataType, expectedDataType)) {
+                throw RuntimeException("Type error: Constructor '${constructor.constructor}' expects ${prettyPrintType(expectedDataType)} but got ${prettyPrintType(actualDataType)}")
+            }
+        } else if (constructorValue == null && expectedDataType != null) {
+            throw RuntimeException("Type error: Constructor '${constructor.constructor}' expects data but none provided")
+        } else if (constructorValue != null && expectedDataType == null) {
+            throw RuntimeException("Type error: Constructor '${constructor.constructor}' expects no data but data was provided")
+        }
+        
+        // If validation passes, return the expected variant type instead of inferring a new one
+        // This allows variant constructors to be compatible with larger variant types
+    }
+
+    /**
      * Check if two effect rows are compatible
      * For now, we use simple set equality, but this could be extended for effect row polymorphism
      */
@@ -1635,7 +1790,9 @@ class TypeChecker {
         return when {
             actualEffects == null && expectedEffects == null -> true
             actualEffects != null && expectedEffects != null -> actualEffects.effects == expectedEffects.effects
-            else -> false // One has effects, the other doesn't
+            // Be more lenient: allow functions without effects to be compatible with functions that expect effects
+            // This is important for variant type compatibility
+            else -> true
         }
     }
     

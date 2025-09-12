@@ -1,3 +1,0 @@
-let doAdd = {x, y} -> do
-  let sum = x + y
-  sum

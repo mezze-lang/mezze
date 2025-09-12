@@ -1,3 +1,0 @@
-let testSimple = {x, y} -> do
-  let sum = x + y
-  sum

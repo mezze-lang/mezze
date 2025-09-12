@@ -11,12 +11,12 @@ effect Random {
 }
 
 # Implementation for Console logging
-impl Log for Console {
+impl Console for Log {
   log : {msg: String} -> {} = {msg} -> intToString {val = 42}  # Placeholder implementation
 }
 
 # Implementation for JVM random
-impl Random for JVM {
+impl JVM for Random {
   randInt : {min: Int, max: Int} -> Int = {min, max} -> 42  # Placeholder implementation
 }
 
