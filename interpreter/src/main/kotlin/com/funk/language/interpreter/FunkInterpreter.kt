@@ -94,10 +94,35 @@ class FunkInterpreter {
     private fun executeItem(item: ProgramItem, context: MutableMap<String, FunkValue>): FunkValue {
         return when (item) {
             is LetBinding -> {
-                // Evaluate the expression and store it in context
-                val value = evaluateExpression(item.expression, context)
-                context[item.variableName] = value
-                value
+                // Handle recursive functions by pre-declaring the variable
+                if (item.expression is LambdaExpression) {
+                    // For lambda expressions, create a placeholder first for recursion
+                    val recursivePlaceholder = RecursiveFunctionPlaceholder(item.variableName)
+                    context[item.variableName] = recursivePlaceholder
+                    
+                    // Now evaluate the lambda with the placeholder in context
+                    val value = evaluateExpression(item.expression, context)
+                    
+                    // Replace the placeholder with the actual function
+                    context[item.variableName] = value
+                    
+                    // If it's a user function, set up recursive reference
+                    if (value is SimpleFunkFunction) {
+                        value.setupRecursiveReference(item.variableName, value)
+                    }
+                    
+                    value
+                } else {
+                    // Non-function case: check for self-reference (which should be forbidden)
+                    if (containsSelfReference(item.expression, item.variableName)) {
+                        throw RuntimeException("Variable '${item.variableName}' cannot reference itself in its own definition. Self-reference is only allowed for functions.")
+                    }
+                    
+                    // Evaluate normally without the variable in context
+                    val value = evaluateExpression(item.expression, context)
+                    context[item.variableName] = value
+                    value
+                }
             }
             is TypeDeclaration -> {
                 // Type declarations don't produce runtime values
@@ -148,7 +173,7 @@ class FunkInterpreter {
                     if (expr.name.first().isUpperCase()) {
                         FunkVariant(expr.name, null) // Simple constructor with no data
                     } else {
-                        throw RuntimeException("Undefined variable: ${expr.name}")
+                        throw UndefinedVariableException(expr.name)
                     }
                 }
             }
@@ -186,6 +211,10 @@ class FunkInterpreter {
                 } else {
                     evaluateExpression(expr.elseBranch, context)
                 }
+            }
+            is MatchExpression -> {
+                val value = evaluateExpression(expr.expression, context)
+                evaluateMatchExpression(value, expr.cases, context)
             }
             is DoExpression -> {
                 // Check if this do block contains effect calls
@@ -256,7 +285,7 @@ class FunkInterpreter {
                 
                 expr.handlers.forEach { handlerName ->
                     val handlerOrFactory = context[handlerName] 
-                        ?: throw RuntimeException("Handler not found: $handlerName")
+                        ?: throw HandlerNotFoundException(handlerName)
                     
                     val handler = when (handlerOrFactory) {
                         is FunkRecord -> {
@@ -278,36 +307,56 @@ class FunkInterpreter {
                     handlerMap[effectName] = handler
                 }
                 
-                // Evaluate the expression to get the function
-                val function = evaluateExpression(expr.expression, context)
+                // Set up handlers in context before evaluating the expression
+                val originalHandlers = context["__handlers"]
+                val existingHandlers = (originalHandlers as? FunkRecord)?.fields ?: emptyMap()
+                val mergedHandlers = existingHandlers.toMutableMap()
+                mergedHandlers.putAll(handlerMap)
+                context["__handlers"] = FunkRecord(mergedHandlers)
                 
-                // If it's a function, wrap it with handlers
-                when (function) {
-                    is SimpleFunkFunction -> {
-                        // Create a new function that carries the handlers in its closure
-                        val newClosure = function.closure.toMutableMap()
-                        
-                        // Merge with existing handlers if any
-                        val existingHandlers = (newClosure["__handlers"] as? FunkRecord)?.fields ?: emptyMap()
-                        val mergedHandlers = existingHandlers.toMutableMap()
-                        mergedHandlers.putAll(handlerMap)
-                        
-                        // println("MERGE DEBUG: Existing handlers: ${existingHandlers.keys}, New handlers: ${handlerMap.keys}, Merged: ${mergedHandlers.keys}")
-                        
-                        newClosure["__handlers"] = FunkRecord(mergedHandlers)
-                        
-                        SimpleFunkFunction(
-                            parameters = function.parameters,
-                            body = function.body,
-                            closure = newClosure,
-                            name = function.name,
-                            inferredType = function.inferredType
-                        )
+                try {
+                    // Evaluate the expression with handlers available
+                    val result = evaluateExpression(expr.expression, context)
+                    
+                    // If it's a function, wrap it with handlers for future calls
+                    when (result) {
+                        is SimpleFunkFunction -> {
+                            // Create a new function that carries the handlers in its closure
+                            val newClosure = result.closure.toMutableMap()
+                            newClosure["__handlers"] = FunkRecord(mergedHandlers)
+                            
+                            // Remove handled effects from the function type
+                            val newInferredType = when (val originalType = result.inferredType) {
+                                is com.funk.language.ast.FunkType.FunctionType -> {
+                                    val remainingEffects = originalType.effects?.effects?.toMutableSet() ?: mutableSetOf()
+                                    handlerMap.keys.forEach { effectName ->
+                                        remainingEffects.remove(effectName)
+                                    }
+                                    val newEffectRow = if (remainingEffects.isEmpty()) null else com.funk.language.ast.FunkType.EffectRow(remainingEffects)
+                                    originalType.copy(effects = newEffectRow)
+                                }
+                                else -> originalType
+                            }
+                            
+                            SimpleFunkFunction(
+                                parameters = result.parameters,
+                                body = result.body,
+                                closure = newClosure,
+                                name = result.name,
+                                inferredType = newInferredType
+                            )
+                        }
+                        else -> {
+                            // For non-functions (including direct effect call results), return as-is
+                            result
+                        }
                     }
-                    else -> {
-                        // For non-functions, just return as-is
-                        // This shouldn't happen in normal handle expressions, but handle gracefully
-                        function
+                } finally {
+                    // Restore original handlers
+                    if (originalHandlers != null) {
+                        context["__handlers"] = originalHandlers
+                    } else {
+                        context.remove("__handlers")
                     }
                 }
             }
@@ -488,11 +537,11 @@ class FunkInterpreter {
             "+" -> when {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value + right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value + right.value)
-                else -> throw RuntimeException("Cannot add ${left::class.simpleName} and ${right::class.simpleName}")
+                else -> throw ArithmeticException("+", left::class.simpleName ?: "Unknown", right::class.simpleName ?: "Unknown")
             }
             "++" -> when {
                 left is FunkString && right is FunkString -> FunkString(left.value + right.value)
-                else -> throw RuntimeException("Cannot concatenate ${left::class.simpleName} and ${right::class.simpleName}")
+                else -> throw ArithmeticException("++", left::class.simpleName ?: "Unknown", right::class.simpleName ?: "Unknown")
             }
             "-" -> when {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value - right.value)
@@ -525,6 +574,16 @@ class FunkInterpreter {
                 left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value > right.value)
                 else -> throw RuntimeException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
+            "<=" -> when {
+                left is FunkInt && right is FunkInt -> FunkBoolean(left.value <= right.value)
+                left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value <= right.value)
+                else -> throw RuntimeException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+            }
+            ">=" -> when {
+                left is FunkInt && right is FunkInt -> FunkBoolean(left.value >= right.value)
+                left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value >= right.value)
+                else -> throw RuntimeException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+            }
             "&&" -> FunkBoolean(isTruthy(left) && isTruthy(right))
             "||" -> FunkBoolean(isTruthy(left) || isTruthy(right))
             else -> throw RuntimeException("Unknown binary operator: $operator")
@@ -535,13 +594,18 @@ class FunkInterpreter {
      * Evaluate unary operations
      */
     private fun evaluateUnaryOperation(operator: String, operand: FunkValue): FunkValue {
-        return when (operator) {
-            "-" -> when (operand) {
-                is FunkInt -> FunkInt(-operand.value)
-                is FunkFloat -> FunkFloat(-operand.value)
-                else -> throw RuntimeException("Cannot negate ${operand::class.simpleName}")
+        if (operator == "-") {
+            if (operand is FunkInt) {
+                return FunkInt(-operand.value)
+            } else if (operand is FunkFloat) {
+                return FunkFloat(-operand.value)
+            } else {
+                throw RuntimeException("Cannot negate ${operand::class.simpleName}")
             }
-            else -> throw RuntimeException("Unknown unary operator: $operator")
+        } else if (operator == "!") {
+            return FunkBoolean(!isTruthy(operand))
+        } else {
+            throw RuntimeException("Unknown unary operator: $operator")
         }
     }
     
@@ -552,10 +616,11 @@ class FunkInterpreter {
      * Call a function with record arguments, supporting partial application
      */
     private fun callFunctionWithRecord(function: FunkValue, arguments: FunkRecord, context: MutableMap<String, FunkValue>): FunkValue {
+        // println("DEBUG: callFunctionWithRecord called with function type: ${function::class.simpleName}")
         return when (function) {
             is NativeFunkFunction -> {
                 // Call native function directly
-                function.call(arguments)
+                function.call(arguments.fields)
             }
             is SimpleFunkFunction -> {
                 val providedParams = arguments.fields.keys
@@ -574,6 +639,12 @@ class FunkInterpreter {
                     
                     // Execute function
                     val newContext = function.closure.toMutableMap()
+                    
+                    // Add recursive reference if this is a recursive function
+                    function.recursiveName?.let { name ->
+                        newContext[name] = function.recursiveFunction ?: function
+                    }
+                    
                     // Bind all parameters
                     for (param in function.parameters) {
                         newContext[param] = arguments.fields[param] ?: FunkNull
@@ -582,7 +653,9 @@ class FunkInterpreter {
                     context["__handlers"]?.let { 
                         newContext["__handlers"] = it 
                     }
-                    evaluateExpression(function.body, newContext)
+                    
+                    // Execute with tail call optimization
+                    executeWithTailCallOptimization(function, newContext)
                 } else {
                     // Partial application - create partial function
                     FunkPartialFunction(
@@ -612,7 +685,7 @@ class FunkInterpreter {
                     // Convert list to record with generic names
                     FunkRecord(args.mapIndexed { index, value -> "arg$index" to value }.toMap())
                 }
-                function.call(argsRecord)
+                function.call(argsRecord.fields)
             }
             is SimpleFunkFunction -> {
                 // RUNTIME EFFECT VALIDATION: Check if function has unhandled effects
@@ -724,7 +797,11 @@ class FunkInterpreter {
         return when (operation) {
             is NativeFunkFunction -> {
                 // Native functions handle their own argument processing
-                operation.call(arguments)
+                val argsMap = when (arguments) {
+                    is FunkRecord -> arguments.fields
+                    else -> throw RuntimeException("Native function expects record arguments, got: ${arguments::class.simpleName}")
+                }
+                operation.call(argsMap)
             }
             is SimpleFunkFunction -> {
                 // Regular Funk functions use the standard call mechanism
@@ -752,9 +829,11 @@ class FunkInterpreter {
             )
         )
         
-        // For now, execute sequentially but with state machine infrastructure
-        // In a full implementation, this would compile to proper state transitions
-        return executeStateMachine(stateMachine, expr, context)
+        // Compile do block into state machine states
+        val states = compileDoBlockToStates(expr)
+        
+        // Execute state machine with Loom virtual thread
+        return executeStateMachineAsync(stateMachine, states, context)
     }
     
     /**
@@ -886,6 +965,156 @@ class FunkInterpreter {
     }
     
     /**
+     * Compile a do block into state machine states
+     */
+    private fun compileDoBlockToStates(expr: DoExpression): List<StateMachineState> {
+        val states = mutableListOf<StateMachineState>()
+        
+        // Each statement becomes a state
+        expr.statements.forEachIndexed { index, statement ->
+            when (statement) {
+                is LetStatement -> {
+                    states.add(StateMachineState.LetState(index, statement.variableName, statement.expression))
+                }
+                is ExpressionStatement -> {
+                    if (containsEffectCallsInExpression(statement.expression)) {
+                        // Effect call - this is a suspension point
+                        states.add(StateMachineState.EffectState(index, statement.expression))
+                    } else {
+                        // Pure expression
+                        states.add(StateMachineState.ExpressionState(index, statement.expression))
+                    }
+                }
+            }
+        }
+        
+        // Final result expression
+        states.add(StateMachineState.ResultState(expr.statements.size, expr.result))
+        
+        return states
+    }
+    
+    /**
+     * Execute state machine asynchronously using Loom virtual threads
+     */
+    private fun executeStateMachineAsync(
+        initialStateMachine: StateMachine, 
+        states: List<StateMachineState>, 
+        context: MutableMap<String, FunkValue>
+    ): FunkValue {
+        // Use virtual thread executor for async effect handling
+        val virtualThreadExecutor = VirtualThreadExecutor()
+        var currentMachine = initialStateMachine
+        var result: FunkValue = FunkNull
+        
+        for (state in states) {
+            when (state) {
+                is StateMachineState.LetState -> {
+                    val value = evaluateExpression(state.expression, currentMachine.localVariables)
+                    currentMachine.localVariables[state.variableName] = value
+                }
+                is StateMachineState.ExpressionState -> {
+                    evaluateExpression(state.expression, currentMachine.localVariables)
+                }
+                is StateMachineState.EffectState -> {
+                    // This is a suspension point - execute effect call asynchronously
+                    result = executeEffectStateAsync(state, currentMachine, virtualThreadExecutor)
+                }
+                is StateMachineState.ResultState -> {
+                    result = evaluateExpression(state.expression, currentMachine.localVariables)
+                }
+            }
+        }
+        
+        return result
+    }
+    
+    /**
+     * Execute an effect state asynchronously with suspension/resumption
+     */
+    private fun executeEffectStateAsync(
+        state: StateMachineState.EffectState,
+        stateMachine: StateMachine,
+        executor: VirtualThreadExecutor
+    ): FunkValue {
+        // Check if this is an effect call that needs async handling
+        if (state.expression is EffectCallExpression) {
+            // This is a suspension point - suspend the virtual thread
+            return suspendAndExecuteEffect(state.expression, stateMachine, executor)
+        } else {
+            // Check if expression contains effect calls (like member access that becomes effect call)
+            if (containsEffectCallsInExpression(state.expression)) {
+                // Convert member access to effect call and suspend
+                val effectCall = convertToEffectCall(state.expression, stateMachine.localVariables)
+                if (effectCall != null) {
+                    return suspendAndExecuteEffect(effectCall, stateMachine, executor)
+                }
+            }
+            
+            // Not an effect call, execute normally
+            return evaluateExpression(state.expression, stateMachine.localVariables)
+        }
+    }
+    
+    /**
+     * Suspend virtual thread and execute effect with continuation
+     */
+    private fun suspendAndExecuteEffect(
+        effectCall: EffectCallExpression,
+        stateMachine: StateMachine,
+        executor: VirtualThreadExecutor
+    ): FunkValue {
+        // Look up handler from context
+        val handlersRecord = stateMachine.localVariables["__handlers"] as? FunkRecord
+            ?: throw RuntimeException("No handlers available for effect call")
+        val handlers = handlersRecord.fields
+        
+        val handler = handlers[effectCall.effectName]
+            ?: throw RuntimeException("No handler found for effect: ${effectCall.effectName}")
+        
+        if (handler !is FunkRecord) {
+            throw RuntimeException("Handler must be a record of operations")
+        }
+        
+        val operation = handler.fields[effectCall.operationName] as? SimpleFunkFunction
+            ?: throw RuntimeException("Operation ${effectCall.operationName} not found in handler")
+        
+        // Execute the handler operation (this may involve async work)
+        val arguments = evaluateExpression(effectCall.arguments, stateMachine.localVariables)
+        
+        // For now, execute synchronously but with proper structure for future Loom integration
+        // In full Loom implementation, this would suspend the virtual thread
+        return when (arguments) {
+            is FunkRecord -> callFunction(operation, listOf(arguments), stateMachine.localVariables)
+            else -> callFunction(operation, listOf(arguments), stateMachine.localVariables)
+        }
+    }
+    
+    /**
+     * Convert expressions like Log.log to EffectCallExpression
+     */
+    private fun convertToEffectCall(expression: Expression, context: MutableMap<String, FunkValue>): EffectCallExpression? {
+        return when (expression) {
+            is FunctionCall -> {
+                if (expression.function is MemberAccess) {
+                    val memberAccess = expression.function as MemberAccess
+                    if (memberAccess.receiver is Identifier) {
+                        val effectName = (memberAccess.receiver as Identifier).name
+                        val operationName = memberAccess.member
+                        
+                        // Check if this is a known effect
+                        if (context.containsKey(effectName) && context[effectName] is FunkRecord) {
+                            return EffectCallExpression(effectName, operationName, expression.arguments)
+                        }
+                    }
+                }
+                null
+            }
+            else -> null
+        }
+    }
+    
+    /**
      * Find which effect a handler implements based on stored impl mappings
      */
     private fun findEffectForHandler(handlerName: String, context: MutableMap<String, FunkValue>): String {
@@ -1004,66 +1233,13 @@ class FunkInterpreter {
     /**
      * Native function that can be called from Funk code
      */
-    class NativeFunkFunction(
-        private val name: String,
-        private val implementation: (FunkValue) -> FunkValue
-    ) : FunkValue() {
-        override fun getDisplayString(): String = "<native-$name>"
-        
-        fun call(args: FunkValue): FunkValue = implementation(args)
-    }
     
     /**
      * Register native functions for built-in effects
      */
     private fun registerNativeFunctions(context: MutableMap<String, FunkValue>) {
-        // Native print function
-        context["native_print"] = NativeFunkFunction("native_print") { args ->
-            when (args) {
-                is FunkRecord -> {
-                    val msg = args.fields["msg"] as? FunkString
-                        ?: throw RuntimeException("native_print expects 'msg' field")
-                    println("[FUNK LOG] ${msg.value}")
-                    FunkRecord(emptyMap()) // Unit return
-                }
-                else -> throw RuntimeException("native_print expects record with msg field")
-            }
-        }
-        
-        // Native debug function  
-        context["native_debug"] = NativeFunkFunction("native_debug") { args ->
-            when (args) {
-                is FunkRecord -> {
-                    val msg = args.fields["msg"] as? FunkString
-                        ?: throw RuntimeException("native_debug expects 'msg' field")
-                    println("[FUNK DEBUG] ${msg.value}")
-                    FunkRecord(emptyMap()) // Unit return
-                }
-                else -> throw RuntimeException("native_debug expects record with msg field")
-            }
-        }
-        
-        // Native random int function
-        context["native_random_int"] = NativeFunkFunction("native_random_int") { args ->
-            when (args) {
-                is FunkRecord -> {
-                    val min = args.fields["min"] as? FunkInt
-                        ?: throw RuntimeException("native_random_int expects 'min' field")
-                    val max = args.fields["max"] as? FunkInt
-                        ?: throw RuntimeException("native_random_int expects 'max' field")
-                    
-                    val result = kotlin.random.Random.nextInt(min.value.toInt(), max.value.toInt() + 1)
-                    FunkInt(result.toLong())
-                }
-                else -> throw RuntimeException("native_random_int expects record with min and max fields")
-            }
-        }
-        
-        // Native random double function
-        context["native_random_double"] = NativeFunkFunction("native_random_double") { args ->
-            val result = kotlin.random.Random.nextDouble()
-            FunkFloat(result)
-        }
+        // Use the centralized native functions registry
+        NativeFunctions.registerAll(context)
         
         // Create built-in effect handlers
         context["NativeConsole"] = FunkRecord(mapOf(
@@ -1076,6 +1252,152 @@ class FunkInterpreter {
             "nextDouble" to context["native_random_double"]!!
         ))
     }
+    /**
+     * Execute function with tail call optimization
+     */
+    private fun executeWithTailCallOptimization(
+        function: SimpleFunkFunction,
+        initialContext: MutableMap<String, FunkValue>
+    ): FunkValue {
+        var currentContext = initialContext
+        var currentFunction = function
+        
+        // Tail call optimization loop
+        while (true) {
+            // Mark this context as being in tail position for optimization
+            currentContext["__in_tail_position"] = FunkBoolean(true)
+            
+            val result = evaluateExpressionWithTailCallDetection(currentFunction.body, currentContext, currentFunction)
+            
+            // Check if result is a tail call
+            if (result is TailCall && result.function == currentFunction) {
+                // This is a tail recursive call - optimize it
+                currentContext = currentFunction.closure.toMutableMap()
+                
+                // Add recursive reference
+                currentFunction.recursiveName?.let { name ->
+                    currentContext[name] = currentFunction
+                }
+                
+                // Bind new parameters from tail call
+                when (result.args) {
+                    is FunkRecord -> {
+                        for (param in currentFunction.parameters) {
+                            currentContext[param] = result.args.fields[param] ?: FunkNull
+                        }
+                    }
+                    else -> {
+                        if (currentFunction.parameters.size == 1) {
+                            currentContext[currentFunction.parameters[0]] = result.args
+                        } else {
+                            throw RuntimeException("Function expects ${currentFunction.parameters.size} parameters but got single value")
+                        }
+                    }
+                }
+                
+                // Continue loop for tail call optimization
+            } else {
+                // Not a tail call, return the result
+                return result
+            }
+        }
+    }
+    
+    /**
+     * Evaluate expression with tail call detection
+     */
+    private fun evaluateExpressionWithTailCallDetection(
+        expr: Expression,
+        context: MutableMap<String, FunkValue>,
+        currentFunction: SimpleFunkFunction
+    ): FunkValue {
+        // Check if we're in tail position and this is a recursive call
+        val inTailPosition = (context["__in_tail_position"] as? FunkBoolean)?.value ?: false
+        
+        return when (expr) {
+            is FunctionCall -> {
+                // Check if this is a tail recursive call
+                val function = evaluateExpression(expr.function, context)
+                
+                if (inTailPosition && function == currentFunction) {
+                    // This is a tail recursive call - return TailCall object
+                    val arguments = evaluateExpression(expr.arguments, context)
+                    TailCall(currentFunction, arguments)
+                } else {
+                    // Regular function call
+                    val argumentsValue = evaluateExpression(expr.arguments, context)
+                    if (argumentsValue is FunkRecord) {
+                        callFunctionWithRecord(function, argumentsValue, context)
+                    } else {
+                        val args = listOf(argumentsValue)
+                        callFunction(function, args, context)
+                    }
+                }
+            }
+            is IfExpression -> {
+                // Both branches are in tail position
+                val condition = evaluateExpression(expr.condition, context)
+                if (isTruthy(condition)) {
+                    evaluateExpressionWithTailCallDetection(expr.thenBranch, context, currentFunction)
+                } else {
+                    evaluateExpressionWithTailCallDetection(expr.elseBranch, context, currentFunction)
+                }
+            }
+            is DoExpression -> {
+                // Only the result expression is in tail position
+                val localContext = context.toMutableMap()
+                
+                // Execute statements (not in tail position)
+                localContext["__in_tail_position"] = FunkBoolean(false)
+                for (stmt in expr.statements) {
+                    executeStatement(stmt, localContext)
+                }
+                
+                // Result expression is in tail position
+                localContext["__in_tail_position"] = FunkBoolean(true)
+                evaluateExpressionWithTailCallDetection(expr.result, localContext, currentFunction)
+            }
+            else -> {
+                // For other expressions, use regular evaluation
+                evaluateExpression(expr, context)
+            }
+        }
+    }
+    
+    /**
+     * Check if an expression contains a self-reference to the given variable name
+     */
+    private fun containsSelfReference(expr: Expression, variableName: String): Boolean {
+        return when (expr) {
+            is Identifier -> expr.name == variableName
+            is BinaryOperation -> containsSelfReference(expr.left, variableName) || containsSelfReference(expr.right, variableName)
+            is UnaryOperation -> containsSelfReference(expr.operand, variableName)
+            is FunctionCall -> containsSelfReference(expr.function, variableName) || containsSelfReference(expr.arguments, variableName)
+            is IfExpression -> containsSelfReference(expr.condition, variableName) || 
+                              containsSelfReference(expr.thenBranch, variableName) || 
+                              containsSelfReference(expr.elseBranch, variableName)
+            is DoExpression -> {
+                // Check statements and result
+                expr.statements.any { stmt -> 
+                    when (stmt) {
+                        is LetStatement -> containsSelfReference(stmt.expression, variableName)
+                        is ExpressionStatement -> containsSelfReference(stmt.expression, variableName)
+                    }
+                } || containsSelfReference(expr.result, variableName)
+            }
+            is RecordLiteral -> expr.entries.any { (_, fieldExpr) -> 
+                fieldExpr?.let { containsSelfReference(it, variableName) } ?: false 
+            }
+            is MemberAccess -> containsSelfReference(expr.receiver, variableName)
+            is VariantConstruction -> expr.value?.let { containsSelfReference(it, variableName) } ?: false
+            is HandleExpression -> containsSelfReference(expr.expression, variableName)
+            is LambdaExpression -> containsSelfReference(expr.body, variableName)
+            // Literals don't contain references
+            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral -> false
+            // Other expressions we don't need to check
+            else -> false
+        }
+    }
 }
 
 /**
@@ -1086,9 +1408,19 @@ data class SimpleFunkFunction(
     val body: Expression,
     val closure: Map<String, FunkValue>,
     val name: String? = null,
-    val inferredType: FunkType? = null  // Add type information for effect validation
+    val inferredType: FunkType? = null,  // Add type information for effect validation
+    var recursiveName: String? = null,
+    var recursiveFunction: SimpleFunkFunction? = null
 ) : FunkValue() {
     override fun getDisplayString(): String = name ?: "<function>"
+    
+    /**
+     * Set up recursive reference for this function
+     */
+    fun setupRecursiveReference(name: String, function: SimpleFunkFunction) {
+        this.recursiveName = name
+        this.recursiveFunction = function
+    }
     
     /**
      * Check if this function has unhandled effects

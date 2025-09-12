@@ -60,7 +60,7 @@ data class FunkMemberKeysArray(val keys: List<String>) : FunkValue() {
     @ExportMessage
     fun readArrayElement(index: Long): String {
         if (index < 0 || index >= keys.size) {
-            throw FunkException.runtimeError("Array index out of bounds: $index")
+            throw FunkException("Array index out of bounds: $index")
         }
         return keys[index.toInt()]
     }
@@ -229,7 +229,7 @@ data class FunkRecord(val fields: Map<String, FunkValue>) : FunkValue() {
     
     @ExportMessage
     fun readMember(member: String): FunkValue {
-        return fields[member] ?: throw FunkException.runtimeError("Field '$member' not found in record")
+        return fields[member] ?: throw FunkException("Field '$member' not found in record")
     }
     
     @ExportMessage
@@ -270,7 +270,7 @@ data class FunkRecord(val fields: Map<String, FunkValue>) : FunkValue() {
      * Read a member field (non-interop version)
      */
     fun readField(member: String): FunkValue {
-        return fields[member] ?: throw FunkException.runtimeError("Field '$member' not found in record")
+        return fields[member] ?: throw FunkException("Field '$member' not found in record")
     }
     
     /**
@@ -313,7 +313,7 @@ data class FunkVariant(val constructor: String, val value: FunkValue?) : FunkVal
         return when (member) {
             "constructor" -> FunkString(constructor)
             "value" -> value ?: FunkNull
-            else -> throw FunkException.runtimeError("Field '$member' not found in variant")
+            else -> throw FunkException("Field '$member' not found in variant")
         }
     }
 }
@@ -363,7 +363,7 @@ data class FunkFunction(
     @ExportMessage
     fun execute(arguments: Array<Any?>): Any {
         // For interop, we'd need to convert arguments and call through interpreter
-        throw FunkException.runtimeError("Direct interop execution not implemented")
+        throw FunkException("Direct interop execution not implemented")
     }
 }
 
@@ -383,6 +383,24 @@ data class FunkPartialFunction(
     
     @ExportMessage
     fun execute(arguments: Array<Any?>): Any {
-        throw FunkException.runtimeError("Partial function execution through interop not implemented")
+        throw FunkException("Partial function execution through interop not implemented")
     }
+}
+
+/**
+ * Placeholder for recursive function references during evaluation
+ */
+class RecursiveFunctionPlaceholder(val name: String) : FunkValue() {
+    override fun getDisplayString(): String = "<recursive-placeholder-$name>"
+}
+
+
+/**
+ * Represents a tail call for optimization
+ */
+class TailCall(
+    val function: com.funk.language.interpreter.SimpleFunkFunction,
+    val args: FunkValue
+) : FunkValue() {
+    override fun getDisplayString(): String = "<tail-call>"
 }

@@ -1,48 +1,51 @@
 package com.funk.language.interpreter
 
 /**
- * Custom exception for Funk language runtime errors.
- * Simple exception class that works in both JVM and native image contexts.
+ * Base exception class for Funk language runtime errors
  */
-class FunkException(
-    message: String,
-    cause: Throwable? = null
-) : RuntimeException(message, cause) {
-    
-    companion object {
-        /**
-         * Create a runtime error exception
-         */
-        fun runtimeError(message: String): FunkException {
-            return FunkException("Runtime Error: $message")
-        }
-        
-        /**
-         * Create a type error exception
-         */
-        fun typeError(message: String): FunkException {
-            return FunkException("Type Error: $message")
-        }
-        
-        /**
-         * Create an unbound variable error
-         */
-        fun unboundVariable(name: String): FunkException {
-            return FunkException("Unbound variable: $name")
-        }
-        
-        /**
-         * Create a pattern match failure exception
-         */
-        fun patternMatchFailure(): FunkException {
-            return FunkException("Pattern match failure: no matching case found")
-        }
-        
-        /**
-         * Create an effect error exception
-         */
-        fun effectError(message: String): FunkException {
-            return FunkException("Effect Error: $message")
-        }
-    }
-}
+open class FunkException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
+/**
+ * Exception thrown when a variable is not found
+ */
+class UndefinedVariableException(variableName: String) : FunkException("Undefined variable: $variableName")
+
+/**
+ * Exception thrown when a function is not found
+ */
+class UndefinedFunctionException(functionName: String) : FunkException("Undefined function: $functionName")
+
+/**
+ * Exception thrown when an effect handler is not found
+ */
+class HandlerNotFoundException(handlerName: String) : FunkException("Handler not found: $handlerName")
+
+/**
+ * Exception thrown when an effect operation is not found
+ */
+class OperationNotFoundException(effectName: String, operationName: String) : 
+    FunkException("Operation $operationName not found in effect $effectName")
+
+/**
+ * Exception thrown when there are type mismatches at runtime
+ */
+class TypeMismatchException(expected: String, actual: String) : 
+    FunkException("Type mismatch: expected $expected, got $actual")
+
+/**
+ * Exception thrown when arithmetic operations fail
+ */
+class ArithmeticException(operation: String, leftType: String, rightType: String) : 
+    FunkException("Cannot apply arithmetic operator '$operation' to $leftType and $rightType")
+
+/**
+ * Exception thrown when native function calls fail
+ */
+class NativeFunctionException(functionName: String, reason: String) : 
+    FunkException("Native function '$functionName' failed: $reason")
+
+/**
+ * Exception thrown when effect calls fail
+ */
+class EffectCallException(effectName: String, reason: String) : 
+    FunkException("Effect call '$effectName' failed: $reason")

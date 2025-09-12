@@ -31,6 +31,9 @@ class TypeChecker {
     // Simple constraint collection for basic unification
     private val constraints = mutableListOf<Pair<com.funk.language.ast.FunkType, com.funk.language.ast.FunkType>>()
     
+    // Constraint-based type inference
+    private val constraintSolver = ConstraintSolver()
+    
     // Current program being type checked (for looking up ImplDeclarations)
     private var currentProgram: Program? = null
 
@@ -66,10 +69,7 @@ class TypeChecker {
         currentProgram = program // Store current program for impl lookup
         
         // Add built-in functions to the context
-        context["intToString"] = com.funk.language.ast.FunkType.FunctionType(
-            com.funk.language.ast.FunkType.RecordType(mapOf("val" to com.funk.language.ast.FunkType.IntType)),
-            com.funk.language.ast.FunkType.StringType
-        )
+        registerNativeFunctionTypes()
         
         val enhancedItems = program.items.map { item ->
             when (item) {
@@ -94,7 +94,11 @@ class TypeChecker {
                     
                     // Update context with this binding
                     context[item.variableName] = finalType
-                    item.copy(inferredType = finalType)
+                    
+                    // Set inferred types on the expression
+                    val updatedExpression = setInferredTypes(item.expression)
+                    
+                    item.copy(expression = updatedExpression, inferredType = finalType)
                 }
                 is TypeDeclaration -> {
                     // Convert the type definition to a FunkType
@@ -136,10 +140,84 @@ class TypeChecker {
                     
                     item.copy(inferredType = implType)
                 }
+                is TopLevelExpression -> {
+                    // Type check the top-level expression and set inferred types
+                    val exprType = inferTypeWithUnification(item.expression)
+                    val updatedExpression = setInferredTypes(item.expression)
+                    item.copy(expression = updatedExpression)
+                }
                 else -> item
             }
         }
         return program.copy(items = enhancedItems)
+    }
+
+    /**
+     * Set inferred types on all expressions in the AST
+     */
+    private fun setInferredTypes(expr: Expression): Expression {
+        val inferredType = try {
+            inferBasicType(expr)
+        } catch (e: Exception) {
+            null // If inference fails, leave type as null
+        }
+        
+        return when (expr) {
+            is LambdaExpression -> {
+                val updatedBody = setInferredTypes(expr.body)
+                expr.copy(body = updatedBody, inferredType = inferredType)
+            }
+            is DoExpression -> {
+                val updatedStatements = expr.statements.map { statement ->
+                    when (statement) {
+                        is LetStatement -> statement.copy(expression = setInferredTypes(statement.expression))
+                        is ExpressionStatement -> statement.copy(expression = setInferredTypes(statement.expression))
+                        else -> statement
+                    }
+                }
+                val updatedResult = setInferredTypes(expr.result)
+                expr.copy(statements = updatedStatements, result = updatedResult, inferredType = inferredType)
+            }
+            is FunctionCall -> {
+                val updatedFunction = setInferredTypes(expr.function)
+                val updatedArguments = setInferredTypes(expr.arguments)
+                expr.copy(function = updatedFunction, arguments = updatedArguments, inferredType = inferredType)
+            }
+            is RecordLiteral -> {
+                val updatedEntries = expr.entries.map { entry ->
+                    val updatedValue = entry.value?.let { setInferredTypes(it) }
+                    entry.copy(value = updatedValue)
+                }
+                expr.copy(entries = updatedEntries, inferredType = inferredType)
+            }
+            is MatchExpression -> {
+                val updatedExpression = setInferredTypes(expr.expression)
+                val updatedCases = expr.cases.map { case ->
+                    case.copy(expression = setInferredTypes(case.expression))
+                }
+                expr.copy(expression = updatedExpression, cases = updatedCases, inferredType = inferredType)
+            }
+            is HandleExpression -> {
+                val updatedExpression = setInferredTypes(expr.expression)
+                expr.copy(expression = updatedExpression, inferredType = inferredType)
+            }
+            is EffectCallExpression -> {
+                val updatedArguments = setInferredTypes(expr.arguments)
+                expr.copy(arguments = updatedArguments, inferredType = inferredType)
+            }
+            // For literals and identifiers, just set the inferred type
+            is IntLiteral -> expr.copy(inferredType = inferredType)
+            is FloatLiteral -> expr.copy(inferredType = inferredType)
+            is StringLiteral -> expr.copy(inferredType = inferredType)
+            is BooleanLiteral -> expr.copy(inferredType = inferredType)
+            is Identifier -> expr.copy(inferredType = inferredType)
+            is VariantConstruction -> {
+                val updatedValue = expr.value?.let { setInferredTypes(it) }
+                expr.copy(value = updatedValue, inferredType = inferredType)
+            }
+            // Add other expression types as needed
+            else -> expr // For any unhandled expression types, return as-is
+        }
     }
 
     /**
@@ -484,12 +562,40 @@ class TypeChecker {
                 inferBasicType(expr.thenBranch)
             }
             is MatchExpression -> {
-                // Try to infer from the first case (simplified)
-                if (expr.cases.isNotEmpty()) {
-                    inferBasicType(expr.cases.first().expression)
-                } else {
-                    com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
+                // Type check match expression with proper pattern binding
+                val matchedType = inferBasicType(expr.expression)
+                
+                if (expr.cases.isEmpty()) {
+                    return com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
                 }
+                
+                // Type check each case with pattern bindings
+                val caseTypes = mutableListOf<com.funk.language.ast.FunkType>()
+                
+                for (case in expr.cases) {
+                    // Extract pattern bindings
+                    val patternBindings = extractPatternBindings(case.pattern, matchedType)
+                    
+                    // Save current context
+                    val savedContext = context.toMap()
+                    
+                    try {
+                        // Add pattern bindings to context
+                        context.putAll(patternBindings)
+                        
+                        // Type check the case expression with bindings in scope
+                        val caseType = inferBasicType(case.expression)
+                        caseTypes.add(caseType)
+                        
+                    } finally {
+                        // Restore context (remove pattern bindings)
+                        context.clear()
+                        context.putAll(savedContext)
+                    }
+                }
+                
+                // All cases should have the same type (simplified - we could use unification here)
+                caseTypes.firstOrNull() ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
             }
             is RecordLiteral -> {
                 val fields = expr.entries.associate { (name, fieldExpr) ->
@@ -581,7 +687,8 @@ class TypeChecker {
             }
             is VariantConstruction -> {
                 val constructors = mapOf(expr.constructor to expr.value?.let { inferBasicType(it) })
-                com.funk.language.ast.FunkType.VariantType(constructors, com.funk.language.ast.RowVar("open_${expr.constructor}"))
+                // Create closed variant by default (no row variable) per user preference
+                com.funk.language.ast.FunkType.VariantType(constructors, null)
             }
             is LambdaExpression -> {
                 // Enter new scope for lambda parameters
@@ -766,7 +873,7 @@ class TypeChecker {
             }
             is HandleExpression -> {
                 // Handle expressions execute effectful code with specific handlers
-                val exprType = inferBasicType(expr.expression)
+                val exprType = inferTypeWithUnification(expr.expression)
                 
                 // If the expression type is a function with effects, remove the handled effects
                 if (exprType is com.funk.language.ast.FunkType.FunctionType && exprType.effects != null) {
@@ -959,9 +1066,19 @@ class TypeChecker {
                             when (val pattern = case.pattern) {
                                 is ConstructorPattern -> {
                                     val dataType = pattern.recordPattern?.let { recordPattern ->
+                                        // Analyze the case expression to infer better types for pattern fields
+                                        val patternBindings = extractPatternBindings(pattern, com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh()))
+                                        
+                                        // Create a temporary context with pattern bindings
+                                        val tempParamTypes = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                                        tempParamTypes.putAll(patternBindings)
+                                        
+                                        // Analyze the case expression to refine field types
+                                        analyzeExpressionForParameterTypes(case.expression, tempParamTypes)
+                                        
+                                        // Build the record type from refined types
                                         val fields = recordPattern.entries.associate { entry ->
-                                            // Try to infer field types from usage context
-                                            entry.name to inferFieldTypeFromName(entry.name)
+                                            entry.name to (tempParamTypes[entry.name] ?: inferFieldTypeFromName(entry.name))
                                         }
                                         com.funk.language.ast.FunkType.RecordType(fields)
                                     }
@@ -999,6 +1116,18 @@ class TypeChecker {
                 // Recursively analyze case expressions
                 for (case in expr.cases) {
                     analyzeExpressionForParameterTypes(case.expression, paramTypes)
+                }
+                
+                // Also check if this is a match on a pattern-bound variable that should be refined
+                if (matchedExpr is Identifier && paramTypes.containsKey(matchedExpr.name)) {
+                    val currentType = paramTypes[matchedExpr.name]
+                    if (currentType is com.funk.language.ast.FunkType.VarType || currentType == com.funk.language.ast.FunkType.StringType) {
+                        // Try to infer a better type from the match patterns
+                        val inferredType = inferTypeFromMatchPatterns(expr.cases)
+                        if (inferredType != null) {
+                            paramTypes[matchedExpr.name] = inferredType
+                        }
+                    }
                 }
             }
             is BinaryOperation -> {
@@ -1376,6 +1505,96 @@ class TypeChecker {
     }
     
     /**
+     * Infer type from match patterns (for nested matches on pattern-bound variables)
+     */
+    private fun inferTypeFromMatchPatterns(cases: List<MatchCase>): com.funk.language.ast.FunkType? {
+        // Look for record patterns to infer record types
+        for (case in cases) {
+            when (val pattern = case.pattern) {
+                is RecordPattern -> {
+                    val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                    for (entry in pattern.entries) {
+                        if (entry.pattern == null) {
+                            // Shorthand {field} - analyze how this field is used in the case expression
+                            val fieldType = analyzeVariableUsageInExpression(entry.name, case.expression)
+                                ?: inferFieldTypeFromName(entry.name)
+                            fields[entry.name] = fieldType
+                        } else {
+                            // Complex pattern - use heuristic for now
+                            fields[entry.name] = inferFieldTypeFromName(entry.name)
+                        }
+                    }
+                    if (fields.isNotEmpty()) {
+                        return com.funk.language.ast.FunkType.RecordType(fields)
+                    }
+                }
+                is ConstructorPattern -> {
+                    // For constructor patterns, we don't know the exact type without more context
+                    // This is handled elsewhere
+                }
+                else -> {
+                    // Other patterns don't give us type information
+                }
+            }
+        }
+        return null
+    }
+    
+    /**
+     * Analyze how a variable is used in an expression to infer its type
+     */
+    private fun analyzeVariableUsageInExpression(varName: String, expr: Expression): com.funk.language.ast.FunkType? {
+        when (expr) {
+            is BinaryOperation -> {
+                // Check if the variable is used in arithmetic
+                if (expr.operator in setOf("+", "-", "*", "/", "<", ">", "<=", ">=")) {
+                    val left = expr.left
+                    val right = expr.right
+                    if ((left is Identifier && left.name == varName) ||
+                        (right is Identifier && right.name == varName)) {
+                        return com.funk.language.ast.FunkType.IntType
+                    }
+                }
+                // Recursively check operands
+                return analyzeVariableUsageInExpression(varName, expr.left)
+                    ?: analyzeVariableUsageInExpression(varName, expr.right)
+            }
+            is FunctionCall -> {
+                // Check if the variable is used as an argument
+                val arguments = expr.arguments
+                if (arguments is RecordLiteral) {
+                    for ((_, argExpr) in arguments.entries) {
+                        if (argExpr is Identifier && argExpr.name == varName) {
+                            // Variable used as function argument - could infer from function signature
+                            return null // For now, no specific inference
+                        }
+                        argExpr?.let { 
+                            analyzeVariableUsageInExpression(varName, it)?.let { return it }
+                        }
+                    }
+                }
+            }
+            is IfExpression -> {
+                // Check condition and branches
+                return analyzeVariableUsageInExpression(varName, expr.condition)
+                    ?: analyzeVariableUsageInExpression(varName, expr.thenBranch)
+                    ?: analyzeVariableUsageInExpression(varName, expr.elseBranch)
+            }
+            is MatchExpression -> {
+                // Check the matched expression and cases
+                analyzeVariableUsageInExpression(varName, expr.expression)?.let { return it }
+                for (case in expr.cases) {
+                    analyzeVariableUsageInExpression(varName, case.expression)?.let { return it }
+                }
+            }
+            else -> {
+                // Other expression types - no specific inference for now
+            }
+        }
+        return null
+    }
+    
+    /**
      * Check if actualType is compatible with expectedType
      * For closed records, this requires exact field matches
      */
@@ -1400,8 +1619,15 @@ class TypeChecker {
                 }
             }
             
-            // Variant type compatibility - actual variant can be a subset of expected variant
+            // Variant type compatibility - use constraint solver for proper subtyping
             actualType is com.funk.language.ast.FunkType.VariantType && expectedType is com.funk.language.ast.FunkType.VariantType -> {
+                // Try constraint-based unification first
+                try {
+                    val constraint = Constraint.Equality(actualType, expectedType)
+                    constraintSolver.solve(listOf(constraint))
+                    true
+                } catch (e: UnificationException) {
+                    // Fallback to legacy logic if constraint solving fails
                 val actualIsOpen = actualType.rowVar != null
                 val expectedIsOpen = expectedType.rowVar != null
                 
@@ -1465,6 +1691,7 @@ class TypeChecker {
                             }
                         }
                     }
+                }
                 }
             }
             
@@ -1794,6 +2021,275 @@ class TypeChecker {
             // This is important for variant type compatibility
             else -> true
         }
+    }
+    
+    /**
+     * Register native function types in the typechecker context
+     */
+    private fun registerNativeFunctionTypes() {
+        // Basic I/O functions
+        context["native_print"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("msg" to com.funk.language.ast.FunkType.StringType)),
+            com.funk.language.ast.FunkType.RecordType(emptyMap()) // Unit type
+        )
+        
+        context["native_debug"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("msg" to com.funk.language.ast.FunkType.StringType)),
+            com.funk.language.ast.FunkType.RecordType(emptyMap()) // Unit type
+        )
+        
+        // Random number generation
+        context["native_random_int"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "min" to com.funk.language.ast.FunkType.IntType,
+                "max" to com.funk.language.ast.FunkType.IntType
+            )),
+            com.funk.language.ast.FunkType.IntType
+        )
+        
+        context["native_random_double"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(emptyMap()),
+            com.funk.language.ast.FunkType.FloatType
+        )
+        
+        context["native_random"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("max" to com.funk.language.ast.FunkType.IntType)),
+            com.funk.language.ast.FunkType.IntType
+        )
+        
+        // Type conversion functions
+        context["intToString"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("val" to com.funk.language.ast.FunkType.IntType)),
+            com.funk.language.ast.FunkType.StringType
+        )
+        
+        context["floatToString"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("val" to com.funk.language.ast.FunkType.FloatType)),
+            com.funk.language.ast.FunkType.StringType
+        )
+        
+        context["boolToString"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("val" to com.funk.language.ast.FunkType.BooleanType)),
+            com.funk.language.ast.FunkType.StringType
+        )
+        
+        context["stringToInt"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("val" to com.funk.language.ast.FunkType.StringType)),
+            com.funk.language.ast.FunkType.IntType
+        )
+        
+        context["stringToFloat"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("val" to com.funk.language.ast.FunkType.StringType)),
+            com.funk.language.ast.FunkType.FloatType
+        )
+        
+        // Boolean logic functions
+        context["boolAnd"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.BooleanType,
+                "b" to com.funk.language.ast.FunkType.BooleanType
+            )),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        context["boolOr"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.BooleanType,
+                "b" to com.funk.language.ast.FunkType.BooleanType
+            )),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        context["boolNot"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("val" to com.funk.language.ast.FunkType.BooleanType)),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        // Numeric comparison functions
+        context["intEquals"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.IntType,
+                "b" to com.funk.language.ast.FunkType.IntType
+            )),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        context["intLessThan"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.IntType,
+                "b" to com.funk.language.ast.FunkType.IntType
+            )),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        context["intGreaterThan"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.IntType,
+                "b" to com.funk.language.ast.FunkType.IntType
+            )),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        context["floatEquals"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.FloatType,
+                "b" to com.funk.language.ast.FunkType.FloatType
+            )),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        context["floatLessThan"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.FloatType,
+                "b" to com.funk.language.ast.FunkType.FloatType
+            )),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        context["floatGreaterThan"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.FloatType,
+                "b" to com.funk.language.ast.FunkType.FloatType
+            )),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        // String functions
+        context["stringEquals"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.StringType,
+                "b" to com.funk.language.ast.FunkType.StringType
+            )),
+            com.funk.language.ast.FunkType.BooleanType
+        )
+        
+        context["stringLength"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("str" to com.funk.language.ast.FunkType.StringType)),
+            com.funk.language.ast.FunkType.IntType
+        )
+        
+        context["stringSubstring"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "str" to com.funk.language.ast.FunkType.StringType,
+                "start" to com.funk.language.ast.FunkType.IntType,
+                "end" to com.funk.language.ast.FunkType.IntType
+            )),
+            com.funk.language.ast.FunkType.StringType
+        )
+        
+        // Math functions
+        context["mathAbs"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("value" to com.funk.language.ast.FunkType.IntType)), // Simplified for now
+            com.funk.language.ast.FunkType.IntType
+        )
+        
+        context["mathMax"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.IntType,
+                "b" to com.funk.language.ast.FunkType.IntType
+            )),
+            com.funk.language.ast.FunkType.IntType
+        )
+        
+        context["mathMin"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "a" to com.funk.language.ast.FunkType.IntType,
+                "b" to com.funk.language.ast.FunkType.IntType
+            )),
+            com.funk.language.ast.FunkType.IntType
+        )
+    }
+    
+    /**
+     * Extract pattern bindings from a pattern for type checking
+     */
+    private fun extractPatternBindings(pattern: Pattern, valueType: com.funk.language.ast.FunkType): Map<String, com.funk.language.ast.FunkType> {
+        return when (pattern) {
+            is VariablePattern -> {
+                mapOf(pattern.name to valueType)
+            }
+            is ConstructorPattern -> {
+                val bindings = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                
+                // If there's a record pattern, extract field bindings
+                pattern.recordPattern?.let { recordPattern ->
+                    // Try to get the data type for this constructor from the variant type
+                    val constructorDataType = when (valueType) {
+                        is com.funk.language.ast.FunkType.VariantType -> {
+                            valueType.constructors[pattern.constructor]
+                        }
+                        else -> null
+                    }
+                    
+                    if (constructorDataType is com.funk.language.ast.FunkType.RecordType) {
+                        // Extract bindings from record pattern
+                        bindings.putAll(extractRecordPatternBindings(recordPattern, constructorDataType))
+                    } else {
+                        // If we don't know the exact type, infer from field names
+                        for (entry in recordPattern.entries) {
+                            if (entry.pattern == null) {
+                                // Shorthand {x} - bind x to its field type
+                                bindings[entry.name] = inferFieldTypeFromName(entry.name)
+                            } else {
+                                // Pattern {field = pattern} - extract bindings from the pattern
+                                val fieldType = inferFieldTypeFromName(entry.name)
+                                bindings.putAll(extractPatternBindings(entry.pattern!!, fieldType))
+                            }
+                        }
+                    }
+                }
+                
+                bindings
+            }
+            is RecordPattern -> {
+                when (valueType) {
+                    is com.funk.language.ast.FunkType.RecordType -> {
+                        extractRecordPatternBindings(pattern, valueType)
+                    }
+                    else -> {
+                        // If we don't know the exact type, infer from field names
+                        val bindings = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                        for (entry in pattern.entries) {
+                            if (entry.pattern == null) {
+                                // Shorthand {x} - bind x to its field type
+                                bindings[entry.name] = inferFieldTypeFromName(entry.name)
+                            } else {
+                                // Pattern {field = pattern} - extract bindings from the pattern
+                                val fieldType = inferFieldTypeFromName(entry.name)
+                                bindings.putAll(extractPatternBindings(entry.pattern!!, fieldType))
+                            }
+                        }
+                        bindings
+                    }
+                }
+            }
+            is WildcardPattern -> {
+                emptyMap() // Wildcard doesn't bind any variables
+            }
+        }
+    }
+    
+    /**
+     * Extract bindings from a record pattern
+     */
+    private fun extractRecordPatternBindings(recordPattern: RecordPattern, recordType: com.funk.language.ast.FunkType.RecordType): Map<String, com.funk.language.ast.FunkType> {
+        val bindings = mutableMapOf<String, com.funk.language.ast.FunkType>()
+        
+        for (entry in recordPattern.entries) {
+            if (entry.pattern == null) {
+                // Shorthand {fieldName} - bind fieldName to its field type
+                val fieldType = recordType.fields[entry.name] 
+                    ?: inferFieldTypeFromName(entry.name)
+                bindings[entry.name] = fieldType
+            } else {
+                // Pattern {field = pattern} - extract bindings from the pattern
+                val fieldType = recordType.fields[entry.name]
+                    ?: inferFieldTypeFromName(entry.name)
+                bindings.putAll(extractPatternBindings(entry.pattern!!, fieldType))
+            }
+        }
+        
+        return bindings
     }
     
 }
