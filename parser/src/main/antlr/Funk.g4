@@ -9,6 +9,8 @@ statement:
     | typeDeclaration
     | effectDeclaration
     | implDeclaration
+    | abilityDeclaration
+    | implAbilityDeclaration
     | expressionStatement
     ;
 
@@ -39,6 +41,30 @@ implParams:
     ;
 
 implOperation:
+    Identifier COLON recordType ARROW typeAnnotation ASSIGN expression
+    ;
+
+abilityDeclaration:
+    ABILITY Identifier TypeVariable+ abilityConstraints? WHERE LBRACE NEWLINE? (abilityOperation NEWLINE?)* RBRACE NEWLINE?
+    ;
+
+abilityConstraints:
+    WHERE LBRACE (abilityConstraint (COMMA abilityConstraint)*)? RBRACE
+    ;
+
+abilityConstraint:
+    Identifier TypeVariable
+    ;
+
+abilityOperation:
+    Identifier COLON recordType ARROW typeAnnotation
+    ;
+
+implAbilityDeclaration:
+    IMPL Identifier Identifier+ WHERE LBRACE NEWLINE? (implAbilityOperation NEWLINE?)* RBRACE NEWLINE?
+    ;
+
+implAbilityOperation:
     Identifier COLON recordType ARROW typeAnnotation ASSIGN expression
     ;
 
@@ -200,8 +226,9 @@ recordTypeEntry:
     ;
 
 typeAnnotation:
-    Identifier typeAnnotation*             // Type application (Color, Maybe Int, etc.)
+    Identifier                             // Simple type (Int, String, etc.)
     | TypeVariable                         // Type variable ('a, 'b, etc.)
+    | LPAREN Identifier typeAnnotation+ RPAREN  // Type application (Maybe Int), etc.
     | recordType                           // Record type
     | variantType                          // Variant type
     | functionType                         // Function type
@@ -239,6 +266,7 @@ IMPL: 'impl';
 FOR: 'for';
 WHERE: 'where';
 PERFORM: 'perform';
+ABILITY: 'ability';
 
 // Operators
 PLUS: '+';

@@ -140,6 +140,43 @@ class TypeChecker {
                     
                     item.copy(inferredType = implType)
                 }
+                is AbilityDeclaration -> {
+                    // Register ability in context as a type class
+                    // Abilities are represented as a record of operation signatures with type parameters
+                    val operationTypes = item.operations.associate { op ->
+                        op.name to com.funk.language.ast.FunkType.FunctionType(
+                            convertTypeAnnotation(op.paramType),
+                            convertTypeAnnotation(op.returnType)
+                        )
+                    }
+                    val abilityType = com.funk.language.ast.FunkType.RecordType(operationTypes)
+                    context["${item.name}_ability"] = abilityType
+                    
+                    item.copy(inferredType = abilityType)
+                }
+                is ImplAbilityDeclaration -> {
+                    // Register ability implementation in context
+                    // This creates a concrete instance of the ability for the target type
+                    val operationTypes = item.operations.associate { op ->
+                        op.name to com.funk.language.ast.FunkType.FunctionType(
+                            convertTypeAnnotation(op.paramType),
+                            convertTypeAnnotation(op.returnType)
+                        )
+                    }
+                    val implType = com.funk.language.ast.FunkType.RecordType(operationTypes)
+                    val targetTypeNames = item.targetTypes.map { targetType ->
+                        when (targetType) {
+                            is IdentifierTypeAnnotation -> targetType.name
+                            else -> "Unknown"
+                        }
+                    }
+                    
+                    // Store the implementation with a key that combines ability and target types
+                    val key = "${item.abilityName}_${targetTypeNames.joinToString("_")}"
+                    context[key] = implType
+                    
+                    item.copy(inferredType = implType)
+                }
                 is TopLevelExpression -> {
                     // Type check the top-level expression and set inferred types
                     val exprType = inferTypeWithUnification(item.expression)

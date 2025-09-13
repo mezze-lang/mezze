@@ -147,6 +147,37 @@ class FunkInterpreter {
                     createHandlerFactory(item, context)
                 }
             }
+            is AbilityDeclaration -> {
+                // Ability declarations create a record type with operation signatures
+                // This is similar to effect declarations but for type classes
+                val operations = item.operations.associate { op ->
+                    op.name to FunkNull // Placeholder - will be replaced by implementations
+                }
+                val abilityRecord = FunkRecord(operations)
+                context["${item.name}_ability"] = abilityRecord
+                abilityRecord
+            }
+            is ImplAbilityDeclaration -> {
+                // Ability implementations create concrete instances
+                // Register the implementation for the specific type
+                val operations = item.operations.associate { op ->
+                    val implementation = evaluateExpression(op.implementation, context)
+                    op.name to implementation
+                }
+                val implRecord = FunkRecord(operations)
+                
+                val targetTypeNames = item.targetTypes.map { targetType ->
+                    when (targetType) {
+                        is IdentifierTypeAnnotation -> targetType.name
+                        else -> "Unknown"
+                    }
+                }
+                
+                // Store the implementation with a key that combines ability and target types
+                val key = "${item.abilityName}_${targetTypeNames.joinToString("_")}"
+                context[key] = implRecord
+                implRecord
+            }
             is TopLevelExpression -> {
                 // Top-level expressions are evaluated and their result is returned
                 evaluateExpression(item.expression, context)

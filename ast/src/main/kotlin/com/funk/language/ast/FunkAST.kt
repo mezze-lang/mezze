@@ -215,6 +215,23 @@ data class ImplDeclaration(
 ) : ProgramItem
 
 @Serializable
+data class AbilityDeclaration(
+    val name: String,
+    val typeParams: List<String>,                // Multiple type parameters like ['a, 'b]
+    val constraints: List<AbilityConstraint> = emptyList(),
+    val operations: List<AbilityOperation>,
+    val inferredType: FunkType? = null           // From typechecker
+) : ProgramItem
+
+@Serializable
+data class ImplAbilityDeclaration(
+    val abilityName: String,
+    val targetTypes: List<TypeAnnotation>,       // Multiple concrete types like [String, Int]
+    val operations: List<ImplAbilityOperation>,
+    val inferredType: FunkType? = null           // From typechecker
+) : ProgramItem
+
+@Serializable
 data class TopLevelExpression(
     val expression: Expression
 ) : ProgramItem
@@ -257,6 +274,27 @@ data class EffectOperation(
 
 @Serializable
 data class ImplOperation(
+    val name: String,
+    val paramType: TypeAnnotation,
+    val returnType: TypeAnnotation,
+    val implementation: Expression
+)
+
+@Serializable
+data class AbilityConstraint(
+    val abilityName: String,
+    val typeParam: String
+)
+
+@Serializable
+data class AbilityOperation(
+    val name: String,
+    val paramType: TypeAnnotation,
+    val returnType: TypeAnnotation
+)
+
+@Serializable
+data class ImplAbilityOperation(
     val name: String,
     val paramType: TypeAnnotation,
     val returnType: TypeAnnotation,

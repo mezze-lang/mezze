@@ -56,6 +56,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             ctx.typeDeclaration() != null -> visit(ctx.typeDeclaration())
             ctx.effectDeclaration() != null -> visit(ctx.effectDeclaration())
             ctx.implDeclaration() != null -> visit(ctx.implDeclaration())
+            ctx.abilityDeclaration() != null -> visit(ctx.abilityDeclaration())
+            ctx.implAbilityDeclaration() != null -> visit(ctx.implAbilityDeclaration())
             ctx.expressionStatement() != null -> visit(ctx.expressionStatement())
             else -> throw IllegalArgumentException("Unknown statement: ${ctx.text}")
         }
@@ -121,6 +123,47 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
         val implementation = visit(ctx.expression()) as Expression
         return ImplOperation(name, paramType, returnType, implementation)
+    }
+
+    override fun visitAbilityDeclaration(ctx: FunkParser.AbilityDeclarationContext): Any {
+        val name = ctx.Identifier().text
+        val typeParams = ctx.TypeVariable().map { it.text }
+        val constraints = ctx.abilityConstraints()?.abilityConstraint()?.map { 
+            visit(it) as AbilityConstraint 
+        } ?: emptyList()
+        val operations = ctx.abilityOperation().map { visit(it) as AbilityOperation }
+        return AbilityDeclaration(name, typeParams, constraints, operations)
+    }
+
+    override fun visitAbilityConstraint(ctx: FunkParser.AbilityConstraintContext): Any {
+        val abilityName = ctx.Identifier().text
+        val typeParam = ctx.TypeVariable().text
+        return AbilityConstraint(abilityName, typeParam)
+    }
+
+    override fun visitAbilityOperation(ctx: FunkParser.AbilityOperationContext): Any {
+        val name = ctx.Identifier().text
+        val paramType = visit(ctx.recordType()) as TypeAnnotation
+        val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
+        return AbilityOperation(name, paramType, returnType)
+    }
+
+    override fun visitImplAbilityDeclaration(ctx: FunkParser.ImplAbilityDeclarationContext): Any {
+        val identifiers = ctx.Identifier()
+        val abilityName = identifiers[0].text
+        val targetTypes = identifiers.drop(1).map { 
+            IdentifierTypeAnnotation(it.text) as TypeAnnotation 
+        }
+        val operations = ctx.implAbilityOperation().map { visit(it) as ImplAbilityOperation }
+        return ImplAbilityDeclaration(abilityName, targetTypes, operations)
+    }
+
+    override fun visitImplAbilityOperation(ctx: FunkParser.ImplAbilityOperationContext): Any {
+        val name = ctx.Identifier().text
+        val paramType = visit(ctx.recordType()) as TypeAnnotation
+        val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
+        val implementation = visit(ctx.expression()) as Expression
+        return ImplAbilityOperation(name, paramType, returnType, implementation)
     }
 
     override fun visitTypeDefinition(ctx: FunkParser.TypeDefinitionContext): Any {
