@@ -140,12 +140,16 @@ primaryExpression:
     | recordLiteral
     | doExpression                         // Do block
     | lambdaExpression                     // Lambda function
-    | handleExpression                     // Handle expression
+    | performExpression                    // Perform expression
     | primaryExpression recordLiteral      // Function call or record update (disambiguated in AST builder)
     ;
 
-handleExpression:
-    HANDLE expression WITH (Identifier (COMMA Identifier)*)?
+performExpression:
+    PERFORM performHandler (COMMA performHandler)* DO NEWLINE? expression
+    ;
+
+performHandler:
+    Identifier (recordLiteral)?
     ;
 
 
@@ -234,8 +238,7 @@ EFFECT: 'effect';
 IMPL: 'impl';
 FOR: 'for';
 WHERE: 'where';
-HANDLE: 'handle';
-WITH: 'with';
+PERFORM: 'perform';
 
 // Operators
 PLUS: '+';

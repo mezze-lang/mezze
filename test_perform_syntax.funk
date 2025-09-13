@@ -1,0 +1,15 @@
+effect Log {
+  print : {msg: String} -> {}
+}
+
+impl Log for Console where {
+  print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+}
+
+let noisyAdd = {x, y} -> do
+  Log.print {msg = "Computing sum"}
+  x + y
+
+perform Console in {
+  noisyAdd {x = 10, y = 20}
+}

@@ -316,7 +316,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             }
             ctx.doExpression() != null -> visit(ctx.doExpression())
             ctx.lambdaExpression() != null -> visit(ctx.lambdaExpression())
-            ctx.handleExpression() != null -> visit(ctx.handleExpression())
+            ctx.performExpression() != null -> visit(ctx.performExpression())
             else -> throw IllegalArgumentException("Unknown primary expression: ${ctx.text}")
         }
     }
@@ -491,10 +491,14 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         return EffectRowAnnotation(effects)
     }
     
-    override fun visitHandleExpression(ctx: FunkParser.HandleExpressionContext): Any {
+    override fun visitPerformExpression(ctx: FunkParser.PerformExpressionContext): Any {
         val expression = visit(ctx.expression()) as Expression
-        val handlers = ctx.Identifier().map { it.text }
-        return HandleExpression(expression, handlers)
+        val handlers = ctx.performHandler().map { handlerCtx ->
+            val name = handlerCtx.Identifier().text
+            val parameters = handlerCtx.recordLiteral()?.let { visit(it) as RecordLiteral }
+            PerformHandler(name, parameters)
+        }
+        return PerformExpression(expression, handlers)
     }
     
     

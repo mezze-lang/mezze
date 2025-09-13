@@ -1,0 +1,13 @@
+effect Log {
+  print : {msg: String} -> {}
+}
+
+impl Log for FileLogger {path: String} where {
+  print : {msg: String} -> {} = {msg} -> native_print {msg = "[" ++ path ++ "] " ++ msg}
+}
+
+let loggedAdd = {x, y} -> do
+  Log.print {msg = "Adding numbers"}
+  x + y
+
+let result = perform FileLogger {path = "/var/log/math.log"} do loggedAdd {x = 15, y = 25}

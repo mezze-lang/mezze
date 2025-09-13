@@ -278,12 +278,14 @@ class FunkInterpreter {
                     evaluateExpression(expr.result, context)
                 }
             }
-            is HandleExpression -> {
+            is PerformExpression -> {
                 // Execute expression with provided handlers
-                // We need to map handler names to effect names based on impl declarations
+                // Process handlers in reverse order (last to first) to match semantics:
+                // perform A, B, C do expr  =>  A handles outermost, C handles innermost
                 val handlerMap = mutableMapOf<String, FunkValue>()
                 
-                expr.handlers.forEach { handlerName ->
+                expr.handlers.reversed().forEach { performHandler ->
+                    val handlerName = performHandler.name
                     val handlerOrFactory = context[handlerName] 
                         ?: throw HandlerNotFoundException(handlerName)
                     
@@ -293,9 +295,11 @@ class FunkInterpreter {
                             handlerOrFactory
                         }
                         is HandlerFactory -> {
-                            // Parameterized handler - need to instantiate with default params
-                            // For now, create empty params - in full implementation, this would come from syntax
-                            handlerOrFactory.createHandler(FunkRecord(emptyMap()))
+                            // Parameterized handler - instantiate with provided parameters
+                            val params = performHandler.parameters?.let { recordLit ->
+                                evaluateExpression(recordLit, context) as FunkRecord
+                            } ?: FunkRecord(emptyMap())
+                            handlerOrFactory.createHandler(params)
                         }
                         else -> {
                             throw RuntimeException("Invalid handler type: ${handlerOrFactory::class.simpleName}")
@@ -631,10 +635,15 @@ class FunkInterpreter {
                     // All parameters provided - check for unhandled effects before execution
                     if (function.hasUnhandledEffects()) {
                         val unhandledEffects = function.getUnhandledEffects()
-                        throw RuntimeException(
-                            "Cannot execute function with unhandled effects: ${unhandledEffects.joinToString(", ")}. " +
-                            "Use 'handle ... with ...' to provide handlers for these effects."
-                        )
+                        val availableHandlers = (context["__handlers"] as? FunkRecord)?.fields?.keys ?: emptySet()
+                        val actuallyUnhandledEffects = unhandledEffects - availableHandlers
+                        
+                        if (actuallyUnhandledEffects.isNotEmpty()) {
+                            throw FunkException(
+                                "Cannot execute function with unhandled effects: ${actuallyUnhandledEffects.joinToString(", ")}. " +
+                                "Use 'perform ... do' to provide handlers for these effects."
+                            )
+                        }
                     }
                     
                     // Execute function
@@ -691,10 +700,15 @@ class FunkInterpreter {
                 // RUNTIME EFFECT VALIDATION: Check if function has unhandled effects
                 if (function.hasUnhandledEffects()) {
                     val unhandledEffects = function.getUnhandledEffects()
-                    throw RuntimeException(
-                        "Cannot execute function with unhandled effects: ${unhandledEffects.joinToString(", ")}. " +
-                        "Use 'handle ... with ...' to provide handlers for these effects."
-                    )
+                    val availableHandlers = (context["__handlers"] as? FunkRecord)?.fields?.keys ?: emptySet()
+                    val actuallyUnhandledEffects = unhandledEffects - availableHandlers
+                    
+                    if (actuallyUnhandledEffects.isNotEmpty()) {
+                        throw FunkException(
+                            "Cannot execute function with unhandled effects: ${actuallyUnhandledEffects.joinToString(", ")}. " +
+                            "Use 'perform ... do' to provide handlers for these effects."
+                        )
+                    }
                 }
                 
                         // Create new context with captured closure and parameters
@@ -763,7 +777,7 @@ class FunkInterpreter {
             is MemberAccess -> containsEffectCallsInExpression(expr.receiver)
             is RecordUpdateExpression -> containsEffectCallsInExpression(expr.baseRecord) || 
                                          expr.updates.any { containsEffectCallsInExpression(it.value) }
-            is HandleExpression -> containsEffectCallsInExpression(expr.expression)
+            is PerformExpression -> containsEffectCallsInExpression(expr.expression)
             else -> false
         }
     }
@@ -1390,7 +1404,7 @@ class FunkInterpreter {
             }
             is MemberAccess -> containsSelfReference(expr.receiver, variableName)
             is VariantConstruction -> expr.value?.let { containsSelfReference(it, variableName) } ?: false
-            is HandleExpression -> containsSelfReference(expr.expression, variableName)
+            is PerformExpression -> containsSelfReference(expr.expression, variableName)
             is LambdaExpression -> containsSelfReference(expr.body, variableName)
             // Literals don't contain references
             is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral -> false

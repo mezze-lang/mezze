@@ -439,11 +439,17 @@ data class DoExpression(
 
 // Effect handling
 @Serializable
-data class HandleExpression(
+data class PerformExpression(
     val expression: Expression,
-    val handlers: List<String>,
+    val handlers: List<PerformHandler>,
     override val inferredType: FunkType? = null
 ) : Expression
+
+@Serializable
+data class PerformHandler(
+    val name: String,
+    val parameters: RecordLiteral? = null
+)
 
 
 @Serializable

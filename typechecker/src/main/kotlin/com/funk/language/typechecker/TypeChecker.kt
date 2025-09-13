@@ -197,7 +197,7 @@ class TypeChecker {
                 }
                 expr.copy(expression = updatedExpression, cases = updatedCases, inferredType = inferredType)
             }
-            is HandleExpression -> {
+            is PerformExpression -> {
                 val updatedExpression = setInferredTypes(expr.expression)
                 expr.copy(expression = updatedExpression, inferredType = inferredType)
             }
@@ -871,26 +871,41 @@ class TypeChecker {
                 // Return type of the final expression
                 inferBasicType(expr.result)
             }
-            is HandleExpression -> {
-                // Handle expressions execute effectful code with specific handlers
+            is PerformExpression -> {
+                // Perform expressions execute effectful code with specific handlers
                 val exprType = inferTypeWithUnification(expr.expression)
+                
+                // Find which effects are being handled by looking up the handler names
+                val handlerNames = expr.handlers.map { it.name }
+                val handledEffects = mutableSetOf<String>()
+                
+                // Look for impl declarations to find which effects these handlers implement
+                for (handlerName in handlerNames) {
+                    for (item in currentProgram?.items ?: emptyList()) {
+                        if (item is ImplDeclaration && item.handlerName == handlerName) {
+                            handledEffects.add(item.effectName)
+                            break
+                        }
+                    }
+                }
+                
+                // Validate that we're only handling effects that actually exist in the expression
+                val actualEffects: Set<String> = when (exprType) {
+                    is com.funk.language.ast.FunkType.FunctionType -> exprType.effects?.effects ?: emptySet()
+                    else -> {
+                        // Check if the expression contains effect calls
+                        val effectsInExpression = mutableSetOf<String>()
+                        collectEffectsFromExpression(expr.expression, effectsInExpression)
+                        effectsInExpression
+                    }
+                }
+                
+                // TODO: Improve validation logic for perform expressions
+                // For now, we allow perform expressions and let the interpreter handle validation
+                // The type system focuses on effect removal from function types
                 
                 // If the expression type is a function with effects, remove the handled effects
                 if (exprType is com.funk.language.ast.FunkType.FunctionType && exprType.effects != null) {
-                    // Find which effects are being handled by looking up the handler names
-                    val handlerNames = expr.handlers
-                    val handledEffects = mutableSetOf<String>()
-                    
-                    // Look for impl declarations to find which effects these handlers implement
-                    for (handlerName in handlerNames) {
-                        for (item in currentProgram?.items ?: emptyList()) {
-                            if (item is ImplDeclaration && item.handlerName == handlerName) {
-                                handledEffects.add(item.effectName)
-                                break
-                            }
-                        }
-                    }
-                    
                     if (handledEffects.isNotEmpty()) {
                         // Remove the handled effects from the effect row
                         val currentEffects = exprType.effects!!.effects.toMutableSet()
@@ -908,11 +923,11 @@ class TypeChecker {
                             newEffectRow
                         )
                     } else {
-                        // No handlers found, return original type
                         exprType
                     }
                 } else {
-                    // Not a function with effects, return as-is
+                    // For non-function types, return the result type of executing the expression
+                    // If there were effects to handle, they've been handled, so return the base type
                     exprType
                 }
             }
@@ -1357,7 +1372,7 @@ class TypeChecker {
                 }
                 // Base cases - no further traversal needed
                 is Identifier, is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral -> {}
-                is HandleExpression -> {
+                is PerformExpression -> {
                     traverse(e.expression)
                 }
                 is EffectCallExpression -> {
@@ -1968,7 +1983,7 @@ class TypeChecker {
                     collectEffectsFromExpression(update.value, effects)
                 }
             }
-            is HandleExpression -> {
+            is PerformExpression -> {
                 collectEffectsFromExpression(expr.expression, effects)
             }
             // Literals and identifiers don't have effects
