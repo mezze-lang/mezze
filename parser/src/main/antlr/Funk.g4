@@ -45,7 +45,7 @@ implOperation:
     ;
 
 abilityDeclaration:
-    ABILITY Identifier TypeVariable+ abilityConstraints? WHERE LBRACE NEWLINE? (abilityOperation NEWLINE?)* RBRACE NEWLINE?
+    ABILITY Identifier TypeVariable+ abilityDependencies? WHERE LBRACE NEWLINE? (abilityOperation NEWLINE?)* RBRACE NEWLINE?
     ;
 
 abilityConstraints:
@@ -54,6 +54,22 @@ abilityConstraints:
 
 abilityConstraint:
     Identifier TypeVariable
+    ;
+
+abilityDependencies:
+    WITH abilityDependency (COMMA abilityDependency)*
+    ;
+
+abilityDependency:
+    Identifier typeAnnotation*
+    ;
+
+functionAbilityConstraints:
+    WITH functionAbilityConstraint (COMMA functionAbilityConstraint)*
+    ;
+
+functionAbilityConstraint:
+    Identifier typeAnnotation*
     ;
 
 abilityOperation:
@@ -180,8 +196,9 @@ performHandler:
 
 
 lambdaExpression:
-    recordType ARROW NEWLINE? expression                    // Typed parameters: { x: Int, y: Int } -> x + y
-    | untypedRecordParams ARROW NEWLINE? expression         // Untyped parameters: { x, y } -> x + y
+    recordType ARROW typeAnnotation? functionAbilityConstraints? ASSIGN expression    // Typed with constraints: { x: Int } -> String with Show Int = ...
+    | recordType ARROW NEWLINE? expression                                            // Typed parameters: { x: Int, y: Int } -> x + y
+    | untypedRecordParams ARROW NEWLINE? expression                                   // Untyped parameters: { x, y } -> x + y
     ;
 
 
@@ -235,7 +252,7 @@ typeAnnotation:
     ;
 
 functionType:
-    recordType ARROW typeAnnotation effectRow?    // { params } -> ReturnType <Effects>
+    recordType ARROW typeAnnotation effectRow? functionAbilityConstraints?    // { params } -> ReturnType <Effects> with Abilities
     ;
 
 effectRow:
@@ -267,6 +284,7 @@ FOR: 'for';
 WHERE: 'where';
 PERFORM: 'perform';
 ABILITY: 'ability';
+WITH: 'with';
 
 // Operators
 PLUS: '+';

@@ -128,17 +128,28 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitAbilityDeclaration(ctx: FunkParser.AbilityDeclarationContext): Any {
         val name = ctx.Identifier().text
         val typeParams = ctx.TypeVariable().map { it.text }
-        val constraints = ctx.abilityConstraints()?.abilityConstraint()?.map { 
-            visit(it) as AbilityConstraint 
+        val constraints = emptyList<AbilityConstraint>() // No longer used in new syntax
+        val dependencies = ctx.abilityDependencies()?.abilityDependency()?.map {
+            visit(it) as AbilityDependency
         } ?: emptyList()
         val operations = ctx.abilityOperation().map { visit(it) as AbilityOperation }
-        return AbilityDeclaration(name, typeParams, constraints, operations)
+        return AbilityDeclaration(name, typeParams, constraints, dependencies, operations)
     }
 
     override fun visitAbilityConstraint(ctx: FunkParser.AbilityConstraintContext): Any {
         val abilityName = ctx.Identifier().text
         val typeParam = ctx.TypeVariable().text
         return AbilityConstraint(abilityName, typeParam)
+    }
+    
+    override fun visitAbilityDependencies(ctx: FunkParser.AbilityDependenciesContext): Any {
+        return ctx.abilityDependency().map { visit(it) as AbilityDependency }
+    }
+    
+    override fun visitAbilityDependency(ctx: FunkParser.AbilityDependencyContext): Any {
+        val abilityName = ctx.Identifier().text
+        val typeArgs = ctx.typeAnnotation().map { visit(it) as TypeAnnotation }
+        return AbilityDependency(abilityName, typeArgs)
     }
 
     override fun visitAbilityOperation(ctx: FunkParser.AbilityOperationContext): Any {
@@ -425,7 +436,14 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         return if (ctx.recordType() != null) {
             val recordType = visit(ctx.recordType()) as RecordTypeAnnotation
             val parameters = TypedParameters(recordType)
-            LambdaExpression(parameters, body)
+            
+            // Check if this is the new syntax with explicit return type and constraints
+            val returnType = ctx.typeAnnotation()?.let { visit(it) as TypeAnnotation }
+            val abilityConstraints = ctx.functionAbilityConstraints()?.let {
+                visit(it) as List<FunctionAbilityConstraint>
+            } ?: emptyList()
+            
+            LambdaExpression(parameters, body, returnType, abilityConstraints)
         } else {
             val params = ctx.untypedRecordParams().untypedParam().map { it.Identifier().text }
             val parameters = UntypedParameters(params)
@@ -526,12 +544,25 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val paramType = visit(ctx.recordType()) as TypeAnnotation
         val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
         val effects = ctx.effectRow()?.let { visit(it) as EffectRowAnnotation }
-        return FunctionTypeAnnotation(paramType, returnType, effects)
+        val abilityConstraints = ctx.functionAbilityConstraints()?.let { 
+            visit(it) as List<FunctionAbilityConstraint> 
+        } ?: emptyList()
+        return FunctionTypeAnnotation(paramType, returnType, effects, abilityConstraints)
     }
     
     override fun visitEffectRow(ctx: FunkParser.EffectRowContext): Any {
         val effects = ctx.Identifier().map { it.text }
         return EffectRowAnnotation(effects)
+    }
+    
+    override fun visitFunctionAbilityConstraints(ctx: FunkParser.FunctionAbilityConstraintsContext): Any {
+        return ctx.functionAbilityConstraint().map { visit(it) as FunctionAbilityConstraint }
+    }
+    
+    override fun visitFunctionAbilityConstraint(ctx: FunkParser.FunctionAbilityConstraintContext): Any {
+        val abilityName = ctx.Identifier().text
+        val typeArgs = ctx.typeAnnotation().map { visit(it) as TypeAnnotation }
+        return FunctionAbilityConstraint(abilityName, typeArgs)
     }
     
     override fun visitPerformExpression(ctx: FunkParser.PerformExpressionContext): Any {

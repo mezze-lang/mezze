@@ -63,7 +63,8 @@ sealed interface FunkType {
     data class FunctionType(
         val paramType: FunkType,
         val returnType: FunkType,
-        val effects: EffectRow? = null  // null = pure function, non-null = effectful function
+        val effects: EffectRow? = null,  // null = pure function, non-null = effectful function
+        val abilityConstraints: List<FunctionAbilityConstraint> = emptyList()  // Ability constraints for this function
     ) : FunkType
     
     // Effect rows
@@ -75,6 +76,13 @@ sealed interface FunkType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
     }
+    
+    // Function-level ability constraints
+    @Serializable
+    data class FunctionAbilityConstraint(
+        val abilityName: String,
+        val typeArgs: List<FunkType> = emptyList()  // Type arguments for the ability
+    )
     
 }
 
@@ -219,6 +227,7 @@ data class AbilityDeclaration(
     val name: String,
     val typeParams: List<String>,                // Multiple type parameters like ['a, 'b]
     val constraints: List<AbilityConstraint> = emptyList(),
+    val dependencies: List<AbilityDependency> = emptyList(),  // Ability dependencies (e.g., Ord depends on Eq)
     val operations: List<AbilityOperation>,
     val inferredType: FunkType? = null           // From typechecker
 ) : ProgramItem
@@ -284,6 +293,18 @@ data class ImplOperation(
 data class AbilityConstraint(
     val abilityName: String,
     val typeParam: String
+)
+
+@Serializable
+data class FunctionAbilityConstraint(
+    val abilityName: String,
+    val typeArgs: List<TypeAnnotation> = emptyList()  // Type arguments for the ability
+)
+
+@Serializable
+data class AbilityDependency(
+    val abilityName: String,
+    val typeArgs: List<TypeAnnotation> = emptyList()  // Type arguments for the dependency
 )
 
 @Serializable
@@ -420,6 +441,8 @@ data class VariantConstruction(
 data class LambdaExpression(
     val parameters: LambdaParameters,
     val body: Expression,
+    val returnType: TypeAnnotation? = null,  // Explicit return type annotation
+    val abilityConstraints: List<FunctionAbilityConstraint> = emptyList(),  // Ability constraints
     override val inferredType: FunkType? = null
 ) : Expression
 
@@ -587,7 +610,8 @@ data class VariantTypeAnnotation(
 data class FunctionTypeAnnotation(
     val paramType: TypeAnnotation,
     val returnType: TypeAnnotation,
-    val effects: EffectRowAnnotation? = null
+    val effects: EffectRowAnnotation? = null,
+    val abilityConstraints: List<FunctionAbilityConstraint> = emptyList()
 ) : TypeAnnotation
 
 @Serializable
