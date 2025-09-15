@@ -1,8 +1,8 @@
 # Testing explicit type constraints with Int as default
 
 # Default behavior: literals are Int
-let intDefault = 42                # expected: intDefault : Int (default)
-let intZero = 0                    # expected: intZero : Int (default)
+let intDefault = 42                # expected: intDefault : Int
+let intZero = 0                    # expected: intZero : Int
 
 # Negative literals are always Int
 let intNegative = -5               # expected: intNegative : Int

@@ -75,9 +75,8 @@ class FunkInterpreter {
         // Simple execution context
         val context = mutableMapOf<String, FunkValue>()
         
-        // Register built-in native functions from Truffle implementations
-        // TODO: Create centralized Truffle native implementations
-        // For now, use placeholder
+        // Register built-in native functions
+        registerNativeFunctions(context)
         
         // Execute each item in the program
         var lastResult: FunkValue = FunkNull
@@ -102,17 +101,17 @@ class FunkInterpreter {
                     context[item.variableName] = recursivePlaceholder
                     
                     // Now evaluate the lambda with the placeholder in context
-                    val value = evaluateExpression(item.expression, context)
+                val value = evaluateExpression(item.expression, context)
                     
                     // Replace the placeholder with the actual function
-                    context[item.variableName] = value
+                context[item.variableName] = value
                     
                     // If it's a user function, set up recursive reference
                     if (value is SimpleFunkFunction) {
                         value.setupRecursiveReference(item.variableName, value)
                     }
                     
-                    value
+                value
                 } else {
                     // Non-function case: check for self-reference (which should be forbidden)
                     if (containsSelfReference(item.expression, item.variableName)) {
@@ -225,6 +224,86 @@ class FunkInterpreter {
                 FunkRecord(fields)
             }
             is MemberAccess -> {
+                // Check if this is an ability call (e.g., Show.show)
+                val receiver = expr.receiver
+                if (receiver is Identifier) {
+                    val receiverName = receiver.name
+                    val abilityKey = "${receiverName}_ability"
+                    if (context.containsKey(abilityKey)) {
+                        // This is an ability operation reference - return a function that will handle ability resolution
+                        // when called with arguments
+                        return NativeFunkFunction(
+                            name = "$receiverName.${expr.member}",
+                            implementation = { args ->
+                                if (args.size != 1) {
+                                    throw RuntimeException("Ability operation $receiverName.${expr.member} expects exactly one argument")
+                                }
+                                val arguments = args[0]
+                                
+                                // Extract type arguments from the arguments for implementation lookup
+                                val typeArgs = when (arguments) {
+                                    is FunkRecord -> {
+                                        arguments.fields.values.map { arg ->
+                                            when (arg) {
+                                                is FunkInt -> "Int"
+                                                is FunkString -> "String"
+                                                is FunkBoolean -> "Boolean"
+                                                is FunkFloat -> "Float"
+                                                is FunkNull -> "Null"
+                                                is FunkRecord -> "Record"
+                                                is FunkVariant -> "Variant"
+                                                is SimpleFunkFunction -> "Function"
+                                                is NativeFunkFunction -> "NativeFunction"
+                                                else -> "Unknown"
+                                            }
+                                        }.distinct()
+                                    }
+                                    else -> {
+                                        listOf(when (arguments) {
+                                            is FunkInt -> "Int"
+                                            is FunkString -> "String"
+                                            is FunkBoolean -> "Boolean"
+                                            is FunkFloat -> "Float"
+                                            is FunkNull -> "Null"
+                                            is FunkRecord -> "Record"
+                                            is FunkVariant -> "Variant"
+                                            is SimpleFunkFunction -> "Function"
+                                            is NativeFunkFunction -> "NativeFunction"
+                                            else -> "Unknown"
+                                        })
+                                    }
+                                }
+                                
+                                // Find matching implementation
+                                val matchingImpl = context.entries.find { (key, value) ->
+                                    if (value is FunkRecord && key.startsWith("${receiverName}_")) {
+                                        val keyTypes = key.removePrefix("${receiverName}_").split("_")
+                                        typeArgs.size <= keyTypes.size && 
+                                        typeArgs.zip(keyTypes).all { (inputType, implType) -> inputType == implType }
+                                    } else false
+                                }
+                                
+                                val (implKey, implementation) = matchingImpl 
+                                    ?: throw RuntimeException("No implementation found for ability $receiverName with input types $typeArgs")
+                                
+                                val implRecord = implementation as FunkRecord
+                                val operationFunction = implRecord.fields[expr.member]
+                                    ?: throw RuntimeException("Operation ${expr.member} not found in $receiverName implementation")
+                                
+                                // Call the operation function
+                                when (operationFunction) {
+                                    is NativeFunkFunction -> operationFunction.call(listOf(arguments))
+                                    is SimpleFunkFunction -> {
+                                        callFunctionWithRecord(operationFunction, arguments as FunkRecord, context)
+                                    }
+                                    else -> throw RuntimeException("Invalid operation function type: ${operationFunction::class.simpleName}")
+                                }
+                            }
+                        )
+                    }
+                }
+                
+                // Regular member access
                 val record = evaluateExpression(expr.receiver, context)
                 when (record) {
                     is FunkRecord -> record.fields[expr.member] 
@@ -272,6 +351,87 @@ class FunkInterpreter {
                             val effectCall = EffectCallExpression(effectName, operationName, expr.arguments)
                             return executeEffectCall(effectCall, context)
                         }
+                        
+                        // Check if this is an ability call (e.g., Show.show, Eq.equals)
+                        if (context.containsKey("${effectName}_ability")) {
+                            // Ability resolution - inline implementation to avoid scope issues
+                            val arguments = evaluateExpression(expr.arguments, context)
+                            
+                            // Extract type arguments from the arguments for implementation lookup
+                            val typeArgs = when (arguments) {
+                                is FunkRecord -> {
+                                    // For record arguments like {val: 42}, extract the types of the field values
+                                    arguments.fields.values.map { arg ->
+                                        when (arg) {
+                                            is FunkInt -> "Int"
+                                            is FunkString -> "String"
+                                            is FunkBoolean -> "Boolean"
+                                            is FunkFloat -> "Float"
+                                            is FunkNull -> "Null"
+                                            is FunkRecord -> "Record"
+                                            is FunkVariant -> "Variant"
+                                            is SimpleFunkFunction -> "Function"
+                                            is NativeFunkFunction -> "NativeFunction"
+                                            else -> "Unknown"
+                                        }
+                                    }.distinct()
+                                }
+                                else -> {
+                                    listOf(when (arguments) {
+                                        is FunkInt -> "Int"
+                                        is FunkString -> "String"
+                                        is FunkBoolean -> "Boolean"
+                                        is FunkFloat -> "Float"
+                                        is FunkNull -> "Null"
+                                        is FunkRecord -> "Record"
+                                        is FunkVariant -> "Variant"
+                                        is SimpleFunkFunction -> "Function"
+                                        is NativeFunkFunction -> "NativeFunction"
+                                        else -> "Unknown"
+                                    })
+                                }
+                            }
+                            
+                            // Find matching implementation by searching all available implementations
+                            // This handles multi-parameter abilities by matching input types and finding compatible implementations
+                            val matchingImpl = context.entries.find { (key, value) ->
+                                if (value is FunkRecord && key.startsWith("${effectName}_")) {
+                                    val keyTypes = key.removePrefix("${effectName}_").split("_")
+                                    // Check if the input types match the beginning of the implementation types
+                                    typeArgs.size <= keyTypes.size && 
+                                    typeArgs.zip(keyTypes).all { (inputType, implType) -> inputType == implType }
+                                } else false
+                            }
+                            
+                            val (implKey, implementation) = matchingImpl 
+                                ?: throw RuntimeException("No implementation found for ability $effectName with input types $typeArgs")
+                            
+                            val implRecord = implementation as FunkRecord
+                            
+                            // Get the operation function from the implementation
+                            val operationFunction = implRecord.fields[operationName]
+                                ?: throw RuntimeException("Operation $operationName not found in $effectName implementation")
+                            
+                            // Call the operation function using existing infrastructure (preserves tail call optimization and Loom threads)
+                            return when (operationFunction) {
+                                is NativeFunkFunction -> {
+                                    operationFunction.call(listOf(arguments))
+                                }
+                                is SimpleFunkFunction -> {
+                                    if (arguments is FunkRecord) {
+                                        // Use existing callFunctionWithRecord which has full tail call optimization and Loom thread support
+                                        callFunctionWithRecord(operationFunction, arguments, context)
+                                    } else {
+                                        // Convert single argument to record
+                                        val recordArgs = FunkRecord(mapOf("arg0" to arguments))
+                                        callFunctionWithRecord(operationFunction, recordArgs, context)
+                                    }
+                                }
+                                else -> {
+                                    throw RuntimeException("Invalid ability operation type: $operationFunction")
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -295,7 +455,7 @@ class FunkInterpreter {
                         params.recordType.entries.map { it.name }
                     }
                 }
-                SimpleFunkFunction(paramNames, expr.body, context.toMap(), inferredType = expr.inferredType) // Capture current context and type
+                SimpleFunkFunction(parameters = paramNames, body = expr.body, closure = context.toMap(), inferredType = expr.inferredType)
             }
             is DoExpression -> {
                 // Check if this do block contains effect calls - if so, lower to state machine
@@ -303,11 +463,11 @@ class FunkInterpreter {
                     executeDoBlockAsStateMachine(expr, context)
                 } else {
                     // Simple sequential execution for pure do blocks
-                    var result: FunkValue = FunkNull
-                    for (stmt in expr.statements) {
-                        result = executeStatement(stmt, context)
-                    }
-                    evaluateExpression(expr.result, context)
+                var result: FunkValue = FunkNull
+                for (stmt in expr.statements) {
+                    result = executeStatement(stmt, context)
+                }
+                evaluateExpression(expr.result, context)
                 }
             }
             is PerformExpression -> {
@@ -655,8 +815,12 @@ class FunkInterpreter {
         // println("DEBUG: callFunctionWithRecord called with function type: ${function::class.simpleName}")
         return when (function) {
             is NativeFunkFunction -> {
-                // Call native function directly - convert map to list of values
-                function.call(arguments.fields.values.toList())
+                // Call native function directly with the record argument
+                function.call(listOf(arguments))
+            }
+            is com.funk.language.interpreter.stdlib.TruffleNativeFunction -> {
+                // Call Truffle native function directly - it expects a single FunkValue argument
+                function.execute(arrayOf(arguments))
             }
             is SimpleFunkFunction -> {
                 val providedParams = arguments.fields.keys
@@ -743,22 +907,22 @@ class FunkInterpreter {
                     }
                 }
                 
-                        // Create new context with captured closure and parameters
-                        val newContext = function.closure.toMutableMap()
-                        
-                        // Bind parameters (simplified - assume list of parameter names)
-                        function.parameters.forEachIndexed { index, param ->
-                            if (index < args.size) {
-                                newContext[param] = args[index]
-                            }
-                        }
+                // Create new context with captured closure and parameters
+                val newContext = function.closure.toMutableMap()
+                
+                // Bind parameters (simplified - assume list of parameter names)
+                function.parameters.forEachIndexed { index, param ->
+                    if (index < args.size) {
+                        newContext[param] = args[index]
+                    }
+                }
                         
                         // Propagate effect handlers from current context
                         context["__handlers"]?.let { 
                             newContext["__handlers"] = it 
-                        }
-                        
-                        evaluateExpression(function.body, newContext)
+                }
+                
+                evaluateExpression(function.body, newContext)
             }
             else -> throw RuntimeException("Cannot call non-function value: ${function::class.simpleName}")
         }
@@ -1444,6 +1608,64 @@ class FunkInterpreter {
             else -> false
         }
     }
+    
+    // ============================================================================
+    // ABILITY RESOLUTION
+    // ============================================================================
+    
+    /**
+     * Resolve and call ability operations at runtime
+     */
+    private fun resolveAbilityOperation(
+        abilityName: String,
+        operationName: String,
+        arguments: FunkValue,
+        context: MutableMap<String, FunkValue>
+    ): FunkValue {
+        // Extract types from arguments
+        val argumentTypes = extractArgumentTypes(arguments)
+        
+        // Find implementation
+        val implKey = "${abilityName}_${argumentTypes.joinToString("_")}"
+        val implementation = context[implKey] as? FunkRecord
+            ?: throw RuntimeException("No implementation found for ability $abilityName with types $argumentTypes")
+        
+        // Get operation from implementation
+        val operation = implementation.fields[operationName] as? SimpleFunkFunction
+            ?: throw RuntimeException("Operation $operationName not found in $abilityName implementation")
+        
+        // Call the operation
+        return if (arguments is FunkRecord) {
+            callFunctionWithRecord(operation, arguments, context)
+        } else {
+            callFunction(operation, listOf(arguments), context)
+        }
+    }
+    
+    /**
+     * Extract type names from runtime values for ability resolution
+     */
+    private fun extractArgumentTypes(arguments: FunkValue): List<String> {
+        return when (arguments) {
+            is FunkRecord -> {
+                arguments.fields.values.map { value ->
+                    when (value) {
+                        is FunkInt -> "Int"
+                        is FunkString -> "String"
+                        is FunkFloat -> "Float"
+                        is FunkBoolean -> "Boolean"
+                        else -> "Unknown"
+                    }
+                }.distinct()
+            }
+            is FunkInt -> listOf("Int")
+            is FunkString -> listOf("String")
+            is FunkFloat -> listOf("Float")
+            is FunkBoolean -> listOf("Boolean")
+            else -> listOf("Unknown")
+        }
+    }
+    
 }
 
 /**
@@ -1491,6 +1713,37 @@ data class SimpleFunkFunction(
                 effects?.effects ?: emptySet()
             }
             else -> emptySet()
+        }
+    }
+    
+    /**
+     * Extract type names from runtime values for ability resolution
+     */
+    private fun extractArgumentTypes(value: FunkValue): List<String> {
+        return when (value) {
+            is FunkRecord -> {
+                // For record arguments like {val: 42}, extract the types of the field values
+                value.fields.values.map { getValueTypeName(it) }.distinct()
+            }
+            else -> listOf(getValueTypeName(value))
+        }
+    }
+    
+    /**
+     * Get the type name of a runtime value
+     */
+    private fun getValueTypeName(value: FunkValue): String {
+        return when (value) {
+            is FunkInt -> "Int"
+            is FunkFloat -> "Float"
+            is FunkString -> "String"
+            is FunkBoolean -> "Boolean"
+            is FunkNull -> "Null"
+            is FunkRecord -> "Record"
+            is FunkVariant -> "Variant"
+            is SimpleFunkFunction -> "Function"
+            is NativeFunkFunction -> "NativeFunction"
+            else -> "Unknown"
         }
     }
     

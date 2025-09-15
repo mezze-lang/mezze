@@ -95,7 +95,10 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val name = ctx.Identifier().text
         val paramType = visit(ctx.recordType()) as TypeAnnotation
         val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
-        return EffectOperation(name, paramType, returnType)
+        val effects = ctx.effectRow()?.let { effectRowCtx ->
+            effectRowCtx.Identifier().map { it.text }
+        } ?: emptyList()
+        return EffectOperation(name, paramType, returnType, effects)
     }
     
     override fun visitImplDeclaration(ctx: FunkParser.ImplDeclarationContext): Any {
@@ -139,7 +142,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitAbilityConstraint(ctx: FunkParser.AbilityConstraintContext): Any {
         val abilityName = ctx.Identifier().text
         val typeParam = ctx.TypeVariable().text
-        return AbilityConstraint(abilityName, typeParam)
+        // This is used for function-level ability constraints, not ability declarations
+        return FunkType.FunctionAbilityConstraint(abilityName, listOf(TypeVar(typeParam).let { FunkType.VarType(it) }))
     }
     
     override fun visitAbilityDependencies(ctx: FunkParser.AbilityDependenciesContext): Any {
@@ -176,6 +180,17 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val implementation = visit(ctx.expression()) as Expression
         return ImplAbilityOperation(name, paramType, returnType, implementation)
     }
+
+    override fun visitFunctionAbilityConstraints(ctx: FunkParser.FunctionAbilityConstraintsContext): Any {
+        return ctx.functionAbilityConstraint().map { visit(it) as FunctionAbilityConstraint }
+    }
+
+    override fun visitFunctionAbilityConstraint(ctx: FunkParser.FunctionAbilityConstraintContext): Any {
+        val abilityName = ctx.Identifier().text
+        val typeArgs = ctx.typeAnnotation().map { visit(it) as TypeAnnotation }
+        return FunctionAbilityConstraint(abilityName, typeArgs)
+    }
+
 
     override fun visitTypeDefinition(ctx: FunkParser.TypeDefinitionContext): Any {
         return when {
@@ -214,7 +229,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         for (i in 1 until ctx.variantExpression().size) {
             val right = visit(ctx.variantExpression(i)) as Expression
             // Desugar pipe: substitute placeholders in right expression with left value
-            result = substitutePlaceholdersInExpression(right, result)
+            result = substitutePlaceholdersInAST(right, result)
         }
         
         return result
@@ -340,7 +355,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
                 Identifier(name)
             }
             ctx.PLACEHOLDER() != null -> {
-                // Pipe placeholder
+                // Create placeholder expression for pipe operator desugaring
                 PlaceholderExpression()
             }
             ctx.expression() != null -> visit(ctx.expression())
@@ -555,16 +570,6 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         return EffectRowAnnotation(effects)
     }
     
-    override fun visitFunctionAbilityConstraints(ctx: FunkParser.FunctionAbilityConstraintsContext): Any {
-        return ctx.functionAbilityConstraint().map { visit(it) as FunctionAbilityConstraint }
-    }
-    
-    override fun visitFunctionAbilityConstraint(ctx: FunkParser.FunctionAbilityConstraintContext): Any {
-        val abilityName = ctx.Identifier().text
-        val typeArgs = ctx.typeAnnotation().map { visit(it) as TypeAnnotation }
-        return FunctionAbilityConstraint(abilityName, typeArgs)
-    }
-    
     override fun visitPerformExpression(ctx: FunkParser.PerformExpressionContext): Any {
         val expression = visit(ctx.expression()) as Expression
         val handlers = ctx.performHandler().map { handlerCtx ->
@@ -578,51 +583,46 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     
     
     /**
-     * Substitute placeholders (@) in an expression with the given value expression.
-     * This implements pipe operator desugaring.
+     * Recursively substitute placeholder expressions with the given value
      */
-    private fun substitutePlaceholdersInExpression(expr: Expression, valueExpr: Expression): Expression {
+    private fun substitutePlaceholdersInAST(expr: Expression, replacement: Expression): Expression {
         return when (expr) {
-            is PlaceholderExpression -> {
-                // Replace placeholder with the piped value
-                valueExpr
-            }
-            is FunctionCall -> {
-                // Recursively substitute in function calls
-                FunctionCall(
-                    substitutePlaceholdersInExpression(expr.function, valueExpr),
-                    substitutePlaceholdersInExpression(expr.arguments, valueExpr),
-                    expr.inferredType
-                )
-            }
-            is RecordLiteral -> {
-                // Recursively substitute in record entries
-                val newEntries = expr.entries.map { entry ->
-                    RecordEntry(
-                        entry.name,
-                        entry.value?.let { substitutePlaceholdersInExpression(it, valueExpr) }
-                    )
-                }
-                RecordLiteral(newEntries, expr.restField, expr.inferredType)
-            }
-            is BinaryOperation -> {
-                // Recursively substitute in binary operations
-                BinaryOperation(
-                    substitutePlaceholdersInExpression(expr.left, valueExpr),
-                    expr.operator,
-                    substitutePlaceholdersInExpression(expr.right, valueExpr),
-                    expr.inferredType
-                )
-            }
-            is MemberAccess -> {
-                // Recursively substitute in member access
-                MemberAccess(
-                    substitutePlaceholdersInExpression(expr.receiver, valueExpr),
-                    expr.member,
-                    expr.inferredType
-                )
-            }
-            // For other expressions, return as-is (no placeholders to substitute)
+            is PlaceholderExpression -> replacement
+            is FunctionCall -> FunctionCall(
+                substitutePlaceholdersInAST(expr.function, replacement),
+                substitutePlaceholdersInAST(expr.arguments, replacement),
+                expr.inferredType
+            )
+            is RecordLiteral -> RecordLiteral(
+                expr.entries.map { entry ->
+                    RecordEntry(entry.name, entry.value?.let { substitutePlaceholdersInAST(it, replacement) })
+                },
+                expr.restField,
+                expr.inferredType
+            )
+            is BinaryOperation -> BinaryOperation(
+                substitutePlaceholdersInAST(expr.left, replacement),
+                expr.operator,
+                substitutePlaceholdersInAST(expr.right, replacement),
+                expr.inferredType
+            )
+            is UnaryOperation -> UnaryOperation(
+                expr.operator,
+                substitutePlaceholdersInAST(expr.operand, replacement),
+                expr.inferredType
+            )
+            is MemberAccess -> MemberAccess(
+                substitutePlaceholdersInAST(expr.receiver, replacement),
+                expr.member,
+                expr.inferredType
+            )
+            is IfExpression -> IfExpression(
+                substitutePlaceholdersInAST(expr.condition, replacement),
+                substitutePlaceholdersInAST(expr.thenBranch, replacement),
+                substitutePlaceholdersInAST(expr.elseBranch, replacement),
+                expr.inferredType
+            )
+            // For all other expressions (literals, identifiers, etc.), return as-is
             else -> expr
         }
     }

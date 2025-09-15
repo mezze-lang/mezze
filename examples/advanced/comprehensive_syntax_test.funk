@@ -30,7 +30,7 @@ let personName = person.name
 let olderPerson = {person | age = 31}
 
 # 6. Open Records (NEW!) - not yet implemented
-# let config = { retries = 3, timeout = 30, ...rest }
+# let config = { retries = 3, timeout = 30, ... }
 
 # 7. Variants
 type Result = | Ok { value: Int }, Error { message: String } |

@@ -352,7 +352,8 @@ data class VariantConstructorDef(
 data class EffectOperation(
     val name: String,
     val paramType: TypeAnnotation,
-    val returnType: TypeAnnotation
+    val returnType: TypeAnnotation,
+    val effects: List<String> = emptyList()
 )
 
 @Serializable
@@ -438,10 +439,12 @@ data class Identifier(
     override val inferredType: FunkType? = null
 ) : Expression
 
+// Temporary placeholder for pipe operator desugaring - should never appear in final AST
 @Serializable
 data class PlaceholderExpression(
     override val inferredType: FunkType? = null
 ) : Expression
+
 
 // Operations
 @Serializable
@@ -718,4 +721,5 @@ data class SourceLocation(
     val column: Int,
     val file: String? = null
 )
+
 

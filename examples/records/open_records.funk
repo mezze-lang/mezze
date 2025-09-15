@@ -17,8 +17,8 @@ let person = { name = "Alice", age = 30 }
 let employee = { name = "Bob", age = 25, department = "Engineering" }
 
 # Row polymorphism in function signatures
-let getName = { name: String, ...rest } -> name
-let getAge = { age: Int, ...rest } -> age
+let getName = { name: String, ... } -> name
+let getAge = { age: Int, ... } -> age
 
 # Using with different record types
 let personName = getName { name = "Alice", age = 30 }

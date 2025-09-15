@@ -5,6 +5,7 @@ import com.oracle.truffle.api.interop.InteropLibrary
 import com.oracle.truffle.api.interop.TruffleObject
 import com.oracle.truffle.api.library.ExportLibrary
 import com.oracle.truffle.api.library.ExportMessage
+import com.funk.language.ast.Expression
 
 /**
  * Base class for all runtime values in the Funk language.
@@ -586,3 +587,5 @@ data class NativeFunkFunction(
         return implementation(arguments)
     }
 }
+
+

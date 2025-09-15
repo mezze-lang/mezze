@@ -40,6 +40,10 @@ class TypeChecker {
     
     // Current program being type checked (for looking up ImplDeclarations)
     private var currentProgram: Program? = null
+    
+    // Ability constraint tracking
+    private val abilityConstraints = mutableListOf<FunkType.FunctionAbilityConstraint>()
+    private val abilityDependencies = mutableMapOf<String, List<AbilityDependency>>()
 
     /**
      * Get the current type aliases registry (for enhanced printing)
@@ -88,8 +92,15 @@ class TypeChecker {
                         val actualType = inferTypeWithUnification(item.expression, declaredType)
                         
                         if (unifyTypes(actualType, declaredType)) {
-                            // Unification successful - use the declared type
+                            // Use the actual inferred type if it has more information (like effects)
+                            // than the declared type
+                            if (actualType is com.funk.language.ast.FunkType.FunctionType && 
+                                declaredType is com.funk.language.ast.FunkType.FunctionType &&
+                                actualType.effects != null && declaredType.effects == null) {
+                                actualType
+                            } else {
                             declaredType
+                            }
                         } else {
                             throw RuntimeException("Type error: Declared type ${prettyPrintType(declaredType)} does not match inferred type ${prettyPrintType(actualType)}")
                         }
@@ -103,7 +114,7 @@ class TypeChecker {
                         polymorphicContext[item.variableName] = scheme
                     } else {
                         // Monomorphic type or explicit annotation - store in regular context
-                        context[item.variableName] = finalType
+                    context[item.variableName] = finalType
                     }
                     
                     // Set inferred types on the expression
@@ -128,10 +139,20 @@ class TypeChecker {
                     // Register effect in context
                     // Effects are represented as a record of operation signatures
                     val operationTypes = item.operations.associate { op ->
-                        op.name to com.funk.language.ast.FunkType.FunctionType(
-                            convertTypeAnnotation(op.paramType),
-                            convertTypeAnnotation(op.returnType)
-                        )
+                        // Create function type with effect row if effects are present
+                        val functionType = if (op.effects.isNotEmpty()) {
+                            com.funk.language.ast.FunkType.FunctionType(
+                                convertTypeAnnotation(op.paramType),
+                                convertTypeAnnotation(op.returnType),
+                                com.funk.language.ast.FunkType.EffectRow(op.effects.toSet()) // Wrap effects in EffectRow
+                            )
+                        } else {
+                            com.funk.language.ast.FunkType.FunctionType(
+                                convertTypeAnnotation(op.paramType),
+                                convertTypeAnnotation(op.returnType)
+                            )
+                        }
+                        op.name to functionType
                     }
                     val effectType = com.funk.language.ast.FunkType.RecordType(operationTypes)
                     context[item.name] = effectType
@@ -152,6 +173,12 @@ class TypeChecker {
                     item.copy(inferredType = implType)
                 }
                 is AbilityDeclaration -> {
+                    // Validate ability dependencies
+                    validateAbilityDependencies(item.name, item.dependencies)
+                    
+                    // Store ability dependencies for later constraint solving
+                    abilityDependencies[item.name] = item.dependencies
+                    
                     // Register ability in context as a type class
                     // Abilities are represented as a record of operation signatures with type parameters
                     val operationTypes = item.operations.associate { op ->
@@ -213,7 +240,12 @@ class TypeChecker {
         return when (expr) {
             is LambdaExpression -> {
                 val updatedBody = setInferredTypes(expr.body)
-                expr.copy(body = updatedBody, inferredType = inferredType)
+                
+                expr.copy(
+                    body = updatedBody, 
+                    inferredType = inferredType,
+                    abilityConstraints = expr.abilityConstraints  // Preserve ability constraints
+                )
             }
             is DoExpression -> {
                 val updatedStatements = expr.statements.map { statement ->
@@ -697,6 +729,13 @@ class TypeChecker {
                                 }
                             }
                         }
+                        
+                        // Check if this is an ability call (e.g., Show.show, Eq.equals)
+                        val abilityType = context["${effectName}_ability"]
+                        if (abilityType is com.funk.language.ast.FunkType.RecordType) {
+                            val argType = inferBasicType(expr.arguments)
+                            return resolveAbilityOperationCall(effectName, operationName, argType)
+                        }
                     }
                 }
                 
@@ -744,11 +783,17 @@ class TypeChecker {
                                             // Use bidirectional inference with expected type
                                             val providedType = inferBasicTypeWithExpected(entryValue, expectedType)
                                             if (!isTypeCompatible(providedType, expectedType)) {
-                                                throw RuntimeException("Type error: Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(providedType)}")
-                                            }
-                                        }
+                                        throw RuntimeException("Type error: Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(providedType)}")
                                     }
                                 }
+                                    }
+                                }
+                                
+                                // Validate ability constraints if the function has them
+                                if (functionType.abilityConstraints.isNotEmpty()) {
+                                    validateAbilityConstraintsAtCallSite(functionType.abilityConstraints, argumentType)
+                                }
+                                
                                 functionType.returnType
                             }
                         } else {
@@ -916,8 +961,8 @@ class TypeChecker {
                             finalLeftType == finalRightType && isNumericType(finalLeftType) -> {
                                 // Special case: Nat - Nat = Int (can be negative)
                                 if (expr.operator == "-" && finalLeftType == com.funk.language.ast.FunkType.NatType) {
-                                    com.funk.language.ast.FunkType.IntType
-                                } else {
+                            com.funk.language.ast.FunkType.IntType
+                        } else {
                                     finalLeftType
                                 }
                             }
@@ -992,12 +1037,12 @@ class TypeChecker {
                         when {
                             // Both are the same concrete numeric type
                             finalLeftType == finalRightType && isNumericType(finalLeftType) -> {
-                                com.funk.language.ast.FunkType.BooleanType
+                            com.funk.language.ast.FunkType.BooleanType
                             }
                             // Mixed Int/Float -> allow comparison
                             (finalLeftType == com.funk.language.ast.FunkType.FloatType || finalLeftType == com.funk.language.ast.FunkType.IntType) &&
                             (finalRightType == com.funk.language.ast.FunkType.FloatType || finalRightType == com.funk.language.ast.FunkType.IntType) -> {
-                                com.funk.language.ast.FunkType.BooleanType
+                            com.funk.language.ast.FunkType.BooleanType
                             }
                             // One or both are type variables - create generic numeric constraint
                             finalLeftType is com.funk.language.ast.FunkType.VarType || finalRightType is com.funk.language.ast.FunkType.VarType -> {
@@ -1047,6 +1092,7 @@ class TypeChecker {
                 com.funk.language.ast.FunkType.VariantType(constructors, null)
             }
             is LambdaExpression -> {
+                
                 // Enter new scope for lambda parameters
                 val originalContext = context.toMap()
                 val scopeLevel = com.funk.language.ast.TypeVar.enterScope()
@@ -1112,8 +1158,8 @@ class TypeChecker {
                     // Update paramType with refined types
                     val refinedParamType = com.funk.language.ast.FunkType.RecordType(paramTypes)
                     
-                    // Infer the return type from the body (this will add constraints)
-                    val returnType = inferBasicType(expr.body)
+                    // Infer the return type from the body or use explicit annotation (this will add constraints)
+                    val returnType = expr.returnType?.let { convertTypeAnnotation(it) } ?: inferBasicType(expr.body)
                     
                     // Collect effects from the lambda body
                     val usedEffects = mutableSetOf<String>()
@@ -1128,12 +1174,20 @@ class TypeChecker {
                     
                     // For simple cases, return the heuristic result if it has concrete types
                     if (hasConcreteTypes(refinedParamType)) {
-                        // Exit scope and restore original context
-                        com.funk.language.ast.TypeVar.exitScope()
-                        context.clear()
-                        context.putAll(originalContext)
-                        
-                        return com.funk.language.ast.FunkType.FunctionType(refinedParamType, returnType, effectRow)
+                        // Handle ability constraints from lambda expression
+                        val abilityConstraints = expr.abilityConstraints?.map { constraint ->
+                            com.funk.language.ast.FunkType.FunctionAbilityConstraint(
+                                constraint.abilityName,
+                                constraint.typeArgs.map { convertTypeAnnotation(it) }
+                            )
+                        } ?: emptyList()
+                    
+                    // Exit scope and restore original context
+                    com.funk.language.ast.TypeVar.exitScope()
+                    context.clear()
+                    context.putAll(originalContext)
+                    
+                        return com.funk.language.ast.FunkType.FunctionType(refinedParamType, returnType, effectRow, abilityConstraints)
                     }
                     
                     // Store the heuristic result for comparison with constraint solver
@@ -1207,29 +1261,52 @@ class TypeChecker {
                     null
                 }
                 
+                // Handle ability constraints from lambda expression
+                val abilityConstraints = expr.abilityConstraints?.map { constraint ->
+                    com.funk.language.ast.FunkType.FunctionAbilityConstraint(
+                        constraint.abilityName,
+                        constraint.typeArgs.map { convertTypeAnnotation(it) }
+                    )
+                } ?: emptyList()
+                
+                
+                // Validate ability constraints if present
+                if (abilityConstraints.isNotEmpty()) {
+                    val argumentTypes = if (finalParamType is com.funk.language.ast.FunkType.RecordType) {
+                        finalParamType.fields.values.toList()
+                    } else {
+                        listOf(finalParamType)
+                    }
+                    
+                    if (!validateAbilityConstraintsForLambda(abilityConstraints)) {
+                        throw TypeCheckError("Ability constraints not satisfied in lambda expression")
+                    }
+                }
+                
                 // Exit scope and restore original context
                 com.funk.language.ast.TypeVar.exitScope()
                 context.clear()
                 context.putAll(originalContext)
                 
-                com.funk.language.ast.FunkType.FunctionType(finalParamType, finalReturnType, effectRow)
+                
+                com.funk.language.ast.FunkType.FunctionType(finalParamType, finalReturnType, effectRow, abilityConstraints)
             }
             is DoExpression -> {
                 // Process statements to add variables to context, but don't create new scopes
-                for (statement in expr.statements) {
-                    when (statement) {
-                        is LetStatement -> {
-                            val actualType = inferBasicType(statement.expression)
+                    for (statement in expr.statements) {
+                        when (statement) {
+                            is LetStatement -> {
+                                val actualType = inferBasicType(statement.expression)
                             context[statement.variableName] = actualType
-                        }
-                        is ExpressionStatement -> {
-                            inferBasicType(statement.expression)
+                            }
+                            is ExpressionStatement -> {
+                                inferBasicType(statement.expression)
+                            }
                         }
                     }
-                }
-                
-                // Return type of the final expression
-                inferBasicType(expr.result)
+                    
+                    // Return type of the final expression
+                    inferBasicType(expr.result)
             }
             is PerformExpression -> {
                 // Perform expressions execute effectful code with specific handlers
@@ -1539,7 +1616,7 @@ class TypeChecker {
                     // For arithmetic operations, check if this should be polymorphic
                     if (shouldBePolymorphicNumeric(expr, paramTypes.keys)) {
                         // Polymorphic function - use Num 'a for type variables
-                        if (left is Identifier && paramTypes.containsKey(left.name)) {
+                    if (left is Identifier && paramTypes.containsKey(left.name)) {
                             val currentType = paramTypes[left.name]
                             if (currentType is com.funk.language.ast.FunkType.VarType) {
                                 paramTypes[left.name] = com.funk.language.ast.FunkType.NumType(com.funk.language.ast.TypeVar.fresh())
@@ -1563,15 +1640,15 @@ class TypeChecker {
                         if (left is Identifier && paramTypes.containsKey(left.name)) {
                             val currentType = paramTypes[left.name]
                             if (currentType is com.funk.language.ast.FunkType.VarType) {
-                                paramTypes[left.name] = com.funk.language.ast.FunkType.IntType
+                        paramTypes[left.name] = com.funk.language.ast.FunkType.IntType
                             }
-                        }
-                        if (right is Identifier && paramTypes.containsKey(right.name)) {
+                    }
+                    if (right is Identifier && paramTypes.containsKey(right.name)) {
                             val currentType = paramTypes[right.name]
                             if (currentType is com.funk.language.ast.FunkType.VarType) {
-                                paramTypes[right.name] = com.funk.language.ast.FunkType.IntType
-                            }
-                        }
+                        paramTypes[right.name] = com.funk.language.ast.FunkType.IntType
+                    }
+                }
                     }
                 }
                 
@@ -1795,7 +1872,11 @@ class TypeChecker {
                 is EffectCallExpression -> {
                     traverse(e.arguments)
                 }
-                is PlaceholderExpression -> {}
+                is PlaceholderExpression -> {
+                    // Placeholders should be desugared during parsing
+                    // If we see one here, it means desugaring failed - this is an error
+                    throw RuntimeException("PlaceholderExpression found in type checking - pipe operator desugaring failed")
+                }
                 is RecordUpdateExpression -> {
                     traverse(e.baseRecord)
                     e.updates.forEach { update ->
@@ -1820,6 +1901,28 @@ class TypeChecker {
         
         fun analyzeExpression(e: Expression) {
             when (e) {
+                is UnaryOperation -> {
+                    // For unary arithmetic operations (like negation), constrain operand to numeric type
+                    if (e.operator == "-") {
+                        val operand = e.operand
+                        if (operand is Identifier && paramNames.contains(operand.name)) {
+                            if (!constraints.containsKey(operand.name)) {
+                                // Use concrete Int for unary negation (simple case)
+                                constraints[operand.name] = com.funk.language.ast.FunkType.IntType
+                            }
+                        }
+                    }
+                    // For boolean negation, constrain operand to Boolean
+                    if (e.operator == "!") {
+                        val operand = e.operand
+                        if (operand is Identifier && paramNames.contains(operand.name)) {
+                            if (!constraints.containsKey(operand.name)) {
+                                constraints[operand.name] = com.funk.language.ast.FunkType.BooleanType
+                            }
+                        }
+                    }
+                    analyzeExpression(e.operand)
+                }
                 is BinaryOperation -> {
                     // For string concatenation, constrain operands to String (specific constraint)
                     if (e.operator == "++") {
@@ -1988,7 +2091,7 @@ class TypeChecker {
         }
     }
 
-
+    
     /**
      * Infer field type from field name - simple heuristics
      */
@@ -2187,9 +2290,9 @@ class TypeChecker {
                                 expectedDataType != null && actualDataType != null -> isTypeCompatible(actualDataType, expectedDataType)
                                 else -> expectedDataType == null && actualDataType == null
                             }
+                            }
                         }
                     }
-                }
                 }
             }
             
@@ -2333,17 +2436,17 @@ class TypeChecker {
                         }
                     }
                 } else {
-                    // Handle type application like Maybe Int
-                    val alias = typeAliases[annotation.constructor]
-                        ?: throw RuntimeException("Type error: Unknown type '${annotation.constructor}'")
-                    
-                    if (alias.typeParams.size != annotation.args.size) {
-                        throw RuntimeException("Type error: Type '${annotation.constructor}' expects ${alias.typeParams.size} parameters, got ${annotation.args.size}")
-                    }
-                    
-                    // Substitute type parameters with actual arguments
-                    val argTypes = annotation.args.map { convertTypeAnnotation(it) }
-                    substituteTypeParameters(alias.definition, alias.typeParams, argTypes)
+                // Handle type application like Maybe Int
+                val alias = typeAliases[annotation.constructor]
+                    ?: throw RuntimeException("Type error: Unknown type '${annotation.constructor}'")
+                
+                if (alias.typeParams.size != annotation.args.size) {
+                    throw RuntimeException("Type error: Type '${annotation.constructor}' expects ${alias.typeParams.size} parameters, got ${annotation.args.size}")
+                }
+                
+                // Substitute type parameters with actual arguments
+                val argTypes = annotation.args.map { convertTypeAnnotation(it) }
+                substituteTypeParameters(alias.definition, alias.typeParams, argTypes)
                 }
             }
             is RecordTypeAnnotation -> {
@@ -2373,7 +2476,15 @@ class TypeChecker {
                 val effects = annotation.effects?.let { 
                     com.funk.language.ast.FunkType.EffectRow(it.effects.toSet())
                 }
-                com.funk.language.ast.FunkType.FunctionType(paramType, returnType, effects)
+                val abilityConstraints = annotation.abilityConstraints.map { constraint ->
+                    com.funk.language.ast.FunkType.FunctionAbilityConstraint(
+                        constraint.abilityName,
+                        constraint.typeArgs.map { convertTypeAnnotation(it) }
+                    )
+                }
+                
+                
+                com.funk.language.ast.FunkType.FunctionType(paramType, returnType, effects, abilityConstraints)
             }
             is EffectRowAnnotation -> {
                 com.funk.language.ast.FunkType.EffectRow(annotation.effects.toSet())
@@ -2451,8 +2562,17 @@ class TypeChecker {
                     val memberAccess = expr.function as MemberAccess
                     if (memberAccess.receiver is Identifier) {
                         val effectName = (memberAccess.receiver as Identifier).name
-                        // Add to effects if it's a known effect
-                        effects.add(effectName)
+                        val effectType = context[effectName]
+                        if (effectType is com.funk.language.ast.FunkType.RecordType) {
+                            effects.add(effectName)
+                            // CRITICAL: Also collect effects from the operation's return type!
+                            val operationType = effectType.fields[memberAccess.member]
+                            if (operationType is com.funk.language.ast.FunkType.FunctionType) {
+                                operationType.effects?.effects?.forEach { effect ->
+                                    effects.add(effect) // ← This propagates nested effects!
+                                }
+                            }
+                        }
                     }
                 }
                 collectEffectsFromExpression(expr.function, effects)
@@ -2820,6 +2940,255 @@ class TypeChecker {
     private fun registerStdLibTypes() {
         // Import StdLib and register all abilities (type signatures only)
         StdLib.registerAll(context)
+    }
+    
+    // ============================================================================
+    // ABILITY CONSTRAINT SOLVING
+    // ============================================================================
+    
+    /**
+     * Validate that ability dependencies are satisfied
+     */
+    private fun validateAbilityDependencies(abilityName: String, dependencies: List<AbilityDependency>) {
+        for (dependency in dependencies) {
+            if (!context.containsKey("${dependency.abilityName}_ability")) {
+                throw TypeCheckError("Ability $abilityName depends on ${dependency.abilityName}, but ${dependency.abilityName} is not defined")
+            }
+        }
+    }
+    
+    /**
+     * Get transitive dependencies for an ability
+     */
+    private fun getTransitiveDependencies(abilityName: String): Set<String> {
+        val visited = mutableSetOf<String>()
+        val result = mutableSetOf<String>()
+        
+        fun traverse(name: String) {
+            if (name in visited) return
+            visited.add(name)
+            
+            val dependencies = abilityDependencies[name] ?: emptyList()
+            for (dep in dependencies) {
+                result.add(dep.abilityName)
+                traverse(dep.abilityName)
+            }
+        }
+        
+        traverse(abilityName)
+        return result
+    }
+    
+    /**
+     * Validate ability constraints for lambda definitions (more lenient - only checks ability declarations exist)
+     */
+    private fun validateAbilityConstraintsForLambda(
+        constraints: List<FunkType.FunctionAbilityConstraint>
+    ): Boolean {
+        return constraints.all { constraint ->
+            // Only check that the ability declaration exists, not implementations
+            context.containsKey("${constraint.abilityName}_ability")
+        }
+    }
+    
+    /**
+     * Solve ability constraints for function calls (strict - requires implementations)
+     */
+    private fun solveAbilityConstraints(
+        constraints: List<FunkType.FunctionAbilityConstraint>,
+        argumentTypes: List<com.funk.language.ast.FunkType>
+    ): Boolean {
+        return constraints.all { constraint ->
+            checkAbilityConstraintSatisfied(constraint, argumentTypes)
+        }
+    }
+    
+    /**
+     * Check if an ability constraint is satisfied by the given argument types
+     */
+    private fun checkAbilityConstraintSatisfied(
+        constraint: FunkType.FunctionAbilityConstraint,
+        argumentTypes: List<com.funk.language.ast.FunkType>
+    ): Boolean {
+        val concreteTypes = extractConcreteTypeArguments(constraint.typeArgs, argumentTypes)
+        return checkAbilityImplementationExists(constraint.abilityName, concreteTypes)
+    }
+    
+    /**
+     * Check if ability implementation exists for given types
+     */
+    private fun checkAbilityImplementationExists(abilityName: String, types: List<com.funk.language.ast.FunkType>): Boolean {
+        val typeNames = types.map { getTypeName(it) }
+        val implKey = "${abilityName}_${typeNames.joinToString("_")}"
+        return context.containsKey(implKey)
+    }
+    
+    /**
+     * Extract concrete type arguments from function type arguments and actual argument types
+     */
+    private fun extractConcreteTypeArguments(
+        typeArgs: List<com.funk.language.ast.FunkType>,
+        argumentTypes: List<com.funk.language.ast.FunkType>
+    ): List<com.funk.language.ast.FunkType> {
+        return typeArgs.map { typeArg ->
+            when (typeArg) {
+                is com.funk.language.ast.FunkType.VarType -> {
+                    // Try to find concrete type from argument types
+                    extractConcreteTypeFromArgument(typeArg.variable, argumentTypes)
+                }
+                else -> typeArg
+            }
+        }
+    }
+    
+    /**
+     * Extract concrete type from argument types based on type variable
+     */
+    private fun extractConcreteTypeFromArgument(
+        typeVar: com.funk.language.ast.TypeVar,
+        argumentTypes: List<com.funk.language.ast.FunkType>
+    ): com.funk.language.ast.FunkType {
+        // For now, use the first concrete type we find
+        // In a real implementation, this would use unification
+        return argumentTypes.firstOrNull { type ->
+            when (type) {
+                is com.funk.language.ast.FunkType.IntType,
+                is com.funk.language.ast.FunkType.StringType,
+                is com.funk.language.ast.FunkType.BooleanType,
+                is com.funk.language.ast.FunkType.FloatType -> true
+                else -> false
+            }
+        } ?: com.funk.language.ast.FunkType.VarType(typeVar)
+    }
+    
+    /**
+     * Get type name for ability implementation lookup
+     */
+    private fun getTypeName(type: com.funk.language.ast.FunkType): String {
+        return when (type) {
+            is com.funk.language.ast.FunkType.IntType -> "Int"
+            is com.funk.language.ast.FunkType.StringType -> "String"
+            is com.funk.language.ast.FunkType.BooleanType -> "Boolean"
+            is com.funk.language.ast.FunkType.FloatType -> "Float"
+            is com.funk.language.ast.FunkType.NatType -> "Nat"
+            is com.funk.language.ast.FunkType.FracType -> "Frac"
+            is com.funk.language.ast.FunkType.VarType -> type.variable.name
+            is com.funk.language.ast.FunkType.RecordType -> {
+                // For record types like {val: Int}, extract the field types
+                type.fields.values.firstOrNull()?.let { getTypeName(it) } ?: "Record"
+            }
+            else -> "Unknown"
+        }
+    }
+    
+    /**
+     * Resolve ability operation call - find the correct implementation
+     */
+    private fun resolveAbilityOperationCall(
+        abilityName: String,
+        operationName: String,
+        argumentType: com.funk.language.ast.FunkType
+    ): com.funk.language.ast.FunkType {
+        // Extract type arguments from the argument
+        val typeArgs = extractTypeArgumentsFromArgument(argumentType)
+        
+        // Check if we have polymorphic types (type variables)
+        val hasPolymorphicTypes = typeArgs.any { it.startsWith("'") || it == "Unknown" }
+        
+        if (hasPolymorphicTypes) {
+            // For polymorphic types, use the ability declaration instead of a concrete implementation
+            val abilityDeclaration = context["${abilityName}_ability"] as? com.funk.language.ast.FunkType.RecordType
+                ?: throw TypeCheckError("Ability declaration $abilityName not found")
+            
+            val operationType = abilityDeclaration.fields[operationName] as? com.funk.language.ast.FunkType.FunctionType
+                ?: throw TypeCheckError("Operation $operationName not found in $abilityName declaration")
+            
+            return operationType.returnType
+        } else {
+            // For concrete types, find matching implementation
+            // For multi-parameter abilities, we need to try all available implementations
+            val implementation = findMatchingAbilityImplementation(abilityName, typeArgs)
+                ?: findBestMatchingMultiParameterImplementation(abilityName, typeArgs)
+                ?: throw TypeCheckError("No implementation found for ability $abilityName with types $typeArgs")
+            
+            // Get operation type from implementation
+            val operationType = implementation.fields[operationName] as? com.funk.language.ast.FunkType.FunctionType
+                ?: throw TypeCheckError("Operation $operationName not found in $abilityName implementation")
+            
+            return operationType.returnType
+        }
+    }
+    
+    /**
+     * Extract type arguments from a function argument for ability resolution
+     */
+    private fun extractTypeArgumentsFromArgument(argumentType: com.funk.language.ast.FunkType): List<String> {
+        return when (argumentType) {
+            is com.funk.language.ast.FunkType.RecordType -> {
+                argumentType.fields.values.map { getTypeName(it) }.distinct()
+            }
+            else -> listOf(getTypeName(argumentType))
+        }
+    }
+    
+    /**
+     * Find matching ability implementation for given type arguments
+     */
+    private fun findMatchingAbilityImplementation(
+        abilityName: String,
+        typeArgs: List<String>
+    ): com.funk.language.ast.FunkType.RecordType? {
+        val implKey = "${abilityName}_${typeArgs.joinToString("_")}"
+        return context[implKey] as? com.funk.language.ast.FunkType.RecordType
+    }
+    
+    /**
+     * Find best matching multi-parameter ability implementation
+     * This handles cases where we only know some of the type parameters
+     */
+    private fun findBestMatchingMultiParameterImplementation(
+        abilityName: String,
+        knownTypeArgs: List<String>
+    ): com.funk.language.ast.FunkType.RecordType? {
+        // Find all implementations for this ability
+        val abilityImpls = context.keys.filter { it.startsWith("${abilityName}_") && it != "${abilityName}_ability" }
+        
+        for (implKey in abilityImpls) {
+            val implementation = context[implKey] as? com.funk.language.ast.FunkType.RecordType ?: continue
+            
+            // Extract type args from implementation key (e.g., "Convert_Int_String" -> ["Int", "String"])
+            val implTypeArgs = implKey.substringAfter("${abilityName}_").split("_")
+            
+            // Check if the known type args match the beginning of the implementation type args
+            val matches = knownTypeArgs.zip(implTypeArgs).all { (known, impl) -> 
+                known == impl || known == "Unknown"
+            }
+            
+            if (matches && knownTypeArgs.size <= implTypeArgs.size) {
+                return implementation
+            }
+        }
+        
+        return null
+    }
+    
+    /**
+     * Validate ability constraints at function call sites
+     */
+    private fun validateAbilityConstraintsAtCallSite(
+        constraints: List<com.funk.language.ast.FunkType.FunctionAbilityConstraint>,
+        argumentType: com.funk.language.ast.FunkType
+    ) {
+        for (constraint in constraints) {
+            // Extract concrete types from arguments to substitute for type variables
+            val typeArgs = extractTypeArgumentsFromArgument(argumentType)
+            
+            // Check if implementation exists for the concrete types
+            val implementation = findMatchingAbilityImplementation(constraint.abilityName, typeArgs)
+            if (implementation == null) {
+                throw TypeCheckError("No implementation found for ability ${constraint.abilityName} with types $typeArgs")
+            }
+        }
     }
     
 }

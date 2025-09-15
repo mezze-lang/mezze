@@ -29,7 +29,7 @@ effectDeclaration:
     ;
 
 effectOperation:
-    Identifier COLON recordType ARROW typeAnnotation
+    Identifier COLON recordType ARROW typeAnnotation effectRow?
     ;
 
 implDeclaration:

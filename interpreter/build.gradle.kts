@@ -19,6 +19,7 @@ dependencies {
     implementation(project(":ast"))
     implementation(project(":parser"))
     implementation(project(":typechecker"))
+    implementation(project(":stdlib"))
     
     // Truffle API (Language, Node, etc.) - guest language API - match native-image version
     implementation("org.graalvm.truffle:truffle-api:24.2.2")

@@ -14,7 +14,7 @@ let complexResult =
     5 |> add { x = 10, y = @ } |> multiply { x = @, y = 2 }
 
 # Function that takes a record with rest fields
-let logData = { msg: String, ...rest } -> 
+let logData = { msg: String, ... } -> 
     "Message: " ++ msg
 
 let logged = logData { msg = "Hello", extra = "data", more = 42 }

@@ -6,8 +6,8 @@ let items: Nat = 0                 # expected: items : Nat
 let total: Nat = 100               # expected: total : Nat
 
 # Arithmetic operations with Nat
-let difference = total - count     # expected: difference : Int (can be negative)
-let product = count * 2            # expected: product : Nat (Nat * Int literal -> Nat)
+let difference = total - count     # expected: difference : Int
+let product = count * 2            # expected: product : Nat
 let quotient = total / 10          # expected: quotient : Nat
 
 # Comparisons return Boolean
@@ -19,7 +19,7 @@ let natFunction = { x: Nat } -> x + x          # Force x to be Nat
 let natResult = natFunction { x = 21 }         # 21 gets constrained to Nat by context
 
 # Default inference should prefer Int
-let defaultInt = 42                # expected: defaultInt : Int (default)
+let defaultInt = 42                # expected: defaultInt : Int
 let intSum = defaultInt + 10       # expected: intSum : Int
 
 # Mixed operations require explicit types
