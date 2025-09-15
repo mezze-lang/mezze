@@ -1,0 +1,11 @@
+# Mixed numeric operations should fail without explicit conversion
+let intVal = 42                    # expected: intVal : Int
+let floatVal = 3.14                # expected: floatVal : Float
+let fracVal = 1/2                  # expected: fracVal : Frac
+
+# These should fail - cannot mix different numeric types directly
+let mixedSum1 = intVal + floatVal  # Type error: cannot add Int and Float
+let mixedSum2 = floatVal + fracVal # Type error: cannot add Float and Frac
+let mixedComp = intVal < fracVal   # Type error: cannot compare Int and Frac
+
+mixedSum1

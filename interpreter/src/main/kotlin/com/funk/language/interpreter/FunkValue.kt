@@ -112,7 +112,11 @@ data class FunkInt(val value: Long) : FunkValue() {
     @ExportMessage
     fun asDouble(): Double = value.toDouble()
     
-    // BigInteger methods removed for Oracle GraalVM 17 compatibility
+    @ExportMessage
+    fun fitsInBigInteger(): Boolean = true
+    
+    @ExportMessage
+    fun asBigInteger(): java.math.BigInteger = java.math.BigInteger.valueOf(value)
 }
 
 /**
@@ -149,7 +153,14 @@ data class FunkFloat(val value: Double) : FunkValue() {
     @ExportMessage
     fun asFloat(): Float = value.toFloat()
     
-    // BigInteger methods removed for Oracle GraalVM 17 compatibility
+    @ExportMessage
+    fun fitsInBigInteger(): Boolean = false
+    
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun asBigInteger(): java.math.BigInteger {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
     
     @ExportMessage
     @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
@@ -403,4 +414,175 @@ class TailCall(
     val args: FunkValue
 ) : FunkValue() {
     override fun getDisplayString(): String = "<tail-call>"
+}
+
+/**
+ * Natural number value (non-negative integers)
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkNat(val value: Long) : FunkValue() {
+    init {
+        if (value < 0) {
+            throw IllegalArgumentException("Natural number cannot be negative: $value")
+        }
+    }
+    
+    override fun getDisplayString(): String = value.toString()
+    
+    @ExportMessage
+    fun isNumber(): Boolean = true
+    
+    @ExportMessage
+    fun fitsInLong(): Boolean = true
+    
+    @ExportMessage
+    fun asLong(): Long = value
+    
+    @ExportMessage
+    fun fitsInInt(): Boolean = value <= Int.MAX_VALUE
+    
+    @ExportMessage
+    fun asInt(): Int = value.toInt()
+    
+    @ExportMessage
+    fun fitsInByte(): Boolean = value <= Byte.MAX_VALUE
+    
+    @ExportMessage
+    fun asByte(): Byte = value.toByte()
+    
+    @ExportMessage
+    fun fitsInShort(): Boolean = value <= Short.MAX_VALUE
+    
+    @ExportMessage
+    fun asShort(): Short = value.toShort()
+    
+    @ExportMessage
+    fun fitsInFloat(): Boolean = true
+    
+    @ExportMessage
+    fun asFloat(): Float = value.toFloat()
+    
+    @ExportMessage
+    fun fitsInDouble(): Boolean = true
+    
+    @ExportMessage
+    fun asDouble(): Double = value.toDouble()
+    
+    @ExportMessage
+    fun fitsInBigInteger(): Boolean = true
+    
+    @ExportMessage
+    fun asBigInteger(): java.math.BigInteger = java.math.BigInteger.valueOf(value)
+}
+
+/**
+ * Fraction value for exact rational arithmetic
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkFrac(val numerator: Long, val denominator: Long) : FunkValue() {
+    init {
+        if (denominator == 0L) {
+            throw IllegalArgumentException("Denominator cannot be zero")
+        }
+    }
+    
+    override fun getDisplayString(): String = "$numerator/$denominator"
+    
+    @ExportMessage
+    fun isNumber(): Boolean = true
+    
+    @ExportMessage
+    fun fitsInDouble(): Boolean = true
+    
+    @ExportMessage
+    fun asDouble(): Double = numerator.toDouble() / denominator.toDouble()
+    
+    @ExportMessage
+    fun fitsInFloat(): Boolean = true
+    
+    @ExportMessage
+    fun asFloat(): Float = (numerator.toDouble() / denominator.toDouble()).toFloat()
+    
+    @ExportMessage
+    fun fitsInLong(): Boolean = denominator == 1L
+    
+    @ExportMessage
+    fun asLong(): Long = if (denominator == 1L) numerator else throw UnsupportedOperationException("Fraction cannot fit in long")
+    
+    @ExportMessage
+    fun fitsInInt(): Boolean = denominator == 1L && numerator <= Int.MAX_VALUE
+    
+    @ExportMessage
+    fun asInt(): Int = if (fitsInInt()) numerator.toInt() else throw UnsupportedOperationException("Fraction cannot fit in int")
+    
+    @ExportMessage
+    fun fitsInByte(): Boolean = denominator == 1L && numerator <= Byte.MAX_VALUE && numerator >= Byte.MIN_VALUE
+    
+    @ExportMessage
+    fun asByte(): Byte = if (fitsInByte()) numerator.toByte() else throw UnsupportedOperationException("Fraction cannot fit in byte")
+    
+    @ExportMessage
+    fun fitsInShort(): Boolean = denominator == 1L && numerator <= Short.MAX_VALUE && numerator >= Short.MIN_VALUE
+    
+    @ExportMessage
+    fun asShort(): Short = if (fitsInShort()) numerator.toShort() else throw UnsupportedOperationException("Fraction cannot fit in short")
+    
+    @ExportMessage
+    fun fitsInBigInteger(): Boolean = true
+    
+    @ExportMessage
+    fun asBigInteger(): java.math.BigInteger = java.math.BigInteger.valueOf(numerator).divide(java.math.BigInteger.valueOf(denominator))
+    
+    /**
+     * Reduce fraction to its simplest form
+     */
+    fun reduce(): FunkFrac {
+        val gcd = gcd(kotlin.math.abs(numerator), kotlin.math.abs(denominator))
+        return FunkFrac(numerator / gcd, denominator / gcd)
+    }
+    
+    /**
+     * Calculate greatest common divisor
+     */
+    private fun gcd(a: Long, b: Long): Long {
+        return if (b == 0L) a else gcd(b, a % b)
+    }
+}
+
+/**
+ * Native function implemented in Kotlin, wrapped for Truffle execution
+ */
+@ExportLibrary(InteropLibrary::class)
+data class NativeFunkFunction(
+    val name: String,
+    val implementation: (List<FunkValue>) -> FunkValue
+) : FunkValue() {
+    
+    override fun getDisplayString(): String = "<native-function:$name>"
+    
+    @ExportMessage
+    fun isExecutable(): Boolean = true
+    
+    @ExportMessage
+    fun execute(arguments: Array<Any?>): Any {
+        // Convert arguments to FunkValues and call implementation
+        val funkArgs = arguments.map { arg ->
+            when (arg) {
+                is FunkValue -> arg
+                is String -> FunkString(arg)
+                is Long -> FunkInt(arg)
+                is Double -> FunkFloat(arg)
+                is Boolean -> FunkBoolean(arg)
+                else -> throw FunkException("Unsupported argument type: ${arg?.javaClass}")
+            }
+        }
+        return implementation(funkArgs)
+    }
+    
+    /**
+     * Call function with FunkValue arguments
+     */
+    fun call(arguments: List<FunkValue>): FunkValue {
+        return implementation(arguments)
+    }
 }

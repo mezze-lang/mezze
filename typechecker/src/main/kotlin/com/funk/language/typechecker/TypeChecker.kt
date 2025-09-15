@@ -4,6 +4,7 @@ import com.funk.language.ast.*
 import com.funk.language.ast.prettyPrintType
 import com.funk.language.ast.prettyPrintTypeWithAliases
 import com.funk.language.ast.TypeAliasInfo
+import com.funk.language.stdlib.StdLib
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -24,6 +25,9 @@ class TypeChecker {
     
     // Context for tracking variable types
     private val context = mutableMapOf<String, com.funk.language.ast.FunkType>()
+    
+    // Context for polymorphic let-bound variables (let-polymorphism)
+    private val polymorphicContext = mutableMapOf<String, com.funk.language.ast.TypeScheme>()
     
     // Registry for type aliases
     private val typeAliases = mutableMapOf<String, TypeAliasInfo>()
@@ -68,8 +72,8 @@ class TypeChecker {
         constraints.clear() // Reset constraints
         currentProgram = program // Store current program for impl lookup
         
-        // Add built-in functions to the context
-        registerNativeFunctionTypes()
+        // Add built-in functions to the context from stdlib
+        registerStdLibTypes()
         
         val enhancedItems = program.items.map { item ->
             when (item) {
@@ -77,12 +81,11 @@ class TypeChecker {
                     // Reset scope counter for each top-level function to start fresh with 'a
                     com.funk.language.ast.TypeVar.resetScopeCounter(0)
                     
-                    // Enhanced type checking with unification
-                    val actualType = inferTypeWithUnification(item.expression)
-                    
+                    // Enhanced type checking with bidirectional inference
                     val finalType = item.typeAnnotation?.let { annotation ->
-                        // If there's a type annotation, try to unify with it
+                        // If there's a type annotation, use bidirectional inference
                         val declaredType = convertTypeAnnotation(annotation)
+                        val actualType = inferTypeWithUnification(item.expression, declaredType)
                         
                         if (unifyTypes(actualType, declaredType)) {
                             // Unification successful - use the declared type
@@ -90,10 +93,18 @@ class TypeChecker {
                         } else {
                             throw RuntimeException("Type error: Declared type ${prettyPrintType(declaredType)} does not match inferred type ${prettyPrintType(actualType)}")
                         }
-                    } ?: actualType
+                    } ?: inferTypeWithUnification(item.expression)
                     
-                    // Update context with this binding
-                    context[item.variableName] = finalType
+                    // Check if this should be a polymorphic binding (let-polymorphism)
+                    val freeVars = getFreeTypeVariables(finalType)
+                    if (freeVars.isNotEmpty() && item.typeAnnotation == null) {
+                        // This is a polymorphic type - generalize it
+                        val scheme = generalize(finalType)
+                        polymorphicContext[item.variableName] = scheme
+                    } else {
+                        // Monomorphic type or explicit annotation - store in regular context
+                        context[item.variableName] = finalType
+                    }
                     
                     // Set inferred types on the expression
                     val updatedExpression = setInferredTypes(item.expression)
@@ -261,11 +272,19 @@ class TypeChecker {
      * Enhanced type inference with constraint-based unification
      */
     private fun inferTypeWithUnification(expr: Expression): com.funk.language.ast.FunkType {
+        return inferTypeWithUnification(expr, null)
+    }
+    
+    private fun inferTypeWithUnification(expr: Expression, expectedType: com.funk.language.ast.FunkType?): com.funk.language.ast.FunkType {
         // Clear constraints for this inference
         constraints.clear()
         
-        // Use the existing inference but with constraint collection
-        val inferredType = inferBasicType(expr)
+        // Use bidirectional inference with expected type
+        val inferredType = if (expectedType != null) {
+            inferBasicTypeWithExpected(expr, expectedType)
+        } else {
+            inferBasicType(expr)
+        }
         
         // Solve constraints and check for conflicts
         solveConstraints()
@@ -380,11 +399,89 @@ class TypeChecker {
                 }
             }
             
+            // NumType unification - Num 'a can unify with Int, Float, Nat, Frac
+            t1 is com.funk.language.ast.FunkType.NumType && isNumericType(t2) -> {
+                // Num 'a unifies with any numeric type by constraining the type variable
+                substitutions[t1.constraint] = t2
+            }
+            
+            t2 is com.funk.language.ast.FunkType.NumType && isNumericType(t1) -> {
+                // Num 'a unifies with any numeric type by constraining the type variable
+                substitutions[t2.constraint] = t1
+            }
+            
+            t1 is com.funk.language.ast.FunkType.NumType && t2 is com.funk.language.ast.FunkType.NumType -> {
+                // Two NumTypes unify by unifying their constraints
+                unifyTypesWithSubstitution(
+                    com.funk.language.ast.FunkType.VarType(t1.constraint),
+                    com.funk.language.ast.FunkType.VarType(t2.constraint),
+                    substitutions
+                )
+            }
+            
             else -> {
                 if (!isTypeCompatible(t1, t2)) {
                     throw RuntimeException("Incompatible types")
                 }
             }
+        }
+    }
+    
+    /**
+     * Generalize a type into a type scheme by quantifying free type variables
+     */
+    private fun generalize(type: com.funk.language.ast.FunkType): com.funk.language.ast.TypeScheme {
+        val freeVars = getFreeTypeVariables(type)
+        return com.funk.language.ast.TypeScheme(freeVars, type)
+    }
+    
+    /**
+     * Get all free type variables in a type
+     */
+    private fun getFreeTypeVariables(type: com.funk.language.ast.FunkType): Set<com.funk.language.ast.TypeVar> {
+        return when (type) {
+            is com.funk.language.ast.FunkType.VarType -> setOf(type.variable)
+            is com.funk.language.ast.FunkType.NumType -> setOf(type.constraint)
+            is com.funk.language.ast.FunkType.FunctionType -> {
+                getFreeTypeVariables(type.paramType) + getFreeTypeVariables(type.returnType)
+            }
+            is com.funk.language.ast.FunkType.RecordType -> {
+                type.fields.values.flatMap { getFreeTypeVariables(it) }.toSet()
+            }
+            is com.funk.language.ast.FunkType.VariantType -> {
+                type.constructors.values.filterNotNull().flatMap { getFreeTypeVariables(it) }.toSet()
+            }
+            // Concrete types have no free variables
+            is com.funk.language.ast.FunkType.IntType, is com.funk.language.ast.FunkType.FloatType,
+            is com.funk.language.ast.FunkType.StringType, is com.funk.language.ast.FunkType.BooleanType,
+            is com.funk.language.ast.FunkType.NatType, is com.funk.language.ast.FunkType.FracType -> emptySet()
+            is com.funk.language.ast.FunkType.EffectRow -> emptySet() // Effects don't have type variables for now
+        }
+    }
+    
+    /**
+     * Check if a type is a numeric type (Int, Float, Nat, Frac)
+     */
+    private fun isNumericType(type: com.funk.language.ast.FunkType): Boolean {
+        return when (type) {
+            is com.funk.language.ast.FunkType.IntType,
+            is com.funk.language.ast.FunkType.FloatType,
+            is com.funk.language.ast.FunkType.NatType,
+            is com.funk.language.ast.FunkType.FracType -> true
+            else -> false
+        }
+    }
+    
+    /**
+     * Check if a type is a concrete numeric type (not NumType or VarType)
+     */
+    private fun isConcreteNumericType(type: com.funk.language.ast.FunkType): Boolean {
+        return when (type) {
+            is com.funk.language.ast.FunkType.IntType,
+            is com.funk.language.ast.FunkType.FloatType,
+            is com.funk.language.ast.FunkType.NatType,
+            is com.funk.language.ast.FunkType.FracType -> true
+            else -> false
         }
     }
     
@@ -411,6 +508,15 @@ class TypeChecker {
                     applySubstitution(fieldType, substitutions)
                 }
                 com.funk.language.ast.FunkType.RecordType(substitutedFields, type.rowVar)
+            }
+            is com.funk.language.ast.FunkType.NumType -> {
+                // Apply substitution to the constraint type variable
+                val substitutedConstraint = substitutions[type.constraint]
+                if (substitutedConstraint != null) {
+                    substitutedConstraint
+                } else {
+                    type
+                }
             }
             else -> type
         }
@@ -456,6 +562,93 @@ class TypeChecker {
     }
     
     /**
+     * Bidirectional type inference with expected type
+     */
+    private fun inferBasicTypeWithExpected(expr: Expression, expectedType: com.funk.language.ast.FunkType): com.funk.language.ast.FunkType {
+        return when (expr) {
+            is IntLiteral -> {
+                when (expectedType) {
+                    is com.funk.language.ast.FunkType.NatType -> {
+                        // Allow non-negative Int literals to be constrained to Nat
+                        if (expr.value >= 0) {
+                            expectedType
+                        } else {
+                            throw RuntimeException("Type error: Cannot use negative literal ${expr.value} where Nat expected")
+                        }
+                    }
+                    is com.funk.language.ast.FunkType.IntType -> expectedType
+                    is com.funk.language.ast.FunkType.NumType -> {
+                        // Num 'a can accept Int literals - constrain the type variable to Int
+                        val inferredType = com.funk.language.ast.FunkType.IntType
+                        constraints.add(inferredType to com.funk.language.ast.FunkType.VarType(expectedType.constraint))
+                        inferredType
+                    }
+                    is com.funk.language.ast.FunkType.VarType -> {
+                        // Type variable - use constraint-based inference
+                        val inferredType = com.funk.language.ast.FunkType.IntType
+                        constraints.add(inferredType to expectedType)
+                        inferredType
+                    }
+                    else -> {
+                        throw RuntimeException("Type error: Cannot use Int literal where ${prettyPrintType(expectedType)} expected")
+                    }
+                }
+            }
+            is FloatLiteral -> {
+                when (expectedType) {
+                    is com.funk.language.ast.FunkType.FloatType -> expectedType
+                    is com.funk.language.ast.FunkType.NumType -> {
+                        // Num 'a can accept Float literals - constrain the type variable to Float
+                        val inferredType = com.funk.language.ast.FunkType.FloatType
+                        constraints.add(inferredType to com.funk.language.ast.FunkType.VarType(expectedType.constraint))
+                        inferredType
+                    }
+                    is com.funk.language.ast.FunkType.VarType -> {
+                        val inferredType = com.funk.language.ast.FunkType.FloatType
+                        constraints.add(inferredType to expectedType)
+                        inferredType
+                    }
+                    else -> {
+                        throw RuntimeException("Type error: Cannot use Float literal where ${prettyPrintType(expectedType)} expected")
+                    }
+                }
+            }
+            is BinaryOperation -> {
+                when {
+                    // Special case: Int literal / Int literal with Frac expected -> treat as fraction literal
+                    expr.operator == "/" && 
+                    expr.left is IntLiteral && 
+                    expr.right is IntLiteral && 
+                    expectedType is com.funk.language.ast.FunkType.FracType -> {
+                        // Treat as fraction literal
+                        expectedType
+                    }
+                    else -> {
+                        // For other binary operations, fall back to normal inference
+                        inferBasicType(expr)
+                    }
+                }
+            }
+            is UnaryOperation -> {
+                when {
+                    expr.operator == "-" && expr.operand is IntLiteral && expectedType is com.funk.language.ast.FunkType.NatType -> {
+                        // Negative numbers cannot be Nat
+                        throw RuntimeException("Type error: Cannot use negative literal -${(expr.operand as IntLiteral).value} where Nat expected")
+                    }
+                    else -> {
+                        // For other unary operations, fall back to normal inference
+                        inferBasicType(expr)
+                    }
+                }
+            }
+            else -> {
+                // For other expressions, fall back to normal inference
+                inferBasicType(expr)
+            }
+        }
+    }
+    
+    /**
      * Basic type inference for expressions - this is a simplified stub
      */
     private fun inferBasicType(expr: Expression): com.funk.language.ast.FunkType {
@@ -466,7 +659,12 @@ class TypeChecker {
             is StringLiteral -> com.funk.language.ast.FunkType.StringType
             is BooleanLiteral -> com.funk.language.ast.FunkType.BooleanType
             is Identifier -> {
-                // Look up the identifier in the context first
+                // First check polymorphic context (let-polymorphism)
+                polymorphicContext[expr.name]?.let { scheme ->
+                    return scheme.instantiate()
+                }
+                
+                // Then look up in regular context
                 context[expr.name] ?: run {
                     // Check if it's a variant constructor (simple heuristic: starts with uppercase)
                     if (expr.name.first().isUpperCase()) {
@@ -543,7 +741,8 @@ class TypeChecker {
                                             validateVariantConstructor(entryValue, expectedType)
                                             // Don't do additional type checking - validation is sufficient
                                         } else {
-                                            val providedType = inferBasicType(entryValue)
+                                            // Use bidirectional inference with expected type
+                                            val providedType = inferBasicTypeWithExpected(entryValue, expectedType)
                                             if (!isTypeCompatible(providedType, expectedType)) {
                                                 throw RuntimeException("Type error: Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(providedType)}")
                                             }
@@ -661,24 +860,118 @@ class TypeChecker {
                 }
             }
             is BinaryOperation -> {
+                // Special case: Int literal / Int literal -> Frac (fraction literal)
+                if (expr.operator == "/" && 
+                    expr.left is IntLiteral && 
+                    expr.right is IntLiteral) {
+                    return com.funk.language.ast.FunkType.FracType
+                }
+                
+                // Use Unison-style inference for binary operations
                 val leftType = inferBasicType(expr.left)
                 val rightType = inferBasicType(expr.right)
                 
+                // Check for literal constraint opportunities
+                val (finalLeftType, finalRightType) = when {
+                    // Left is concrete numeric, right is Int literal -> try to constrain right to left's type
+                    isConcreteNumericType(leftType) && expr.right is IntLiteral && rightType == com.funk.language.ast.FunkType.IntType -> {
+                        if (leftType == com.funk.language.ast.FunkType.NatType && (expr.right as IntLiteral).value >= 0) {
+                            // Constrain Int literal to Nat
+                            Pair(leftType, com.funk.language.ast.FunkType.NatType)
+                        } else if (leftType == com.funk.language.ast.FunkType.IntType) {
+                            // Both Int
+                            Pair(leftType, rightType)
+                        } else if (leftType == com.funk.language.ast.FunkType.FracType) {
+                            // Constrain Int literal to Frac (integers can become fractions)
+                            Pair(leftType, com.funk.language.ast.FunkType.FracType)
+                        } else {
+                            // Can't constrain other types
+                            Pair(leftType, rightType)
+                        }
+                    }
+                    // Right is concrete numeric, left is Int literal -> try to constrain left to right's type
+                    isConcreteNumericType(rightType) && expr.left is IntLiteral && leftType == com.funk.language.ast.FunkType.IntType -> {
+                        if (rightType == com.funk.language.ast.FunkType.NatType && (expr.left as IntLiteral).value >= 0) {
+                            // Constrain Int literal to Nat
+                            Pair(com.funk.language.ast.FunkType.NatType, rightType)
+                        } else if (rightType == com.funk.language.ast.FunkType.IntType) {
+                            // Both Int
+                            Pair(leftType, rightType)
+                        } else if (rightType == com.funk.language.ast.FunkType.FracType) {
+                            // Constrain Int literal to Frac (integers can become fractions)
+                            Pair(com.funk.language.ast.FunkType.FracType, rightType)
+                        } else {
+                            // Can't constrain other types
+                            Pair(leftType, rightType)
+                        }
+                    }
+                    else -> Pair(leftType, rightType)
+                }
+                
                 when (expr.operator) {
                     "+", "-", "*", "/" -> {
-                        // Arithmetic operations - check that both operands are numeric
-                        if (leftType == com.funk.language.ast.FunkType.IntType && rightType == com.funk.language.ast.FunkType.IntType) {
-                            com.funk.language.ast.FunkType.IntType
-                        } else if ((leftType == com.funk.language.ast.FunkType.FloatType || leftType == com.funk.language.ast.FunkType.IntType) &&
-                                   (rightType == com.funk.language.ast.FunkType.FloatType || rightType == com.funk.language.ast.FunkType.IntType)) {
-                            com.funk.language.ast.FunkType.FloatType
-                        } else if (leftType is com.funk.language.ast.FunkType.VarType || rightType is com.funk.language.ast.FunkType.VarType) {
-                            // Try to unify with Int for type variables
-                            addConstraint(leftType, com.funk.language.ast.FunkType.IntType)
-                            addConstraint(rightType, com.funk.language.ast.FunkType.IntType)
-                            com.funk.language.ast.FunkType.IntType
-                        } else {
-                            throw RuntimeException("Type error: Cannot apply arithmetic operator '${expr.operator}' to ${prettyPrintType(leftType)} and ${prettyPrintType(rightType)}")
+                        // Arithmetic operations - support polymorphic numeric types
+                        when {
+                            // Both are the same concrete numeric type
+                            finalLeftType == finalRightType && isNumericType(finalLeftType) -> {
+                                // Special case: Nat - Nat = Int (can be negative)
+                                if (expr.operator == "-" && finalLeftType == com.funk.language.ast.FunkType.NatType) {
+                                    com.funk.language.ast.FunkType.IntType
+                                } else {
+                                    finalLeftType
+                                }
+                            }
+                            // Mixed Frac/Int -> Frac (fractions absorb integers)
+                            (finalLeftType == com.funk.language.ast.FunkType.FracType || finalLeftType == com.funk.language.ast.FunkType.IntType) &&
+                            (finalRightType == com.funk.language.ast.FunkType.FracType || finalRightType == com.funk.language.ast.FunkType.IntType) -> {
+                                com.funk.language.ast.FunkType.FracType
+                            }
+                            // Mixed Nat/Int -> Int (Nat can become Int)
+                            (finalLeftType == com.funk.language.ast.FunkType.NatType || finalLeftType == com.funk.language.ast.FunkType.IntType) &&
+                            (finalRightType == com.funk.language.ast.FunkType.NatType || finalRightType == com.funk.language.ast.FunkType.IntType) -> {
+                                com.funk.language.ast.FunkType.IntType
+                            }
+                            // Both are NumType - return NumType (polymorphic numeric operation)
+                            finalLeftType is com.funk.language.ast.FunkType.NumType && finalRightType is com.funk.language.ast.FunkType.NumType -> {
+                                // Unify the type variables and return NumType
+                                addConstraint(
+                                    com.funk.language.ast.FunkType.VarType(finalLeftType.constraint),
+                                    com.funk.language.ast.FunkType.VarType(finalRightType.constraint)
+                                )
+                                finalLeftType // Return the first NumType (they're now unified)
+                            }
+                            // One or both are type variables - create generic numeric constraint
+                            finalLeftType is com.funk.language.ast.FunkType.VarType || finalRightType is com.funk.language.ast.FunkType.VarType -> {
+                                when {
+                                    // Both are type variables - unify them and return a generic result
+                                    finalLeftType is com.funk.language.ast.FunkType.VarType && finalRightType is com.funk.language.ast.FunkType.VarType -> {
+                                        addConstraint(finalLeftType, finalRightType)
+                                        // Return the first type variable (they're now unified)
+                                        finalLeftType
+                                    }
+                                    // Left is type variable, right is concrete - constrain left to right
+                                    finalLeftType is com.funk.language.ast.FunkType.VarType -> {
+                                        addConstraint(finalLeftType, finalRightType)
+                                        finalRightType
+                                    }
+                                    // Right is type variable, left is concrete - constrain right to left
+                                    finalRightType is com.funk.language.ast.FunkType.VarType -> {
+                                        addConstraint(finalRightType, finalLeftType)
+                                        finalLeftType
+                                    }
+                                    else -> {
+                                        // Shouldn't reach here, but fallback
+                                        com.funk.language.ast.FunkType.IntType
+                                    }
+                                }
+                            }
+                            // Both are numeric but different types - need explicit conversion
+                            isNumericType(finalLeftType) && isNumericType(finalRightType) -> {
+                                throw RuntimeException("Type error: Cannot apply arithmetic operator '${expr.operator}' to ${prettyPrintType(finalLeftType)} and ${prettyPrintType(finalRightType)}. Both operands must be the same numeric type.")
+                            }
+                            else -> {
+                                throw RuntimeException("Type error: Cannot apply arithmetic operator '${expr.operator}' to ${prettyPrintType(finalLeftType)} and ${prettyPrintType(finalRightType)}")
+                            }
                         }
                     }
                     "++" -> {
@@ -695,16 +988,42 @@ class TypeChecker {
                         }
                     }
                     "==", "!=", "<", ">", "<=", ">=" -> {
-                        // Comparison operators - both operands must be Int (for now, can extend later)
-                        if (leftType == com.funk.language.ast.FunkType.IntType && rightType == com.funk.language.ast.FunkType.IntType) {
-                            com.funk.language.ast.FunkType.BooleanType
-                        } else if (leftType is com.funk.language.ast.FunkType.VarType || rightType is com.funk.language.ast.FunkType.VarType) {
-                            // Constrain both operands to be Int, just like arithmetic operators
-                            addConstraint(leftType, com.funk.language.ast.FunkType.IntType)
-                            addConstraint(rightType, com.funk.language.ast.FunkType.IntType)
-                            com.funk.language.ast.FunkType.BooleanType
-                        } else {
-                            throw RuntimeException("Type error: Cannot compare ${prettyPrintType(leftType)} and ${prettyPrintType(rightType)}")
+                        // Comparison operators - support polymorphic numeric types
+                        when {
+                            // Both are the same concrete numeric type
+                            finalLeftType == finalRightType && isNumericType(finalLeftType) -> {
+                                com.funk.language.ast.FunkType.BooleanType
+                            }
+                            // Mixed Int/Float -> allow comparison
+                            (finalLeftType == com.funk.language.ast.FunkType.FloatType || finalLeftType == com.funk.language.ast.FunkType.IntType) &&
+                            (finalRightType == com.funk.language.ast.FunkType.FloatType || finalRightType == com.funk.language.ast.FunkType.IntType) -> {
+                                com.funk.language.ast.FunkType.BooleanType
+                            }
+                            // One or both are type variables - create generic numeric constraint
+                            finalLeftType is com.funk.language.ast.FunkType.VarType || finalRightType is com.funk.language.ast.FunkType.VarType -> {
+                                when {
+                                    // Both are type variables - unify them
+                                    finalLeftType is com.funk.language.ast.FunkType.VarType && finalRightType is com.funk.language.ast.FunkType.VarType -> {
+                                        addConstraint(finalLeftType, finalRightType)
+                                    }
+                                    // Left is type variable, right is concrete - constrain left to right
+                                    finalLeftType is com.funk.language.ast.FunkType.VarType -> {
+                                        addConstraint(finalLeftType, finalRightType)
+                                    }
+                                    // Right is type variable, left is concrete - constrain right to left
+                                    finalRightType is com.funk.language.ast.FunkType.VarType -> {
+                                        addConstraint(finalRightType, finalLeftType)
+                                    }
+                                }
+                                com.funk.language.ast.FunkType.BooleanType
+                            }
+                            // Both are numeric but different types - need explicit conversion
+                            isNumericType(finalLeftType) && isNumericType(finalRightType) -> {
+                                throw RuntimeException("Type error: Cannot compare ${prettyPrintType(finalLeftType)} and ${prettyPrintType(finalRightType)}. Both operands must be the same numeric type.")
+                            }
+                            else -> {
+                                throw RuntimeException("Type error: Cannot compare ${prettyPrintType(finalLeftType)} and ${prettyPrintType(finalRightType)}")
+                            }
                         }
                     }
                     "&&", "||" -> {
@@ -770,15 +1089,19 @@ class TypeChecker {
                 // Special handling for record parameters to ensure constraint propagation works
                 if (paramType is com.funk.language.ast.FunkType.RecordType) {
                     val paramTypes = paramType.fields.toMutableMap()
+                    val originalTypes = paramType.fields.toMap() // Remember original explicit types
                     
                     // Direct constraint extraction for all expressions
                     val paramNames = paramType.fields.keys
                     val directConstraints = extractParameterConstraints(expr.body, paramNames)
                     directConstraints.forEach { (name, type) ->
-                        paramTypes[name] = type
+                        // Only apply constraint if the original type was a type variable (not explicit)
+                        if (originalTypes[name] is com.funk.language.ast.FunkType.VarType) {
+                            paramTypes[name] = type
+                        }
                     }
                     
-                    // Also run the regular heuristic analysis for all expressions
+                    // Also run the regular heuristic analysis for all expressions (but preserve explicit types)
                     analyzeExpressionForParameterTypes(expr.body, paramTypes)
                     
                     // Update context with refined parameter types
@@ -1079,6 +1402,29 @@ class TypeChecker {
                 
                 com.funk.language.ast.FunkType.RecordType(resultFields, recordType.rowVar)
             }
+            is UnaryOperation -> {
+                when (expr.operator) {
+                    "-" -> {
+                        val operandType = inferBasicType(expr.operand)
+                        when (operandType) {
+                            is com.funk.language.ast.FunkType.IntType -> com.funk.language.ast.FunkType.IntType
+                            is com.funk.language.ast.FunkType.FloatType -> com.funk.language.ast.FunkType.FloatType
+                            is com.funk.language.ast.FunkType.NatType -> com.funk.language.ast.FunkType.IntType // Nat -> Int when negated
+                            is com.funk.language.ast.FunkType.FracType -> com.funk.language.ast.FunkType.FracType
+                            else -> throw RuntimeException("Type error: Cannot negate ${prettyPrintType(operandType)}")
+                        }
+                    }
+                    "!" -> {
+                        val operandType = inferBasicType(expr.operand)
+                        if (operandType == com.funk.language.ast.FunkType.BooleanType) {
+                            com.funk.language.ast.FunkType.BooleanType
+                        } else {
+                            throw RuntimeException("Type error: Cannot apply logical negation to ${prettyPrintType(operandType)}")
+                        }
+                    }
+                    else -> throw RuntimeException("Type error: Unknown unary operator '${expr.operator}'")
+                }
+            }
             else -> com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
         }
     }
@@ -1186,17 +1532,51 @@ class TypeChecker {
                 val left = expr.left
                 val right = expr.right
                 
-                // For arithmetic operations, infer that operands should be Int
+                // For arithmetic operations, apply smart constraints
+                // If we can determine the function should be concrete, constrain to Int
+                // If it should be polymorphic, leave unconstrained
                 if (expr.operator in setOf("+", "-", "*", "/")) {
-                    if (left is Identifier && paramTypes.containsKey(left.name)) {
-                        paramTypes[left.name] = com.funk.language.ast.FunkType.IntType
-                    }
-                    if (right is Identifier && paramTypes.containsKey(right.name)) {
-                        paramTypes[right.name] = com.funk.language.ast.FunkType.IntType
+                    // For arithmetic operations, check if this should be polymorphic
+                    if (shouldBePolymorphicNumeric(expr, paramTypes.keys)) {
+                        // Polymorphic function - use Num 'a for type variables
+                        if (left is Identifier && paramTypes.containsKey(left.name)) {
+                            val currentType = paramTypes[left.name]
+                            if (currentType is com.funk.language.ast.FunkType.VarType) {
+                                paramTypes[left.name] = com.funk.language.ast.FunkType.NumType(com.funk.language.ast.TypeVar.fresh())
+                            }
+                        }
+                        if (right is Identifier && paramTypes.containsKey(right.name)) {
+                            val currentType = paramTypes[right.name]
+                            if (currentType is com.funk.language.ast.FunkType.VarType) {
+                                // If it's the same parameter (like x + x), use the same type variable
+                                val typeVar = if (left is Identifier && left.name == right.name) {
+                                    val leftType = paramTypes[left.name]
+                                    if (leftType is com.funk.language.ast.FunkType.NumType) leftType.constraint else com.funk.language.ast.TypeVar.fresh()
+                                } else {
+                                    com.funk.language.ast.TypeVar.fresh()
+                                }
+                                paramTypes[right.name] = com.funk.language.ast.FunkType.NumType(typeVar)
+                            }
+                        }
+                    } else {
+                        // Regular function - use concrete Int for type variables
+                        if (left is Identifier && paramTypes.containsKey(left.name)) {
+                            val currentType = paramTypes[left.name]
+                            if (currentType is com.funk.language.ast.FunkType.VarType) {
+                                paramTypes[left.name] = com.funk.language.ast.FunkType.IntType
+                            }
+                        }
+                        if (right is Identifier && paramTypes.containsKey(right.name)) {
+                            val currentType = paramTypes[right.name]
+                            if (currentType is com.funk.language.ast.FunkType.VarType) {
+                                paramTypes[right.name] = com.funk.language.ast.FunkType.IntType
+                            }
+                        }
                     }
                 }
+                
                 // For string concatenation, infer that operands should be String
-                else if (expr.operator == "++") {
+                if (expr.operator == "++") {
                     if (left is Identifier && paramTypes.containsKey(left.name)) {
                         paramTypes[left.name] = com.funk.language.ast.FunkType.StringType
                     }
@@ -1441,19 +1821,8 @@ class TypeChecker {
         fun analyzeExpression(e: Expression) {
             when (e) {
                 is BinaryOperation -> {
-                    // For arithmetic operations, constrain operands to Int
-                    if (e.operator in setOf("+", "-", "*", "/")) {
-                        val left = e.left
-                        val right = e.right
-                        if (left is Identifier && paramNames.contains(left.name)) {
-                            constraints[left.name] = com.funk.language.ast.FunkType.IntType
-                        }
-                        if (right is Identifier && paramNames.contains(right.name)) {
-                            constraints[right.name] = com.funk.language.ast.FunkType.IntType
-                        }
-                    }
-                    // For string concatenation, constrain operands to String
-                    else if (e.operator == "++") {
+                    // For string concatenation, constrain operands to String (specific constraint)
+                    if (e.operator == "++") {
                         val left = e.left
                         val right = e.right
                         if (left is Identifier && paramNames.contains(left.name)) {
@@ -1461,6 +1830,47 @@ class TypeChecker {
                         }
                         if (right is Identifier && paramNames.contains(right.name)) {
                             constraints[right.name] = com.funk.language.ast.FunkType.StringType
+                        }
+                    }
+                    // For arithmetic operations, apply smart constraints
+                    if (e.operator in setOf("+", "-", "*", "/")) {
+                        val left = e.left
+                        val right = e.right
+                        
+                        // For arithmetic operations, check if this should be polymorphic
+                        if (shouldBePolymorphicNumeric(e, paramNames)) {
+                            // This looks like a polymorphic function - use Num 'a
+                            // Use a shared type variable for all parameters in this operation
+                            val sharedTypeVar = com.funk.language.ast.TypeVar.fresh()
+                            
+                            if (left is Identifier && paramNames.contains(left.name)) {
+                                if (!constraints.containsKey(left.name)) {
+                                    constraints[left.name] = com.funk.language.ast.FunkType.NumType(sharedTypeVar)
+                                }
+                            }
+                            if (right is Identifier && paramNames.contains(right.name)) {
+                                if (!constraints.containsKey(right.name)) {
+                                    // If it's the same parameter as left, use the same constraint
+                                    val typeVar = if (left is Identifier && left.name == right.name) {
+                                        sharedTypeVar
+                                    } else {
+                                        sharedTypeVar // For now, use shared var for all params in same operation
+                                    }
+                                    constraints[right.name] = com.funk.language.ast.FunkType.NumType(typeVar)
+                                }
+                            }
+                        } else {
+                            // Regular function - use concrete Int
+                            if (left is Identifier && paramNames.contains(left.name)) {
+                                if (!constraints.containsKey(left.name)) {
+                                    constraints[left.name] = com.funk.language.ast.FunkType.IntType
+                                }
+                            }
+                            if (right is Identifier && paramNames.contains(right.name)) {
+                                if (!constraints.containsKey(right.name)) {
+                                    constraints[right.name] = com.funk.language.ast.FunkType.IntType
+                                }
+                            }
                         }
                     }
                     analyzeExpression(e.left)
@@ -1523,6 +1933,42 @@ class TypeChecker {
         return constraints
     }
 
+    /**
+     * Determine if we should constrain a parameter to Int based on usage context
+     */
+    private fun shouldConstrainToInt(expr: Expression, paramTypes: Map<String, com.funk.language.ast.FunkType>): Boolean {
+        return when (expr) {
+            is IntLiteral -> true  // Literal usage suggests concrete type
+            is Identifier -> {
+                // If parameter already has a concrete numeric type, keep it concrete
+                val currentType = paramTypes[expr.name]
+                currentType != null && isConcreteNumericType(currentType)
+            }
+            else -> false
+        }
+    }
+    
+    /**
+     * Determine if an arithmetic operation should be polymorphic numeric (Num 'a) vs concrete (Int)
+     */
+    private fun shouldBePolymorphicNumeric(expr: BinaryOperation, paramNames: Set<String>): Boolean {
+        // Heuristic: If both operands are parameters and no literals are involved, 
+        // this looks like a polymorphic function like { x } -> x + x
+        val left = expr.left
+        val right = expr.right
+        
+        val leftIsParam = left is Identifier && paramNames.contains(left.name)
+        val rightIsParam = right is Identifier && paramNames.contains(right.name)
+        val hasLiterals = left is IntLiteral || right is IntLiteral || 
+                         left is FloatLiteral || right is FloatLiteral
+        
+        // Only consider it polymorphic if it's the same parameter used twice (like x + x)
+        // This is more conservative and avoids making {x, y} -> x + y polymorphic
+        return leftIsParam && rightIsParam && 
+               left is Identifier && right is Identifier && 
+               left.name == right.name
+    }
+    
     /**
      * Check if a type has concrete types (no type variables)
      */
@@ -1764,6 +2210,10 @@ class TypeChecker {
                 }
             }
             
+            // NumType compatibility - Num 'a is compatible with any numeric type
+            expectedType is com.funk.language.ast.FunkType.NumType && isNumericType(actualType) -> true
+            actualType is com.funk.language.ast.FunkType.NumType && isNumericType(expectedType) -> true
+            
             // Type variables can unify with any type
             actualType is com.funk.language.ast.FunkType.VarType -> true
             expectedType is com.funk.language.ast.FunkType.VarType -> true
@@ -1844,6 +2294,12 @@ class TypeChecker {
                     annotation.name == "Float" -> com.funk.language.ast.FunkType.FloatType
                     annotation.name == "String" -> com.funk.language.ast.FunkType.StringType
                     annotation.name == "Boolean" -> com.funk.language.ast.FunkType.BooleanType
+                    annotation.name == "Nat" -> com.funk.language.ast.FunkType.NatType
+                    annotation.name == "Frac" -> com.funk.language.ast.FunkType.FracType
+                    annotation.name == "Num" -> {
+                        // Num without type parameter - create a fresh type variable constrained to numeric types
+                        com.funk.language.ast.FunkType.NumType(com.funk.language.ast.TypeVar.fresh())
+                    }
                     annotation.name.startsWith("'") -> {
                         // Explicit type variable - use the exact name provided
                         com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar(annotation.name))
@@ -1864,17 +2320,31 @@ class TypeChecker {
                 }
             }
             is TypeApplicationAnnotation -> {
-                // Handle type application like Maybe Int
-                val alias = typeAliases[annotation.constructor]
-                    ?: throw RuntimeException("Type error: Unknown type '${annotation.constructor}'")
-                
-                if (alias.typeParams.size != annotation.args.size) {
-                    throw RuntimeException("Type error: Type '${annotation.constructor}' expects ${alias.typeParams.size} parameters, got ${annotation.args.size}")
+                // Special case for Num 'a
+                if (annotation.constructor == "Num" && annotation.args.size == 1) {
+                    val constraintType = convertTypeAnnotation(annotation.args[0])
+                    when (constraintType) {
+                        is com.funk.language.ast.FunkType.VarType -> {
+                            // Num 'a - create NumType with the type variable
+                            com.funk.language.ast.FunkType.NumType(constraintType.variable)
+                        }
+                        else -> {
+                            throw RuntimeException("Type error: Num expects a type variable, got ${prettyPrintType(constraintType)}")
+                        }
+                    }
+                } else {
+                    // Handle type application like Maybe Int
+                    val alias = typeAliases[annotation.constructor]
+                        ?: throw RuntimeException("Type error: Unknown type '${annotation.constructor}'")
+                    
+                    if (alias.typeParams.size != annotation.args.size) {
+                        throw RuntimeException("Type error: Type '${annotation.constructor}' expects ${alias.typeParams.size} parameters, got ${annotation.args.size}")
+                    }
+                    
+                    // Substitute type parameters with actual arguments
+                    val argTypes = annotation.args.map { convertTypeAnnotation(it) }
+                    substituteTypeParameters(alias.definition, alias.typeParams, argTypes)
                 }
-                
-                // Substitute type parameters with actual arguments
-                val argTypes = annotation.args.map { convertTypeAnnotation(it) }
-                substituteTypeParameters(alias.definition, alias.typeParams, argTypes)
             }
             is RecordTypeAnnotation -> {
                 val fields = annotation.entries.associate { entry ->
@@ -2342,6 +2812,14 @@ class TypeChecker {
         }
         
         return bindings
+    }
+    
+    /**
+     * Register standard library types into the type checking context
+     */
+    private fun registerStdLibTypes() {
+        // Import StdLib and register all abilities (type signatures only)
+        StdLib.registerAll(context)
     }
     
 }

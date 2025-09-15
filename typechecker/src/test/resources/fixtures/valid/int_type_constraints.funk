@@ -1,0 +1,28 @@
+# Testing explicit type constraints with Int as default
+
+# Default behavior: literals are Int
+let intDefault = 42                # expected: intDefault : Int (default)
+let intZero = 0                    # expected: intZero : Int (default)
+
+# Negative literals are always Int
+let intNegative = -5               # expected: intNegative : Int
+let intNegativeZero = -0           # expected: intNegativeZero : Int
+
+# Arithmetic operations with Int
+let intSum = intDefault + intZero              # expected: intSum : Int
+let intProduct = intDefault * 2                # expected: intProduct : Int
+let intDifference = intSum - intProduct        # expected: intDifference : Int
+
+# Function parameters can constrain types
+let intFunction = { x: Int } -> x + 1          # Force x to be Int
+let natFunction = { x: Nat } -> x + 1          # Force x to be Nat
+
+# Using the functions
+let intResult = intFunction { x = 42 }         # 42 is already Int (default)
+let natResult = natFunction { x = 42 }         # 42 gets constrained to Nat by context
+
+# Explicit type annotations
+let explicitNat: Nat = 42                      # Force 42 to be Nat
+let explicitInt: Int = 42                      # 42 is already Int (default)
+
+intDefault

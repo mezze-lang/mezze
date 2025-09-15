@@ -1,0 +1,29 @@
+# Fraction arithmetic and type checking
+# Testing Frac type with exact rational arithmetic
+
+let half = 1/2                     # expected: half : Frac
+let quarter = 1/4                  # expected: quarter : Frac
+let third = 1/3                    # expected: third : Frac
+
+# Fraction arithmetic
+let sum = half + quarter           # expected: sum : Frac (3/4)
+let difference = half - quarter    # expected: difference : Frac (1/4)
+let product = half * quarter       # expected: product : Frac (1/8)
+let quotient = half / quarter      # expected: quotient : Frac (2/1)
+
+# Mixed with integers (should convert to fractions)
+let mixedSum = half + 1            # expected: mixedSum : Frac (3/2)
+let mixedProduct = third * 3       # expected: mixedProduct : Frac (1/1)
+
+# Comparisons
+let isLarger = half > quarter      # expected: isLarger : Boolean
+let isEqual = quarter == 1/4       # expected: isEqual : Boolean
+
+# Function with fraction parameter
+let doubleFrac = { f: Frac } -> f * 2    # expected: doubleFrac : { f: Frac } -> Frac
+let doubled = doubleFrac { f = third }   # expected: doubled : Frac
+
+# Explicit type annotation
+let preciseFrac: Frac = 22/7       # expected: preciseFrac : Frac (approximation of π)
+
+half

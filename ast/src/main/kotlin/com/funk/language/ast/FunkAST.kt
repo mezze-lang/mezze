@@ -34,6 +34,17 @@ sealed interface FunkType {
     @Serializable
     object BooleanType : FunkType
     
+    // Enhanced numeric types
+    @Serializable
+    object NatType : FunkType
+    
+    @Serializable
+    object FracType : FunkType
+    
+    // Generic numeric type
+    @Serializable
+    data class NumType(val constraint: TypeVar) : FunkType
+    
     // Type variables (for inference)
     @Serializable
     data class VarType(val variable: TypeVar) : FunkType
@@ -84,6 +95,69 @@ sealed interface FunkType {
         val typeArgs: List<FunkType> = emptyList()  // Type arguments for the ability
     )
     
+}
+
+/**
+ * Type schemes for let-polymorphism
+ * Represents ∀α₁,α₂,...,αₙ. τ (forall type variables, type τ)
+ */
+@Serializable
+data class TypeScheme(
+    val quantifiedVars: Set<TypeVar>,
+    val type: FunkType
+) {
+    /**
+     * Check if this type scheme is monomorphic (no quantified variables)
+     */
+    val isMonomorphic: Boolean get() = quantifiedVars.isEmpty()
+    
+    /**
+     * Instantiate this type scheme with fresh type variables
+     */
+    fun instantiate(): FunkType {
+        if (isMonomorphic) return type
+        
+        val substitution = quantifiedVars.associateWith { 
+            FunkType.VarType(TypeVar.fresh()) 
+        }
+        return applySubstitutionToType(type, substitution)
+    }
+    
+    /**
+     * Apply a substitution to a type
+     */
+    private fun applySubstitutionToType(type: FunkType, substitution: Map<TypeVar, FunkType>): FunkType {
+        return when (type) {
+            is FunkType.VarType -> substitution[type.variable] ?: type
+            is FunkType.FunctionType -> FunkType.FunctionType(
+                applySubstitutionToType(type.paramType, substitution),
+                applySubstitutionToType(type.returnType, substitution),
+                type.effects,
+                type.abilityConstraints
+            )
+            is FunkType.RecordType -> FunkType.RecordType(
+                type.fields.mapValues { (_, fieldType) -> 
+                    applySubstitutionToType(fieldType, substitution) 
+                },
+                type.rowVar
+            )
+            is FunkType.VariantType -> FunkType.VariantType(
+                type.constructors.mapValues { (_, dataType) -> 
+                    dataType?.let { applySubstitutionToType(it, substitution) }
+                },
+                type.rowVar
+            )
+            is FunkType.NumType -> FunkType.NumType(
+                substitution[type.constraint]?.let { 
+                    if (it is FunkType.VarType) it.variable else type.constraint 
+                } ?: type.constraint
+            )
+            // Concrete types remain unchanged
+            is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
+            is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType -> type
+            is FunkType.EffectRow -> type // Effects don't contain type variables for now
+        }
+    }
 }
 
 @Serializable
@@ -644,3 +718,4 @@ data class SourceLocation(
     val column: Int,
     val file: String? = null
 )
+

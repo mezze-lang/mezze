@@ -1,0 +1,23 @@
+# Polymorphic numeric functions using Num 'a
+let addTwo = { x } -> x + x        # expected: addTwo : { x: Num 'a } -> Num 'a
+let square = { x } -> x * x        # expected: square : { x: Num 'a } -> Num 'a  
+let isPositive = { x } -> x > 0    # expected: isPositive : { x: Num 'a } -> Boolean
+
+# Using with different numeric types (Int is default)
+let intResult = addTwo { x = 21 }           # expected: intResult : Int (default for literals)
+let floatResult = addTwo { x = 3.14 }       # expected: floatResult : Float
+let fracResult = addTwo { x = 1/2 }         # expected: fracResult : Frac
+
+# Using Nat requires explicit constraint
+let natFunction = { x: Nat } -> x + x       # Function that forces Nat
+let natResult = natFunction { x = 21 }      # expected: natResult : Nat (21 constrained to Nat)
+
+# Square function
+let intSquare = square { x = 7 }            # expected: intSquare : Int (default)
+let fracSquare = square { x = 3/4 }         # expected: fracSquare : Frac
+
+# Comparison function
+let intPositive = isPositive { x = 42 }     # expected: intPositive : Boolean
+let intZero = isPositive { x = 0 }          # expected: intZero : Boolean
+
+intResult

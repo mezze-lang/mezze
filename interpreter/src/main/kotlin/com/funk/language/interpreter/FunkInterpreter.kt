@@ -75,8 +75,9 @@ class FunkInterpreter {
         // Simple execution context
         val context = mutableMapOf<String, FunkValue>()
         
-        // Register built-in native functions
-        registerNativeFunctions(context)
+        // Register built-in native functions from Truffle implementations
+        // TODO: Create centralized Truffle native implementations
+        // For now, use placeholder
         
         // Execute each item in the program
         var lastResult: FunkValue = FunkNull
@@ -654,8 +655,8 @@ class FunkInterpreter {
         // println("DEBUG: callFunctionWithRecord called with function type: ${function::class.simpleName}")
         return when (function) {
             is NativeFunkFunction -> {
-                // Call native function directly
-                function.call(arguments.fields)
+                // Call native function directly - convert map to list of values
+                function.call(arguments.fields.values.toList())
             }
             is SimpleFunkFunction -> {
                 val providedParams = arguments.fields.keys
@@ -725,7 +726,7 @@ class FunkInterpreter {
                     // Convert list to record with generic names
                     FunkRecord(args.mapIndexed { index, value -> "arg$index" to value }.toMap())
                 }
-                function.call(argsRecord.fields)
+                function.call(argsRecord.fields.values.toList())
             }
             is SimpleFunkFunction -> {
                 // RUNTIME EFFECT VALIDATION: Check if function has unhandled effects
@@ -846,7 +847,7 @@ class FunkInterpreter {
                     is FunkRecord -> arguments.fields
                     else -> throw RuntimeException("Native function expects record arguments, got: ${arguments::class.simpleName}")
                 }
-                operation.call(argsMap)
+                operation.call(argsMap.values.toList())
             }
             is SimpleFunkFunction -> {
                 // Regular Funk functions use the standard call mechanism
@@ -1492,5 +1493,6 @@ data class SimpleFunkFunction(
             else -> emptySet()
         }
     }
+    
 }
 

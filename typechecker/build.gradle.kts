@@ -5,6 +5,7 @@ plugins {
 dependencies {
     implementation(project(":ast"))
     implementation(project(":parser"))
+    implementation(project(":stdlib"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
     
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.9.2")
