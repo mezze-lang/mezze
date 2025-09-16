@@ -160,17 +160,20 @@ class TypeChecker {
                     item.copy(inferredType = effectType)
                 }
                 is ImplDeclaration -> {
-                    // Register implementation in context
+                    // Validate performer implementation with new rules
+                    validatePerformerImplementation(item)
+                    
+                    // Register performer implementation in context
                     val operationTypes = item.operations.associate { op ->
                         op.name to com.funk.language.ast.FunkType.FunctionType(
                             convertTypeAnnotation(op.paramType),
                             convertTypeAnnotation(op.returnType)
                         )
                     }
-                    val implType = com.funk.language.ast.FunkType.RecordType(operationTypes)
-                    context[item.handlerName] = implType
+                    val performerType = com.funk.language.ast.FunkType.RecordType(operationTypes)
+                    context[item.performerName] = performerType
                     
-                    item.copy(inferredType = implType)
+                    item.copy(inferredType = performerType)
                 }
                 is AbilityDeclaration -> {
                     // Validate ability dependencies
@@ -486,7 +489,8 @@ class TypeChecker {
             // Concrete types have no free variables
             is com.funk.language.ast.FunkType.IntType, is com.funk.language.ast.FunkType.FloatType,
             is com.funk.language.ast.FunkType.StringType, is com.funk.language.ast.FunkType.BooleanType,
-            is com.funk.language.ast.FunkType.NatType, is com.funk.language.ast.FunkType.FracType -> emptySet()
+            is com.funk.language.ast.FunkType.UnitType, is com.funk.language.ast.FunkType.NatType, 
+            is com.funk.language.ast.FunkType.FracType -> emptySet()
             is com.funk.language.ast.FunkType.EffectRow -> emptySet() // Effects don't have type variables for now
         }
     }
@@ -1319,7 +1323,7 @@ class TypeChecker {
                 // Look for impl declarations to find which effects these handlers implement
                 for (handlerName in handlerNames) {
                     for (item in currentProgram?.items ?: emptyList()) {
-                        if (item is ImplDeclaration && item.handlerName == handlerName) {
+                        if (item is ImplDeclaration && item.performerName == handlerName) {
                             handledEffects.add(item.effectName)
                             break
                         }
@@ -2397,6 +2401,7 @@ class TypeChecker {
                     annotation.name == "Float" -> com.funk.language.ast.FunkType.FloatType
                     annotation.name == "String" -> com.funk.language.ast.FunkType.StringType
                     annotation.name == "Boolean" -> com.funk.language.ast.FunkType.BooleanType
+                    annotation.name == "Unit" -> com.funk.language.ast.FunkType.UnitType
                     annotation.name == "Nat" -> com.funk.language.ast.FunkType.NatType
                     annotation.name == "Frac" -> com.funk.language.ast.FunkType.FracType
                     annotation.name == "Num" -> {
@@ -2672,12 +2677,12 @@ class TypeChecker {
         // Basic I/O functions
         context["native_print"] = com.funk.language.ast.FunkType.FunctionType(
             com.funk.language.ast.FunkType.RecordType(mapOf("msg" to com.funk.language.ast.FunkType.StringType)),
-            com.funk.language.ast.FunkType.RecordType(emptyMap()) // Unit type
+            com.funk.language.ast.FunkType.UnitType
         )
         
         context["native_debug"] = com.funk.language.ast.FunkType.FunctionType(
             com.funk.language.ast.FunkType.RecordType(mapOf("msg" to com.funk.language.ast.FunkType.StringType)),
-            com.funk.language.ast.FunkType.RecordType(emptyMap()) // Unit type
+            com.funk.language.ast.FunkType.UnitType
         )
         
         // Random number generation
@@ -3187,6 +3192,202 @@ class TypeChecker {
             val implementation = findMatchingAbilityImplementation(constraint.abilityName, typeArgs)
             if (implementation == null) {
                 throw TypeCheckError("No implementation found for ability ${constraint.abilityName} with types $typeArgs")
+            }
+        }
+    }
+    
+    /**
+     * Validate performer implementation according to new effect system rules
+     */
+    private fun validatePerformerImplementation(impl: ImplDeclaration) {
+        // Rule 1: No 'perform' allowed inside performer implementations
+        for (operation in impl.operations) {
+            validateNoPerformInExpression(operation.implementation, "performer implementation")
+        }
+        
+        // Rule 2: Only same-effect performers can reuse other performers
+        for (operation in impl.operations) {
+            validateSameEffectPerformerReuse(operation.implementation, impl.effectName)
+        }
+        
+        // Rule 3: Effect handlers can transform effect types but must preserve return types
+        validateEffectTypeTransformation(impl)
+    }
+    
+    /**
+     * Validate that effect handlers preserve return types but can transform effect types
+     */
+    private fun validateEffectTypeTransformation(impl: ImplDeclaration) {
+        // Find the effect declaration this implementation is for
+        val effectDeclaration = currentProgram?.items?.filterIsInstance<EffectDeclaration>()
+            ?.find { it.name == impl.effectName }
+            ?: throw TypeCheckError("Effect '${impl.effectName}' not found for implementation '${impl.performerName}'")
+        
+        // Validate each operation
+        for (operation in impl.operations) {
+            val effectOperation = effectDeclaration.operations.find { it.name == operation.name }
+                ?: throw TypeCheckError("Operation '${operation.name}' not found in effect '${impl.effectName}'")
+            
+            // Check return type compatibility (must be the same)
+            val expectedReturnType = convertTypeAnnotation(effectOperation.returnType)
+            val actualReturnType = convertTypeAnnotation(operation.returnType)
+            
+            if (expectedReturnType != actualReturnType) {
+                throw TypeCheckError(
+                    "Return type mismatch in performer '${impl.performerName}' operation '${operation.name}': " +
+                    "expected ${prettyPrintType(expectedReturnType)}, got ${prettyPrintType(actualReturnType)}"
+                )
+            }
+            
+            // Effect transformations are allowed - no validation needed for effects
+            // The operation.effects field contains the effect transformations
+            
+            // Check parameter type compatibility (must be the same)
+            val expectedParamType = convertTypeAnnotation(effectOperation.paramType)
+            val actualParamType = convertTypeAnnotation(operation.paramType)
+            
+            if (expectedParamType != actualParamType) {
+                throw TypeCheckError(
+                    "Parameter type mismatch in performer '${impl.performerName}' operation '${operation.name}': " +
+                    "expected ${prettyPrintType(expectedParamType)}, got ${prettyPrintType(actualParamType)}"
+                )
+            }
+            
+            // Effect types can be different - this is the transformation capability
+            // No validation needed for effect types as they can transform
+        }
+    }
+    
+    /**
+     * Validate that no 'perform' expressions exist in the given expression
+     */
+    private fun validateNoPerformInExpression(expr: Expression, context: String) {
+        when (expr) {
+            is PerformExpression -> {
+                throw TypeCheckError("Cannot use 'perform' inside $context")
+            }
+            is DoExpression -> {
+                expr.statements.forEach { stmt ->
+                    when (stmt) {
+                        is LetStatement -> validateNoPerformInExpression(stmt.expression, context)
+                        is ExpressionStatement -> validateNoPerformInExpression(stmt.expression, context)
+                    }
+                }
+                validateNoPerformInExpression(expr.result, context)
+            }
+            is IfExpression -> {
+                validateNoPerformInExpression(expr.condition, context)
+                validateNoPerformInExpression(expr.thenBranch, context)
+                validateNoPerformInExpression(expr.elseBranch, context)
+            }
+            is BinaryOperation -> {
+                validateNoPerformInExpression(expr.left, context)
+                validateNoPerformInExpression(expr.right, context)
+            }
+            is UnaryOperation -> {
+                validateNoPerformInExpression(expr.operand, context)
+            }
+            is FunctionCall -> {
+                validateNoPerformInExpression(expr.function, context)
+                validateNoPerformInExpression(expr.arguments, context)
+            }
+            is LambdaExpression -> {
+                validateNoPerformInExpression(expr.body, context)
+            }
+            is RecordLiteral -> {
+                expr.entries.forEach { entry ->
+                    entry.value?.let { validateNoPerformInExpression(it, context) }
+                }
+            }
+            is MemberAccess -> {
+                validateNoPerformInExpression(expr.receiver, context)
+            }
+            is VariantConstruction -> {
+                expr.value?.let { validateNoPerformInExpression(it, context) }
+            }
+            // Literals and identifiers are safe
+            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral, is Identifier -> {
+                // No validation needed
+            }
+            else -> {
+                // For any other expression types, we're safe to ignore for now
+            }
+        }
+    }
+    
+    /**
+     * Validate that performer reuse only happens within the same effect type
+     */
+    private fun validateSameEffectPerformerReuse(expr: Expression, currentEffectName: String) {
+        when (expr) {
+            is FunctionCall -> {
+                // Check if this is a performer call (e.g., SomePerformer.operation)
+                if (expr.function is MemberAccess) {
+                    val memberAccess = expr.function as MemberAccess
+                    if (memberAccess.receiver is Identifier) {
+                        val performerName = (memberAccess.receiver as Identifier).name
+                        val operationName = memberAccess.member
+                        
+                        // Find the performer implementation in the current program
+                        currentProgram?.items?.filterIsInstance<ImplDeclaration>()?.forEach { impl ->
+                            if (impl.performerName == performerName) {
+                                // This is a performer call - validate it's the same effect
+                                if (impl.effectName != currentEffectName) {
+                                    throw TypeCheckError(
+                                        "Performer for effect '$currentEffectName' cannot reuse performer '$performerName' " +
+                                        "which implements effect '${impl.effectName}'. " +
+                                        "Performers can only reuse other performers of the same effect type."
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Recursively validate arguments
+                validateSameEffectPerformerReuse(expr.arguments, currentEffectName)
+            }
+            is DoExpression -> {
+                expr.statements.forEach { stmt ->
+                    when (stmt) {
+                        is LetStatement -> validateSameEffectPerformerReuse(stmt.expression, currentEffectName)
+                        is ExpressionStatement -> validateSameEffectPerformerReuse(stmt.expression, currentEffectName)
+                    }
+                }
+                validateSameEffectPerformerReuse(expr.result, currentEffectName)
+            }
+            is IfExpression -> {
+                validateSameEffectPerformerReuse(expr.condition, currentEffectName)
+                validateSameEffectPerformerReuse(expr.thenBranch, currentEffectName)
+                validateSameEffectPerformerReuse(expr.elseBranch, currentEffectName)
+            }
+            is BinaryOperation -> {
+                validateSameEffectPerformerReuse(expr.left, currentEffectName)
+                validateSameEffectPerformerReuse(expr.right, currentEffectName)
+            }
+            is UnaryOperation -> {
+                validateSameEffectPerformerReuse(expr.operand, currentEffectName)
+            }
+            is LambdaExpression -> {
+                validateSameEffectPerformerReuse(expr.body, currentEffectName)
+            }
+            is RecordLiteral -> {
+                expr.entries.forEach { entry ->
+                    entry.value?.let { validateSameEffectPerformerReuse(it, currentEffectName) }
+                }
+            }
+            is MemberAccess -> {
+                validateSameEffectPerformerReuse(expr.receiver, currentEffectName)
+            }
+            is VariantConstruction -> {
+                expr.value?.let { validateSameEffectPerformerReuse(it, currentEffectName) }
+            }
+            // Literals and identifiers are safe
+            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral, is Identifier -> {
+                // No validation needed
+            }
+            else -> {
+                // For any other expression types, we're safe to ignore for now
             }
         }
     }

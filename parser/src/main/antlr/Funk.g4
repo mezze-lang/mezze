@@ -33,15 +33,19 @@ effectOperation:
     ;
 
 implDeclaration:
-    IMPL Identifier FOR Identifier implParams? WHERE LBRACE NEWLINE? (implOperation NEWLINE?)* RBRACE NEWLINE?
+    IMPL Identifier FOR Identifier performerParams? WHERE LBRACE NEWLINE? (performerOperation | NEWLINE)* RBRACE NEWLINE?
     ;
 
-implParams:
-    LBRACE (recordTypeEntry (COMMA recordTypeEntry)*)? RBRACE
+performerParams:
+    LBRACE (performerParam (COMMA performerParam)*)? RBRACE
     ;
 
-implOperation:
-    Identifier COLON recordType ARROW typeAnnotation ASSIGN expression
+performerParam:
+    Identifier COLON typeAnnotation
+    ;
+
+performerOperation:
+    Identifier COLON recordType ARROW typeAnnotation effectRow? ASSIGN expression
     ;
 
 abilityDeclaration:

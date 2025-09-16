@@ -102,31 +102,37 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
     
     override fun visitImplDeclaration(ctx: FunkParser.ImplDeclarationContext): Any {
-        // New syntax: impl EffectName for HandlerName {params?} where {}
+        // New syntax: impl EffectName for PerformerName {params?} where {}
         val effectName = ctx.Identifier(0).text    // First identifier is effect name
-        val handlerName = ctx.Identifier(1).text   // Second identifier is handler name (after FOR)
-        val handlerParams = ctx.implParams()?.let { visit(it) as RecordTypeAnnotation }
+        val performerName = ctx.Identifier(1).text   // Second identifier is performer name (after FOR)
+        val performerParams = ctx.performerParams()?.let { 
+            ctx.performerParams()!!.performerParam().map { paramCtx ->
+                val name = paramCtx.Identifier().text
+                val type = visit(paramCtx.typeAnnotation()) as TypeAnnotation
+                PerformerParameter(name, type)
+            }
+        } ?: emptyList()
         
-        val operations = ctx.implOperation().map { visit(it) as ImplOperation }
-        return ImplDeclaration(effectName, handlerName, handlerParams, operations)
+        val operations = ctx.performerOperation().map { visit(it) as PerformerOperation }
+        return ImplDeclaration(effectName, performerName, performerParams, operations)
     }
     
-    override fun visitImplParams(ctx: FunkParser.ImplParamsContext): Any {
-        val entries = ctx.recordTypeEntry().map { entry ->
-            val name = entry.Identifier().text
-            val type = visit(entry.typeAnnotation()) as TypeAnnotation
-            RecordTypeEntry(name, type)
-        }
-        return RecordTypeAnnotation(entries, null) // No rest field for handler params
-    }
     
-    override fun visitImplOperation(ctx: FunkParser.ImplOperationContext): Any {
+    override fun visitPerformerOperation(ctx: FunkParser.PerformerOperationContext): Any {
         val name = ctx.Identifier().text
         val paramType = visit(ctx.recordType()) as TypeAnnotation
         val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
         val implementation = visit(ctx.expression()) as Expression
-        return ImplOperation(name, paramType, returnType, implementation)
+        
+        // Handle optional effect row
+        val effectAnnotation = ctx.effectRow()?.let { effectRowCtx ->
+            val effects = effectRowCtx.Identifier()?.map { it.text } ?: emptyList()
+            EffectRowAnnotation(effects)
+        }
+        
+        return PerformerOperation(name, paramType, returnType, implementation, effectAnnotation)
     }
+    
 
     override fun visitAbilityDeclaration(ctx: FunkParser.AbilityDeclarationContext): Any {
         val name = ctx.Identifier().text

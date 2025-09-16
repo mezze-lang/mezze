@@ -34,6 +34,10 @@ sealed interface FunkType {
     @Serializable
     object BooleanType : FunkType
     
+    // Unit type
+    @Serializable
+    object UnitType : FunkType
+    
     // Enhanced numeric types
     @Serializable
     object NatType : FunkType
@@ -154,7 +158,7 @@ data class TypeScheme(
             )
             // Concrete types remain unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
-            is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType -> type
+            is FunkType.BooleanType, is FunkType.UnitType, is FunkType.NatType, is FunkType.FracType -> type
             is FunkType.EffectRow -> type // Effects don't contain type variables for now
         }
     }
@@ -290,9 +294,9 @@ data class EffectDeclaration(
 @Serializable
 data class ImplDeclaration(
     val effectName: String,
-    val handlerName: String,
-    val handlerParams: RecordTypeAnnotation? = null, // For parameterized handlers like FileLogger {path: String}
-    val operations: List<ImplOperation>,
+    val performerName: String,
+    val performerParams: List<PerformerParameter> = emptyList(), // For parameterized performers like FileLogger {path: String}
+    val operations: List<PerformerOperation>,
     val inferredType: FunkType? = null           // From typechecker
 ) : ProgramItem
 
@@ -356,6 +360,22 @@ data class EffectOperation(
     val effects: List<String> = emptyList()
 )
 
+@Serializable
+data class PerformerParameter(
+    val name: String,
+    val type: TypeAnnotation
+)
+
+@Serializable
+data class PerformerOperation(
+    val name: String,
+    val paramType: TypeAnnotation,
+    val returnType: TypeAnnotation,
+    val implementation: Expression,
+    val effects: EffectRowAnnotation? = null
+)
+
+// Keep ImplOperation for backward compatibility during transition
 @Serializable
 data class ImplOperation(
     val name: String,
@@ -721,5 +741,65 @@ data class SourceLocation(
     val column: Int,
     val file: String? = null
 )
+
+/**
+ * Convert TypeAnnotation to internal FunkType representation
+ */
+fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
+    return when (annotation) {
+        is IdentifierTypeAnnotation -> {
+            when (annotation.name) {
+                "Int" -> FunkType.IntType
+                "Float" -> FunkType.FloatType
+                "String" -> FunkType.StringType
+                "Boolean" -> FunkType.BooleanType
+                else -> FunkType.VarType(TypeVar(annotation.name))
+            }
+        }
+        is FunctionTypeAnnotation -> {
+            val paramType = convertTypeAnnotation(annotation.paramType)
+            val returnType = convertTypeAnnotation(annotation.returnType)
+            
+            // Convert effect annotations
+            val effects = annotation.effects?.let { effectRow ->
+                FunkType.EffectRow(effectRow.effects.toSet())
+            }
+            
+            // Convert ability constraints  
+            val abilityConstraints = annotation.abilityConstraints.map { constraint ->
+                FunkType.FunctionAbilityConstraint(
+                    constraint.abilityName,
+                    constraint.typeArgs.map { convertTypeAnnotation(it) }
+                )
+            }
+            
+            FunkType.FunctionType(
+                paramType, 
+                returnType, 
+                effects, 
+                abilityConstraints
+            )
+        }
+        is RecordTypeAnnotation -> {
+            val fieldTypes = annotation.entries.associate { entry ->
+                entry.name to convertTypeAnnotation(entry.type)
+            }
+            FunkType.RecordType(fieldTypes)
+        }
+        is VariantTypeAnnotation -> {
+            val constructorTypes = annotation.constructors.associate { constructor ->
+                constructor.name to constructor.dataType?.let { convertTypeAnnotation(it) }
+            }
+            FunkType.VariantType(constructorTypes)
+        }
+        is TypeApplicationAnnotation -> {
+            // For now, just return a simple identifier type - proper generic support would be more complex
+            FunkType.VarType(TypeVar(annotation.constructor))
+        }
+        else -> {
+            throw RuntimeException("Unsupported type annotation: ${annotation::class.simpleName}")
+        }
+    }
+}
 
 

@@ -14,6 +14,8 @@ import java.util.concurrent.Executors
  * This provides proper Truffle execution while using the unified AST architecture
  */
 class FunkInterpreter {
+    // Centralized effect handling system
+    private val effectHandler = EffectHandler()
     
     private val parser: FunkParserImpl?
     private val typeChecker: TypeChecker?
@@ -136,15 +138,17 @@ class FunkInterpreter {
                 }
                 val effectRecord = FunkRecord(operations)
                 context[item.name] = effectRecord
+                // Register in effect handler for global access
+                effectHandler.registerEffect(item.name, effectRecord)
                 effectRecord
             }
             is ImplDeclaration -> {
-                if (item.handlerParams == null) {
-                    // Non-parameterized implementation - create handler directly
-                    createDirectHandler(item, context)
+                if (item.performerParams.isEmpty()) {
+                    // Non-parameterized performer - create performer directly
+                    createDirectPerformer(item, context)
                 } else {
-                    // Parameterized implementation - create handler factory
-                    createHandlerFactory(item, context)
+                    // Parameterized performer - create performer factory
+                    createPerformerFactory(item, context)
                 }
             }
             is AbilityDeclaration -> {
@@ -303,6 +307,22 @@ class FunkInterpreter {
                     }
                 }
                 
+                // CRITICAL: Check for effect handlers BEFORE regular member access
+                // Priority 1: Active handlers (from perform expressions)
+                if (expr.receiver is Identifier) {
+                    val effectName = (expr.receiver as Identifier).name
+                    val operationName = expr.member
+                    
+                    // Check if we have an active handler for this effect
+                    val handlersRecord = (context["__handlers"] as? FunkRecord) ?: effectHandler.getCurrentHandlers()
+                    if (handlersRecord?.fields?.containsKey(effectName) == true) {
+                        // This is an effect operation - return the handler operation
+                        val handler = handlersRecord.fields[effectName] as? FunkRecord
+                        return handler?.fields?.get(operationName) 
+                            ?: throw RuntimeException("Operation '$operationName' not found in handler for effect '$effectName'")
+                    }
+                }
+                
                 // Regular member access
                 val record = evaluateExpression(expr.receiver, context)
                 when (record) {
@@ -344,12 +364,10 @@ class FunkInterpreter {
                     if (memberAccess.receiver is Identifier) {
                         val effectName = (memberAccess.receiver as Identifier).name
                         val operationName = memberAccess.member
-                        
-                        // Check if this is a known effect
-                        if (context.containsKey(effectName) && context[effectName] is FunkRecord) {
-                            // Convert to effect call
-                            val effectCall = EffectCallExpression(effectName, operationName, expr.arguments)
-                            return executeEffectCall(effectCall, context)
+                        // CRITICAL: Always check if this is an effect call FIRST
+                        // This ensures handlers take precedence over effect declarations
+                        if (effectHandler.shouldConvertToEffectCall(effectName, context)) {
+                            return effectHandler.executeEffectCall(effectName, operationName, evaluateExpression(expr.arguments, context), context, this)
                         }
                         
                         // Check if this is an ability call (e.g., Show.show, Eq.equals)
@@ -455,7 +473,14 @@ class FunkInterpreter {
                         params.recordType.entries.map { it.name }
                     }
                 }
-                SimpleFunkFunction(parameters = paramNames, body = expr.body, closure = context.toMap(), inferredType = expr.inferredType)
+                // Don't capture effect context at creation time - get it dynamically at execution time
+                SimpleFunkFunction(
+                    parameters = paramNames, 
+                    body = expr.body, 
+                    closure = context.toMap(), 
+                    inferredType = expr.inferredType
+                    // effectContext will be populated at execution time
+                )
             }
             is DoExpression -> {
                 // Check if this do block contains effect calls - if so, lower to state machine
@@ -486,20 +511,20 @@ class FunkInterpreter {
                             // Direct handler (non-parameterized)
                             handlerOrFactory
                         }
-                        is HandlerFactory -> {
+                        is PerformerFactory -> {
                             // Parameterized handler - instantiate with provided parameters
                             val params = performHandler.parameters?.let { recordLit ->
                                 evaluateExpression(recordLit, context) as FunkRecord
                             } ?: FunkRecord(emptyMap())
-                            handlerOrFactory.createHandler(params)
+                            handlerOrFactory.createPerformer(params)
                         }
                         else -> {
                             throw RuntimeException("Invalid handler type: ${handlerOrFactory::class.simpleName}")
                         }
                     }
                     
-                    // Map handler to its effect based on impl declarations
-                    val effectName = findEffectForHandler(handlerName, context)
+                    // Map performer to its effect based on impl declarations
+                    val effectName = findEffectForPerformer(handlerName, context)
                     handlerMap[effectName] = handler
                 }
                 
@@ -508,7 +533,11 @@ class FunkInterpreter {
                 val existingHandlers = (originalHandlers as? FunkRecord)?.fields ?: emptyMap()
                 val mergedHandlers = existingHandlers.toMutableMap()
                 mergedHandlers.putAll(handlerMap)
-                context["__handlers"] = FunkRecord(mergedHandlers)
+                val handlersRecord = FunkRecord(mergedHandlers)
+                context["__handlers"] = handlersRecord
+                
+                // Push handlers onto effect handler stack
+                effectHandler.pushHandlers(handlersRecord)
                 
                 try {
                     // Evaluate the expression with handlers available
@@ -554,11 +583,14 @@ class FunkInterpreter {
                     } else {
                         context.remove("__handlers")
                     }
+                    
+                    // Pop handlers from effect handler stack
+                    effectHandler.popHandlers()
                 }
             }
             is EffectCallExpression -> {
-                // Perform effect call
-                executeEffectCall(expr, context)
+                // Perform effect call using effect handler
+                effectHandler.executeEffectCall(expr.effectName, expr.operationName, evaluateExpression(expr.arguments, context), context, this)
             }
             // PipeExpression and PlaceholderExpression removed - desugared during parsing
             is RecordUpdateExpression -> {
@@ -811,7 +843,7 @@ class FunkInterpreter {
     /**
      * Call a function with record arguments, supporting partial application
      */
-    private fun callFunctionWithRecord(function: FunkValue, arguments: FunkRecord, context: MutableMap<String, FunkValue>): FunkValue {
+    fun callFunctionWithRecord(function: FunkValue, arguments: FunkRecord, context: MutableMap<String, FunkValue>): FunkValue {
         // println("DEBUG: callFunctionWithRecord called with function type: ${function::class.simpleName}")
         return when (function) {
             is NativeFunkFunction -> {
@@ -842,8 +874,11 @@ class FunkInterpreter {
                         }
                     }
                     
-                    // Execute function
+                    // Execute function with inherited context
                     val newContext = function.closure.toMutableMap()
+                    
+                    // Setup function context with proper effect infrastructure
+                    effectHandler.setupFunctionContext(newContext, context)
                     
                     // Add recursive reference if this is a recursive function
                     function.recursiveName?.let { name ->
@@ -853,10 +888,6 @@ class FunkInterpreter {
                     // Bind all parameters
                     for (param in function.parameters) {
                         newContext[param] = arguments.fields[param] ?: FunkNull
-                    }
-                    // Propagate effect handlers from current context
-                    context["__handlers"]?.let { 
-                        newContext["__handlers"] = it 
                     }
                     
                     // Execute with tail call optimization
@@ -880,7 +911,7 @@ class FunkInterpreter {
         }
     }
 
-    private fun callFunction(function: FunkValue, args: List<FunkValue>, context: MutableMap<String, FunkValue>): FunkValue {
+    fun callFunction(function: FunkValue, args: List<FunkValue>, context: MutableMap<String, FunkValue>): FunkValue {
         return when (function) {
             is NativeFunkFunction -> {
                 // For native functions, convert args list to record if needed
@@ -981,49 +1012,6 @@ class FunkInterpreter {
     /**
      * Execute an effect call
      */
-    private fun executeEffectCall(expr: EffectCallExpression, context: MutableMap<String, FunkValue>): FunkValue {
-        // Look up handler from context
-        val handlersRecord = context["__handlers"] as? FunkRecord
-            ?: throw RuntimeException("No handlers available for effect call")
-        val handlers = handlersRecord.fields
-        
-        val handler = handlers[expr.effectName]
-            ?: throw RuntimeException("No handler found for effect: ${expr.effectName}")
-        
-        if (handler !is FunkRecord) {
-            throw RuntimeException("Handler must be a record of operations")
-        }
-        
-        val operation = handler.fields[expr.operationName]
-            ?: throw RuntimeException("Handler ${expr.effectName} has no operation ${expr.operationName}")
-        
-        if (operation !is SimpleFunkFunction && operation !is NativeFunkFunction) {
-            throw RuntimeException("Effect operation must be a function, got: ${operation::class.simpleName}")
-        }
-        
-        // Execute the handler operation
-        val arguments = evaluateExpression(expr.arguments, context)
-        
-        return when (operation) {
-            is NativeFunkFunction -> {
-                // Native functions handle their own argument processing
-                val argsMap = when (arguments) {
-                    is FunkRecord -> arguments.fields
-                    else -> throw RuntimeException("Native function expects record arguments, got: ${arguments::class.simpleName}")
-                }
-                operation.call(argsMap.values.toList())
-            }
-            is SimpleFunkFunction -> {
-                // Regular Funk functions use the standard call mechanism
-                if (arguments is FunkRecord) {
-                    callFunctionWithRecord(operation, arguments, context)
-                } else {
-                    callFunction(operation, listOf(arguments), context)
-                }
-            }
-            else -> throw RuntimeException("Unknown function type: ${operation::class.simpleName}")
-        }
-    }
     
     
     /**
@@ -1154,7 +1142,7 @@ class FunkInterpreter {
             }
         } else {
             // Fall back to synchronous execution
-            return executeEffectCall(expr, context)
+            return effectHandler.executeEffectCall(expr.effectName, expr.operationName, evaluateExpression(expr.arguments, context), context, this)
         }
     }
     
@@ -1325,18 +1313,24 @@ class FunkInterpreter {
     }
     
     /**
+     * Check if an effect is declared (globally available)
+     */
+    private fun isEffectDeclared(effectName: String): Boolean {
+        return effectHandler.isEffectDeclared(effectName)
+    }
+    
+    
+    /**
      * Find which effect a handler implements based on stored impl mappings
      */
-    private fun findEffectForHandler(handlerName: String, context: MutableMap<String, FunkValue>): String {
-        val implMappings = context["__impl_mappings"] as? FunkRecord
-        val effectNameValue = implMappings?.fields?.get(handlerName) as? FunkString
-        return effectNameValue?.value ?: handlerName // Fallback to handler name
+    private fun findEffectForPerformer(performerName: String, context: MutableMap<String, FunkValue>): String {
+        return effectHandler.findEffectForPerformer(performerName, context)
     }
     
     /**
-     * Create a direct handler for non-parameterized implementations
+     * Create a direct performer for non-parameterized implementations
      */
-    private fun createDirectHandler(item: ImplDeclaration, context: MutableMap<String, FunkValue>): FunkValue {
+    private fun createDirectPerformer(item: ImplDeclaration, context: MutableMap<String, FunkValue>): FunkValue {
         val operations = item.operations.associate { op ->
             // Extract parameter names from the record type annotation
             val paramNames = when (val paramType = op.paramType) {
@@ -1364,8 +1358,8 @@ class FunkInterpreter {
                 context.toMap()
             )
         }
-        val handler = FunkRecord(operations)
-        context[item.handlerName] = handler
+        val performer = FunkRecord(operations)
+        context[item.performerName] = performer
         
         // Store the impl mapping for later lookup
         @Suppress("UNCHECKED_CAST")
@@ -1373,44 +1367,44 @@ class FunkInterpreter {
             FunkRecord(mutableMapOf<String, FunkValue>()) 
         } as FunkRecord
         implMappings.fields as MutableMap<String, FunkValue>
-        (implMappings.fields as MutableMap)[item.handlerName] = FunkString(item.effectName)
+        (implMappings.fields as MutableMap)[item.performerName] = FunkString(item.effectName)
         
-        return handler
+        return performer
     }
     
     /**
-     * Create a handler factory for parameterized implementations
+     * Create a performer factory for parameterized implementations
      */
-    private fun createHandlerFactory(item: ImplDeclaration, context: MutableMap<String, FunkValue>): FunkValue {
-        // Extract parameter names from handler params
-        val handlerParamNames = item.handlerParams!!.entries.map { it.name }
+    private fun createPerformerFactory(item: ImplDeclaration, context: MutableMap<String, FunkValue>): FunkValue {
+        // Extract parameter names from performer params
+        val performerParamNames = item.performerParams.map { it.name }
         
-        // Create a special handler factory that can be called to create instances
-        val factory = HandlerFactory(item, context.toMap())
+        // Create a special performer factory that can be called to create instances
+        val factory = PerformerFactory(item, context.toMap())
         
-        // Store factory under handler name
-        context[item.handlerName] = factory
+        // Store factory under performer name
+        context[item.performerName] = factory
         
         // Store the impl mapping
         @Suppress("UNCHECKED_CAST")
         val implMappings = context.getOrPut("__impl_mappings") { 
             FunkRecord(mutableMapOf<String, FunkValue>()) 
         } as FunkRecord
-        (implMappings.fields as MutableMap)[item.handlerName] = FunkString(item.effectName)
+        (implMappings.fields as MutableMap)[item.performerName] = FunkString(item.effectName)
         
         return factory
     }
     
     /**
-     * Handler factory for parameterized implementations
+     * Performer factory for parameterized implementations
      */
-    class HandlerFactory(
+    class PerformerFactory(
         private val implDeclaration: ImplDeclaration,
         private val capturedContext: Map<String, FunkValue>
     ) : FunkValue() {
-        override fun getDisplayString(): String = "<factory-${implDeclaration.handlerName}>"
+        override fun getDisplayString(): String = "<factory-${implDeclaration.performerName}>"
         
-        fun createHandler(params: FunkRecord): FunkRecord {
+        fun createPerformer(params: FunkRecord): FunkRecord {
             // Create operations with access to handler parameters
             val operations = implDeclaration.operations.associate { op ->
                 // Extract parameter names from the operation type
@@ -1676,9 +1670,10 @@ data class SimpleFunkFunction(
     val body: Expression,
     val closure: Map<String, FunkValue>,
     val name: String? = null,
-    val inferredType: FunkType? = null,  // Add type information for effect validation
+    val inferredType: FunkType? = null,  // Contains effect row information
     var recursiveName: String? = null,
-    var recursiveFunction: SimpleFunkFunction? = null
+    var recursiveFunction: SimpleFunkFunction? = null,
+    val effectContext: Map<String, FunkRecord> = emptyMap()  // Carry effect declarations
 ) : FunkValue() {
     override fun getDisplayString(): String = name ?: "<function>"
     
