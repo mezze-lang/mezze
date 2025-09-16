@@ -191,7 +191,7 @@ primaryExpression:
     ;
 
 performExpression:
-    PERFORM performHandler (COMMA performHandler)* DO NEWLINE? expression
+    PERFORM performHandler (COMMA performHandler)* IN NEWLINE? expression
     ;
 
 performHandler:
@@ -289,6 +289,7 @@ WHERE: 'where';
 PERFORM: 'perform';
 ABILITY: 'ability';
 WITH: 'with';
+IN: 'in';
 
 // Operators
 PLUS: '+';

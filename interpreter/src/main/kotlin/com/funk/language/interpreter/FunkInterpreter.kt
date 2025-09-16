@@ -869,7 +869,7 @@ class FunkInterpreter {
                         if (actuallyUnhandledEffects.isNotEmpty()) {
                             throw FunkException(
                                 "Cannot execute function with unhandled effects: ${actuallyUnhandledEffects.joinToString(", ")}. " +
-                                "Use 'perform ... do' to provide handlers for these effects."
+                                "Use 'perform ... in' to provide handlers for these effects."
                             )
                         }
                     }
@@ -933,7 +933,7 @@ class FunkInterpreter {
                     if (actuallyUnhandledEffects.isNotEmpty()) {
                         throw FunkException(
                             "Cannot execute function with unhandled effects: ${actuallyUnhandledEffects.joinToString(", ")}. " +
-                            "Use 'perform ... do' to provide handlers for these effects."
+                            "Use 'perform ... in' to provide handlers for these effects."
                         )
                     }
                 }
