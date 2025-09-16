@@ -8,7 +8,6 @@ fun prettyPrintType(type: FunkType): String = when (type) {
     is FunkType.FloatType -> "Float"
     is FunkType.StringType -> "String"
     is FunkType.BooleanType -> "Boolean"
-    is FunkType.UnitType -> "Unit"
     is FunkType.NatType -> "Nat"
     is FunkType.FracType -> "Frac"
     is FunkType.NumType -> "Num ${type.constraint.name}"

@@ -489,8 +489,7 @@ class TypeChecker {
             // Concrete types have no free variables
             is com.funk.language.ast.FunkType.IntType, is com.funk.language.ast.FunkType.FloatType,
             is com.funk.language.ast.FunkType.StringType, is com.funk.language.ast.FunkType.BooleanType,
-            is com.funk.language.ast.FunkType.UnitType, is com.funk.language.ast.FunkType.NatType, 
-            is com.funk.language.ast.FunkType.FracType -> emptySet()
+            is com.funk.language.ast.FunkType.NatType, is com.funk.language.ast.FunkType.FracType -> emptySet()
             is com.funk.language.ast.FunkType.EffectRow -> emptySet() // Effects don't have type variables for now
         }
     }
@@ -2401,7 +2400,7 @@ class TypeChecker {
                     annotation.name == "Float" -> com.funk.language.ast.FunkType.FloatType
                     annotation.name == "String" -> com.funk.language.ast.FunkType.StringType
                     annotation.name == "Boolean" -> com.funk.language.ast.FunkType.BooleanType
-                    annotation.name == "Unit" -> com.funk.language.ast.FunkType.UnitType
+                    annotation.name == "Unit" -> com.funk.language.ast.FunkType.RecordType(emptyMap())
                     annotation.name == "Nat" -> com.funk.language.ast.FunkType.NatType
                     annotation.name == "Frac" -> com.funk.language.ast.FunkType.FracType
                     annotation.name == "Num" -> {
@@ -2677,12 +2676,12 @@ class TypeChecker {
         // Basic I/O functions
         context["native_print"] = com.funk.language.ast.FunkType.FunctionType(
             com.funk.language.ast.FunkType.RecordType(mapOf("msg" to com.funk.language.ast.FunkType.StringType)),
-            com.funk.language.ast.FunkType.UnitType
+            com.funk.language.ast.FunkType.RecordType(emptyMap())
         )
         
         context["native_debug"] = com.funk.language.ast.FunkType.FunctionType(
             com.funk.language.ast.FunkType.RecordType(mapOf("msg" to com.funk.language.ast.FunkType.StringType)),
-            com.funk.language.ast.FunkType.UnitType
+            com.funk.language.ast.FunkType.RecordType(emptyMap())
         )
         
         // Random number generation
