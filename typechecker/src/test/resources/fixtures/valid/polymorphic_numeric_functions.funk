@@ -1,20 +1,20 @@
 # Polymorphic numeric functions using Num 'a
-let addTwo = { x } -> x + x        # expected: addTwo : { x: Num 'b } -> Num 'b
-let square = { x } -> x * x        # expected: square : { x: Num 'b } -> Num 'b  
+let addTwo = { x } -> x + x        # expected: addTwo : { x: Num 'a } -> Num 'a
+let square = { x } -> x * x        # expected: square : { x: Num 'a } -> Num 'a  
 let isPositive = { x } -> x > 0    # expected: isPositive : { x: Int } -> Boolean
 
 # Using with different numeric types (Int is default)
-let intResult = addTwo { x = 21 }           # expected: intResult : Num 'a
-let floatResult = addTwo { x = 3.14 }       # expected: floatResult : Num 'a
-let fracResult = addTwo { x = 1/2 }         # expected: fracResult : Num 'a
+let intResult = addTwo { x = 21 }           # expected: intResult : Int
+let floatResult = addTwo { x = 3.14 }       # expected: floatResult : Float
+let fracResult = addTwo { x = 1/2 }         # expected: fracResult : Frac
 
 # Using Nat requires explicit constraint
 let natFunction = { x: Nat } -> x + x       # Function that forces Nat
 let natResult = natFunction { x = 21 }      # expected: natResult : Nat
 
 # Square function
-let intSquare = square { x = 7 }            # expected: intSquare : Num 'a
-let fracSquare = square { x = 3/4 }         # expected: fracSquare : Num 'a
+let intSquare = square { x = 7 }            # expected: intSquare : Int
+let fracSquare = square { x = 3/4 }         # expected: fracSquare : Frac
 
 # Comparison function
 let intPositive = isPositive { x = 42 }     # expected: intPositive : Boolean

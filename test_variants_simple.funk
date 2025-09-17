@@ -1,0 +1,10 @@
+let addColor = {x, y, color} -> match color {
+  Red -> x + y
+  Blue {val} -> val * 2
+  _ -> 0
+}
+
+let result1 = addColor {x = 4, y = 5, color = Red}
+let result2 = addColor {x = 4, y = 5, color = Blue {val = 10}}
+
+result1 + result2

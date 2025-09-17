@@ -99,7 +99,8 @@ class TypeCheckerComprehensiveTest {
                             assertTrue(concatBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType)
                             
                             val addType = addBinding?.inferredType as com.funk.language.ast.FunkType.FunctionType
-                            assertEquals(com.funk.language.ast.FunkType.IntType, addType.returnType)
+                            // add = {x, y} -> x + y correctly infers as concrete Int (not polymorphic due to heuristic)
+                            assertTrue(addType.returnType is com.funk.language.ast.FunkType.IntType)
                         }
                         
                         "variant_inference_from_match" -> {

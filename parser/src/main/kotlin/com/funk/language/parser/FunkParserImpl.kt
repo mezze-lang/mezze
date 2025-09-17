@@ -358,7 +358,12 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             ctx.literal() != null -> visit(ctx.literal())
             ctx.Identifier() != null -> {
                 val name = ctx.Identifier().text
-                Identifier(name)
+                // CRITICAL FIX: Convert uppercase identifiers to variant constructions
+                if (name.first().isUpperCase()) {
+                    VariantConstruction(name, null)  // Variant constructor without arguments
+                } else {
+                    Identifier(name)  // Regular identifier
+                }
             }
             ctx.PLACEHOLDER() != null -> {
                 // Create placeholder expression for pipe operator desugaring

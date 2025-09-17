@@ -168,26 +168,15 @@ data class TypeVar(val name: String, val level: Int = 0) {
         private val scopeCounters = mutableMapOf<Int, Int>()
         
         fun fresh(level: Int = currentLevel): TypeVar {
-            // For nested scopes, use a shared counter across all scopes in the same function
-            val scopeCounter = if (level == 0) {
-                // Top-level scope uses its own counter
-                scopeCounters.getOrPut(level) { 0 }
-            } else {
-                // All nested scopes share a counter that continues from where we left off
-                val sharedCounter = scopeCounters.values.maxOrNull() ?: 0
-                sharedCounter
-            }
+            // Get or initialize counter for this level, starting from 0
+            val scopeCounter = scopeCounters.getOrPut(level) { 0 }
+            
+            // Generate name: 'a', 'b', 'c', etc.
             val name = "'${('a' + scopeCounter)}"
             
-            // Update all scope counters to the next value
-            if (level == 0) {
-                scopeCounters[level] = scopeCounter + 1
-            } else {
-                // Update all nested scope counters
-                for (i in 1..currentLevel) {
-                    scopeCounters[i] = scopeCounter + 1
-                }
-            }
+            // Increment counter for this level
+            scopeCounters[level] = scopeCounter + 1
+            
             return TypeVar(name, level)
         }
         
@@ -204,23 +193,20 @@ data class TypeVar(val name: String, val level: Int = 0) {
             scopeCounters.clear()
         }
         
+        fun resetScope(level: Int = 0) {
+            // Reset counter for a specific scope level (useful for per-function reset)
+            scopeCounters[level] = 0
+        }
+        
         fun enterScope(): Int {
             currentLevel++
-            // Nested scopes inherit the parent's counter, top-level scopes start at 0
-            if (currentLevel == 1) {
-                // Top-level scope (inside a function) starts at 0
-                scopeCounters[currentLevel] = 0
-            } else {
-                // Nested scopes continue from parent's counter
-                val parentCounter = scopeCounters[currentLevel - 1] ?: 0
-                scopeCounters[currentLevel] = parentCounter
-            }
+            // Each new scope starts fresh with 'a
+            scopeCounters[currentLevel] = 0
             return currentLevel
         }
         
         fun exitScope() {
             if (currentLevel > 0) {
-                // Clean up the scope counter when exiting
                 scopeCounters.remove(currentLevel)
                 currentLevel--
             }
@@ -795,6 +781,132 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
         else -> {
             throw RuntimeException("Unsupported type annotation: ${annotation::class.simpleName}")
         }
+    }
+}
+
+/**
+ * Normalize type variables in a type to start from 'a, 'b, 'c, etc.
+ * This provides clean, readable output by renaming type variables in order of appearance.
+ */
+fun normalizeTypeVariables(type: FunkType): FunkType {
+    val typeVarsInOrder = mutableListOf<TypeVar>()
+    collectTypeVariablesInOrder(type, typeVarsInOrder)
+    
+    // Remove duplicates while preserving order
+    val uniqueVarsInOrder = typeVarsInOrder.distinctBy { it.name }
+    
+    // Create mapping from old names to new normalized names
+    val mapping = mutableMapOf<TypeVar, TypeVar>()
+    uniqueVarsInOrder.forEachIndexed { index, typeVar ->
+        val normalizedName = "'${('a' + index)}"
+        mapping[typeVar] = TypeVar(normalizedName, typeVar.level)
+    }
+    
+    return substituteTypeVariables(type, mapping)
+}
+
+/**
+ * Collect all type variables in a type in order of appearance (left-to-right, depth-first)
+ */
+private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<TypeVar>) {
+    when (type) {
+        is FunkType.VarType -> collector.add(type.variable)
+        is FunkType.NumType -> collector.add(type.constraint)
+        is FunkType.FunctionType -> {
+            // Collect parameters first (left side), then return type (right side)
+            collectTypeVariablesInOrder(type.paramType, collector)
+            collectTypeVariablesInOrder(type.returnType, collector)
+            type.effects?.let { /* Effect collection if needed */ }
+        }
+        is FunkType.RecordType -> {
+            // Collect field types in alphabetical order for consistency
+            type.fields.keys.sorted().forEach { fieldName ->
+                type.fields[fieldName]?.let { collectTypeVariablesInOrder(it, collector) }
+            }
+            type.rowVar?.let { /* RowVar collection if needed */ }
+        }
+        is FunkType.VariantType -> {
+            // Collect constructor types in alphabetical order for consistency
+            type.constructors.keys.sorted().forEach { constructorName ->
+                type.constructors[constructorName]?.let { collectTypeVariablesInOrder(it, collector) }
+            }
+        }
+        // Base types don't contain type variables
+        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType -> {
+            // No type variables to collect
+        }
+        is FunkType.EffectRow -> {
+            // Effect rows might contain type variables in the future
+        }
+    }
+}
+
+/**
+ * Collect all type variables in a type (old version for compatibility)
+ */
+private fun collectTypeVariables(type: FunkType, collector: MutableSet<TypeVar>) {
+    when (type) {
+        is FunkType.VarType -> collector.add(type.variable)
+        is FunkType.NumType -> collector.add(type.constraint)
+        is FunkType.FunctionType -> {
+            collectTypeVariables(type.paramType, collector)
+            collectTypeVariables(type.returnType, collector)
+            type.effects?.let { /* Effect collection if needed */ }
+        }
+        is FunkType.RecordType -> {
+            type.fields.values.forEach { collectTypeVariables(it, collector) }
+            type.rowVar?.let { /* RowVar collection if needed */ }
+        }
+        is FunkType.VariantType -> {
+            type.constructors.values.forEach { caseType ->
+                caseType?.let { collectTypeVariables(it, collector) }
+            }
+        }
+        // Base types don't contain type variables
+        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType -> {
+            // No type variables to collect
+        }
+        is FunkType.EffectRow -> {
+            // Effect rows might contain type variables in the future
+        }
+    }
+}
+
+/**
+ * Substitute type variables in a type according to the mapping
+ */
+private fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVar>): FunkType {
+    return when (type) {
+        is FunkType.VarType -> {
+            val newVar = mapping[type.variable] ?: type.variable
+            FunkType.VarType(newVar)
+        }
+        is FunkType.NumType -> {
+            val newConstraint = mapping[type.constraint] ?: type.constraint
+            FunkType.NumType(newConstraint)
+        }
+        is FunkType.FunctionType -> {
+            val newParamType = substituteTypeVariables(type.paramType, mapping)
+            val newReturnType = substituteTypeVariables(type.returnType, mapping)
+            FunkType.FunctionType(newParamType, newReturnType, type.effects, type.abilityConstraints)
+        }
+        is FunkType.RecordType -> {
+            val newFields = type.fields.mapValues { (_, fieldType) ->
+                substituteTypeVariables(fieldType, mapping)
+            }
+            FunkType.RecordType(newFields, type.rowVar) // RowVar substitution if needed
+        }
+        is FunkType.VariantType -> {
+            val newConstructors = type.constructors.mapValues { (_, caseType) ->
+                caseType?.let { substituteTypeVariables(it, mapping) }
+            }
+            // CRITICAL FIX: Preserve row variable during type variable normalization
+            FunkType.VariantType(newConstructors, type.rowVar)
+        }
+        // Base types and effect rows remain unchanged
+        else -> type
     }
 }
 

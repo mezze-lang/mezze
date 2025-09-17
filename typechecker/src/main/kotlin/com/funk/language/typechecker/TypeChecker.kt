@@ -106,21 +106,24 @@ class TypeChecker {
                         }
                     } ?: inferTypeWithUnification(item.expression)
                     
+                    // CRITICAL FIX: Normalize type variables for consistent naming ('a, 'b, etc.)
+                    val normalizedType = com.funk.language.ast.normalizeTypeVariables(finalType)
+                    
                     // Check if this should be a polymorphic binding (let-polymorphism)
-                    val freeVars = getFreeTypeVariables(finalType)
+                    val freeVars = getFreeTypeVariables(normalizedType)
                     if (freeVars.isNotEmpty() && item.typeAnnotation == null) {
                         // This is a polymorphic type - generalize it
-                        val scheme = generalize(finalType)
+                        val scheme = generalize(normalizedType)
                         polymorphicContext[item.variableName] = scheme
                     } else {
                         // Monomorphic type or explicit annotation - store in regular context
-                    context[item.variableName] = finalType
+                    context[item.variableName] = normalizedType
                     }
                     
                     // Set inferred types on the expression
                     val updatedExpression = setInferredTypes(item.expression)
                     
-                    item.copy(expression = updatedExpression, inferredType = finalType)
+                    item.copy(expression = updatedExpression, inferredType = normalizedType)
                 }
                 is TypeDeclaration -> {
                     // Convert the type definition to a FunkType
@@ -148,9 +151,9 @@ class TypeChecker {
                             )
                         } else {
                             com.funk.language.ast.FunkType.FunctionType(
-                                convertTypeAnnotation(op.paramType),
-                                convertTypeAnnotation(op.returnType)
-                            )
+                            convertTypeAnnotation(op.paramType),
+                            convertTypeAnnotation(op.returnType)
+                        )
                         }
                         op.name to functionType
                     }
@@ -471,6 +474,20 @@ class TypeChecker {
     }
     
     /**
+     * CRITICAL FIX: Lookup variable with let-polymorphism support
+     * Check polymorphic context first, then regular context
+     */
+    private fun lookupVariable(name: String): com.funk.language.ast.FunkType? {
+        // First check polymorphic context and instantiate if found
+        polymorphicContext[name]?.let { scheme ->
+            return scheme.instantiate()
+        }
+        
+        // Then check regular context
+        return context[name]
+    }
+    
+    /**
      * Get all free type variables in a type
      */
     private fun getFreeTypeVariables(type: com.funk.language.ast.FunkType): Set<com.funk.language.ast.TypeVar> {
@@ -743,7 +760,13 @@ class TypeChecker {
                 }
                 
                 // Try to infer return type from function type and validate arguments
-                val functionType = inferBasicType(expr.function)
+                // CRITICAL FIX: Use polymorphic lookup for identifier functions (let-polymorphism)
+                val functionType = if (expr.function is Identifier) {
+                    val identifierName = (expr.function as Identifier).name
+                    lookupVariable(identifierName) ?: throw RuntimeException("Undefined variable: $identifierName")
+                } else {
+                    inferBasicType(expr.function)
+                }
                 val argumentType = inferBasicType(expr.arguments)
                 
                 when (functionType) {
@@ -786,18 +809,24 @@ class TypeChecker {
                                             // Use bidirectional inference with expected type
                                             val providedType = inferBasicTypeWithExpected(entryValue, expectedType)
                                             if (!isTypeCompatible(providedType, expectedType)) {
-                                        throw RuntimeException("Type error: Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(providedType)}")
+                                                throw RuntimeException("Type error: Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(providedType)}")
+                                            }
+                                            // CRITICAL FIX: Add unification constraint for let-polymorphism
+                                            addConstraint(providedType, expectedType)
+                                        }
                                     }
                                 }
-                                    }
-                                }
+                                
+                                // CRITICAL FIX: Solve constraints to resolve instantiated type variables
+                                val substitutions = solveConstraintsAndGetSubstitutions()
+                                val resolvedReturnType = applySubstitution(functionType.returnType, substitutions)
                                 
                                 // Validate ability constraints if the function has them
                                 if (functionType.abilityConstraints.isNotEmpty()) {
                                     validateAbilityConstraintsAtCallSite(functionType.abilityConstraints, argumentType)
                                 }
                                 
-                                functionType.returnType
+                                resolvedReturnType
                             }
                         } else {
                             // Non-record parameters - use existing logic
@@ -1146,7 +1175,7 @@ class TypeChecker {
                     directConstraints.forEach { (name, type) ->
                         // Only apply constraint if the original type was a type variable (not explicit)
                         if (originalTypes[name] is com.funk.language.ast.FunkType.VarType) {
-                            paramTypes[name] = type
+                        paramTypes[name] = type
                         }
                     }
                     
@@ -1185,11 +1214,11 @@ class TypeChecker {
                             )
                         } ?: emptyList()
                     
-                    // Exit scope and restore original context
-                    com.funk.language.ast.TypeVar.exitScope()
-                    context.clear()
-                    context.putAll(originalContext)
-                    
+                        // Exit scope and restore original context
+                        com.funk.language.ast.TypeVar.exitScope()
+                        context.clear()
+                        context.putAll(originalContext)
+                        
                         return com.funk.language.ast.FunkType.FunctionType(refinedParamType, returnType, effectRow, abilityConstraints)
                     }
                     
@@ -1296,20 +1325,20 @@ class TypeChecker {
             }
             is DoExpression -> {
                 // Process statements to add variables to context, but don't create new scopes
-                    for (statement in expr.statements) {
-                        when (statement) {
-                            is LetStatement -> {
-                                val actualType = inferBasicType(statement.expression)
+                for (statement in expr.statements) {
+                    when (statement) {
+                        is LetStatement -> {
+                            val actualType = inferBasicType(statement.expression)
                             context[statement.variableName] = actualType
-                            }
-                            is ExpressionStatement -> {
-                                inferBasicType(statement.expression)
-                            }
+                        }
+                        is ExpressionStatement -> {
+                            inferBasicType(statement.expression)
                         }
                     }
-                    
-                    // Return type of the final expression
-                    inferBasicType(expr.result)
+                }
+                
+                // Return type of the final expression
+                inferBasicType(expr.result)
             }
             is PerformExpression -> {
                 // Perform expressions execute effectful code with specific handlers
@@ -1949,12 +1978,12 @@ class TypeChecker {
                             // Use a shared type variable for all parameters in this operation
                             val sharedTypeVar = com.funk.language.ast.TypeVar.fresh()
                             
-                            if (left is Identifier && paramNames.contains(left.name)) {
+                        if (left is Identifier && paramNames.contains(left.name)) {
                                 if (!constraints.containsKey(left.name)) {
                                     constraints[left.name] = com.funk.language.ast.FunkType.NumType(sharedTypeVar)
                                 }
-                            }
-                            if (right is Identifier && paramNames.contains(right.name)) {
+                        }
+                        if (right is Identifier && paramNames.contains(right.name)) {
                                 if (!constraints.containsKey(right.name)) {
                                     // If it's the same parameter as left, use the same constraint
                                     val typeVar = if (left is Identifier && left.name == right.name) {
@@ -2074,7 +2103,7 @@ class TypeChecker {
                left is Identifier && right is Identifier && 
                left.name == right.name
     }
-    
+
     /**
      * Check if a type has concrete types (no type variables)
      */
@@ -2094,7 +2123,7 @@ class TypeChecker {
         }
     }
 
-    
+
     /**
      * Infer field type from field name - simple heuristics
      */
@@ -2293,9 +2322,9 @@ class TypeChecker {
                                 expectedDataType != null && actualDataType != null -> isTypeCompatible(actualDataType, expectedDataType)
                                 else -> expectedDataType == null && actualDataType == null
                             }
-                            }
                         }
                     }
+                }
                 }
             }
             

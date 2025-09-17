@@ -1,0 +1,2 @@
+let variant_fn = {color} -> match color { Red -> 1; Blue {val} -> val; _ -> 0 }
+let result = variant_fn {color = Blue {val = 10}}
