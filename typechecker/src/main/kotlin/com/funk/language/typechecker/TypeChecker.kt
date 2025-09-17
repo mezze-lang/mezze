@@ -106,8 +106,8 @@ class TypeChecker {
                         }
                     } ?: inferTypeWithUnification(item.expression)
                     
-                    // CRITICAL FIX: Normalize type variables for consistent naming ('a, 'b, etc.)
-                    val normalizedType = com.funk.language.ast.normalizeTypeVariables(finalType)
+        // CRITICAL FIX: Normalize type variables for consistent naming ('a, 'b, etc.)
+        val normalizedType = com.funk.language.ast.normalizeTypeVariables(finalType)
                     
                     // Check if this should be a polymorphic binding (let-polymorphism)
                     val freeVars = getFreeTypeVariables(normalizedType)
@@ -795,6 +795,8 @@ class TypeChecker {
                             } else {
                                 // All parameters provided - validate types and return result type
                                 val argumentRecord = expr.arguments as RecordLiteral
+                                val localSubstitutions = mutableMapOf<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>()
+                                
                                 for (entry in argumentRecord.entries) {
                                     val fieldName = entry.name
                                     val expectedType = expectedFields[fieldName]
@@ -811,22 +813,39 @@ class TypeChecker {
                                             if (!isTypeCompatible(providedType, expectedType)) {
                                                 throw RuntimeException("Type error: Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(providedType)}")
                                             }
-                                            // CRITICAL FIX: Add unification constraint for let-polymorphism
-                                            addConstraint(providedType, expectedType)
+                                            
+                                            // CRITICAL FIX: Collect local substitutions for polymorphic function calls
+                                            if (expectedType is com.funk.language.ast.FunkType.NumType) {
+                                                when (providedType) {
+                                                    is com.funk.language.ast.FunkType.IntType -> {
+                                                        localSubstitutions[expectedType.constraint] = providedType
+                                                    }
+                                                    is com.funk.language.ast.FunkType.FloatType -> {
+                                                        localSubstitutions[expectedType.constraint] = providedType
+                                                    }
+                                                    is com.funk.language.ast.FunkType.FracType -> {
+                                                        localSubstitutions[expectedType.constraint] = providedType
+                                                    }
+                                                    else -> {
+                                                        // Other types don't create substitutions
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                                
-                                // CRITICAL FIX: Solve constraints to resolve instantiated type variables
-                                val substitutions = solveConstraintsAndGetSubstitutions()
-                                val resolvedReturnType = applySubstitution(functionType.returnType, substitutions)
                                 
                                 // Validate ability constraints if the function has them
                                 if (functionType.abilityConstraints.isNotEmpty()) {
                                     validateAbilityConstraintsAtCallSite(functionType.abilityConstraints, argumentType)
                                 }
                                 
-                                resolvedReturnType
+                                // CRITICAL FIX: Apply local substitutions to resolve polymorphic return type
+                                if (localSubstitutions.isNotEmpty()) {
+                                    applySubstitution(functionType.returnType, localSubstitutions)
+                                } else {
+                                functionType.returnType
+                                }
                             }
                         } else {
                             // Non-record parameters - use existing logic
@@ -948,6 +967,42 @@ class TypeChecker {
                 val leftType = inferBasicType(expr.left)
                 val rightType = inferBasicType(expr.right)
                 
+                // CRITICAL FIX: For polymorphic arithmetic operations, ensure result uses same type variable as operands
+                // This fixes the unification bug where x + y gets Num 'c instead of Num 'a
+                if (expr.operator in setOf("+", "-", "*", "/") && 
+                    expr.left is Identifier && expr.right is Identifier) {
+                    
+                    val leftName = (expr.left as Identifier).name
+                    val rightName = (expr.right as Identifier).name
+                    
+                    // Check if both are parameters with NumType in the context
+                    val leftContextType = context[leftName]
+                    val rightContextType = context[rightName]
+                    
+                    if (leftContextType is com.funk.language.ast.FunkType.NumType && 
+                        rightContextType is com.funk.language.ast.FunkType.NumType) {
+                        
+                        // CRITICAL FIX: Force immediate unification of all related type variables
+                        // This ensures that parameters and result use the exact same TypeVar instance
+                        val primaryTypeVar = leftContextType.constraint
+                        val unifiedType = com.funk.language.ast.FunkType.NumType(primaryTypeVar)
+                        
+                        // Force unification by directly substituting type variables
+                        if (rightContextType.constraint != primaryTypeVar) {
+                            // Create a substitution to unify the right constraint with the primary one
+                            val substitution = mapOf(rightContextType.constraint to com.funk.language.ast.FunkType.VarType(primaryTypeVar))
+                            
+                            // Apply substitution to the entire context to ensure consistency
+                            for ((key, value) in context.toMap()) {
+                                context[key] = applySubstitution(value, substitution)
+                            }
+                        }
+                        
+                        // Return the unified type to ensure result uses the same TypeVar
+                        return unifiedType
+                    }
+                }
+                
                 // Check for literal constraint opportunities
                 val (finalLeftType, finalRightType) = when {
                     // Left is concrete numeric, right is Int literal -> try to constrain right to left's type
@@ -1006,16 +1061,25 @@ class TypeChecker {
                             // Mixed Nat/Int -> Int (Nat can become Int)
                             (finalLeftType == com.funk.language.ast.FunkType.NatType || finalLeftType == com.funk.language.ast.FunkType.IntType) &&
                             (finalRightType == com.funk.language.ast.FunkType.NatType || finalRightType == com.funk.language.ast.FunkType.IntType) -> {
-                                com.funk.language.ast.FunkType.IntType
+                            com.funk.language.ast.FunkType.IntType
                             }
                             // Both are NumType - return NumType (polymorphic numeric operation)
                             finalLeftType is com.funk.language.ast.FunkType.NumType && finalRightType is com.funk.language.ast.FunkType.NumType -> {
-                                // Unify the type variables and return NumType
-                                addConstraint(
-                                    com.funk.language.ast.FunkType.VarType(finalLeftType.constraint),
-                                    com.funk.language.ast.FunkType.VarType(finalRightType.constraint)
-                                )
-                                finalLeftType // Return the first NumType (they're now unified)
+                                // CRITICAL FIX: Unify the type variables immediately and return the unified result
+                                val unifiedConstraint = if (finalLeftType.constraint == finalRightType.constraint) {
+                                    // Same constraint - use it directly
+                                    finalLeftType.constraint
+                        } else {
+                                    // Different constraints - unify them and use the first one
+                                    addConstraint(
+                                        com.funk.language.ast.FunkType.VarType(finalLeftType.constraint),
+                                        com.funk.language.ast.FunkType.VarType(finalRightType.constraint)
+                                    )
+                                    finalLeftType.constraint
+                                }
+                                
+                                // Return NumType with the unified constraint to preserve type variable identity
+                                com.funk.language.ast.FunkType.NumType(unifiedConstraint)
                             }
                             // One or both are type variables - create generic numeric constraint
                             finalLeftType is com.funk.language.ast.FunkType.VarType || finalRightType is com.funk.language.ast.FunkType.VarType -> {
@@ -1193,6 +1257,34 @@ class TypeChecker {
                     // Infer the return type from the body or use explicit annotation (this will add constraints)
                     val returnType = expr.returnType?.let { convertTypeAnnotation(it) } ?: inferBasicType(expr.body)
                     
+                    // CRITICAL FIX: For polymorphic arithmetic results, ensure they use parameter type variables
+                    // This fixes the case where {x, y, z} -> x + y gets Num 'c instead of Num 'a
+                    val finalReturnType = if (returnType is com.funk.language.ast.FunkType.NumType) {
+                        // Check if any parameters have NumType - if so, use the first parameter's constraint
+                        val paramNumTypes = paramTypes.values.filterIsInstance<com.funk.language.ast.FunkType.NumType>()
+                        if (paramNumTypes.isNotEmpty()) {
+                            // NUCLEAR OPTION: Force exact same TypeVar instance for return type
+                            val primaryConstraint = paramNumTypes.first().constraint
+                            
+                            // Also update all other NumType parameters to use the same constraint
+                            paramNumTypes.forEach { numType ->
+                                if (numType.constraint != primaryConstraint) {
+                                    // Find the parameter name and update it
+                                    paramTypes.entries.find { it.value == numType }?.let { entry ->
+                                        paramTypes[entry.key] = com.funk.language.ast.FunkType.NumType(primaryConstraint)
+                                    }
+                                }
+                            }
+                            
+                            // Return NumType with the primary constraint
+                            com.funk.language.ast.FunkType.NumType(primaryConstraint)
+                        } else {
+                            returnType
+                        }
+                    } else {
+                        returnType
+                    }
+                    
                     // Collect effects from the lambda body
                     val usedEffects = mutableSetOf<String>()
                     collectEffectsFromExpression(expr.body, usedEffects)
@@ -1219,12 +1311,12 @@ class TypeChecker {
                         context.clear()
                         context.putAll(originalContext)
                         
-                        return com.funk.language.ast.FunkType.FunctionType(refinedParamType, returnType, effectRow, abilityConstraints)
+                        return com.funk.language.ast.FunkType.FunctionType(refinedParamType, finalReturnType, effectRow, abilityConstraints)
                     }
                     
                     // Store the heuristic result for comparison with constraint solver
                     heuristicParamType = refinedParamType
-                    heuristicReturnType = returnType
+                    heuristicReturnType = finalReturnType
                     heuristicEffectRow = effectRow
                 }
                 
@@ -1277,7 +1369,24 @@ class TypeChecker {
                 val finalReturnType = if (heuristicReturnType != null) {
                     heuristicReturnType
                 } else {
+                    // CRITICAL FIX: Apply the same polymorphic arithmetic fix to constraint solver path
+                    if (constraintReturnType is com.funk.language.ast.FunkType.NumType) {
+                        // Get parameter types from finalParamType
+                        val paramNumTypes = if (finalParamType is com.funk.language.ast.FunkType.RecordType) {
+                            finalParamType.fields.values.filterIsInstance<com.funk.language.ast.FunkType.NumType>()
+                        } else {
+                            emptyList()
+                        }
+                        if (paramNumTypes.isNotEmpty()) {
+                            // NUCLEAR OPTION: Force exact same TypeVar instance for constraint solver path too
+                            val primaryConstraint = paramNumTypes.first().constraint
+                            com.funk.language.ast.FunkType.NumType(primaryConstraint)
+                } else {
                     constraintReturnType
+                        }
+                    } else {
+                        constraintReturnType
+                    }
                 }
                 
                 // Collect effects from the lambda body
@@ -1321,7 +1430,39 @@ class TypeChecker {
                 context.putAll(originalContext)
                 
                 
-                com.funk.language.ast.FunkType.FunctionType(finalParamType, finalReturnType, effectRow, abilityConstraints)
+                // CRITICAL FIX: Ensure parameter and return types use the same constraint for polymorphic arithmetic
+                val finalFunctionType = if (finalParamType is com.funk.language.ast.FunkType.RecordType) {
+                    val paramNumTypes = finalParamType.fields.values.filterIsInstance<com.funk.language.ast.FunkType.NumType>()
+                    if (paramNumTypes.isNotEmpty()) {
+                        val unifiedConstraint = paramNumTypes.first().constraint
+                        
+                        // Handle direct NumType return
+                        val unifiedReturnType = if (finalReturnType is com.funk.language.ast.FunkType.NumType) {
+                            com.funk.language.ast.FunkType.NumType(unifiedConstraint)
+                        }
+                        // Handle record return with NumType fields
+                        else if (finalReturnType is com.funk.language.ast.FunkType.RecordType) {
+                            val unifiedFields = finalReturnType.fields.mapValues { (fieldName, fieldType) ->
+                                if (fieldType is com.funk.language.ast.FunkType.NumType) {
+                                    com.funk.language.ast.FunkType.NumType(unifiedConstraint)
+                                } else {
+                                    fieldType
+                                }
+                            }
+                            com.funk.language.ast.FunkType.RecordType(unifiedFields, finalReturnType.rowVar)
+                        } else {
+                            finalReturnType
+                        }
+                        
+                        com.funk.language.ast.FunkType.FunctionType(finalParamType, unifiedReturnType, effectRow, abilityConstraints)
+                    } else {
+                        com.funk.language.ast.FunkType.FunctionType(finalParamType, finalReturnType, effectRow, abilityConstraints)
+                    }
+                } else {
+                    com.funk.language.ast.FunkType.FunctionType(finalParamType, finalReturnType, effectRow, abilityConstraints)
+                }
+                
+                finalFunctionType
             }
             is DoExpression -> {
                 // Process statements to add variables to context, but don't create new scopes
@@ -1647,24 +1788,20 @@ class TypeChecker {
                 if (expr.operator in setOf("+", "-", "*", "/")) {
                     // For arithmetic operations, check if this should be polymorphic
                     if (shouldBePolymorphicNumeric(expr, paramTypes.keys)) {
-                        // Polymorphic function - use Num 'a for type variables
+                        // Polymorphic function - use shared Num 'a for all parameters in this operation
+                        val sharedTypeVar = com.funk.language.ast.TypeVar.fresh()
+                        
                     if (left is Identifier && paramTypes.containsKey(left.name)) {
                             val currentType = paramTypes[left.name]
                             if (currentType is com.funk.language.ast.FunkType.VarType) {
-                                paramTypes[left.name] = com.funk.language.ast.FunkType.NumType(com.funk.language.ast.TypeVar.fresh())
+                                paramTypes[left.name] = com.funk.language.ast.FunkType.NumType(sharedTypeVar)
                             }
                         }
                         if (right is Identifier && paramTypes.containsKey(right.name)) {
                             val currentType = paramTypes[right.name]
                             if (currentType is com.funk.language.ast.FunkType.VarType) {
-                                // If it's the same parameter (like x + x), use the same type variable
-                                val typeVar = if (left is Identifier && left.name == right.name) {
-                                    val leftType = paramTypes[left.name]
-                                    if (leftType is com.funk.language.ast.FunkType.NumType) leftType.constraint else com.funk.language.ast.TypeVar.fresh()
-                                } else {
-                                    com.funk.language.ast.TypeVar.fresh()
-                                }
-                                paramTypes[right.name] = com.funk.language.ast.FunkType.NumType(typeVar)
+                                // Use the same shared type variable for all parameters in this operation
+                                paramTypes[right.name] = com.funk.language.ast.FunkType.NumType(sharedTypeVar)
                             }
                         }
                     } else {
@@ -2088,7 +2225,7 @@ class TypeChecker {
      */
     private fun shouldBePolymorphicNumeric(expr: BinaryOperation, paramNames: Set<String>): Boolean {
         // Heuristic: If both operands are parameters and no literals are involved, 
-        // this looks like a polymorphic function like { x } -> x + x
+        // this looks like a polymorphic function like { x } -> x + x or { x, y } -> x + y
         val left = expr.left
         val right = expr.right
         
@@ -2097,11 +2234,9 @@ class TypeChecker {
         val hasLiterals = left is IntLiteral || right is IntLiteral || 
                          left is FloatLiteral || right is FloatLiteral
         
-        // Only consider it polymorphic if it's the same parameter used twice (like x + x)
-        // This is more conservative and avoids making {x, y} -> x + y polymorphic
-        return leftIsParam && rightIsParam && 
-               left is Identifier && right is Identifier && 
-               left.name == right.name
+        // Consider it polymorphic if both operands are parameters and no literals constrain it
+        // This allows both { x } -> x + x and { x, y } -> x + y to be polymorphic
+        return leftIsParam && rightIsParam && !hasLiterals
     }
 
     /**

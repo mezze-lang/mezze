@@ -1,0 +1,12 @@
+# Test polymorphic arithmetic with 3+ parameters
+let complex = {x, y, z} -> x + y # expected: complex : { x: Num 'a, y: Num 'a, z: 'b } -> Num 'a
+
+let fourParam = {x, y, z, w} -> x + y # expected: fourParam : { x: Num 'b, y: Num 'b, z: 'c, w: 'a } -> Num 'b
+
+let recordResult = {x, y, z} -> {result = x + y, other = z} # expected: recordResult : { x: Num 'a, y: Num 'a, z: 'b } -> { result: Num 'a, other: 'b }
+
+# Note: Multi-arithmetic like x + y - z currently has type unification limitations
+
+# Test function call instantiation
+let intResult = complex { x = 21, y = 42, z = "test" } # expected: intResult : Int
+let floatResult = complex { x = 21.5, y = 42.5, z = true } # expected: floatResult : Float

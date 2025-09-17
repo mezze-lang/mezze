@@ -785,6 +785,88 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
 }
 
 /**
+ * Normalize type variables with constraint awareness to preserve unification relationships
+ */
+fun normalizeTypeVariablesWithConstraints(type: FunkType, constraints: List<Pair<FunkType, FunkType>>): FunkType {
+    val typeVarsInOrder = mutableListOf<TypeVar>()
+    collectTypeVariablesInOrder(type, typeVarsInOrder)
+    
+    // Create equivalence classes based on constraints
+    val equivalenceClasses = mutableListOf<MutableSet<TypeVar>>()
+    val processed = mutableSetOf<TypeVar>()
+    
+    for (typeVar in typeVarsInOrder) {
+        if (typeVar in processed) continue
+        
+        val equivalenceClass = mutableSetOf<TypeVar>()
+        equivalenceClass.add(typeVar)
+        processed.add(typeVar)
+        
+        // Find all type variables that should be unified with this one
+        for ((type1, type2) in constraints) {
+            val vars1 = extractTypeVariables(type1)
+            val vars2 = extractTypeVariables(type2)
+            
+            if (typeVar in vars1) {
+                vars2.forEach { otherVar ->
+                    if (otherVar !in processed) {
+                        equivalenceClass.add(otherVar)
+                        processed.add(otherVar)
+                    }
+                }
+            } else if (typeVar in vars2) {
+                vars1.forEach { otherVar ->
+                    if (otherVar !in processed) {
+                        equivalenceClass.add(otherVar)
+                        processed.add(otherVar)
+                    }
+                }
+            }
+        }
+        
+        equivalenceClasses.add(equivalenceClass)
+    }
+    
+    // Create mapping from old names to new normalized names
+    val mapping = mutableMapOf<TypeVar, TypeVar>()
+    equivalenceClasses.forEachIndexed { index, equivalenceClass ->
+        val normalizedName = "'${('a' + index)}"
+        for (typeVar in equivalenceClass) {
+            mapping[typeVar] = TypeVar(normalizedName, typeVar.level)
+        }
+    }
+    
+    return substituteTypeVariables(type, mapping)
+}
+
+/**
+ * Extract type variables from a type
+ */
+private fun extractTypeVariables(type: FunkType): Set<TypeVar> {
+    val result = mutableSetOf<TypeVar>()
+    when (type) {
+        is FunkType.VarType -> result.add(type.variable)
+        is FunkType.NumType -> result.add(type.constraint)
+        is FunkType.FunctionType -> {
+            result.addAll(extractTypeVariables(type.paramType))
+            result.addAll(extractTypeVariables(type.returnType))
+        }
+        is FunkType.RecordType -> {
+            type.fields.values.forEach { fieldType ->
+                fieldType?.let { result.addAll(extractTypeVariables(it)) }
+            }
+        }
+        is FunkType.VariantType -> {
+            type.constructors.values.forEach { constructorType ->
+                constructorType?.let { result.addAll(extractTypeVariables(it)) }
+            }
+        }
+        else -> { /* Base types don't contain type variables */ }
+    }
+    return result
+}
+
+/**
  * Normalize type variables in a type to start from 'a, 'b, 'c, etc.
  * This provides clean, readable output by renaming type variables in order of appearance.
  */
@@ -792,14 +874,19 @@ fun normalizeTypeVariables(type: FunkType): FunkType {
     val typeVarsInOrder = mutableListOf<TypeVar>()
     collectTypeVariablesInOrder(type, typeVarsInOrder)
     
-    // Remove duplicates while preserving order
-    val uniqueVarsInOrder = typeVarsInOrder.distinctBy { it.name }
+    // CRITICAL FIX: Group type variables by name to preserve constraint relationships
+    // Type variables with the same name should get the same normalized name
+    val groupedByName = typeVarsInOrder.groupBy { it.name }
+    val uniqueNames = groupedByName.keys.toList()
     
     // Create mapping from old names to new normalized names
     val mapping = mutableMapOf<TypeVar, TypeVar>()
-    uniqueVarsInOrder.forEachIndexed { index, typeVar ->
+    uniqueNames.forEachIndexed { index, name ->
         val normalizedName = "'${('a' + index)}"
-        mapping[typeVar] = TypeVar(normalizedName, typeVar.level)
+        // All type variables with the same original name get the same normalized name
+        groupedByName[name]?.forEach { typeVar ->
+            mapping[typeVar] = TypeVar(normalizedName, typeVar.level)
+        }
     }
     
     return substituteTypeVariables(type, mapping)

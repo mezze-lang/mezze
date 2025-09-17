@@ -1,5 +1,5 @@
 # Simple function definitions and calls
-let add = {x, y} -> x + y               # expected: add : { x: Int, y: Int } -> Int
+let add = {x, y} -> x + y               # expected: add : { x: Num 'a, y: Num 'a } -> Num 'a
 let greet = {name} -> "Hello " ++ name  # expected: greet : { name: String } -> String
 
 let result1 = add {x = 10, y = 20}      # expected: result1 : Int
