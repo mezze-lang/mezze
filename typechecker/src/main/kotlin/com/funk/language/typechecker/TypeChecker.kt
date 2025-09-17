@@ -910,14 +910,8 @@ class TypeChecker {
                     return com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
                 }
                 
-                // CRITICAL: Validate closed variant exhaustiveness
-                if (matchedType is com.funk.language.ast.FunkType.VariantType && matchedType.isClosed) {
-                    // This is a closed variant - check for invalid wildcard patterns
-                    val hasWildcard = expr.cases.any { it.pattern is WildcardPattern }
-                    if (hasWildcard) {
-                        throw RuntimeException("Type error: Wildcard pattern '_' is not allowed for closed variant type ${prettyPrintType(matchedType)}. Use exhaustive pattern matching instead.")
-                    }
-                }
+                // Note: Exhaustiveness checking is handled by type annotation vs inferred type mismatch
+                // Wildcards are allowed in closed variants when not all cases are covered
                 
                 // Type check each case with pattern bindings
                 val caseTypes = mutableListOf<com.funk.language.ast.FunkType>()

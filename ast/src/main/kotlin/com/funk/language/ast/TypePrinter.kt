@@ -63,7 +63,7 @@ fun prettyPrintTypeWithAliases(
         val aliasName = if (aliasMatch.typeArgs.isEmpty()) {
             aliasMatch.aliasName
         } else {
-            val typeArgsStr = aliasMatch.typeArgs.joinToString(" ") { prettyPrintType(it) }
+            val typeArgsStr = aliasMatch.typeArgs.joinToString(" ") { prettyPrintTypeWithAliases(it, typeAliases, showExpansion) }
             "${aliasMatch.aliasName} $typeArgsStr"
         }
         
@@ -73,8 +73,61 @@ fun prettyPrintTypeWithAliases(
             aliasName
         }
     } else {
-        prettyPrintType(type)
+        // No direct alias match - recursively apply aliases to subcomponents
+        prettyPrintTypeWithAliasesRecursive(type, typeAliases, showExpansion)
     }
+}
+
+/**
+ * Recursively apply type aliases to subcomponents of a type
+ */
+private fun prettyPrintTypeWithAliasesRecursive(
+    type: FunkType, 
+    typeAliases: Map<String, TypeAliasInfo>,
+    showExpansion: Boolean
+): String = when (type) {
+    is FunkType.IntType -> "Int"
+    is FunkType.FloatType -> "Float"
+    is FunkType.StringType -> "String"
+    is FunkType.BooleanType -> "Boolean"
+    is FunkType.NatType -> "Nat"
+    is FunkType.FracType -> "Frac"
+    is FunkType.NumType -> "Num ${type.constraint.name}"
+    is FunkType.VarType -> type.variable.name
+    is FunkType.RecordType -> {
+        val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
+            "$name: ${prettyPrintTypeWithAliases(fieldType, typeAliases, showExpansion)}"
+        }
+        if (type.isOpen) {
+            "{ $fields, ... }"
+        } else {
+            "{ $fields }"
+        }
+    }
+    is FunkType.VariantType -> {
+        val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
+            when (dataType) {
+                null -> name
+                is FunkType.RecordType -> "$name ${prettyPrintTypeWithAliases(dataType, typeAliases, showExpansion)}"
+                else -> "$name(${prettyPrintTypeWithAliases(dataType, typeAliases, showExpansion)})"
+            }
+        }
+        if (type.isOpen) {
+            "| $constructors, ... |"
+        } else {
+            "| $constructors |"
+        }
+    }
+    is FunkType.FunctionType -> {
+        val baseType = "${prettyPrintTypeWithAliases(type.paramType, typeAliases, showExpansion)} -> ${prettyPrintTypeWithAliases(type.returnType, typeAliases, showExpansion)}"
+        if (type.effects != null && type.effects.effects.isNotEmpty()) {
+            val effectList = type.effects.effects.sorted().joinToString(", ")
+            "$baseType <$effectList>"
+        } else {
+            baseType
+        }
+    }
+    else -> type.toString() // Fallback for any other types
 }
 
 /**

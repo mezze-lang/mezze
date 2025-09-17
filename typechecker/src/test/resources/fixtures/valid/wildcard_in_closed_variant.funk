@@ -1,0 +1,13 @@
+# Test that wildcard patterns are allowed in closed variants (when not all cases covered)
+
+type Color = | Red, Blue { val: Int }, Green |
+
+# This should PASS - wildcard handles missing cases
+let processColor = {color: Color} -> match color {
+  Red -> "red"
+  _ -> "other"
+}                                                       # expected: processColor : { color: Color } -> String
+
+let result = processColor {color = Red}                 # expected: result : String
+
+result

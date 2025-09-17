@@ -232,7 +232,7 @@ class TypeCheckerComprehensiveTest {
         val result = parseAndTypeCheck(openRecordSource)
         assertNotNull(result)
         
-        // Test closed record incompatibility
+        // Test closed record incompatibility - should FAIL with extra fields
         val closedRecordSource = """
             let processUser = {user} -> user.name
             let user = {name = "Alice", age = 30, city = "NYC"}
@@ -240,9 +240,10 @@ class TypeCheckerComprehensiveTest {
             result
         """.trimIndent()
         
-        // Should succeed with structural typing (extra fields allowed)
-        val result2 = parseAndTypeCheck(closedRecordSource)
-        assertNotNull(result2)
+        // Should fail because closed record {name: String} cannot accept extra fields {age, city}
+        assertThrows<RuntimeException> {
+            parseAndTypeCheck(closedRecordSource)
+        }
     }
     
     @Test

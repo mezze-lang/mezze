@@ -1,0 +1,12 @@
+# Test that open records accept extra fields
+
+let processOpenUser: {user: {name: String, ...}} -> String = {user} -> user.name  # expected: processOpenUser : { user: { name: String, ... } } -> String
+
+# This should PASS - open records accept extra fields
+let user1 = {name = "Alice", age = 30, city = "NYC"}       # expected: user1 : { name: String, age: Int, city: String }
+let user2 = {name = "Bob", email = "bob@test.com"}         # expected: user2 : { name: String, email: String }
+
+let result1 = processOpenUser {user = user1}               # expected: result1 : String
+let result2 = processOpenUser {user = user2}               # expected: result2 : String
+
+result1

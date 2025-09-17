@@ -1,0 +1,10 @@
+# Test that non-exhaustive match without wildcard fails
+
+type Color = | Red, Blue { val: Int } |
+
+# This should FAIL - missing Blue case and no wildcard
+let processColor: {color: Color} -> String = {color} -> match color {
+  Red -> "red"
+}
+
+processColor
