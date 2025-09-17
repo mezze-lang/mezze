@@ -103,17 +103,17 @@ class FunkInterpreter {
                     context[item.variableName] = recursivePlaceholder
                     
                     // Now evaluate the lambda with the placeholder in context
-                val value = evaluateExpression(item.expression, context)
+                    val value = evaluateExpression(item.expression, context)
                     
                     // Replace the placeholder with the actual function
-                context[item.variableName] = value
+                    context[item.variableName] = value
                     
                     // If it's a user function, set up recursive reference
                     if (value is SimpleFunkFunction) {
                         value.setupRecursiveReference(item.variableName, value)
                     }
                     
-                value
+                    value
                 } else {
                     // Non-function case: check for self-reference (which should be forbidden)
                     if (containsSelfReference(item.expression, item.variableName)) {
@@ -228,10 +228,39 @@ class FunkInterpreter {
                 FunkRecord(fields)
             }
             is MemberAccess -> {
-                // Check if this is an ability call (e.g., Show.show)
+                // Check if this is an effect call (e.g., Console.print, Log.log)
                 val receiver = expr.receiver
-                if (receiver is Identifier) {
-                    val receiverName = receiver.name
+                val receiverName = when (receiver) {
+                    is Identifier -> receiver.name
+                    is VariantConstruction -> receiver.constructor
+                    else -> null
+                }
+                
+                if (receiverName != null) {
+                    
+                    // First check if this is an effect call
+                    // Check if this is a declared effect (not just any record)
+                    val isEffectCall = effectHandler.isEffectDeclared(receiverName) && 
+                                      context[receiverName] is FunkRecord &&
+                                      (context[receiverName] as FunkRecord).fields.containsKey(expr.member)
+                    
+                    if (isEffectCall) {
+                        // This is an effect call - return an EffectCallExpression wrapper
+                        return NativeFunkFunction(
+                            name = "$receiverName.${expr.member}",
+                            implementation = { args ->
+                                if (args.size != 1) {
+                                    throw RuntimeException("Effect operation $receiverName.${expr.member} expects exactly one argument")
+                                }
+                                val arguments = args[0]
+                                
+                                // Directly call the effect handling logic
+                                effectHandler.executeEffectCall(receiverName, expr.member, arguments, context, this@FunkInterpreter)
+                            }
+                        )
+                    }
+                    
+                    // Check if this is an ability call (e.g., Show.show)
                     val abilityKey = "${receiverName}_ability"
                     if (context.containsKey(abilityKey)) {
                         // This is an ability operation reference - return a function that will handle ability resolution
@@ -488,11 +517,11 @@ class FunkInterpreter {
                     executeDoBlockAsStateMachine(expr, context)
                 } else {
                     // Simple sequential execution for pure do blocks
-                var result: FunkValue = FunkNull
-                for (stmt in expr.statements) {
-                    result = executeStatement(stmt, context)
-                }
-                evaluateExpression(expr.result, context)
+                    var result: FunkValue = FunkNull
+                    for (stmt in expr.statements) {
+                        result = executeStatement(stmt, context)
+                    }
+                    evaluateExpression(expr.result, context)
                 }
             }
             is PerformExpression -> {
@@ -938,22 +967,22 @@ class FunkInterpreter {
                     }
                 }
                 
-                // Create new context with captured closure and parameters
-                val newContext = function.closure.toMutableMap()
-                
-                // Bind parameters (simplified - assume list of parameter names)
-                function.parameters.forEachIndexed { index, param ->
-                    if (index < args.size) {
-                        newContext[param] = args[index]
-                    }
-                }
+                        // Create new context with captured closure and parameters
+                        val newContext = function.closure.toMutableMap()
+                        
+                        // Bind parameters (simplified - assume list of parameter names)
+                        function.parameters.forEachIndexed { index, param ->
+                            if (index < args.size) {
+                                newContext[param] = args[index]
+                            }
+                        }
                         
                         // Propagate effect handlers from current context
                         context["__handlers"]?.let { 
                             newContext["__handlers"] = it 
-                }
-                
-                evaluateExpression(function.body, newContext)
+                        }
+                        
+                        evaluateExpression(function.body, newContext)
             }
             else -> throw RuntimeException("Cannot call non-function value: ${function::class.simpleName}")
         }
