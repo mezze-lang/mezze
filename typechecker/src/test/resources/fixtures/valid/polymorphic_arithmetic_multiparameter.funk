@@ -5,8 +5,14 @@ let fourParam = {x, y, z, w} -> x + y # expected: fourParam : { x: Num 'b, y: Nu
 
 let recordResult = {x, y, z} -> {result = x + y, other = z} # expected: recordResult : { x: Num 'a, y: Num 'a, z: 'b } -> { result: Num 'a, other: 'b }
 
-# Note: Multi-arithmetic like x + y - z currently has type unification limitations
+# Test do expressions with bidirectional type checking
+let doMultiple = {x, y, z} -> do
+  let sum = x + y
+  let product = sum * z
+  product
+# expected: doMultiple : { x: Num 'a, y: Num 'a, z: Num 'a } -> Num 'a
 
 # Test function call instantiation
 let intResult = complex { x = 21, y = 42, z = "test" } # expected: intResult : Int
 let floatResult = complex { x = 21.5, y = 42.5, z = true } # expected: floatResult : Float
+let doResult = doMultiple { x = 1, y = 2, z = 3 } # expected: doResult : Int

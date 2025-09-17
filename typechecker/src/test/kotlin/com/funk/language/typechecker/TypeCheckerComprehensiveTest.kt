@@ -99,8 +99,8 @@ class TypeCheckerComprehensiveTest {
                             assertTrue(concatBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType)
                             
                             val addType = addBinding?.inferredType as com.funk.language.ast.FunkType.FunctionType
-                            // add = {x, y} -> x + y correctly infers as concrete Int (not polymorphic due to heuristic)
-                            assertTrue(addType.returnType is com.funk.language.ast.FunkType.IntType)
+                            // add = {x, y} -> x + y correctly infers as polymorphic after our fix
+                            assertTrue(addType.returnType is com.funk.language.ast.FunkType.NumType)
                         }
                         
                         "variant_inference_from_match" -> {
@@ -137,6 +137,25 @@ class TypeCheckerComprehensiveTest {
                             val objRecordType = objFieldType as com.funk.language.ast.FunkType.RecordType
                             val nameFieldType = objRecordType.fields["name"]
                             assertEquals(com.funk.language.ast.FunkType.StringType, nameFieldType)
+                        }
+                        
+                        "record_update_inference" -> {
+                            // Test basic record update functionality - just ensure it parses and type checks
+                            val bindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
+                            val updateFuncBinding = bindings.find { it.variableName == "updateFunc" }
+                            
+                            assertTrue(updateFuncBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType)
+                            val funcType = updateFuncBinding?.inferredType as com.funk.language.ast.FunkType.FunctionType
+                            assertTrue(funcType.returnType is com.funk.language.ast.FunkType.RecordType)
+                            
+                            val returnType = funcType.returnType as com.funk.language.ast.FunkType.RecordType
+                            assertTrue(returnType.fields.containsKey("x"))
+                            assertEquals(com.funk.language.ast.FunkType.IntType, returnType.fields["x"])
+                        }
+                        
+                        else -> {
+                            // For fixtures without specific test cases, just ensure they parse and type check successfully
+                            // The parseAndTypeCheck call above already validates this
                         }
                     }
                 }
@@ -239,7 +258,7 @@ class TypeCheckerComprehensiveTest {
             result1 + result2
         """.trimIndent()
         
-        // Should not throw
+        // Should not throw - this infers an open variant type from patterns
         val result = parseAndTypeCheck(variantSource)
         assertNotNull(result)
         
