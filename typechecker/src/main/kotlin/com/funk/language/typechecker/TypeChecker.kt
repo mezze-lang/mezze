@@ -3016,6 +3016,19 @@ class TypeChecker {
                         }
                     }
                 }
+                
+                // CRITICAL FIX: Also collect effects from function type signatures
+                // When calling outerFunction : {} -> Unit <Log>, we need to add Log to effects
+                if (expr.function is Identifier) {
+                    val functionName = (expr.function as Identifier).name
+                    val functionType = context[functionName]
+                    if (functionType is com.funk.language.ast.FunkType.FunctionType) {
+                        functionType.effects?.effects?.forEach { effect ->
+                            effects.add(effect)
+                        }
+                    }
+                }
+                
                 collectEffectsFromExpression(expr.function, effects)
                 collectEffectsFromExpression(expr.arguments, effects)
             }
