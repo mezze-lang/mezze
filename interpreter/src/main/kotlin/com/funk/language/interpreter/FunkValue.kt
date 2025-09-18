@@ -300,7 +300,12 @@ data class FunkRecord(val fields: Map<String, FunkValue>) : FunkValue() {
 data class FunkVariant(val constructor: String, val value: FunkValue?) : FunkValue() {
     override fun getDisplayString(): String {
         return if (value != null) {
-            "$constructor(${value.getDisplayString()})"
+            // Use braces for record values, parentheses for other values
+            if (value is FunkRecord) {
+                "$constructor ${value.getDisplayString()}"
+            } else {
+                "$constructor(${value.getDisplayString()})"
+            }
         } else {
             constructor
         }

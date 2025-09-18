@@ -238,11 +238,13 @@ class FunkInterpreter {
                 
                 if (receiverName != null) {
                     
+                    
                     // First check if this is an effect call
                     // Check if this is a declared effect (not just any record)
                     val isEffectCall = effectHandler.isEffectDeclared(receiverName) && 
                                       context[receiverName] is FunkRecord &&
                                       (context[receiverName] as FunkRecord).fields.containsKey(expr.member)
+                    
                     
                     if (isEffectCall) {
                         // This is an effect call - return an EffectCallExpression wrapper
@@ -361,8 +363,16 @@ class FunkInterpreter {
                 }
             }
             is VariantConstruction -> {
+                // CRITICAL FIX: Check if this "variant constructor" is actually a value in the context
+                // This handles cases like BasicLogger.info where BasicLogger should be looked up, not treated as a variant
+                if (expr.value == null && context.containsKey(expr.constructor)) {
+                    // This is actually an identifier lookup, not a variant construction
+                    context[expr.constructor]!!
+                } else {
+                    // This is a real variant construction
                 val data = expr.value?.let { evaluateExpression(it, context) }
                 FunkVariant(expr.constructor, data)
+                }
             }
             is IfExpression -> {
                 val condition = evaluateExpression(expr.condition, context)
@@ -485,8 +495,13 @@ class FunkInterpreter {
                 val function = evaluateExpression(expr.function, context)
                 val argumentsValue = evaluateExpression(expr.arguments, context)
                 
+                // Special case: If function is a variant constructor, create variant construction
+                if (function is FunkVariant && function.value == null && argumentsValue is FunkRecord) {
+                    // This is a variant constructor call like Success {data = 42}
+                    // Convert to variant construction
+                    FunkVariant(function.constructor, argumentsValue)
+                } else if (argumentsValue is FunkRecord) {
                 // Handle record arguments for partial application
-                if (argumentsValue is FunkRecord) {
                     callFunctionWithRecord(function, argumentsValue, context)
                 } else {
                     // Otherwise treat as single argument (legacy)
@@ -555,6 +570,9 @@ class FunkInterpreter {
                     // Map performer to its effect based on impl declarations
                     val effectName = findEffectForPerformer(handlerName, context)
                     handlerMap[effectName] = handler
+                    
+                    // Also make the performer available by its name for delegation
+                    context[handlerName] = handler
                 }
                 
                 // Set up handlers in context before evaluating the expression
@@ -905,6 +923,15 @@ class FunkInterpreter {
                     
                     // Execute function with inherited context
                     val newContext = function.closure.toMutableMap()
+                    
+                    // CRITICAL FIX: Merge current context with closure context
+                    // This ensures that all performers (like BasicLogger) are available for delegation
+                    context.forEach { (key, value) ->
+                        if (!newContext.containsKey(key)) {
+                            newContext[key] = value
+                        }
+                    }
+                    
                     
                     // Setup function context with proper effect infrastructure
                     effectHandler.setupFunctionContext(newContext, context)
@@ -1559,7 +1586,13 @@ class FunkInterpreter {
                 } else {
                     // Regular function call
                     val argumentsValue = evaluateExpression(expr.arguments, context)
-                    if (argumentsValue is FunkRecord) {
+                    
+                    // Special case: If function is a variant constructor, create variant construction
+                    if (function is FunkVariant && function.value == null && argumentsValue is FunkRecord) {
+                        // This is a variant constructor call like Success {data = 42}
+                        // Convert to variant construction
+                        FunkVariant(function.constructor, argumentsValue)
+                    } else if (argumentsValue is FunkRecord) {
                         callFunctionWithRecord(function, argumentsValue, context)
                     } else {
                         val args = listOf(argumentsValue)
