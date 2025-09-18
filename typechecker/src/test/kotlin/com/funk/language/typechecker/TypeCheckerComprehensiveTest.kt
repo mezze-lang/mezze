@@ -249,11 +249,10 @@ class TypeCheckerComprehensiveTest {
     @Test
     fun `variant type compatibility should work correctly`() {
         val variantSource = """
-            let processColor = {color} -> match color {
+            let processColor = {color} -> match color is
               Red -> 10
               Blue {val} -> val
               _ -> 0
-            }
             let result1 = processColor {color = Red}
             let result2 = processColor {color = Blue {val = 20}}
             result1 + result2
@@ -271,10 +270,9 @@ class TypeCheckerComprehensiveTest {
     @Test
     fun `complex nested type inference should work`() {
         val complexSource = """
-            let calculator = {op, x, y} -> match op {
+            let calculator = {op, x, y} -> match op is
               Add -> x + y
               Multiply -> x * y
-            }
             let formatResult = {calc, operation, a, b} -> calc {op = operation, x = a, y = b}
             let result = formatResult {calc = calculator, operation = Add, a = 10, b = 20}
             result

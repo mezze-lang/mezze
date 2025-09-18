@@ -565,7 +565,8 @@ data class MatchExpression(
 
 @Serializable
 data class MatchCase(
-    val pattern: Pattern,
+    val patterns: List<Pattern>,        // Multiple patterns for | syntax
+    val guard: Expression? = null,      // Optional guard condition
     val expression: Expression
 )
 

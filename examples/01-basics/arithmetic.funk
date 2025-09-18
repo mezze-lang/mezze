@@ -1,0 +1,28 @@
+# Arithmetic Operations in Funk
+
+# Basic arithmetic
+let a = 10
+let b = 3
+
+# Addition and subtraction
+let sum = a + b        # 13
+let difference = a - b # 7
+
+# Multiplication and division  
+let product = a * b    # 30
+let quotient = a / b   # 3 (integer division)
+
+# More complex expressions
+let complex = (a + b) * 2 - 1  # 25
+
+# Comparison operations
+let isGreater = a > b     # true
+let isEqual = a == b      # false
+let isNotEqual = a != b   # true
+
+# Boolean operations
+let both = isGreater && isNotEqual  # true
+let either = isEqual || isGreater   # true
+
+# Result
+"Sum: " ++ intToString {val = sum} ++ ", Product: " ++ intToString {val = product}

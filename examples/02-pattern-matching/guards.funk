@@ -1,0 +1,44 @@
+# Guard Conditions in Pattern Matching
+# Demonstrates conditional patterns with 'if'
+
+# Temperature classification with guards
+type Temperature = | Hot { degrees: Int }, Cold { degrees: Int } |
+
+let classifyTemperature = {temp: Temperature} -> match temp is
+  Hot { degrees } if degrees > 100 -> "Dangerously hot! " ++ intToString {val = degrees} ++ "°"
+  Hot { degrees } if degrees > 80 -> "Very hot: " ++ intToString {val = degrees} ++ "°"
+  Hot { degrees } if degrees > 60 -> "Warm: " ++ intToString {val = degrees} ++ "°"
+  Hot { degrees } -> "Mild heat: " ++ intToString {val = degrees} ++ "°"
+  Cold { degrees } if degrees < -20 -> "Freezing cold! " ++ intToString {val = degrees} ++ "°"
+  Cold { degrees } if degrees < 0 -> "Below freezing: " ++ intToString {val = degrees} ++ "°"
+  Cold { degrees } -> "Cool: " ++ intToString {val = degrees} ++ "°"
+
+# Student grades with conditional logic
+type Student = | Student { name: String, score: Int } |
+
+let evaluateStudent = {student: Student} -> match student is
+  Student { name, score } if score >= 95 -> name ++ " gets an A+ (Outstanding!)"
+  Student { name, score } if score >= 90 -> name ++ " gets an A (Excellent)"
+  Student { name, score } if score >= 80 -> name ++ " gets a B (Good)"
+  Student { name, score } if score >= 70 -> name ++ " gets a C (Satisfactory)"
+  Student { name, score } if score >= 60 -> name ++ " gets a D (Needs improvement)"
+  Student { name, score } -> name ++ " gets an F (Must retake)"
+
+# Age-based permissions
+type Person = | Person { name: String, age: Int } |
+
+let checkPermissions = {person: Person} -> match person is
+  Person { name, age } if age >= 21 -> name ++ " can drink alcohol"
+  Person { name, age } if age >= 18 -> name ++ " can vote but not drink"
+  Person { name, age } if age >= 16 -> name ++ " can drive with supervision"
+  Person { name, age } if age >= 13 -> name ++ " can use social media"
+  Person { name, age } -> name ++ " has limited permissions"
+
+# Testing the guard conditions
+let hotDay = classifyTemperature {temp = Hot {degrees = 95}}
+let coldDay = classifyTemperature {temp = Cold {degrees = -15}}
+let studentResult = evaluateStudent {student = Student {name = "Alice", score = 92}}
+let personResult = checkPermissions {person = Person {name = "Bob", age = 19}}
+
+# Result
+"Hot day: " ++ hotDay ++ " | Student: " ++ studentResult

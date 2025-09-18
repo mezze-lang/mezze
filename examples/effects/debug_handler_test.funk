@@ -1,6 +1,0 @@
-# Debug handler test
-
-# Check if Console handler exists
-let console_test = Console
-
-console_test

@@ -1,7 +1,0 @@
-# Simple Built-in Test
-
-# Test native functions directly
-let msg_result = native_print {msg = "Hello from native!"}
-let random_result = native_random_int {min = 1, max = 10}
-
-random_result

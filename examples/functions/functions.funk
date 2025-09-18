@@ -1,5 +1,0 @@
-# Define a function that takes a record of arguments
-let add = { x: Int, y: Int } -> x + y
-
-# Call the function with a record
-let result = add { x = 5, y = 10 }

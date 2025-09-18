@@ -1144,11 +1144,29 @@ class TypeChecker {
                 inferBasicType(expr.thenBranch)
             }
             is MatchExpression -> {
-                // Type check match expression with proper pattern binding
-                val matchedType = inferBasicType(expr.expression)
-                
+                // ENHANCED TYPE INFERENCE: Analyze patterns first to infer variant type
                 if (expr.cases.isEmpty()) {
                     return com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
+                }
+                
+        // First, try to infer the variant type from the match patterns
+        val inferredVariantType = inferVariantTypeFromPatterns(expr.cases)
+                
+                // Get the matched expression's type
+                val preliminaryMatchedType = inferBasicType(expr.expression)
+                
+                // Use the inferred variant type to constrain the matched expression if needed
+                val matchedType = if (inferredVariantType != null && 
+                                     preliminaryMatchedType is com.funk.language.ast.FunkType.VarType) {
+                    // If the matched expression is a type variable and we inferred a variant type,
+                    // use the variant type and update the context
+                    val matchedExpr = expr.expression
+                    if (matchedExpr is Identifier) {
+                        context[matchedExpr.name] = inferredVariantType
+                    }
+                    inferredVariantType
+                } else {
+                    preliminaryMatchedType
                 }
                 
                 // EXHAUSTIVENESS CHECKING
@@ -1158,8 +1176,21 @@ class TypeChecker {
                 val caseTypes = mutableListOf<com.funk.language.ast.FunkType>()
                 
                 for (case in expr.cases) {
-                    // Extract pattern bindings
-                    val patternBindings = extractPatternBindings(case.pattern, matchedType)
+                    // Extract pattern bindings from all patterns (they should all bind the same variables)
+                    val patternBindings = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                    
+                    // For multiple patterns, we need to ensure they all have compatible bindings
+                    for (pattern in case.patterns) {
+                        val bindings = extractPatternBindings(pattern, matchedType)
+                        // Merge bindings, checking for conflicts
+                        for ((name, type) in bindings) {
+                            val existingType = patternBindings[name]
+                            if (existingType != null && existingType != type) {
+                                throw RuntimeException("Pattern variable '$name' has conflicting types: $existingType vs $type")
+                            }
+                            patternBindings[name] = type
+                        }
+                    }
                     
                     // Save current context
                     val savedContext = context.toMap()
@@ -1167,6 +1198,14 @@ class TypeChecker {
                     try {
                         // Add pattern bindings to context
                         context.putAll(patternBindings)
+                        
+                        // Type check guard condition if present
+                        case.guard?.let { guard ->
+                            val guardType = inferBasicType(guard)
+                            if (guardType != com.funk.language.ast.FunkType.BooleanType) {
+                                throw RuntimeException("Guard condition must be Boolean, got ${prettyPrintType(guardType)}")
+                            }
+                        }
                         
                         // Type check the case expression with bindings in scope
                         val caseType = inferBasicType(case.expression)
@@ -2185,33 +2224,63 @@ class TypeChecker {
     }
     
     /**
+     * Resolve type aliases to get the underlying type
+     */
+    private fun resolveTypeAlias(type: com.funk.language.ast.FunkType): com.funk.language.ast.FunkType {
+        // Type aliases should already be resolved during type inference, but let's double-check
+        // If this is a reference to a type alias, resolve it
+        return when (type) {
+            is com.funk.language.ast.FunkType.VariantType -> type // Already resolved
+            is com.funk.language.ast.FunkType.RecordType -> type // Already resolved
+            else -> {
+                // For other types, check if they reference a type alias
+                // This is a simplified approach - in practice, type aliases are resolved earlier
+                type
+            }
+        }
+    }
+
+    /**
      * Check exhaustiveness and wildcard usage in match expressions
      */
     private fun checkMatchExhaustivenessAndWildcards(matchedType: com.funk.language.ast.FunkType, cases: List<MatchCase>) {
+        // Resolve type aliases to get the underlying type
+        val resolvedType = resolveTypeAlias(matchedType)
+        
         // Only check exhaustiveness for closed variant types
-        if (matchedType !is com.funk.language.ast.FunkType.VariantType) {
+        if (resolvedType !is com.funk.language.ast.FunkType.VariantType) {
             return // Can't check exhaustiveness for non-variant types
         }
         
-        if (matchedType.rowVar != null) {
+        if (resolvedType.rowVar != null) {
             return // Open variant - exhaustiveness not required
         }
         
         // This is a closed variant - check exhaustiveness
-        val requiredConstructors = matchedType.constructors.keys
+        val requiredConstructors = resolvedType.constructors.keys
         val coveredConstructors = mutableSetOf<String>()
         var hasWildcard = false
         
         for (case in cases) {
-            when (val pattern = case.pattern) {
-                is ConstructorPattern -> {
-                    coveredConstructors.add(pattern.constructor)
-                }
-                is WildcardPattern -> {
-                    hasWildcard = true
-                }
-                is RecordPattern, is VariablePattern -> {
-                    // Other patterns don't cover specific constructors
+            // Check each pattern in the case
+            for (pattern in case.patterns) {
+                when (pattern) {
+                    is ConstructorPattern -> {
+                        // Only count as covered if there's no guard condition
+                        // Guards make coverage conditional
+                        if (case.guard == null) {
+                            coveredConstructors.add(pattern.constructor)
+                        }
+                    }
+                    is WildcardPattern -> {
+                        // Only count as wildcard if there's no guard condition
+                        if (case.guard == null) {
+                            hasWildcard = true
+                        }
+                    }
+                    is RecordPattern, is VariablePattern -> {
+                        // Other patterns don't cover specific constructors
+                    }
                 }
             }
         }
@@ -2242,7 +2311,9 @@ class TypeChecker {
                         val constructors = mutableMapOf<String, com.funk.language.ast.FunkType?>()
                         
                         for (case in expr.cases) {
-                            when (val pattern = case.pattern) {
+                            // Process each pattern in the case
+                            for (pattern in case.patterns) {
+                                when (pattern) {
                                 is ConstructorPattern -> {
                                     val dataType = pattern.recordPattern?.let { recordPattern ->
                                         // Analyze the case expression to infer better types for pattern fields
@@ -2276,11 +2347,14 @@ class TypeChecker {
                                     // Handle other pattern types
                                 }
                             }
+                            }
                         }
                         
                         if (constructors.isNotEmpty()) {
                             // Check if there's a wildcard pattern - if so, make it an open variant
-                            val hasWildcard = expr.cases.any { it.pattern is WildcardPattern }
+                            val hasWildcard = expr.cases.any { case -> 
+                                case.patterns.any { it is WildcardPattern }
+                            }
                             paramTypes[paramName] = if (hasWildcard) {
                                 // Open variant (can accept more constructors)
                                 com.funk.language.ast.FunkType.VariantType(constructors, com.funk.language.ast.RowVar("match_${paramName}"))
@@ -2725,9 +2799,24 @@ class TypeChecker {
                     analyzeExpression(e.receiver)
                 }
                 is MatchExpression -> {
+                    // Analyze the matched expression
+                    analyzeExpression(e.expression)
+                    
+                    // Try to infer type from match patterns if the matched expression is a parameter
+                    val matchedExpr = e.expression
+                    if (matchedExpr is Identifier && paramNames.contains(matchedExpr.name)) {
+                        val paramName = matchedExpr.name
+                        val inferredType = inferTypeFromMatchPatterns(e.cases)
+                        if (inferredType != null && !constraints.containsKey(paramName)) {
+                            constraints[paramName] = inferredType
+                        }
+                    }
+                    
                     // Recursively analyze match cases
                     e.cases.forEach { case ->
                         analyzeExpression(case.expression)
+                        // Also analyze guard conditions if present
+                        case.guard?.let { analyzeExpression(it) }
                     }
                 }
                 // Add more cases as needed
@@ -2875,15 +2964,154 @@ class TypeChecker {
 
 
     /**
+     * Find the variant type that contains the given constructor
+     */
+    private fun findVariantTypeByConstructor(constructorName: String): com.funk.language.ast.FunkType.VariantType? {
+        // Look in the context for variant types that contain this constructor
+        for ((typeName, typeValue) in context) {
+            if (typeValue is com.funk.language.ast.FunkType.VariantType) {
+                if (typeValue.constructors.containsKey(constructorName)) {
+                    return typeValue
+                }
+            }
+        }
+        return null
+    }
+    
+    /**
      * Infer field type from field name - simple heuristics
      */
     private fun inferFieldTypeFromName(fieldName: String): com.funk.language.ast.FunkType {
         return when (fieldName) {
-            "val", "value", "amount", "count", "size", "length", "width", "height", "x", "y", "z", "age", "id" -> com.funk.language.ast.FunkType.IntType
+            "val", "value", "amount", "count", "size", "length", "width", "height", "radius", "base", "x", "y", "z", "age", "id", "degrees", "points" -> com.funk.language.ast.FunkType.IntType
             "name", "message", "text", "title", "description", "email", "city", "department" -> com.funk.language.ast.FunkType.StringType
             "flag", "enabled", "active", "visible" -> com.funk.language.ast.FunkType.BooleanType
             "price", "rate", "ratio" -> com.funk.language.ast.FunkType.FloatType
             else -> com.funk.language.ast.FunkType.StringType  // Default to String for unknown fields
+        }
+    }
+    
+    /**
+     * Infer variant type from match patterns by analyzing constructor patterns
+     * This looks up the actual type definitions to get precise field types
+     */
+    private fun inferVariantTypeFromPatterns(cases: List<MatchCase>): com.funk.language.ast.FunkType.VariantType? {
+        val usedConstructors = mutableSetOf<String>()
+        
+        // Collect all constructor names from patterns
+        for (case in cases) {
+            for (pattern in case.patterns) {
+                when (pattern) {
+                    is ConstructorPattern -> {
+                        usedConstructors.add(pattern.constructor)
+                    }
+                    is WildcardPattern -> {
+                        // Wildcard doesn't give us constructor information
+                    }
+                    is VariablePattern -> {
+                        // Variable pattern doesn't give us constructor information
+                    }
+                    is RecordPattern -> {
+                        // Pure record pattern without constructor - not a variant
+                        return null
+                    }
+                }
+            }
+        }
+        
+        if (usedConstructors.isEmpty()) {
+            return null
+        }
+        
+        // PRIORITY: Try to find an existing variant type in the context first!
+        // This is where type definitions are stored after processing
+        for ((typeName, typeValue) in context) {
+            if (typeValue is com.funk.language.ast.FunkType.VariantType) {
+                val hasAllConstructors = usedConstructors.all { constructor ->
+                    typeValue.constructors.containsKey(constructor)
+                }
+                if (hasAllConstructors) {
+                    // Found the exact type in context - use it!
+                    return typeValue
+                }
+            }
+        }
+        
+        // FALLBACK: Look up actual type definitions in the current program
+        val program = currentProgram
+        if (program != null) {
+            for (item in program.items) {
+                if (item is TypeDeclaration && item.definition is VariantDefinition) {
+                    val variantDef = item.definition as VariantDefinition
+                    
+                    // Check if this variant type contains all the constructors we're using
+                    val definedConstructors = variantDef.constructors.map { it.name }.toSet()
+                    val hasAllConstructors = usedConstructors.all { constructor ->
+                        definedConstructors.contains(constructor)
+                    }
+                    
+                    if (hasAllConstructors) {
+                        // Found the matching type definition! Use the inferred type if available
+                        if (item.inferredType is com.funk.language.ast.FunkType.VariantType) {
+                            return item.inferredType as com.funk.language.ast.FunkType.VariantType
+                        }
+                        
+                        // Otherwise build the precise variant type
+                        val constructors = mutableMapOf<String, com.funk.language.ast.FunkType?>()
+                        
+                        for (constructorDef in variantDef.constructors) {
+                            val dataType = constructorDef.dataType?.let { typeAnnotation ->
+                                // Convert the type annotation to a FunkType
+                                convertTypeAnnotation(typeAnnotation)
+                            }
+                            constructors[constructorDef.name] = dataType
+                        }
+                        
+                        return com.funk.language.ast.FunkType.VariantType(constructors, null) // closed variant
+                    }
+                }
+            }
+        }
+        
+        // Last resort: Create a new variant type by inferring field types
+        val constructors = mutableMapOf<String, com.funk.language.ast.FunkType?>()
+        
+        for (case in cases) {
+            for (pattern in case.patterns) {
+                when (pattern) {
+                    is ConstructorPattern -> {
+                        val dataType = pattern.recordPattern?.let { recordPattern ->
+                            val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                            for (entry in recordPattern.entries) {
+                                if (entry.pattern == null) {
+                                    fields[entry.name] = inferFieldTypeFromName(entry.name)
+                                } else {
+                                    fields[entry.name] = inferFieldTypeFromName(entry.name)
+                                }
+                            }
+                            if (fields.isNotEmpty()) {
+                                com.funk.language.ast.FunkType.RecordType(fields)
+                            } else null
+                        }
+                        constructors[pattern.constructor] = dataType
+                    }
+                    is WildcardPattern -> {
+                        // Wildcard doesn't contribute to constructor inference
+                    }
+                    is VariablePattern -> {
+                        // Variable pattern doesn't contribute to constructor inference
+                    }
+                    is RecordPattern -> {
+                        // Pure record pattern doesn't contribute to constructor inference
+                    }
+                }
+            }
+        }
+        
+        return if (constructors.isNotEmpty()) {
+            com.funk.language.ast.FunkType.VariantType(constructors, null) // closed variant
+        } else {
+            null
         }
     }
     
@@ -2893,7 +3121,9 @@ class TypeChecker {
     private fun inferTypeFromMatchPatterns(cases: List<MatchCase>): com.funk.language.ast.FunkType? {
         // Look for record patterns to infer record types
         for (case in cases) {
-            when (val pattern = case.pattern) {
+            // Check the first pattern in each case (simplified approach)
+            val pattern = case.patterns.firstOrNull() ?: continue
+            when (pattern) {
                 is RecordPattern -> {
                     val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
                     for (entry in pattern.entries) {
@@ -2912,8 +3142,33 @@ class TypeChecker {
                     }
                 }
                 is ConstructorPattern -> {
-                    // For constructor patterns, we don't know the exact type without more context
-                    // This is handled elsewhere
+                    // Try to infer variant type from constructor patterns
+                    val constructors = mutableMapOf<String, com.funk.language.ast.FunkType?>()
+                    
+                    // Extract constructor info from all cases
+                    for (caseForConstructor in cases) {
+                        for (patternForConstructor in caseForConstructor.patterns) {
+                            if (patternForConstructor is ConstructorPattern) {
+                                val dataType = patternForConstructor.recordPattern?.let { recordPattern ->
+                                    val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                                    for (entry in recordPattern.entries) {
+                                        if (entry.pattern == null) {
+                                            // Use the actual field type from type definitions if possible
+                                            fields[entry.name] = inferFieldTypeFromName(entry.name)
+                                        }
+                                    }
+                                    if (fields.isNotEmpty()) {
+                                        com.funk.language.ast.FunkType.RecordType(fields)
+                                    } else null
+                                }
+                                constructors[patternForConstructor.constructor] = dataType
+                            }
+                        }
+                    }
+                    
+                    if (constructors.isNotEmpty()) {
+                        return com.funk.language.ast.FunkType.VariantType(constructors)
+                    }
                 }
                 else -> {
                     // Other patterns don't give us type information
@@ -3675,27 +3930,35 @@ class TypeChecker {
                 
                 // If there's a record pattern, extract field bindings
                 pattern.recordPattern?.let { recordPattern ->
-                    // Try to get the data type for this constructor from the variant type
-                    val constructorDataType = when (valueType) {
-                        is com.funk.language.ast.FunkType.VariantType -> {
-                            valueType.constructors[pattern.constructor]
-                        }
-                        else -> null
-                    }
+                    // ENHANCED: Try to find the variant type by constructor name first
+                    val variantType = findVariantTypeByConstructor(pattern.constructor)
+                    val constructorDataType = variantType?.constructors?.get(pattern.constructor)
                     
                     if (constructorDataType is com.funk.language.ast.FunkType.RecordType) {
-                        // Extract bindings from record pattern
+                        // Found the exact type! Use it for precise field types
                         bindings.putAll(extractRecordPatternBindings(recordPattern, constructorDataType))
                     } else {
-                        // If we don't know the exact type, infer from field names
-                        for (entry in recordPattern.entries) {
-                            if (entry.pattern == null) {
-                                // Shorthand {x} - bind x to its field type
-                                bindings[entry.name] = inferFieldTypeFromName(entry.name)
-                            } else {
-                                // Pattern {field = pattern} - extract bindings from the pattern
-                                val fieldType = inferFieldTypeFromName(entry.name)
-                                bindings.putAll(extractPatternBindings(entry.pattern!!, fieldType))
+                        // Fallback: Try to get the data type from the provided valueType
+                        val fallbackDataType = when (valueType) {
+                            is com.funk.language.ast.FunkType.VariantType -> {
+                                valueType.constructors[pattern.constructor]
+                            }
+                            else -> null
+                        }
+                        
+                        if (fallbackDataType is com.funk.language.ast.FunkType.RecordType) {
+                            bindings.putAll(extractRecordPatternBindings(recordPattern, fallbackDataType))
+                        } else {
+                            // Last resort: infer from field names
+                            for (entry in recordPattern.entries) {
+                                if (entry.pattern == null) {
+                                    // Shorthand {x} - bind x to its field type
+                                    bindings[entry.name] = inferFieldTypeFromName(entry.name)
+                                } else {
+                                    // Pattern {field = pattern} - extract bindings from the pattern
+                                    val fieldType = inferFieldTypeFromName(entry.name)
+                                    bindings.putAll(extractPatternBindings(entry.pattern!!, fieldType))
+                                }
                             }
                         }
                     }

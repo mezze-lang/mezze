@@ -57,7 +57,7 @@ in
       echo "🚀 Building native Funk binary..."
       gradle build
       gradle :cli:nativeCompile
-      
+
       if [ -f "./cli/build/native/nativeCompile/funk" ]; then
         echo "✅ Native binary built: ./cli/build/native/nativeCompile/funk"
         echo "📊 Size: $(du -h ./cli/build/native/nativeCompile/funk | cut -f1)"
@@ -67,7 +67,7 @@ in
       fi
     '';
 
-    funk-native.exec = ''
+    funk.exec = ''
       NATIVE_BINARY="./cli/build/native/nativeCompile/funk"
       if [ -f "$NATIVE_BINARY" ]; then
         "$NATIVE_BINARY" "$@"
@@ -88,7 +88,7 @@ in
     echo ""
     echo "🎯 Funk CLI:"
     echo "  funk-dev     - Development CLI (JAR, faster builds)"
-    echo "  funk-native  - Native binary CLI (production)"
+    echo "  funk         - Native binary CLI (production)"
     echo "  build-native - Build native binary"
     echo ""
     echo "📝 Examples:"

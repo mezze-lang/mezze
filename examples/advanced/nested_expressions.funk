@@ -1,7 +1,0 @@
-# This example demonstrates operator precedence.
-# The result should be 25 (10 + (5 * 3)).
-let result = 10 + 5 * 3
-
-# This example uses parentheses to override precedence.
-# The result should be 45 ((10 + 5) * 3).
-let anotherResult = (10 + 5) * 3

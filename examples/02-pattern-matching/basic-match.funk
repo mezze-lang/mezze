@@ -1,0 +1,41 @@
+# Basic Pattern Matching in Funk
+# Demonstrates the new 'match ... is' syntax
+
+# Define a simple variant type
+type Color = | Red, Green, Blue |
+
+# Basic pattern matching function
+let describeColor = {color: Color} -> match color is
+  Red -> "The color of fire and passion"
+  Green -> "The color of nature and growth"  
+  Blue -> "The color of sky and ocean"
+
+# Test with different colors
+let redDescription = describeColor {color = Red}
+let blueDescription = describeColor {color = Blue}
+
+# More complex variant with data
+type Shape = | Circle { radius: Int }, Rectangle { width: Int, height: Int } |
+
+# Pattern matching with data extraction
+let calculateArea: {shape: Shape} -> Int = {shape} -> match shape is
+  Circle { radius } -> 3 * radius * radius  # Simplified π ≈ 3
+  Rectangle { width, height } -> width * height
+
+# Test shape calculations
+let circleArea = calculateArea {shape = Circle {radius = 5}}
+let rectangleArea = calculateArea {shape = Rectangle {width = 4, height = 6}}
+
+# Using wildcard patterns
+type Grade = | A, B, C, D, F |
+
+let isPassing = {grade: Grade} -> match grade is
+  A -> true
+  B -> true 
+  C -> true
+  _ -> false  # Matches D and F
+
+let gradeResult = isPassing {grade = A}
+
+# Result
+"Circle area: " ++ intToString {val = circleArea} ++ ", Rectangle area: " ++ intToString {val = rectangleArea}

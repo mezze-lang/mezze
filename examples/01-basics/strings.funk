@@ -1,0 +1,26 @@
+# String Operations in Funk
+
+# Basic strings
+let firstName = "Alice"
+let lastName = "Johnson"
+
+# String concatenation with ++
+let fullName = firstName ++ " " ++ lastName
+
+# Working with string literals
+let greeting = "Hello"
+let punctuation = "!"
+let exclamation = greeting ++ ", " ++ fullName ++ punctuation
+
+# Multi-part string building
+let intro = "Welcome to the world of "
+let subject = "functional programming"
+let conclusion = " with Funk!"
+let welcomeMessage = intro ++ subject ++ conclusion
+
+# String with numbers (using conversion)
+let age = 30
+let ageMessage = fullName ++ " is " ++ intToString {val = age} ++ " years old"
+
+# Result
+ageMessage

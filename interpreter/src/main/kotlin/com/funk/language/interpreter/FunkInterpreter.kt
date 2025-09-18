@@ -681,12 +681,29 @@ class FunkInterpreter {
      */
     private fun evaluateMatchExpression(value: FunkValue, cases: List<MatchCase>, context: MutableMap<String, FunkValue>): FunkValue {
         for (case in cases) {
-            val patternContext = mutableMapOf<String, FunkValue>()
-            if (matchesPattern(value, case.pattern, patternContext)) {
-                // Create new context with pattern bindings
-                val newContext = context.toMutableMap()
-                newContext.putAll(patternContext)
-                return evaluateExpression(case.expression, newContext)
+            // Try each pattern in the case
+            for (pattern in case.patterns) {
+                val patternContext = mutableMapOf<String, FunkValue>()
+                if (matchesPattern(value, pattern, patternContext)) {
+                    // Pattern matched, now check guard if present
+                    val newContext = context.toMutableMap()
+                    newContext.putAll(patternContext)
+                    
+                    // Evaluate guard condition if present
+                    val guardPassed = case.guard?.let { guard ->
+                        val guardResult = evaluateExpression(guard, newContext)
+                        when (guardResult) {
+                            is FunkBoolean -> guardResult.value
+                            else -> throw RuntimeException("Guard condition must evaluate to Boolean, got ${guardResult::class.simpleName}")
+                        }
+                    } ?: true // No guard means it passes
+                    
+                    if (guardPassed) {
+                        // Guard passed (or no guard), execute case body
+                        return evaluateExpression(case.expression, newContext)
+                    }
+                    // Guard failed, continue to next pattern/case
+                }
             }
         }
         throw RuntimeException("No matching pattern found for value: $value")

@@ -255,9 +255,18 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
 
     override fun visitMatchCase(ctx: FunkParser.MatchCaseContext): Any {
-        val pattern = visit(ctx.pattern()) as Pattern
+        val patterns = ctx.patternList().pattern().map { visit(it) as Pattern }
+        val guard = ctx.guardCondition()?.expression()?.let { visit(it) as Expression }
         val expression = visit(ctx.expression()) as Expression
-        return MatchCase(pattern, expression)
+        return MatchCase(patterns, guard, expression)
+    }
+
+    override fun visitPatternList(ctx: FunkParser.PatternListContext): Any {
+        return ctx.pattern().map { visit(it) as Pattern }
+    }
+
+    override fun visitGuardCondition(ctx: FunkParser.GuardConditionContext): Any {
+        return visit(ctx.expression()) as Expression
     }
 
 
@@ -272,7 +281,29 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
 
     override fun visitUpdateExpression(ctx: FunkParser.UpdateExpressionContext): Any {
-        return visit(ctx.comparisonExpression())
+        return visit(ctx.logicalOrExpression())
+    }
+
+    override fun visitLogicalOrExpression(ctx: FunkParser.LogicalOrExpressionContext): Any {
+        var result = visit(ctx.logicalAndExpression(0)) as Expression
+        
+        for (i in 1 until ctx.logicalAndExpression().size) {
+            val right = visit(ctx.logicalAndExpression(i)) as Expression
+            result = BinaryOperation(result, "||", right)
+        }
+        
+        return result
+    }
+
+    override fun visitLogicalAndExpression(ctx: FunkParser.LogicalAndExpressionContext): Any {
+        var result = visit(ctx.comparisonExpression(0)) as Expression
+        
+        for (i in 1 until ctx.comparisonExpression().size) {
+            val right = visit(ctx.comparisonExpression(i)) as Expression
+            result = BinaryOperation(result, "&&", right)
+        }
+        
+        return result
     }
 
     override fun visitComparisonExpression(ctx: FunkParser.ComparisonExpressionContext): Any {

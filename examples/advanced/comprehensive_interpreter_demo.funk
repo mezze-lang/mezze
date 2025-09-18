@@ -1,7 +1,0 @@
-# Comprehensive interpreter demo
-let name = "Funk"
-let version = 1
-let isStable = true
-let config = { language = name, majorVersion = version, stable = isStable }
-let description = "Language: " ++ config.language
-let finalMessage = if config.stable then description ++ " (stable)" else description ++ " (experimental)"

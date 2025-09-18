@@ -1,0 +1,43 @@
+# Simple Functions in Funk
+# Basic function definition and usage
+
+# Simple arithmetic function
+let add = {x, y} -> x + y
+
+# String manipulation function
+let greet = {name} -> "Hello, " ++ name ++ "!"
+
+# Function with conditional logic
+let max = {a, b} -> if a > b then a else b
+
+# Function that uses pattern matching
+type Color = | Red, Green, Blue |
+
+let colorName = {color: Color} -> match color is
+  Red -> "Red"
+  Green -> "Green" 
+  Blue -> "Blue"
+
+# Function with multiple operations
+let calculateArea = {radius} -> 
+  let pi = 3
+  pi * radius * radius
+
+# Functions can call other functions
+let doubleAdd = {x, y} -> add {x = x * 2, y = y * 2}
+
+# Testing the functions
+let sum = add {x = 5, y = 3}
+let greeting = greet {name = "Alice"}
+let maximum = max {a = 10, b = 7}
+let area = calculateArea {radius = 5}
+let doubled = doubleAdd {x = 2, y = 3}
+
+# Function with record parameter
+let formatPerson = {person} -> 
+  person.name ++ " is " ++ intToString {val = person.age} ++ " years old"
+
+let personInfo = formatPerson {person = {name = "Bob", age = 25}}
+
+# Result
+"Sum: " ++ intToString {val = sum} ++ ", Greeting: " ++ greeting ++ ", Area: " ++ intToString {val = area}

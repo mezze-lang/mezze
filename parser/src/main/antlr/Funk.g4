@@ -124,12 +124,20 @@ variantExpression:
     ;
 
 matchExpression:
-    MATCH expression LBRACE NEWLINE? (matchCase NEWLINE?)* RBRACE
+    MATCH expression IS NEWLINE? (matchCase NEWLINE?)*
     | ifExpression
     ;
 
 matchCase:
-    PIPE_DELIM? pattern ARROW expression
+    patternList guardCondition? ARROW expression
+    ;
+
+patternList:
+    pattern (PIPE_DELIM pattern)*
+    ;
+
+guardCondition:
+    IF expression
     ;
 
 pattern:
@@ -154,7 +162,15 @@ ifExpression:
     ;
 
 updateExpression:
-    comparisonExpression
+    logicalOrExpression
+    ;
+
+logicalOrExpression:
+    logicalAndExpression (OR logicalAndExpression)*
+    ;
+
+logicalAndExpression:
+    comparisonExpression (AND comparisonExpression)*
     ;
 
 comparisonExpression:
@@ -281,6 +297,7 @@ IF: 'if';
 THEN: 'then';
 ELSE: 'else';
 MATCH: 'match';
+IS: 'is';
 DO: 'do';
 EFFECT: 'effect';
 IMPL: 'impl';
@@ -311,6 +328,10 @@ GTE: '>=';
 LTE: '<=';
 EQ: '==';
 NEQ: '!=';
+
+// Logical operators
+AND: '&&';
+OR: '||';
 
 // Delimiters
 LPAREN: '(';

@@ -1,3 +1,0 @@
-let person = { name = "Alice", age = 25 }
-let updated = person { age = 26 }
-let greeting = "Hello " ++ updated.name ++ ", you are " ++ "26"

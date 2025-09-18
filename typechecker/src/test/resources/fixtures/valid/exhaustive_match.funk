@@ -3,11 +3,10 @@
 type Color = | Red, Blue { val: Int }, Green |
 
 # This should PASS - all cases covered
-let processColor: {color: Color} -> String = {color} -> match color {
+let processColor: {color: Color} -> String = {color} -> match color is
   Red -> "red"
   Blue {val} -> "blue"  
-  Green -> "green"
-}                                                       # expected: processColor : { color: Color } -> String
+  Green -> "green"                                                       # expected: processColor : { color: Color } -> String
 
 let result = processColor {color = Red}                 # expected: result : String
 
