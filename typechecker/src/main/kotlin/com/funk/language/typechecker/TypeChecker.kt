@@ -41,6 +41,11 @@ class TypeChecker {
     // Current program being type checked (for looking up ImplDeclarations)
     private var currentProgram: Program? = null
     
+    // Context tracking for effect handler validation
+    private var currentImplContext: ImplDeclaration? = null
+    private var currentPerformContext: PerformExpression? = null
+    private var currentDoContext: DoExpression? = null
+    
     // Ability constraint tracking
     private val abilityConstraints = mutableListOf<FunkType.FunctionAbilityConstraint>()
     private val abilityDependencies = mutableMapOf<String, List<AbilityDependency>>()
@@ -166,8 +171,17 @@ class TypeChecker {
                     item.copy(inferredType = effectType)
                 }
                 is ImplDeclaration -> {
-                    // Validate performer implementation with new rules
-                    validatePerformerImplementation(item)
+                    // Set context for effect handler validation
+                    val previousImplContext = currentImplContext
+                    currentImplContext = item
+                    
+                    try {
+                        // Validate performer implementation with new rules
+                        validatePerformerImplementation(item)
+                    } finally {
+                        // Restore previous context
+                        currentImplContext = previousImplContext
+                    }
                     
                     // Register performer implementation in context
                     val operationTypes = item.operations.associate { op ->
@@ -696,6 +710,197 @@ class TypeChecker {
                     }
                 }
             }
+            is LambdaExpression -> {
+                // BIDIRECTIONAL CONTEXT: Handle lambda expressions with expected function type
+                // This is crucial for Option 4 - when we expect {x: Int, y: Int} -> Int <Log>,
+                // we should pass Int <Log> as the expected return type to the lambda body
+                
+                if (expectedType is com.funk.language.ast.FunkType.FunctionType) {
+                    // Extract expected return type and pass it to the lambda body
+                    val expectedReturnType = expectedType.returnType
+                    val expectedEffects = expectedType.effects
+                    
+                    // Enter new scope for lambda parameters
+                    val originalContext = context.toMap()
+                    val scopeLevel = com.funk.language.ast.TypeVar.enterScope()
+                    
+                    try {
+                        // Set up parameters based on expected parameter type
+                        when (val params = expr.parameters) {
+                            is UntypedParameters -> {
+                                // Use expected parameter types from the function type
+                                val expectedParamType = expectedType.paramType
+                                if (expectedParamType is com.funk.language.ast.FunkType.RecordType) {
+                                    val expectedParams = expectedParamType.fields
+                                    params.names.forEachIndexed { index, name ->
+                                        val expectedParamTypeForName = expectedParams[name] ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
+                                        context[name] = expectedParamTypeForName
+                                    }
+                                }
+                            }
+                            is TypedParameters -> {
+                                // Use explicitly typed parameters
+                                val annotatedType = convertTypeAnnotation(params.recordType)
+                                if (annotatedType is com.funk.language.ast.FunkType.RecordType) {
+                                    annotatedType.fields.forEach { (name, type) ->
+                                        context[name] = type
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Infer the body with expected return type (this is the key!)
+                        val bodyType = if (expectedReturnType != null) {
+                            inferBasicTypeWithExpected(expr.body, expectedReturnType)
+                        } else {
+                            inferBasicType(expr.body)
+                        }
+                        
+                        // Return the expected function type structure
+                        com.funk.language.ast.FunkType.FunctionType(
+                            expectedType.paramType,
+                            bodyType,
+                            expectedEffects
+                        )
+                    } finally {
+                        // Exit scope and restore original context
+                        com.funk.language.ast.TypeVar.exitScope()
+                        context.clear()
+                        context.putAll(originalContext)
+                    }
+                } else {
+                    // No expected function type, fall back to normal inference
+                    inferBasicType(expr)
+                }
+            }
+            is FunctionCall -> {
+                // BIDIRECTIONAL CONTEXT: Handle function calls with expected type
+                // This is crucial for direct effect calls in lambda bodies
+                
+                if (expr.function is MemberAccess) {
+                    val memberAccess = expr.function as MemberAccess
+                    val effectName = when (memberAccess.receiver) {
+                        is Identifier -> (memberAccess.receiver as Identifier).name
+                        is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
+                        else -> null
+                    }
+                    
+                    if (effectName != null) {
+                        val effectType = context[effectName]
+                        if (effectType is com.funk.language.ast.FunkType.RecordType) {
+                            // This is an effect call - return the expected type directly
+                            // instead of creating a thunk
+                            val operationType = effectType.fields[memberAccess.member]
+                            if (operationType is com.funk.language.ast.FunkType.FunctionType) {
+                                val argType = inferBasicType(expr.arguments)
+                                if (isTypeCompatible(argType, operationType.paramType)) {
+                                    // Return the expected type directly - effects will be handled by outer context
+                                    return expectedType
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Not an effect call, fall back to normal inference
+                inferBasicType(expr)
+            }
+            is DoExpression -> {
+                // BIDIRECTIONAL CONTEXT: Handle do blocks with expected type
+                // This is the key fix for Option 4 - when we have an expected type (either a direct type
+                // or an effectful function type), we should match that structure instead of creating a thunk
+                
+                // Case 1: Expected type is an effectful function like {x: Int} -> Int <Log>
+                if (expectedType is com.funk.language.ast.FunkType.FunctionType && expectedType.effects != null) {
+                    // Expected type is a direct effectful function like {x: Int} -> Int <Log>
+                    // Don't create a thunk, instead return the result type with effects attached to the expected function
+                    
+                    // Set context for effect call handling within do blocks
+                    val previousDoContext = currentDoContext
+                    currentDoContext = expr
+                    
+                    try {
+                        val collectedEffects = mutableSetOf<String>()
+                        
+                        // Process statements to add variables to context and collect effects
+                        for (statement in expr.statements) {
+                            when (statement) {
+                                is LetStatement -> {
+                                    val actualType = inferBasicType(statement.expression)
+                                    context[statement.variableName] = actualType
+                                    // Collect effects from the let statement expression
+                                    collectEffectsFromExpression(statement.expression, collectedEffects)
+                                }
+                                is ExpressionStatement -> {
+                                    inferBasicType(statement.expression)
+                                    // Collect effects from the expression statement
+                                    collectEffectsFromExpression(statement.expression, collectedEffects)
+                                }
+                            }
+                        }
+                        
+                        // Get the type of the final expression and collect its effects
+                        val resultType = inferBasicType(expr.result)
+                        collectEffectsFromExpression(expr.result, collectedEffects)
+                        
+                        // Return the expected function type structure with collected effects
+                        // This preserves the direct effectful function structure the user declared
+                        val combinedEffects = (expectedType.effects?.effects ?: emptySet()) + collectedEffects
+                        val effectRow = if (combinedEffects.isNotEmpty()) {
+                            com.funk.language.ast.FunkType.EffectRow(combinedEffects)
+                        } else {
+                            expectedType.effects
+                        }
+                        
+                        com.funk.language.ast.FunkType.FunctionType(
+                            expectedType.paramType,
+                            resultType,
+                            effectRow
+                        )
+                    } finally {
+                        // Restore previous context
+                        currentDoContext = previousDoContext
+                    }
+                } else {
+                    // Case 2: Expected type is a direct result type (when called from lambda body)
+                    // In this case, we should collect effects and return the expected type directly
+                    
+                    // Set context for effect call handling within do blocks
+                    val previousDoContext = currentDoContext
+                    currentDoContext = expr
+                    
+                    try {
+                        val collectedEffects = mutableSetOf<String>()
+                        
+                        // Process statements to add variables to context and collect effects
+                        for (statement in expr.statements) {
+                            when (statement) {
+                                is LetStatement -> {
+                                    val actualType = inferBasicType(statement.expression)
+                                    context[statement.variableName] = actualType
+                                    // Collect effects from the let statement expression
+                                    collectEffectsFromExpression(statement.expression, collectedEffects)
+                                }
+                                is ExpressionStatement -> {
+                                    inferBasicType(statement.expression)
+                                    // Collect effects from the expression statement
+                                    collectEffectsFromExpression(statement.expression, collectedEffects)
+                                }
+                            }
+                        }
+                        
+                        // Get the type of the final expression and collect its effects
+                        val resultType = inferBasicType(expr.result)
+                        collectEffectsFromExpression(expr.result, collectedEffects)
+                        
+                        // Return the expected type - the effects will be handled by the outer context
+                        expectedType
+                    } finally {
+                        // Restore previous context
+                        currentDoContext = previousDoContext
+                    }
+                }
+            }
             else -> {
                 // For other expressions, fall back to normal inference
                 inferBasicType(expr)
@@ -736,6 +941,9 @@ class TypeChecker {
                 // Check if this is an effect call (function is a member access like Log.log)
                 if (expr.function is MemberAccess) {
                     val memberAccess = expr.function as MemberAccess
+                    
+                    // CRITICAL VALIDATION: Check if this is a direct handler call (not allowed)
+                    validateEffectHandlerUsage(memberAccess)
                     val effectName = when (memberAccess.receiver) {
                         is Identifier -> (memberAccess.receiver as Identifier).name
                         is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
@@ -752,7 +960,21 @@ class TypeChecker {
                             if (operationType is com.funk.language.ast.FunkType.FunctionType) {
                                 val argType = inferBasicType(expr.arguments)
                                 if (isTypeCompatible(argType, operationType.paramType)) {
-                                    return operationType.returnType
+                                    val returnType = operationType.returnType
+                                    
+                                    if (currentDoContext != null) {
+                                        // Inside a do block: return the actual value type
+                                        // The do block will collect the effects and make the whole block effectful
+                                        return returnType
+                                    } else {
+                                        // Outside do blocks: return a thunk representing the effectful computation
+                                        val effectRow = com.funk.language.ast.FunkType.EffectRow(setOf(effectName))
+                                        return com.funk.language.ast.FunkType.FunctionType(
+                                            com.funk.language.ast.FunkType.RecordType(emptyMap()), // {} parameter (unit)
+                                            returnType,
+                                            effectRow
+                                        )
+                                    }
                                 } else {
                                     throw RuntimeException("Effect call ${effectName}.${operationName} expects ${prettyPrintType(operationType.paramType)} but got ${prettyPrintType(argType)}")
                                 }
@@ -1562,23 +1784,58 @@ class TypeChecker {
                 finalFunctionType
             }
             is DoExpression -> {
-                // Process statements to add variables to context, but don't create new scopes
+                // Set context for effect call handling within do blocks
+                val previousDoContext = currentDoContext
+                currentDoContext = expr
+                
+                try {
+                    // CRITICAL FIX: DoExpression must collect effects and return effectful computation type
+                    val collectedEffects = mutableSetOf<String>()
+                
+                // Process statements to add variables to context and collect effects
                 for (statement in expr.statements) {
                     when (statement) {
                         is LetStatement -> {
                             val actualType = inferBasicType(statement.expression)
                             context[statement.variableName] = actualType
+                            // Collect effects from the let statement expression
+                            collectEffectsFromExpression(statement.expression, collectedEffects)
                         }
                         is ExpressionStatement -> {
                             inferBasicType(statement.expression)
+                            // Collect effects from the expression statement
+                            collectEffectsFromExpression(statement.expression, collectedEffects)
                         }
                     }
                 }
                 
-                // Return type of the final expression
-                inferBasicType(expr.result)
+                // Get the type of the final expression and collect its effects
+                val resultType = inferBasicType(expr.result)
+                collectEffectsFromExpression(expr.result, collectedEffects)
+                
+                // If there are effects, return a function type representing the effectful computation
+                if (collectedEffects.isNotEmpty()) {
+                    val effectRow = com.funk.language.ast.FunkType.EffectRow(collectedEffects)
+                    com.funk.language.ast.FunkType.FunctionType(
+                        com.funk.language.ast.FunkType.RecordType(emptyMap()), // {} parameter (unit)
+                        resultType,
+                        effectRow
+                    )
+                } else {
+                    // No effects, just return the result type
+                    resultType
+                }
+                } finally {
+                    // Restore previous context
+                    currentDoContext = previousDoContext
+                }
             }
             is PerformExpression -> {
+                // Set context for effect handler validation
+                val previousPerformContext = currentPerformContext
+                currentPerformContext = expr
+                
+                try {
                 // Perform expressions execute effectful code with specific handlers
                 val exprType = inferTypeWithUnification(expr.expression)
                 
@@ -1692,11 +1949,19 @@ class TypeChecker {
                             com.funk.language.ast.FunkType.EffectRow(currentEffects, exprType.effects!!.rowVar)
                         }
                         
+                        // CRITICAL FIX: When all effects are handled, return the return type directly
+                        // perform Console in (program : {} -> Int <Log>) should return Int, not {} -> Int
+                        if (newEffectRow == null) {
+                            // All effects handled, return the return type directly
+                            exprType.returnType
+                        } else {
+                            // Some effects remain, return function type with remaining effects
                         com.funk.language.ast.FunkType.FunctionType(
                             exprType.paramType,
                             exprType.returnType,
                             newEffectRow
                         )
+                        }
                     } else {
                         exprType
                     }
@@ -1704,6 +1969,10 @@ class TypeChecker {
                     // For non-function types, return the result type of executing the expression
                     // If there were effects to handle, they've been handled, so return the base type
                     exprType
+                }
+                } finally {
+                    // Restore previous context
+                    currentPerformContext = previousPerformContext
                 }
             }
             is EffectCallExpression -> {
@@ -2981,13 +3250,9 @@ class TypeChecker {
                 effects.add(expr.effectName)
             }
             is DoExpression -> {
-                expr.statements.forEach { stmt ->
-                    when (stmt) {
-                        is LetStatement -> collectEffectsFromExpression(stmt.expression, effects)
-                        is ExpressionStatement -> collectEffectsFromExpression(stmt.expression, effects)
-                    }
-                }
-                collectEffectsFromExpression(expr.result, effects)
+                // DoExpression effects are handled by the main DoExpression inference logic
+                // to avoid double-counting effects. The main logic already collects effects
+                // from statements and result properly.
             }
             is FunctionCall -> {
                 // Check if this is an effect call (function is a member access like Log.log)
@@ -3067,7 +3332,17 @@ class TypeChecker {
             is PerformExpression -> {
                 collectEffectsFromExpression(expr.expression, effects)
             }
-            // Literals and identifiers don't have effects
+            is Identifier -> {
+                // CRITICAL FIX: Identifiers can have effects if they refer to effectful expressions
+                // Look up the identifier's type and collect effects from it
+                val identifierType = context[expr.name]
+                if (identifierType is com.funk.language.ast.FunkType.FunctionType) {
+                    identifierType.effects?.effects?.forEach { effect ->
+                        effects.add(effect)
+                    }
+                }
+            }
+            // Literals don't have effects
             else -> {}
         }
     }
@@ -3848,6 +4123,53 @@ class TypeChecker {
         }
     }
     
+    /**
+     * Validate that effect handler calls are only used in appropriate contexts
+     * Rules:
+     * 1. Abstract effect calls (Log.info) are allowed everywhere
+     * 2. Handler calls (BasicLogger.info) are only allowed:
+     *    - Inside impl declarations of the same effect type
+     *    - Inside perform expressions (handled separately)
+     */
+    private fun validateEffectHandlerUsage(memberAccess: MemberAccess) {
+        val receiverName = when (memberAccess.receiver) {
+            is Identifier -> (memberAccess.receiver as Identifier).name
+            is VariantConstruction -> (memberAccess.receiver as VariantConstruction).constructor
+            else -> return // Not a simple identifier or variant, skip validation
+        }
+        
+        // Validate effect handler usage
+        
+        // Check if this is a handler call (performer name)
+        val isHandlerCall = currentProgram?.items?.any { item ->
+            item is ImplDeclaration && item.performerName == receiverName
+        } ?: false
+        
+        if (isHandlerCall) {
+            // This is a handler call - check if we're in an appropriate context
+            val handlerEffectType = findEffectForPerformer(receiverName)
+            
+            // Check if we're inside an impl declaration of the same effect type
+            val currentImplEffectType = currentImplContext?.effectName
+            
+            if (currentImplEffectType != null && currentImplEffectType == handlerEffectType) {
+                // We're inside an impl of the same effect type - this is allowed
+                return
+            }
+            
+            // Check if we're inside a perform expression (this is handled by PerformExpression validation)
+            if (currentPerformContext != null) {
+                // We're inside a perform expression - this is allowed
+                return
+            }
+            
+            // Not in an appropriate context - this is an error
+            throw RuntimeException("Effect handler '$receiverName' cannot be called directly. Use 'perform $receiverName in ...' syntax or call from within an impl of the same effect type.")
+        }
+        
+        // If it's not a handler call (i.e., it's an abstract effect call), it's always allowed
+    }
+
     /**
      * Validate that effect names and impl performer names don't conflict
      */
