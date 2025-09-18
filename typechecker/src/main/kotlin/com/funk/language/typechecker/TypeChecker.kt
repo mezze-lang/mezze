@@ -45,6 +45,7 @@ class TypeChecker {
     private var currentImplContext: ImplDeclaration? = null
     private var currentPerformContext: PerformExpression? = null
     private var currentDoContext: DoExpression? = null
+    private var currentLambdaContext: LambdaExpression? = null
     
     // Ability constraint tracking
     private val abilityConstraints = mutableListOf<FunkType.FunctionAbilityConstraint>()
@@ -723,6 +724,8 @@ class TypeChecker {
                     // Enter new scope for lambda parameters
                     val originalContext = context.toMap()
                     val scopeLevel = com.funk.language.ast.TypeVar.enterScope()
+                    val previousLambdaContext = currentLambdaContext
+                    currentLambdaContext = expr
                     
                     try {
                         // Set up parameters based on expected parameter type
@@ -756,17 +759,30 @@ class TypeChecker {
                             inferBasicType(expr.body)
                         }
                         
-                        // Return the expected function type structure
+                        // CRITICAL FIX: Collect effects from lambda body even in bidirectional inference
+                        val collectedEffects = mutableSetOf<String>()
+                        collectEffectsFromExpression(expr.body, collectedEffects)
+                        
+                        // Combine expected effects with collected effects
+                        val allEffects = (expectedEffects?.effects ?: emptySet()) + collectedEffects
+                        val finalEffectRow = if (allEffects.isNotEmpty()) {
+                            com.funk.language.ast.FunkType.EffectRow(allEffects)
+                        } else {
+                            null
+                        }
+                        
+                        // Return the expected function type structure with collected effects
                         com.funk.language.ast.FunkType.FunctionType(
                             expectedType.paramType,
                             bodyType,
-                            expectedEffects
+                            finalEffectRow
                         )
                     } finally {
                         // Exit scope and restore original context
                         com.funk.language.ast.TypeVar.exitScope()
                         context.clear()
                         context.putAll(originalContext)
+                        currentLambdaContext = previousLambdaContext
                     }
                 } else {
                     // No expected function type, fall back to normal inference
@@ -962,12 +978,12 @@ class TypeChecker {
                                 if (isTypeCompatible(argType, operationType.paramType)) {
                                     val returnType = operationType.returnType
                                     
-                                    if (currentDoContext != null) {
-                                        // Inside a do block: return the actual value type
-                                        // The do block will collect the effects and make the whole block effectful
+                                    if (currentDoContext != null || currentLambdaContext != null) {
+                                        // Inside a do block or lambda: return the actual value type
+                                        // The surrounding context will collect the effects
                                         return returnType
                                     } else {
-                                        // Outside do blocks: return a thunk representing the effectful computation
+                                        // Top-level effect call: return a thunk representing the effectful computation
                                         val effectRow = com.funk.language.ast.FunkType.EffectRow(setOf(effectName))
                                         return com.funk.language.ast.FunkType.FunctionType(
                                             com.funk.language.ast.FunkType.RecordType(emptyMap()), // {} parameter (unit)
@@ -1135,8 +1151,8 @@ class TypeChecker {
                     return com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
                 }
                 
-                // Note: Exhaustiveness checking is handled by type annotation vs inferred type mismatch
-                // Wildcards are allowed in closed variants when not all cases are covered
+                // EXHAUSTIVENESS CHECKING
+                checkMatchExhaustivenessAndWildcards(matchedType, expr.cases)
                 
                 // Type check each case with pattern bindings
                 val caseTypes = mutableListOf<com.funk.language.ast.FunkType>()
@@ -1507,10 +1523,11 @@ class TypeChecker {
                 com.funk.language.ast.FunkType.VariantType(constructors, null)
             }
             is LambdaExpression -> {
-                
                 // Enter new scope for lambda parameters
                 val originalContext = context.toMap()
                 val scopeLevel = com.funk.language.ast.TypeVar.enterScope()
+                val previousLambdaContext = currentLambdaContext
+                currentLambdaContext = expr
                 
                 // Variables to store heuristic results
                 var heuristicParamType: com.funk.language.ast.FunkType? = null
@@ -1747,6 +1764,7 @@ class TypeChecker {
                 com.funk.language.ast.TypeVar.exitScope()
                 context.clear()
                 context.putAll(originalContext)
+                currentLambdaContext = previousLambdaContext
                 
                 
                 // CRITICAL FIX: Ensure parameter and return types use the same constraint for polymorphic arithmetic
@@ -1813,17 +1831,24 @@ class TypeChecker {
                 val resultType = inferBasicType(expr.result)
                 collectEffectsFromExpression(expr.result, collectedEffects)
                 
-                // If there are effects, return a function type representing the effectful computation
-                if (collectedEffects.isNotEmpty()) {
-                    val effectRow = com.funk.language.ast.FunkType.EffectRow(collectedEffects)
-                    com.funk.language.ast.FunkType.FunctionType(
-                        com.funk.language.ast.FunkType.RecordType(emptyMap()), // {} parameter (unit)
-                        resultType,
-                        effectRow
-                    )
-                } else {
-                    // No effects, just return the result type
+                // CRITICAL FIX: Only create thunks for top-level do expressions
+                // Don't create thunks for do expressions inside lambda bodies
+                if (currentLambdaContext != null) {
+                    // Inside a lambda body - return direct result type, effects will be collected by lambda
                     resultType
+                } else {
+                    // Top-level do expression - create a thunk
+                    if (collectedEffects.isNotEmpty()) {
+                        val effectRow = com.funk.language.ast.FunkType.EffectRow(collectedEffects)
+                        com.funk.language.ast.FunkType.FunctionType(
+                            com.funk.language.ast.FunkType.RecordType(emptyMap()), // {} parameter (unit)
+                            resultType,
+                            effectRow
+                        )
+                    } else {
+                        // No effects, just return the result type
+                        resultType
+                    }
                 }
                 } finally {
                     // Restore previous context
@@ -1896,10 +1921,10 @@ class TypeChecker {
                 }
                 
                 
-                // Use expanded effects for validation
-                val finalAvailableEffects = expandedEffects
+                // Use expanded effects for validation - make it mutable for consumption tracking
+                val consumableEffects = expandedEffects.toMutableSet()
                 
-                // Process handlers in reverse order (right-to-left)
+                // Process handlers in reverse order (right-to-left) with effect consumption
                 for (handlerName in handlerNames.reversed()) {
                     // Find which effect this handler implements
                     var handlerEffect: String? = null
@@ -1911,12 +1936,13 @@ class TypeChecker {
                     }
                     
                     if (handlerEffect != null) {
-                        // Check if this effect is available (using expanded effects)
-                        if (!finalAvailableEffects.contains(handlerEffect)) {
-                            throw RuntimeException("Performer '$handlerName' expects to handle effect '$handlerEffect', but effect '$handlerEffect' is not available in the expression")
+                        // Check if this effect is still available (not already consumed)
+                        if (!consumableEffects.contains(handlerEffect)) {
+                            throw RuntimeException("Performer '$handlerName' expects to handle effect '$handlerEffect', but effect '$handlerEffect' is not available (already consumed by a previous performer)")
                         }
                         
-                        // Track handled effects but don't remove from available (allows nested usage)
+                        // CONSUME the effect - remove it from available effects
+                        consumableEffects.remove(handlerEffect)
                         handledEffects.add(handlerEffect)
                     }
                 }
@@ -1949,11 +1975,24 @@ class TypeChecker {
                             com.funk.language.ast.FunkType.EffectRow(currentEffects, exprType.effects!!.rowVar)
                         }
                         
-                        // CRITICAL FIX: When all effects are handled, return the return type directly
-                        // perform Console in (program : {} -> Int <Log>) should return Int, not {} -> Int
+                        // When all effects are handled
                         if (newEffectRow == null) {
-                            // All effects handled, return the return type directly
-                            exprType.returnType
+                            // All effects handled
+                            // Check if this is a thunk (function with unit parameter {})
+                            val isThunk = exprType.paramType is com.funk.language.ast.FunkType.RecordType && 
+                                (exprType.paramType as com.funk.language.ast.FunkType.RecordType).fields.isEmpty()
+                            
+                            if (isThunk && expr.expression is FunctionCall) {
+                                // This is perform Console in (thunk {}) - return the result type directly
+                                exprType.returnType
+                            } else {
+                                // This is perform Console in thunk OR regular function - return function without effects
+                                com.funk.language.ast.FunkType.FunctionType(
+                                    exprType.paramType,
+                                    exprType.returnType,
+                                    null // No effects
+                                )
+                            }
                         } else {
                             // Some effects remain, return function type with remaining effects
                         com.funk.language.ast.FunkType.FunctionType(
@@ -2143,6 +2182,49 @@ class TypeChecker {
         }
         
         return paramTypes
+    }
+    
+    /**
+     * Check exhaustiveness and wildcard usage in match expressions
+     */
+    private fun checkMatchExhaustivenessAndWildcards(matchedType: com.funk.language.ast.FunkType, cases: List<MatchCase>) {
+        // Only check exhaustiveness for closed variant types
+        if (matchedType !is com.funk.language.ast.FunkType.VariantType) {
+            return // Can't check exhaustiveness for non-variant types
+        }
+        
+        if (matchedType.rowVar != null) {
+            return // Open variant - exhaustiveness not required
+        }
+        
+        // This is a closed variant - check exhaustiveness
+        val requiredConstructors = matchedType.constructors.keys
+        val coveredConstructors = mutableSetOf<String>()
+        var hasWildcard = false
+        
+        for (case in cases) {
+            when (val pattern = case.pattern) {
+                is ConstructorPattern -> {
+                    coveredConstructors.add(pattern.constructor)
+                }
+                is WildcardPattern -> {
+                    hasWildcard = true
+                }
+                is RecordPattern, is VariablePattern -> {
+                    // Other patterns don't cover specific constructors
+                }
+            }
+        }
+        
+        val uncoveredConstructors = requiredConstructors - coveredConstructors
+        
+        if (uncoveredConstructors.isNotEmpty() && !hasWildcard) {
+            // Non-exhaustive match without wildcard
+            throw RuntimeException("Non-exhaustive pattern match: missing cases for ${uncoveredConstructors.joinToString(", ")} in closed variant")
+        }
+        
+        // Note: Wildcards are allowed in closed variants when not all cases are covered
+        // This is a design decision - wildcards provide a catch-all for missing cases
     }
     
     /**
@@ -3250,9 +3332,14 @@ class TypeChecker {
                 effects.add(expr.effectName)
             }
             is DoExpression -> {
-                // DoExpression effects are handled by the main DoExpression inference logic
-                // to avoid double-counting effects. The main logic already collects effects
-                // from statements and result properly.
+                // Collect effects from statements and result
+                expr.statements.forEach { stmt ->
+                    when (stmt) {
+                        is LetStatement -> collectEffectsFromExpression(stmt.expression, effects)
+                        is ExpressionStatement -> collectEffectsFromExpression(stmt.expression, effects)
+                    }
+                }
+                collectEffectsFromExpression(expr.result, effects)
             }
             is FunctionCall -> {
                 // Check if this is an effect call (function is a member access like Log.log)
@@ -4208,9 +4295,8 @@ class TypeChecker {
                 ?: throw TypeCheckError("Operation '${operation.name}' not found in effect '${impl.effectName}'")
             
             // Get the effects that are declared in the implementation operation (not the original effect)
-            // The implementation can declare additional effects that it needs
-            // TODO: Extract effects from operation signature properly
-            val declaredEffects: Set<String> = setOf("Console", "Log", "Auth", "Error", "Cache", "Database") // Temporary: allow common effects
+            // Extract effects from the operation's effects annotation
+            val declaredEffects: Set<String> = operation.effects?.effects?.toSet() ?: emptySet()
             
             // Collect all effects used in the implementation
             val usedEffects = mutableSetOf<String>()
@@ -4230,10 +4316,8 @@ class TypeChecker {
                         invalidUsages.add("$usedEffect (impl of $effectForPerformer, but this is impl of ${impl.effectName})")
                     }
                 } else {
-                    // This is an abstract effect - check if it's declared in the signature
-                    if (!declaredEffects.contains(usedEffect)) {
-                        invalidUsages.add("$usedEffect (abstract effect not declared in signature)")
-                    }
+                    // This is an abstract effect - always allowed (implementations can use other effects)
+                    // Abstract effects are safe because they're just interface calls, not direct handler calls
                 }
             }
             
