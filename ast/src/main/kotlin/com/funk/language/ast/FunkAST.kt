@@ -69,6 +69,10 @@ sealed interface FunkType {
         val isClosed: Boolean get() = rowVar == null
     }
     
+    // ArrayList types (maps to java.util.ArrayList)
+    @Serializable
+    data class ArrayListType(val elementType: FunkType) : FunkType
+    
     // Function types
     @Serializable
     data class FunctionType(
@@ -146,6 +150,9 @@ data class TypeScheme(
                     dataType?.let { applySubstitutionToType(it, substitution) }
                 },
                 type.rowVar
+            )
+            is FunkType.ArrayListType -> FunkType.ArrayListType(
+                applySubstitutionToType(type.elementType, substitution)
             )
             is FunkType.NumType -> FunkType.NumType(
                 substitution[type.constraint]?.let { 
@@ -400,6 +407,19 @@ data class ImplAbilityOperation(
 )
 
 // ============================================================================
+// SOURCE LOCATION TRACKING
+// ============================================================================
+
+@Serializable
+data class SourceLocation(
+    val line: Int,
+    val column: Int,
+    val file: String? = null
+) {
+    override fun toString(): String = if (file != null) "$file:$line:$column" else "$line:$column"
+}
+
+// ============================================================================
 // EXPRESSIONS (Unified - can be untyped or typed)
 // ============================================================================
 
@@ -407,44 +427,58 @@ data class ImplAbilityOperation(
 @JsonClassDiscriminator("exprKind")
 sealed interface Expression {
     val inferredType: FunkType? // null during parsing, filled by typechecker
+    val sourceLocation: SourceLocation? get() = null // source location for error reporting (default implementation)
 }
 
 // Literals
 @Serializable
 data class IntLiteral(
     val value: Long,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
 data class FloatLiteral(
     val value: Double,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
 data class StringLiteral(
     val value: String,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
 data class BooleanLiteral(
     val value: Boolean,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
+) : Expression
+
+@Serializable
+data class ArrayListLiteral(
+    val elements: List<Expression>,
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 // Variables
 @Serializable
 data class Identifier(
     val name: String,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 // Temporary placeholder for pipe operator desugaring - should never appear in final AST
 @Serializable
 data class PlaceholderExpression(
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 
@@ -454,7 +488,8 @@ data class BinaryOperation(
     val left: Expression,
     val operator: String,
     val right: Expression,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
@@ -512,7 +547,8 @@ data class RecordUpdateEntry(
 data class VariantConstruction(
     val constructor: String,
     val value: Expression? = null,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 // Functions
@@ -544,7 +580,8 @@ data class UntypedParameters(
 data class FunctionCall(
     val function: Expression,
     val arguments: Expression,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 // Control flow
@@ -560,7 +597,8 @@ data class IfExpression(
 data class MatchExpression(
     val expression: Expression,
     val cases: List<MatchCase>,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
@@ -695,6 +733,11 @@ data class FunctionTypeAnnotation(
 ) : TypeAnnotation
 
 @Serializable
+data class ArrayListTypeAnnotation(
+    val elementType: TypeAnnotation
+) : TypeAnnotation
+
+@Serializable
 data class EffectRowAnnotation(
     val effects: List<String>
 ) : TypeAnnotation
@@ -717,13 +760,6 @@ data class VariantTypeConstructor(
 
 @Serializable
 data class ContentHash(val hash: String)
-
-@Serializable
-data class SourceLocation(
-    val line: Int,
-    val column: Int,
-    val file: String? = null
-)
 
 /**
  * Convert TypeAnnotation to internal FunkType representation
@@ -919,6 +955,9 @@ private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<T
                 type.constructors[constructorName]?.let { collectTypeVariablesInOrder(it, collector) }
             }
         }
+        is FunkType.ArrayListType -> {
+            collectTypeVariablesInOrder(type.elementType, collector)
+        }
         // Base types don't contain type variables
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType -> {
@@ -950,6 +989,9 @@ private fun collectTypeVariables(type: FunkType, collector: MutableSet<TypeVar>)
             type.constructors.values.forEach { caseType ->
                 caseType?.let { collectTypeVariables(it, collector) }
             }
+        }
+        is FunkType.ArrayListType -> {
+            collectTypeVariables(type.elementType, collector)
         }
         // Base types don't contain type variables
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 

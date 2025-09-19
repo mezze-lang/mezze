@@ -20,6 +20,18 @@ class FunkParserImpl {
 private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
     /**
+     * Extract source location information from ANTLR4 parse context
+     */
+    private fun getSourceLocation(ctx: org.antlr.v4.runtime.ParserRuleContext): SourceLocation {
+        val token = ctx.start
+        return SourceLocation(
+            line = token.line,
+            column = token.charPositionInLine + 1, // ANTLR uses 0-based columns, we want 1-based
+            file = null // File information could be added later if needed
+        )
+    }
+
+    /**
      * Heuristic to determine if an identifier is likely a record variable vs a function.
      * This is conservative - when in doubt, we prefer function calls.
      */
@@ -286,10 +298,11 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
     override fun visitLogicalOrExpression(ctx: FunkParser.LogicalOrExpressionContext): Any {
         var result = visit(ctx.logicalAndExpression(0)) as Expression
+        val sourceLocation = getSourceLocation(ctx)
         
         for (i in 1 until ctx.logicalAndExpression().size) {
             val right = visit(ctx.logicalAndExpression(i)) as Expression
-            result = BinaryOperation(result, "||", right)
+            result = BinaryOperation(result, "||", right, sourceLocation = sourceLocation)
         }
         
         return result
@@ -297,10 +310,11 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
     override fun visitLogicalAndExpression(ctx: FunkParser.LogicalAndExpressionContext): Any {
         var result = visit(ctx.comparisonExpression(0)) as Expression
+        val sourceLocation = getSourceLocation(ctx)
         
         for (i in 1 until ctx.comparisonExpression().size) {
             val right = visit(ctx.comparisonExpression(i)) as Expression
-            result = BinaryOperation(result, "&&", right)
+            result = BinaryOperation(result, "&&", right, sourceLocation = sourceLocation)
         }
         
         return result
@@ -309,6 +323,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitComparisonExpression(ctx: FunkParser.ComparisonExpressionContext): Any {
         var result = visit(ctx.additiveExpression(0)) as Expression
         
+        val sourceLocation = getSourceLocation(ctx)
         for (i in 1 until ctx.additiveExpression().size) {
             val right = visit(ctx.additiveExpression(i)) as Expression
             val operator = when {
@@ -320,7 +335,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
                 ctx.NEQ(i-1) != null -> "!="
                 else -> "=="
             }
-            result = BinaryOperation(result, operator, right)
+            result = BinaryOperation(result, operator, right, sourceLocation = sourceLocation)
         }
         
         return result
@@ -329,6 +344,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitAdditiveExpression(ctx: FunkParser.AdditiveExpressionContext): Any {
         var result = visit(ctx.multiplicativeExpression(0)) as Expression
         
+        val sourceLocation = getSourceLocation(ctx)
         for (i in 1 until ctx.multiplicativeExpression().size) {
             val right = visit(ctx.multiplicativeExpression(i)) as Expression
             val operator = when {
@@ -337,7 +353,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
                 ctx.CONCAT(i-1) != null -> "++"
                 else -> "+"
             }
-            result = BinaryOperation(result, operator, right)
+            result = BinaryOperation(result, operator, right, sourceLocation = sourceLocation)
         }
         
         return result
@@ -346,6 +362,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitMultiplicativeExpression(ctx: FunkParser.MultiplicativeExpressionContext): Any {
         var result = visit(ctx.unaryExpression(0)) as Expression
         
+        val sourceLocation = getSourceLocation(ctx)
         for (i in 1 until ctx.unaryExpression().size) {
             val right = visit(ctx.unaryExpression(i)) as Expression
             val operator = when {
@@ -353,7 +370,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
                 ctx.DIVIDE(i-1) != null -> "/"
                 else -> "*"
             }
-            result = BinaryOperation(result, operator, right)
+            result = BinaryOperation(result, operator, right, sourceLocation = sourceLocation)
         }
         
         return result
@@ -389,16 +406,18 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             ctx.literal() != null -> visit(ctx.literal())
             ctx.Identifier() != null -> {
                 val name = ctx.Identifier().text
+                val sourceLocation = getSourceLocation(ctx)
                 // CRITICAL FIX: Convert uppercase identifiers to variant constructions
                 if (name.first().isUpperCase()) {
-                    VariantConstruction(name, null)  // Variant constructor without arguments
+                    VariantConstruction(name, null, sourceLocation = sourceLocation)  // Variant constructor without arguments
                 } else {
-                    Identifier(name)  // Regular identifier
+                    Identifier(name, sourceLocation = sourceLocation)  // Regular identifier
                 }
             }
             ctx.PLACEHOLDER() != null -> {
                 // Create placeholder expression for pipe operator desugaring
-                PlaceholderExpression()
+                val sourceLocation = getSourceLocation(ctx)
+                PlaceholderExpression(sourceLocation = sourceLocation)
             }
             ctx.expression() != null -> visit(ctx.expression())
             ctx.recordLiteral() != null -> {
@@ -434,25 +453,36 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
     // Literals
     override fun visitLiteral(ctx: FunkParser.LiteralContext): Any {
+        val sourceLocation = getSourceLocation(ctx)
         return when {
             ctx.Integer() != null -> {
                 val value = ctx.Integer().text.toLong()
-                IntLiteral(value)
+                IntLiteral(value, sourceLocation = sourceLocation)
             }
             ctx.Float() != null -> {
                 val value = ctx.Float().text.toDouble()
-                FloatLiteral(value)
+                FloatLiteral(value, sourceLocation = sourceLocation)
             }
             ctx.String() != null -> {
                 val value = ctx.String().text.removeSurrounding("\"")
-                StringLiteral(value)
+                StringLiteral(value, sourceLocation = sourceLocation)
             }
             ctx.Boolean() != null -> {
                 val value = ctx.Boolean().text.toBoolean()
-                BooleanLiteral(value)
+                BooleanLiteral(value, sourceLocation = sourceLocation)
+            }
+            ctx.arrayListLiteral() != null -> {
+                visitArrayListLiteral(ctx.arrayListLiteral())
             }
             else -> throw IllegalArgumentException("Unknown literal: ${ctx.text}")
         }
+    }
+
+    // ArrayList literals
+    override fun visitArrayListLiteral(ctx: FunkParser.ArrayListLiteralContext): Any {
+        val sourceLocation = getSourceLocation(ctx)
+        val elements = ctx.expression().map { visit(it) as Expression }
+        return ArrayListLiteral(elements, sourceLocation = sourceLocation)
     }
 
     // Records
@@ -580,6 +610,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             ctx.recordType() != null -> visit(ctx.recordType())
             ctx.variantType() != null -> visit(ctx.variantType())
             ctx.functionType() != null -> visit(ctx.functionType())
+            ctx.arrayListType() != null -> visit(ctx.arrayListType())
             else -> throw IllegalArgumentException("Unknown type annotation: ${ctx.text}")
         }
     }
@@ -610,6 +641,11 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitEffectRow(ctx: FunkParser.EffectRowContext): Any {
         val effects = ctx.Identifier().map { it.text }
         return EffectRowAnnotation(effects)
+    }
+    
+    override fun visitArrayListType(ctx: FunkParser.ArrayListTypeContext): Any {
+        val elementType = visit(ctx.typeAnnotation()) as TypeAnnotation
+        return ArrayListTypeAnnotation(elementType)
     }
     
     override fun visitPerformExpression(ctx: FunkParser.PerformExpressionContext): Any {

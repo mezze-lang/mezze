@@ -241,7 +241,7 @@ class TypeCheckerComprehensiveTest {
         """.trimIndent()
         
         // Should fail because closed record {name: String} cannot accept extra fields {age, city}
-        assertThrows<RuntimeException> {
+        assertThrows<TypeCheckError> {
             parseAndTypeCheck(closedRecordSource)
         }
     }

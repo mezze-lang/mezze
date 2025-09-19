@@ -269,6 +269,11 @@ typeAnnotation:
     | recordType                           // Record type
     | variantType                          // Variant type
     | functionType                         // Function type
+    | arrayListType                        // ArrayList type
+    ;
+
+arrayListType:
+    LBRACKET typeAnnotation RBRACKET       // [Int], [String], ['a], etc.
     ;
 
 functionType:
@@ -286,6 +291,11 @@ literal:
     | Float
     | String
     | Boolean
+    | arrayListLiteral
+    ;
+
+arrayListLiteral:
+    LBRACKET (expression (COMMA expression)*)? RBRACKET
     ;
 
 // --- Lexer Rules ---

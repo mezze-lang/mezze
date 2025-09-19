@@ -65,11 +65,8 @@ class FunkContext(
      * Initialize built-in functions and effects
      */
     private fun initializeBuiltins() {
-        // Basic arithmetic and comparison operations will be handled by specialized nodes
-        // Built-in effects and functions will be added here
-        
-        // Register built-in effects
-        // Built-in effects initialization removed
+        // Register all native functions using the existing system
+        NativeFunctions.registerAll(builtins as MutableMap<String, FunkValue>)
     }
     
     /**

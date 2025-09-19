@@ -118,6 +118,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
             "| $constructors |"
         }
     }
+    is FunkType.ArrayListType -> "[${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}]"
     is FunkType.FunctionType -> {
         val baseType = "${prettyPrintTypeWithAliases(type.paramType, typeAliases, showExpansion)} -> ${prettyPrintTypeWithAliases(type.returnType, typeAliases, showExpansion)}"
         if (type.effects != null && type.effects.effects.isNotEmpty()) {

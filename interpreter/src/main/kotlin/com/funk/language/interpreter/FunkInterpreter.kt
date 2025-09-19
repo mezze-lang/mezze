@@ -1142,7 +1142,7 @@ class FunkInterpreter {
     ): FunkValue {
         return when (expr) {
             is EffectCallExpression -> {
-                executeAsyncEffectCall(expr, context, stateMachine)
+                evaluateExpression(expr, context)
             }
             is DoExpression -> {
                 executeStateMachine(stateMachine, expr, context)
@@ -1154,42 +1154,7 @@ class FunkInterpreter {
         }
     }
     
-    /**
-     * Execute an effect call with async support
-     */
-    private fun executeAsyncEffectCall(
-        expr: EffectCallExpression,
-        context: MutableMap<String, FunkValue>,
-        stateMachine: StateMachine
-    ): FunkValue {
-        // Look up handler from context
-        val handlersRecord = context["__handlers"] as? FunkRecord
-            ?: throw RuntimeException("No handlers available for effect call")
-        val handlers = handlersRecord.fields
-        
-        val handler = handlers[expr.effectName]
-            ?: throw RuntimeException("No handler found for effect: ${expr.effectName}")
-        
-        // Check if handler supports async execution
-        if (handler is AsyncEffectHandler && handler.canHandle(expr.effectName)) {
-            // Execute asynchronously using virtual threads
-            val arguments = evaluateExpression(expr.arguments, context)
-            val future = VirtualThreadExecutor.submitSuspending {
-                handler.handle(expr.operationName, arguments)
-            }
-            
-            // Use virtual thread to wait for result without blocking OS threads
-            return try {
-                // This uses Project Loom's virtual threads via VirtualThreadExecutor
-                future.get()
-            } catch (e: Exception) {
-                throw RuntimeException("Async effect execution failed: ${e.message}", e)
-            }
-        } else {
-            // Fall back to synchronous execution
-            return effectHandler.executeEffectCall(expr.effectName, expr.operationName, evaluateExpression(expr.arguments, context), context, this)
-        }
-    }
+
     
     /**
      * Extract effect handlers from context
@@ -1245,8 +1210,7 @@ class FunkInterpreter {
         states: List<StateMachineState>, 
         context: MutableMap<String, FunkValue>
     ): FunkValue {
-        // Use virtual thread executor for async effect handling
-        val virtualThreadExecutor = VirtualThreadExecutor()
+        // Simple state machine execution without async for now
         var currentMachine = initialStateMachine
         var result: FunkValue = FunkNull
         
@@ -1260,8 +1224,8 @@ class FunkInterpreter {
                     evaluateExpression(state.expression, currentMachine.localVariables)
                 }
                 is StateMachineState.EffectState -> {
-                    // This is a suspension point - execute effect call asynchronously
-                    result = executeEffectStateAsync(state, currentMachine, virtualThreadExecutor)
+                    // Execute effect call synchronously for now
+                    result = evaluateExpression(state.expression, currentMachine.localVariables)
                 }
                 is StateMachineState.ResultState -> {
                     result = evaluateExpression(state.expression, currentMachine.localVariables)
@@ -1272,66 +1236,7 @@ class FunkInterpreter {
         return result
     }
     
-    /**
-     * Execute an effect state asynchronously with suspension/resumption
-     */
-    private fun executeEffectStateAsync(
-        state: StateMachineState.EffectState,
-        stateMachine: StateMachine,
-        executor: VirtualThreadExecutor
-    ): FunkValue {
-        // Check if this is an effect call that needs async handling
-        if (state.expression is EffectCallExpression) {
-            // This is a suspension point - suspend the virtual thread
-            return suspendAndExecuteEffect(state.expression, stateMachine, executor)
-        } else {
-            // Check if expression contains effect calls (like member access that becomes effect call)
-            if (containsEffectCallsInExpression(state.expression)) {
-                // Convert member access to effect call and suspend
-                val effectCall = convertToEffectCall(state.expression, stateMachine.localVariables)
-                if (effectCall != null) {
-                    return suspendAndExecuteEffect(effectCall, stateMachine, executor)
-                }
-            }
-            
-            // Not an effect call, execute normally
-            return evaluateExpression(state.expression, stateMachine.localVariables)
-        }
-    }
-    
-    /**
-     * Suspend virtual thread and execute effect with continuation
-     */
-    private fun suspendAndExecuteEffect(
-        effectCall: EffectCallExpression,
-        stateMachine: StateMachine,
-        executor: VirtualThreadExecutor
-    ): FunkValue {
-        // Look up handler from context
-        val handlersRecord = stateMachine.localVariables["__handlers"] as? FunkRecord
-            ?: throw RuntimeException("No handlers available for effect call")
-        val handlers = handlersRecord.fields
-        
-        val handler = handlers[effectCall.effectName]
-            ?: throw RuntimeException("No handler found for effect: ${effectCall.effectName}")
-        
-        if (handler !is FunkRecord) {
-            throw RuntimeException("Handler must be a record of operations")
-        }
-        
-        val operation = handler.fields[effectCall.operationName] as? SimpleFunkFunction
-            ?: throw RuntimeException("Operation ${effectCall.operationName} not found in handler")
-        
-        // Execute the handler operation (this may involve async work)
-        val arguments = evaluateExpression(effectCall.arguments, stateMachine.localVariables)
-        
-        // For now, execute synchronously but with proper structure for future Loom integration
-        // In full Loom implementation, this would suspend the virtual thread
-        return when (arguments) {
-            is FunkRecord -> callFunction(operation, listOf(arguments), stateMachine.localVariables)
-            else -> callFunction(operation, listOf(arguments), stateMachine.localVariables)
-        }
-    }
+
     
     /**
      * Convert expressions like Log.log to EffectCallExpression

@@ -1,0 +1,9 @@
+type Inner = | Inner { value: Int } |
+type Outer = | Outer { inner: Inner } |
+
+let extract = {outer} -> match outer is
+  Outer { inner } -> match inner is
+    Inner { value } -> value
+    
+let result = extract { outer = Outer { inner = Inner { value = 42 } } }
+result

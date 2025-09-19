@@ -55,12 +55,10 @@ fun main(args: Array<String>) {
             }
         }
     } catch (e: TypeCheckError) {
-        println("❌ Type Error:")
-        println(ErrorPrettyPrinter.prettyPrint(e))
+        printTypeError(e)
         kotlin.system.exitProcess(1)
     } catch (e: Exception) {
-        println("❌ Error:")
-        println(e.message ?: "Unknown error")
+        printGeneralError(e)
         kotlin.system.exitProcess(1)
     }
 }
@@ -263,28 +261,7 @@ private fun handleCheckCommand(args: List<String>) {
         }
         val typeAliases = typeChecker.getTypeAliases()
         
-        println("✅ Type checking successful!")
-        println()
-        println("Variables:")
-        for (item in result.items) {
-            when (item) {
-                is LetBinding -> {
-                    val typeStr = item.inferredType?.let { 
-                        prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false) 
-                    } ?: "unknown"
-                    println("  ${item.variableName} : $typeStr")
-                }
-                is TypeDeclaration -> {
-                    val expansionStr = item.inferredType?.let { 
-                        ": ${prettyPrintType(it)}" 
-                    } ?: ""
-                    println("  ${item.name}$expansionStr")
-                }
-                else -> {
-                    // Skip other items for now
-                }
-            }
-        }
+        printTypeCheckSuccess(result, typeAliases)
     } catch (e: TypeCheckError) {
         // For demonstration, show both simple and detailed error formats
         println(ErrorPrettyPrinter.prettyPrint(e))
@@ -777,4 +754,156 @@ private fun buildJarWithGradle(tempDir: File, outputFile: File, programName: Str
 
 private fun escapeForKotlin(source: String): String {
     return "\"\"\"" + source.replace("\"\"\"", "\\\"\\\"\\\"") + "\"\"\""
+}
+
+/**
+ * Enhanced error reporting functions
+ */
+private fun printTypeError(error: TypeCheckError) {
+    println("❌ Type Error")
+    println("━".repeat(50))
+    
+    // Print location if available
+    if (error.sourceLocation != null) {
+        val loc = error.sourceLocation!!
+        println("📍 Location: line ${loc.line}, column ${loc.column}")
+        println()
+    }
+    
+    // Print error message with better formatting
+    when (error.errorType) {
+        ErrorType.TYPE_MISMATCH -> {
+            println("🔍 Type Mismatch")
+            val expected = error.context["expected"] as? FunkType
+            val actual = error.context["actual"] as? FunkType
+            if (expected != null && actual != null) {
+                println("   Expected: ${prettyPrintType(expected)}")
+                println("   Actual:   ${prettyPrintType(actual)}")
+            } else {
+                println("   ${error.message}")
+            }
+        }
+        ErrorType.UNDEFINED_VARIABLE -> {
+            println("🔍 Undefined Variable")
+            val variable = error.context["variable"] as? String
+            if (variable != null) {
+                println("   Variable '$variable' is not defined in the current scope")
+                println()
+                println("💡 Tip: Check for typos or make sure the variable is declared before use")
+            } else {
+                println("   ${error.message}")
+            }
+        }
+        ErrorType.MISSING_FIELD -> {
+            println("🔍 Missing Field")
+            val field = error.context["field"] as? String
+            val type = error.context["type"] as? FunkType
+            if (field != null && type != null) {
+                println("   Field '$field' not found in type ${prettyPrintType(type)}")
+                println()
+                println("💡 Tip: Check the field name for typos")
+            } else {
+                println("   ${error.message}")
+            }
+        }
+        ErrorType.INEXHAUSTIVE_MATCH -> {
+            println("🔍 Non-exhaustive Pattern Match")
+            @Suppress("UNCHECKED_CAST")
+            val missing = error.context["missing"] as? List<String>
+            if (missing != null) {
+                println("   Missing patterns: ${missing.joinToString(", ")}")
+                println()
+                println("💡 Tip: Add cases for all missing patterns to make the match exhaustive")
+            } else {
+                println("   ${error.message}")
+            }
+        }
+        else -> {
+            println("🔍 ${error.errorType.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }}")
+            println("   ${error.message}")
+        }
+    }
+    
+    println()
+    println("💡 For more help, see: https://funk-lang.org/docs/type-errors")
+}
+
+private fun printGeneralError(error: Exception) {
+    println("❌ Error")
+    println("━".repeat(50))
+    println("🔍 ${error.javaClass.simpleName}")
+    println("   ${error.message ?: "Unknown error"}")
+    println()
+    
+    // Show stack trace for debugging if it's not a known user error
+    if (error !is TypeCheckError && error !is FunkException) {
+        println("🐛 Debug Information:")
+        error.printStackTrace()
+    }
+}
+
+private fun printTypeCheckSuccess(result: Program, typeAliases: Map<String, TypeAliasInfo>) {
+    println("✅ Type checking successful!")
+    println("━".repeat(50))
+    
+    // Count different types of items
+    val letBindings = result.items.filterIsInstance<LetBinding>()
+    val typeDeclarations = result.items.filterIsInstance<TypeDeclaration>()
+    val effectDeclarations = result.items.filterIsInstance<EffectDeclaration>()
+    val implDeclarations = result.items.filterIsInstance<ImplDeclaration>()
+    
+    // Print summary
+    println("📊 Summary:")
+    if (letBindings.isNotEmpty()) println("   ${letBindings.size} variable(s)")
+    if (typeDeclarations.isNotEmpty()) println("   ${typeDeclarations.size} type(s)")
+    if (effectDeclarations.isNotEmpty()) println("   ${effectDeclarations.size} effect(s)")
+    if (implDeclarations.isNotEmpty()) println("   ${implDeclarations.size} implementation(s)")
+    println()
+    
+    // Print type declarations first
+    if (typeDeclarations.isNotEmpty()) {
+        println("🏷️  Types:")
+        for (item in typeDeclarations) {
+            val expansionStr = item.inferredType?.let { 
+                " = ${prettyPrintType(it)}" 
+            } ?: ""
+            println("   ${item.name}$expansionStr")
+        }
+        println()
+    }
+    
+    // Print effect declarations
+    if (effectDeclarations.isNotEmpty()) {
+        println("⚡ Effects:")
+        for (item in effectDeclarations) {
+            println("   ${item.name} (${item.operations.size} operations)")
+        }
+        println()
+    }
+    
+    // Print variables with better formatting
+    if (letBindings.isNotEmpty()) {
+        println("📝 Variables:")
+        for (item in letBindings) {
+            val typeStr = item.inferredType?.let { 
+                prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false) 
+            } ?: "unknown"
+            
+            // Add emoji based on type
+            val emoji = when {
+                typeStr.contains("->") -> "🔧" // Function
+                typeStr.contains("|") -> "🏷️"  // Variant
+                typeStr.contains("{") -> "📦" // Record
+                typeStr == "Int" || typeStr == "Float" || typeStr == "Nat" || typeStr == "Frac" -> "🔢"
+                typeStr == "String" -> "📝"
+                typeStr == "Boolean" -> "✅"
+                else -> "📋"
+            }
+            
+            println("   $emoji ${item.variableName} : $typeStr")
+        }
+    }
+    
+    println()
+    println("🎉 All types check out! Your code is ready to run.")
 }

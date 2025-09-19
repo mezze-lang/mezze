@@ -8,7 +8,148 @@ import com.funk.language.stdlib.StdLib
 import java.nio.file.Path
 import java.nio.file.Paths
 
-class TypeCheckError(message: String) : Exception(message)
+/**
+ * Enhanced TypeCheckError with source location information for precise error reporting
+ */
+class TypeCheckError : Exception {
+    val sourceLocation: SourceLocation?
+    val expression: Expression?
+    val errorType: ErrorType
+    val context: Map<String, Any>
+    
+    constructor(message: String, errorType: ErrorType = ErrorType.GENERAL) : super(message) {
+        this.sourceLocation = null
+        this.expression = null
+        this.errorType = errorType
+        this.context = emptyMap()
+    }
+    
+    constructor(
+        message: String, 
+        sourceLocation: SourceLocation?, 
+        errorType: ErrorType = ErrorType.GENERAL,
+        context: Map<String, Any> = emptyMap()
+    ) : super(formatMessage(message, sourceLocation)) {
+        this.sourceLocation = sourceLocation
+        this.expression = null
+        this.errorType = errorType
+        this.context = context
+    }
+    
+    constructor(
+        message: String, 
+        expression: Expression?, 
+        errorType: ErrorType = ErrorType.GENERAL,
+        context: Map<String, Any> = emptyMap()
+    ) : super(formatMessage(message, expression?.sourceLocation)) {
+        this.sourceLocation = expression?.sourceLocation
+        this.expression = expression
+        this.errorType = errorType
+        this.context = context
+    }
+    
+    companion object {
+        private fun formatMessage(message: String, sourceLocation: SourceLocation?): String {
+            return if (sourceLocation != null) {
+                "Type Error at line ${sourceLocation.line}, column ${sourceLocation.column}: $message"
+            } else {
+                "Type Error: $message"
+            }
+        }
+        
+        fun typeMismatch(expected: FunkType, actual: FunkType, expression: Expression?): TypeCheckError {
+            val message = "Expected type '${prettyPrintType(expected)}' but got '${prettyPrintType(actual)}'"
+            return TypeCheckError(
+                message, 
+                expression, 
+                ErrorType.TYPE_MISMATCH,
+                mapOf("expected" to expected, "actual" to actual)
+            )
+        }
+        
+        fun undefinedVariable(name: String, expression: Expression?): TypeCheckError {
+            val message = "Undefined variable '$name'"
+            return TypeCheckError(
+                message, 
+                expression, 
+                ErrorType.UNDEFINED_VARIABLE,
+                mapOf("variable" to name)
+            )
+        }
+        
+        fun missingField(fieldName: String, recordType: FunkType, expression: Expression?): TypeCheckError {
+            val message = "Field '$fieldName' not found in type '${prettyPrintType(recordType)}'"
+            return TypeCheckError(
+                message, 
+                expression, 
+                ErrorType.MISSING_FIELD,
+                mapOf("field" to fieldName, "type" to recordType)
+            )
+        }
+        
+        fun inexhaustiveMatch(missingPatterns: List<String>, expression: Expression?): TypeCheckError {
+            val message = "Non-exhaustive pattern match. Missing cases: ${missingPatterns.joinToString(", ")}"
+            return TypeCheckError(
+                message, 
+                expression, 
+                ErrorType.INEXHAUSTIVE_MATCH,
+                mapOf("missing" to missingPatterns)
+            )
+        }
+        
+        fun arityMismatch(expected: Int, actual: Int, expression: Expression?): TypeCheckError {
+            val message = "Function expects $expected arguments but got $actual"
+            return TypeCheckError(
+                message, 
+                expression, 
+                ErrorType.ARITY_MISMATCH,
+                mapOf("expected" to expected, "actual" to actual)
+            )
+        }
+        
+        fun unknownConstructor(constructor: String, variantType: FunkType?, expression: Expression?): TypeCheckError {
+            val message = if (variantType != null) {
+                "Unknown constructor '$constructor' for type '${prettyPrintType(variantType)}'"
+            } else {
+                "Unknown constructor '$constructor'"
+            }
+            return TypeCheckError(
+                message, 
+                expression, 
+                ErrorType.UNKNOWN_CONSTRUCTOR,
+                mapOf("constructor" to constructor).let { map ->
+                    if (variantType != null) map + ("type" to variantType) else map
+                }
+            )
+        }
+        
+        fun missingHandler(effectName: String, expression: Expression?): TypeCheckError {
+            val message = "No handler found for effect '$effectName'"
+            return TypeCheckError(
+                message, 
+                expression, 
+                ErrorType.MISSING_HANDLER,
+                mapOf("effect" to effectName)
+            )
+        }
+    }
+}
+
+/**
+ * Types of type checking errors for better categorization
+ */
+enum class ErrorType {
+    GENERAL,
+    TYPE_MISMATCH,
+    UNDEFINED_VARIABLE,
+    MISSING_FIELD,
+    INEXHAUSTIVE_MATCH,
+    ARITY_MISMATCH,
+    UNKNOWN_CONSTRUCTOR,
+    MISSING_HANDLER,
+    CIRCULAR_REFERENCE,
+    CONSTRAINT_VIOLATION
+}
 
 /**
  * Bidirectional type checking modes
@@ -37,6 +178,7 @@ class TypeChecker {
     
     // Constraint-based type inference
     private val constraintSolver = ConstraintSolver()
+    private val improvedConstraintSolver = ImprovedConstraintSolver()
     
     // Current program being type checked (for looking up ImplDeclarations)
     private var currentProgram: Program? = null
@@ -94,26 +236,57 @@ class TypeChecker {
                     // Reset scope counter for each top-level function to start fresh with 'a
                     com.funk.language.ast.TypeVar.resetScopeCounter(0)
                     
-                    // Enhanced type checking with bidirectional inference
-                    val finalType = item.typeAnnotation?.let { annotation ->
-                        // If there's a type annotation, use bidirectional inference
-                        val declaredType = convertTypeAnnotation(annotation)
-                        val actualType = inferTypeWithUnification(item.expression, declaredType)
+                    // Check if this is a recursive function
+                    val isRecursiveFunction = item.expression is LambdaExpression && 
+                        containsRecursiveReference(item.expression, item.variableName)
+                    
+                    val finalType = if (isRecursiveFunction) {
+                        // For recursive functions, create a placeholder and add to context first
+                        val placeholderType = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
+                        context[item.variableName] = placeholderType
                         
-                        if (unifyTypes(actualType, declaredType)) {
-                            // Use the actual inferred type if it has more information (like effects)
-                            // than the declared type
-                            if (actualType is com.funk.language.ast.FunkType.FunctionType && 
-                                declaredType is com.funk.language.ast.FunkType.FunctionType &&
-                                actualType.effects != null && declaredType.effects == null) {
-                                actualType
-                            } else {
-                            declaredType
-                            }
-                        } else {
-                            throw RuntimeException("Type error: Declared type ${prettyPrintType(declaredType)} does not match inferred type ${prettyPrintType(actualType)}")
+                        try {
+                            val inferredType = item.typeAnnotation?.let { annotation ->
+                                val declaredType = convertTypeAnnotation(annotation)
+                                val actualType = inferTypeWithUnification(item.expression, declaredType)
+                                if (unifyTypes(actualType, declaredType)) {
+                                    if (actualType is com.funk.language.ast.FunkType.FunctionType && 
+                                        declaredType is com.funk.language.ast.FunkType.FunctionType &&
+                                        actualType.effects != null && declaredType.effects == null) {
+                                        actualType
+                                    } else {
+                                        declaredType
+                                    }
+                                } else {
+                                    throw TypeCheckError.typeMismatch(declaredType, actualType, item.expression)
+                                }
+                            } ?: inferTypeWithUnification(item.expression)
+                            
+                            // Just return the inferred type - no need to unify with placeholder
+                            inferredType
+                        } finally {
+                            // Remove the placeholder from context (will be re-added below)
+                            context.remove(item.variableName)
                         }
-                    } ?: inferTypeWithUnification(item.expression)
+                    } else {
+                        // Non-recursive case - original logic
+                        item.typeAnnotation?.let { annotation ->
+                            val declaredType = convertTypeAnnotation(annotation)
+                            val actualType = inferTypeWithUnification(item.expression, declaredType)
+                            
+                            if (unifyTypes(actualType, declaredType)) {
+                                if (actualType is com.funk.language.ast.FunkType.FunctionType && 
+                                    declaredType is com.funk.language.ast.FunkType.FunctionType &&
+                                    actualType.effects != null && declaredType.effects == null) {
+                                    actualType
+                                } else {
+                                    declaredType
+                                }
+                            } else {
+                                throw TypeCheckError.typeMismatch(declaredType, actualType, item.expression)
+                            }
+                        } ?: inferTypeWithUnification(item.expression)
+                    }
                     
         // CRITICAL FIX: Normalize type variables for consistent naming ('a, 'b, etc.)
         val normalizedType = com.funk.language.ast.normalizeTypeVariables(finalType)
@@ -342,10 +515,11 @@ class TypeChecker {
             inferBasicType(expr)
         }
         
-        // Solve constraints and check for conflicts
-        solveConstraints()
+        // Solve constraints and apply substitutions to the inferred type
+        val substitutions = solveConstraints()
+        val finalType = applySubstitutionToType(inferredType, substitutions)
         
-        return inferredType
+        return finalType
     }
     
     /**
@@ -381,27 +555,61 @@ class TypeChecker {
     }
     
     /**
+     * Apply substitutions to a type
+     */
+    private fun applySubstitutionToType(
+        type: com.funk.language.ast.FunkType, 
+        substitutions: Map<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>
+    ): com.funk.language.ast.FunkType {
+        return when (type) {
+            is com.funk.language.ast.FunkType.VarType -> {
+                substitutions[type.variable] ?: type
+            }
+            is com.funk.language.ast.FunkType.NumType -> {
+                substitutions[type.constraint] ?: type
+            }
+            is com.funk.language.ast.FunkType.FunctionType -> {
+                val substitutedParamType = applySubstitutionToType(type.paramType, substitutions)
+                val substitutedReturnType = applySubstitutionToType(type.returnType, substitutions)
+                type.copy(paramType = substitutedParamType, returnType = substitutedReturnType)
+            }
+            is com.funk.language.ast.FunkType.RecordType -> {
+                val substitutedFields = type.fields.mapValues { (_, fieldType) ->
+                    applySubstitutionToType(fieldType, substitutions)
+                }
+                type.copy(fields = substitutedFields)
+            }
+            is com.funk.language.ast.FunkType.VariantType -> {
+                val substitutedConstructors = type.constructors.mapValues { (_, constructorType) ->
+                    constructorType?.let { applySubstitutionToType(it, substitutions) }
+                }
+                type.copy(constructors = substitutedConstructors)
+            }
+            // For concrete types, no substitution needed
+            else -> type
+        }
+    }
+
+    /**
      * Solve accumulated constraints using proper unification
      */
-    private fun solveConstraints() {
-        val substitutions = mutableMapOf<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>()
-        
-        for ((type1, type2) in constraints) {
+    private fun solveConstraints(): Map<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType> {
+        if (constraints.isNotEmpty()) {
             try {
-                unifyTypesWithSubstitution(type1, type2, substitutions)
+                // Use improved constraint solver and capture substitutions
+                val substitutions = improvedConstraintSolver.solveConstraints(constraints, context)
+                constraints.clear()
+                return substitutions
+            } catch (e: TypeCheckError) {
+                throw e
             } catch (e: Exception) {
-                throw RuntimeException("Type error: Cannot unify ${prettyPrintType(type1)} with ${prettyPrintType(type2)}")
+                throw TypeCheckError(
+                    "Constraint solving failed: ${e.message}",
+                    ErrorType.CONSTRAINT_VIOLATION
+                )
             }
         }
-        
-        // Apply substitutions to context
-        for ((typeVar, substitutedType) in substitutions) {
-            for ((varName, varType) in context) {
-                context[varName] = applySubstitution(varType, substitutions)
-            }
-        }
-        
-        constraints.clear()
+        return emptyMap()
     }
     
     /**
@@ -506,6 +714,47 @@ class TypeChecker {
     }
     
     /**
+     * Check if an expression contains a recursive reference to a variable
+     */
+    private fun containsRecursiveReference(expr: Expression, varName: String): Boolean {
+        return when (expr) {
+            is LambdaExpression -> containsRecursiveReference(expr.body, varName)
+            is Identifier -> expr.name == varName
+            is FunctionCall -> {
+                val function = expr.function
+                val functionIsRecursive = when (function) {
+                    is Identifier -> function.name == varName
+                    else -> containsRecursiveReference(function, varName)
+                }
+                functionIsRecursive || containsRecursiveReference(expr.arguments, varName)
+            }
+            is IfExpression -> {
+                containsRecursiveReference(expr.condition, varName) ||
+                containsRecursiveReference(expr.thenBranch, varName) ||
+                containsRecursiveReference(expr.elseBranch, varName)
+            }
+            is BinaryOperation -> {
+                containsRecursiveReference(expr.left, varName) ||
+                containsRecursiveReference(expr.right, varName)
+            }
+            is MatchExpression -> {
+                containsRecursiveReference(expr.expression, varName) ||
+                expr.cases.any { case -> containsRecursiveReference(case.expression, varName) }
+            }
+            is DoExpression -> {
+                expr.statements.any { stmt -> 
+                    when (stmt) {
+                        is LetBinding -> containsRecursiveReference(stmt.expression, varName)
+                        is ExpressionStatement -> containsRecursiveReference(stmt.expression, varName)
+                        is LetStatement -> false // LetStatement doesn't have expressions to check
+                    }
+                } || containsRecursiveReference(expr.result, varName)
+            }
+            else -> false
+        }
+    }
+
+    /**
      * Get all free type variables in a type
      */
     private fun getFreeTypeVariables(type: com.funk.language.ast.FunkType): Set<com.funk.language.ast.TypeVar> {
@@ -520,6 +769,9 @@ class TypeChecker {
             }
             is com.funk.language.ast.FunkType.VariantType -> {
                 type.constructors.values.filterNotNull().flatMap { getFreeTypeVariables(it) }.toSet()
+            }
+            is com.funk.language.ast.FunkType.ArrayListType -> {
+                getFreeTypeVariables(type.elementType)
             }
             // Concrete types have no free variables
             is com.funk.language.ast.FunkType.IntType, is com.funk.language.ast.FunkType.FloatType,
@@ -540,6 +792,62 @@ class TypeChecker {
             is com.funk.language.ast.FunkType.FracType -> true
             else -> false
         }
+    }
+    
+    /**
+     * Find a common supertype for two types (used in if-then-else expressions)
+     */
+    private fun findCommonSupertype(type1: com.funk.language.ast.FunkType, type2: com.funk.language.ast.FunkType): com.funk.language.ast.FunkType? {
+        // If types are identical, return that type
+        if (isTypeCompatible(type1, type2)) {
+            return type1
+        }
+        
+        // Handle variant types - if both are variant constructions of the same variant type
+        if (type1 is com.funk.language.ast.FunkType.VariantType && type2 is com.funk.language.ast.FunkType.VariantType) {
+            // Check if they can be unified into a common variant type
+            val commonConstructors = mutableMapOf<String, com.funk.language.ast.FunkType?>()
+            
+            // Add all constructors from both types
+            commonConstructors.putAll(type1.constructors)
+            for ((name, dataType) in type2.constructors) {
+                if (commonConstructors.containsKey(name)) {
+                    // If constructor exists in both, keep the existing data type
+                    // (for now, we don't try to unify the data types)
+                } else {
+                    commonConstructors[name] = dataType
+                }
+            }
+            
+            return com.funk.language.ast.FunkType.VariantType(commonConstructors, type1.rowVar ?: type2.rowVar)
+        }
+        
+        // Handle case where one type is a variant and the other might be a constructor of that variant
+        if (type1 is com.funk.language.ast.FunkType.VariantType || type2 is com.funk.language.ast.FunkType.VariantType) {
+            val variantType = if (type1 is com.funk.language.ast.FunkType.VariantType) type1 else type2 as com.funk.language.ast.FunkType.VariantType
+            val otherType = if (type1 is com.funk.language.ast.FunkType.VariantType) type2 else type1
+            
+            // Check if the other type could be a constructor of this variant
+            // For now, we'll assume they can be unified to the variant type
+            // This handles cases like: Int and Error -> Result type
+            return variantType
+        }
+        
+        // Handle numeric types - promote to more general type
+        if (isNumericType(type1) && isNumericType(type2)) {
+            return when {
+                type1 is com.funk.language.ast.FunkType.FloatType || type2 is com.funk.language.ast.FunkType.FloatType -> com.funk.language.ast.FunkType.FloatType
+                type1 is com.funk.language.ast.FunkType.IntType || type2 is com.funk.language.ast.FunkType.IntType -> com.funk.language.ast.FunkType.IntType
+                else -> com.funk.language.ast.FunkType.NumType(com.funk.language.ast.TypeVar.fresh())
+            }
+        }
+        
+        // If one type is a type variable, return the other type
+        if (type1 is com.funk.language.ast.FunkType.VarType) return type2
+        if (type2 is com.funk.language.ast.FunkType.VarType) return type1
+        
+        // No common supertype found
+        return null
     }
     
     /**
@@ -643,7 +951,7 @@ class TypeChecker {
                         if (expr.value >= 0) {
                             expectedType
                         } else {
-                            throw RuntimeException("Type error: Cannot use negative literal ${expr.value} where Nat expected")
+                            throw TypeCheckError("Type error: Cannot use negative literal ${expr.value} where Nat expected", expr)
                         }
                     }
                     is com.funk.language.ast.FunkType.IntType -> expectedType
@@ -660,7 +968,7 @@ class TypeChecker {
                         inferredType
                     }
                     else -> {
-                        throw RuntimeException("Type error: Cannot use Int literal where ${prettyPrintType(expectedType)} expected")
+                        throw TypeCheckError("Type error: Cannot use Int literal where ${prettyPrintType(expectedType)} expected", expr)
                     }
                 }
             }
@@ -679,7 +987,7 @@ class TypeChecker {
                         inferredType
                     }
                     else -> {
-                        throw RuntimeException("Type error: Cannot use Float literal where ${prettyPrintType(expectedType)} expected")
+                        throw TypeCheckError("Type error: Cannot use Float literal where ${prettyPrintType(expectedType)} expected", expr)
                     }
                 }
             }
@@ -934,6 +1242,29 @@ class TypeChecker {
             is FloatLiteral -> com.funk.language.ast.FunkType.FloatType
             is StringLiteral -> com.funk.language.ast.FunkType.StringType
             is BooleanLiteral -> com.funk.language.ast.FunkType.BooleanType
+            is ArrayListLiteral -> {
+                if (expr.elements.isEmpty()) {
+                    // Empty ArrayList - use a fresh type variable for the element type
+                    val elementTypeVar = com.funk.language.ast.TypeVar.fresh()
+                    com.funk.language.ast.FunkType.ArrayListType(com.funk.language.ast.FunkType.VarType(elementTypeVar))
+                } else {
+                    // Non-empty ArrayList - infer element type from first element
+                    val firstElementType = inferBasicType(expr.elements[0])
+                    
+                    // Check that all elements have compatible types
+                    for (i in 1 until expr.elements.size) {
+                        val elementType = inferBasicType(expr.elements[i])
+                        if (!isTypeCompatible(elementType, firstElementType)) {
+                            throw TypeCheckError(
+                                "ArrayList elements must have the same type. Expected ${prettyPrintType(firstElementType)}, got ${prettyPrintType(elementType)}",
+                                ErrorType.TYPE_MISMATCH
+                            )
+                        }
+                    }
+                    
+                    com.funk.language.ast.FunkType.ArrayListType(firstElementType)
+                }
+            }
             is Identifier -> {
                 // First check polymorphic context (let-polymorphism)
                 polymorphicContext[expr.name]?.let { scheme ->
@@ -948,7 +1279,7 @@ class TypeChecker {
                         val constructors = mapOf(expr.name to null)
                         com.funk.language.ast.FunkType.VariantType(constructors, null) // null = closed
                     } else {
-                        throw RuntimeException("Type error: Undefined variable '${expr.name}'")
+                        throw TypeCheckError.undefinedVariable(expr.name, expr)
                     }
                 }
             }
@@ -1059,7 +1390,7 @@ class TypeChecker {
                                             // Use bidirectional inference with expected type
                                             val providedType = inferBasicTypeWithExpected(entryValue, expectedType)
                                             if (!isTypeCompatible(providedType, expectedType)) {
-                                                throw RuntimeException("Type error: Field '$fieldName' expects ${prettyPrintType(expectedType)} but got ${prettyPrintType(providedType)}")
+                                                throw TypeCheckError.typeMismatch(expectedType, providedType, entryValue)
                                             }
                                             
                                             // CRITICAL FIX: Collect local substitutions for polymorphic function calls
@@ -1140,8 +1471,30 @@ class TypeChecker {
                 }
             }
             is IfExpression -> {
-                // Infer from the then branch
-                inferBasicType(expr.thenBranch)
+                // Type check condition
+                val conditionType = inferBasicType(expr.condition)
+                if (!isTypeCompatible(conditionType, com.funk.language.ast.FunkType.BooleanType)) {
+                    throw TypeCheckError(
+                        "If condition must be Boolean, got ${prettyPrintType(conditionType)}",
+                        ErrorType.TYPE_MISMATCH
+                    )
+                }
+                
+                // Infer types from both branches
+                val thenType = inferBasicType(expr.thenBranch)
+                val elseType = inferBasicType(expr.elseBranch)
+                
+                // Try to unify the branch types
+                if (unifyTypes(thenType, elseType)) {
+                    // If unification succeeds, return the first type (they should be equivalent)
+                    thenType
+                } else {
+                    // If unification fails, try to find a common supertype
+                    findCommonSupertype(thenType, elseType) ?: throw TypeCheckError(
+                        "If branches have incompatible types: ${prettyPrintType(thenType)} and ${prettyPrintType(elseType)}",
+                        ErrorType.TYPE_MISMATCH
+                    )
+                }
             }
             is MatchExpression -> {
                 // ENHANCED TYPE INFERENCE: Analyze patterns first to infer variant type
@@ -1218,8 +1571,33 @@ class TypeChecker {
                     }
                 }
                 
-                // All cases should have the same type (simplified - we could use unification here)
-                caseTypes.firstOrNull() ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
+                // Unify all case types to find the common type
+                if (caseTypes.isEmpty()) {
+                    com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
+                } else if (caseTypes.size == 1) {
+                    caseTypes[0]
+                } else {
+                    // Unify all case types
+                    var unifiedType = caseTypes[0]
+                    for (i in 1 until caseTypes.size) {
+                        val caseType = caseTypes[i]
+                        if (unifyTypes(unifiedType, caseType)) {
+                            // Types are compatible, keep the unified type
+                        } else {
+                            // Try to find a common supertype
+                            val commonType = findCommonSupertype(unifiedType, caseType)
+                            if (commonType != null) {
+                                unifiedType = commonType
+                            } else {
+                                throw TypeCheckError(
+                                    "Match cases have incompatible types: ${prettyPrintType(unifiedType)} and ${prettyPrintType(caseType)}",
+                                    ErrorType.TYPE_MISMATCH
+                                )
+                            }
+                        }
+                    }
+                    unifiedType
+                }
             }
             is RecordLiteral -> {
                 val fields = expr.entries.associate { (name, fieldExpr) ->
@@ -1232,7 +1610,10 @@ class TypeChecker {
                 val receiverType = inferBasicType(expr.receiver)
                 when (receiverType) {
                     is com.funk.language.ast.FunkType.RecordType -> {
-                        receiverType.fields[expr.member] ?: inferFieldTypeFromName(expr.member)
+                        receiverType.fields[expr.member] ?: throw TypeCheckError(
+                            "Record field '${expr.member}' not found in record type ${prettyPrintType(receiverType)}",
+                            expr.sourceLocation
+                        )
                     }
                     is com.funk.language.ast.FunkType.VarType -> {
                         // Create a fresh type variable for the field type
@@ -1462,10 +1843,20 @@ class TypeChecker {
                             }
                             // Both are numeric but different types - need explicit conversion
                             isNumericType(finalLeftType) && isNumericType(finalRightType) -> {
-                                throw RuntimeException("Type error: Cannot apply arithmetic operator '${expr.operator}' to ${prettyPrintType(finalLeftType)} and ${prettyPrintType(finalRightType)}. Both operands must be the same numeric type.")
+                                throw TypeCheckError(
+                                    "Cannot apply arithmetic operator '${expr.operator}' to ${prettyPrintType(finalLeftType)} and ${prettyPrintType(finalRightType)}. Both operands must be the same numeric type.",
+                                    expr,
+                                    ErrorType.TYPE_MISMATCH,
+                                    mapOf("expected" to finalLeftType, "actual" to finalRightType, "operator" to expr.operator)
+                                )
                             }
                             else -> {
-                                throw RuntimeException("Type error: Cannot apply arithmetic operator '${expr.operator}' to ${prettyPrintType(finalLeftType)} and ${prettyPrintType(finalRightType)}")
+                                throw TypeCheckError(
+                                    "Cannot apply arithmetic operator '${expr.operator}' to ${prettyPrintType(finalLeftType)} and ${prettyPrintType(finalRightType)}",
+                                    expr,
+                                    ErrorType.TYPE_MISMATCH,
+                                    mapOf("leftType" to finalLeftType, "rightType" to finalRightType, "operator" to expr.operator)
+                                )
                             }
                         }
                     }
@@ -1619,7 +2010,16 @@ class TypeChecker {
                     }
                     
                     // Also run the regular heuristic analysis for all expressions (but preserve explicit types)
-                    analyzeExpressionForParameterTypes(expr.body, paramTypes)
+                    // Create a copy for analysis that only includes type variables (not explicit types)
+                    val analysisParamTypes = paramTypes.filterValues { it is com.funk.language.ast.FunkType.VarType }.toMutableMap()
+                    analyzeExpressionForParameterTypes(expr.body, analysisParamTypes)
+                    
+                    // Only apply analysis results to type variables (preserve explicit types)
+                    analysisParamTypes.forEach { (name, type) ->
+                        if (originalTypes[name] is com.funk.language.ast.FunkType.VarType) {
+                            paramTypes[name] = type
+                        }
+                    }
                     
                     // Update context with refined parameter types
                     paramTypes.forEach { (name, type) ->
@@ -2315,23 +2715,20 @@ class TypeChecker {
                             for (pattern in case.patterns) {
                                 when (pattern) {
                                 is ConstructorPattern -> {
-                                    val dataType = pattern.recordPattern?.let { recordPattern ->
-                                        // Analyze the case expression to infer better types for pattern fields
-                                        val patternBindings = extractPatternBindings(pattern, com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh()))
-                                        
-                                        // Create a temporary context with pattern bindings
-                                        val tempParamTypes = mutableMapOf<String, com.funk.language.ast.FunkType>()
-                                        tempParamTypes.putAll(patternBindings)
-                                        
-                                        // Analyze the case expression to refine field types
-                                        analyzeExpressionForParameterTypes(case.expression, tempParamTypes)
-                                        
-                                        // Build the record type from refined types
-                                        val fields = recordPattern.entries.associate { entry ->
-                                            entry.name to (tempParamTypes[entry.name] ?: inferFieldTypeFromName(entry.name))
+                                    // Build variant type from constructor pattern using actual type definitions
+                                    val variantType = findVariantTypeByConstructor(pattern.constructor)
+                                    val actualDataType = variantType?.constructors?.get(pattern.constructor)
+                                    
+                                    val recordPattern = pattern.recordPattern
+                                    val dataType = if (recordPattern != null && actualDataType is com.funk.language.ast.FunkType.RecordType) {
+                                        // Use actual field types from the constructor definition
+                                        val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                                        for (entry in recordPattern.entries) {
+                                            val fieldType = actualDataType.fields[entry.name] ?: inferFieldTypeFromName(entry.name)
+                                            fields[entry.name] = fieldType
                                         }
                                         com.funk.language.ast.FunkType.RecordType(fields)
-                                    }
+                                    } else actualDataType
                                     constructors[pattern.constructor] = dataType
                                 }
                                 is WildcardPattern -> {
@@ -2355,6 +2752,7 @@ class TypeChecker {
                             val hasWildcard = expr.cases.any { case -> 
                                 case.patterns.any { it is WildcardPattern }
                             }
+
                             paramTypes[paramName] = if (hasWildcard) {
                                 // Open variant (can accept more constructors)
                                 com.funk.language.ast.FunkType.VariantType(constructors, com.funk.language.ast.RowVar("match_${paramName}"))
@@ -2640,6 +3038,11 @@ class TypeChecker {
                 }
                 is LambdaExpression -> {
                     traverse(e.body)
+                }
+                is ArrayListLiteral -> {
+                    e.elements.forEach { element ->
+                        traverse(element)
+                    }
                 }
                 // Base cases - no further traversal needed
                 is Identifier, is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral -> {}
@@ -2967,11 +3370,36 @@ class TypeChecker {
      * Find the variant type that contains the given constructor
      */
     private fun findVariantTypeByConstructor(constructorName: String): com.funk.language.ast.FunkType.VariantType? {
-        // Look in the context for variant types that contain this constructor
-        for ((typeName, typeValue) in context) {
-            if (typeValue is com.funk.language.ast.FunkType.VariantType) {
-                if (typeValue.constructors.containsKey(constructorName)) {
-                    return typeValue
+        // Look through all defined types in the current program to find one that contains this constructor
+        val program = currentProgram ?: return null
+        
+        for (item in program.items) {
+            if (item is TypeDeclaration) {
+                val variantType = convertTypeDefinition(item.definition)
+                if (variantType is com.funk.language.ast.FunkType.VariantType) {
+                    if (variantType.constructors.containsKey(constructorName)) {
+                        return variantType
+                    }
+                }
+            }
+        }
+        return null
+    }
+    
+    /**
+     * Find the variant type that contains the given constructor
+     */
+    private fun findVariantConstructorType(constructorName: String): com.funk.language.ast.FunkType? {
+        // Look through all defined types in the current program to find one that contains this constructor
+        val program = currentProgram ?: return null
+        
+        for (item in program.items) {
+            if (item is TypeDeclaration) {
+                val variantType = convertTypeDefinition(item.definition)
+                if (variantType is com.funk.language.ast.FunkType.VariantType) {
+                    if (variantType.constructors.containsKey(constructorName)) {
+                        return variantType
+                    }
                 }
             }
         }
@@ -2997,8 +3425,9 @@ class TypeChecker {
      */
     private fun inferVariantTypeFromPatterns(cases: List<MatchCase>): com.funk.language.ast.FunkType.VariantType? {
         val usedConstructors = mutableSetOf<String>()
+        var hasWildcard = false
         
-        // Collect all constructor names from patterns
+        // Collect all constructor names from patterns and check for wildcards
         for (case in cases) {
             for (pattern in case.patterns) {
                 when (pattern) {
@@ -3006,7 +3435,8 @@ class TypeChecker {
                         usedConstructors.add(pattern.constructor)
                     }
                     is WildcardPattern -> {
-                        // Wildcard doesn't give us constructor information
+                        // Wildcard makes the variant open
+                        hasWildcard = true
                     }
                     is VariablePattern -> {
                         // Variable pattern doesn't give us constructor information
@@ -3067,7 +3497,9 @@ class TypeChecker {
                             constructors[constructorDef.name] = dataType
                         }
                         
-                        return com.funk.language.ast.FunkType.VariantType(constructors, null) // closed variant
+                        // Create open variant if there's a wildcard, closed otherwise
+                        val rowVar = if (hasWildcard) com.funk.language.ast.RowVar.fresh() else null
+                        return com.funk.language.ast.FunkType.VariantType(constructors, rowVar)
                     }
                 }
             }
@@ -3109,7 +3541,9 @@ class TypeChecker {
         }
         
         return if (constructors.isNotEmpty()) {
-            com.funk.language.ast.FunkType.VariantType(constructors, null) // closed variant
+            // Create open variant if there's a wildcard, closed otherwise
+            val rowVar = if (hasWildcard) com.funk.language.ast.RowVar.fresh() else null
+            com.funk.language.ast.FunkType.VariantType(constructors, rowVar)
         } else {
             null
         }
@@ -3150,11 +3584,20 @@ class TypeChecker {
                         for (patternForConstructor in caseForConstructor.patterns) {
                             if (patternForConstructor is ConstructorPattern) {
                                 val dataType = patternForConstructor.recordPattern?.let { recordPattern ->
+                                    // Try to find the actual constructor type first
+                                    val variantType = findVariantTypeByConstructor(patternForConstructor.constructor)
+                                    val actualDataType = variantType?.constructors?.get(patternForConstructor.constructor)
+                                    
                                     val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
                                     for (entry in recordPattern.entries) {
                                         if (entry.pattern == null) {
-                                            // Use the actual field type from type definitions if possible
-                                            fields[entry.name] = inferFieldTypeFromName(entry.name)
+                                            // Use actual field type from constructor definition, fallback to heuristic
+                                            val fieldType = if (actualDataType is com.funk.language.ast.FunkType.RecordType) {
+                                                actualDataType.fields[entry.name] ?: inferFieldTypeFromName(entry.name)
+                                            } else {
+                                                inferFieldTypeFromName(entry.name)
+                                            }
+                                            fields[entry.name] = fieldType
                                         }
                                     }
                                     if (fields.isNotEmpty()) {
@@ -3167,7 +3610,13 @@ class TypeChecker {
                     }
                     
                     if (constructors.isNotEmpty()) {
-                        return com.funk.language.ast.FunkType.VariantType(constructors)
+                        // Check if there are any wildcard patterns - if so, make it an open variant
+                        val hasWildcard = cases.any { case -> 
+                            case.patterns.any { it is WildcardPattern }
+                        }
+
+                        val rowVar = if (hasWildcard) com.funk.language.ast.RowVar.fresh() else null
+                        return com.funk.language.ast.FunkType.VariantType(constructors, rowVar)
                     }
                 }
                 else -> {
@@ -3353,7 +3802,11 @@ class TypeChecker {
             
             // NumType compatibility - Num 'a is compatible with any numeric type
             expectedType is com.funk.language.ast.FunkType.NumType && isNumericType(actualType) -> true
-            actualType is com.funk.language.ast.FunkType.NumType && isNumericType(expectedType) -> true
+            actualType is com.funk.language.ast.FunkType.NumType && isNumericType(expectedType) -> {
+                // CRITICAL FIX: When Num 'a meets a concrete type, constrain the type variable
+                addConstraint(actualType, expectedType)
+                true
+            }
             
             // Type variables can unify with any type
             actualType is com.funk.language.ast.FunkType.VarType -> true
@@ -3798,6 +4251,69 @@ class TypeChecker {
         context["stringToFloat"] = com.funk.language.ast.FunkType.FunctionType(
             com.funk.language.ast.FunkType.RecordType(mapOf("val" to com.funk.language.ast.FunkType.StringType)),
             com.funk.language.ast.FunkType.FloatType
+        )
+        
+        // ArrayList built-in functions
+        val elementTypeVar = com.funk.language.ast.TypeVar("a")
+        val elementType = com.funk.language.ast.FunkType.VarType(elementTypeVar)
+        val arrayListType = com.funk.language.ast.FunkType.ArrayListType(elementType)
+        
+        // arrayLength : {arr: ['a]} -> Int
+        context["arrayLength"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("arr" to arrayListType)),
+            com.funk.language.ast.FunkType.IntType
+        )
+        
+        // arrayGet : {arr: ['a], index: Int} -> 'a
+        context["arrayGet"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "arr" to arrayListType,
+                "index" to com.funk.language.ast.FunkType.IntType
+            )),
+            elementType
+        )
+        
+        // arraySet : {arr: ['a], index: Int, value: 'a} -> ['a]
+        context["arraySet"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "arr" to arrayListType,
+                "index" to com.funk.language.ast.FunkType.IntType,
+                "value" to elementType
+            )),
+            arrayListType
+        )
+        
+        // arrayAdd : {arr: ['a], value: 'a} -> ['a]
+        context["arrayAdd"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "arr" to arrayListType,
+                "value" to elementType
+            )),
+            arrayListType
+        )
+        
+        // arrayRemove : {arr: ['a], index: Int} -> ['a]
+        context["arrayRemove"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "arr" to arrayListType,
+                "index" to com.funk.language.ast.FunkType.IntType
+            )),
+            arrayListType
+        )
+        
+        // arrayConcat : {arr1: ['a], arr2: ['a]} -> ['a]
+        context["arrayConcat"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf(
+                "arr1" to arrayListType,
+                "arr2" to arrayListType
+            )),
+            arrayListType
+        )
+        
+        // arrayIsEmpty : {arr: ['a]} -> Bool
+        context["arrayIsEmpty"] = com.funk.language.ast.FunkType.FunctionType(
+            com.funk.language.ast.FunkType.RecordType(mapOf("arr" to arrayListType)),
+            com.funk.language.ast.FunkType.BooleanType
         )
         
         // Boolean logic functions

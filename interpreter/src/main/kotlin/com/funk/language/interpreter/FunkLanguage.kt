@@ -6,9 +6,12 @@ import com.oracle.truffle.api.TruffleLanguage.Registration
 import com.oracle.truffle.api.nodes.Node
 import com.oracle.truffle.api.nodes.RootNode
 import com.oracle.truffle.api.frame.VirtualFrame
+import com.oracle.truffle.api.frame.FrameDescriptor
 import com.funk.language.parser.FunkParserImpl
 import com.funk.language.ast.Program
 import com.funk.language.typechecker.TypeChecker
+import com.funk.language.interpreter.nodes.ASTToTruffleConverter
+import com.funk.language.interpreter.nodes.FunkNode
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
 import com.funk.language.parser.generated.FunkLexer
@@ -69,9 +72,13 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             val typeChecker = TypeChecker()
             val typedProgram = typeChecker.typeCheck(ast)
             
-            // Create a proper Truffle execution root node
-            val interpreter = FunkInterpreter()
-            val rootNode = FunkProgramRootNode(this, typedProgram, interpreter)
+            // Convert AST to optimized Truffle nodes
+            val converter = ASTToTruffleConverter()
+            val truffleNode = converter.convertProgram(typedProgram)
+            val frameDescriptor = converter.getFrameDescriptor()
+            
+            // Create optimized Truffle execution root node
+            val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode)
             return rootNode.callTarget
         } catch (e: Exception) {
             throw FunkException("Parse error: ${e.message}", e)
@@ -86,7 +93,39 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 }
 
 /**
- * Truffle root node for program execution using the unified AST
+ * Optimized Truffle root node for program execution using specialized nodes
+ */
+class FunkTruffleRootNode(
+    language: FunkLanguage,
+    @field:Child private var programNode: FunkNode,
+    frameDescriptor: FrameDescriptor,
+    private val sourceCode: String
+) : RootNode(language, frameDescriptor) {
+    
+    override fun execute(frame: VirtualFrame): Any {
+        return try {
+            val result = programNode.execute(frame)
+            // Convert FunkValue to appropriate return type for Truffle interop
+            when (result) {
+                is FunkInt -> result.value as Any
+                is FunkFloat -> result.value as Any
+                is FunkString -> result.value as Any
+                is FunkBoolean -> result.value as Any
+                is FunkNull -> null as Any
+                else -> result.getDisplayString() as Any
+            }
+        } catch (e: Exception) {
+            throw FunkException("Execution error in Truffle node: ${e.message}", e)
+        }
+    }
+    
+    override fun getName(): String = "funk-program"
+    
+    override fun toString(): String = "FunkTruffleRootNode"
+}
+
+/**
+ * Legacy root node for backward compatibility with existing interpreter
  */
 class FunkProgramRootNode(
     language: FunkLanguage,
