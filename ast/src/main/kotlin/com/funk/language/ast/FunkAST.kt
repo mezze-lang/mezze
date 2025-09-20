@@ -260,6 +260,7 @@ sealed interface ProgramItem
 @Serializable
 data class LetBinding(
     val variableName: String,
+    val visibility: Visibility = Visibility.PRIVATE,
     val typeAnnotation: TypeAnnotation? = null,  // From parser
     val inferredType: FunkType? = null,          // From typechecker
     val expression: Expression
@@ -268,6 +269,7 @@ data class LetBinding(
 @Serializable
 data class TypeDeclaration(
     val name: String,
+    val visibility: Visibility = Visibility.PRIVATE,
     val typeParams: List<String> = emptyList(),
     val definition: TypeDefinition,
     val inferredType: FunkType? = null           // From typechecker
@@ -276,6 +278,7 @@ data class TypeDeclaration(
 @Serializable
 data class EffectDeclaration(
     val name: String,
+    val visibility: Visibility = Visibility.PRIVATE,
     val operations: List<EffectOperation>,
     val inferredType: FunkType? = null           // From typechecker
 ) : ProgramItem
@@ -292,6 +295,7 @@ data class ImplDeclaration(
 @Serializable
 data class AbilityDeclaration(
     val name: String,
+    val visibility: Visibility = Visibility.PRIVATE,
     val typeParams: List<String>,                // Multiple type parameters like ['a, 'b]
     val constraints: List<AbilityConstraint> = emptyList(),
     val dependencies: List<AbilityDependency> = emptyList(),  // Ability dependencies (e.g., Ord depends on Eq)
@@ -310,6 +314,19 @@ data class ImplAbilityDeclaration(
 @Serializable
 data class TopLevelExpression(
     val expression: Expression
+) : ProgramItem
+
+// Module system declarations
+@Serializable
+data class UseDeclaration(
+    val path: UsePath,
+    val alias: String? = null
+) : ProgramItem
+
+@Serializable
+data class PubUseDeclaration(
+    val path: UsePath,
+    val alias: String? = null
 ) : ProgramItem
 
 
@@ -760,6 +777,45 @@ data class VariantTypeConstructor(
 
 @Serializable
 data class ContentHash(val hash: String)
+
+// ============================================================================
+// MODULE SYSTEM
+// ============================================================================
+
+/**
+ * Visibility modifier for declarations
+ */
+@Serializable
+enum class Visibility {
+    PUBLIC,    // pub - visible to other modules
+    PRIVATE    // default - only visible within module
+}
+
+/**
+ * Use path types for import declarations
+ */
+@Serializable
+@JsonClassDiscriminator("usePathKind")
+sealed interface UsePath
+
+@Serializable
+data class ModulePath(val segments: List<String>) : UsePath  // math::geometry
+
+@Serializable
+data class SelectivePath(
+    val module: List<String>,
+    val items: List<ImportItem>
+) : UsePath  // math::geometry::{area, Shape as alias}
+
+@Serializable
+data class ImportItem(
+    val name: String,
+    val alias: String? = null
+)
+
+// ============================================================================
+// TYPE CONVERSION
+// ============================================================================
 
 /**
  * Convert TypeAnnotation to internal FunkType representation

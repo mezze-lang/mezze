@@ -1,0 +1,3 @@
+use internal::secret
+
+let value = get_secret

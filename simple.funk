@@ -1,0 +1,3 @@
+let x = 42
+let result = x + 25
+result

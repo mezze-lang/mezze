@@ -8,7 +8,7 @@ import com.oracle.truffle.api.nodes.RootNode
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.funk.language.parser.FunkParserImpl
-import com.funk.language.ast.Program
+import com.funk.language.ast.*
 import com.funk.language.typechecker.TypeChecker
 import com.funk.language.interpreter.nodes.ASTToTruffleConverter
 import com.funk.language.interpreter.nodes.FunkNode
@@ -70,16 +70,40 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             
             // Type check the program
             val typeChecker = TypeChecker()
-            val typedProgram = typeChecker.typeCheck(ast)
+            val typedProgram = if (source.path != null) {
+                // If we have a file path, use its parent directory as project root
+                val sourcePath = java.nio.file.Paths.get(source.path)
+                val projectRoot = sourcePath.parent ?: sourcePath
+                typeChecker.typeCheck(ast, projectRoot)
+            } else {
+                // Fallback for stdin or string sources
+                typeChecker.typeCheck(ast)
+            }
             
-            // Convert AST to optimized Truffle nodes
-            val converter = ASTToTruffleConverter()
-            val truffleNode = converter.convertProgram(typedProgram)
-            val frameDescriptor = converter.getFrameDescriptor()
+            // Check if the program contains modules (UseDeclaration or PubUseDeclaration)
+            val hasModules = typedProgram.items.any { it is UseDeclaration || it is PubUseDeclaration }
             
-            // Create optimized Truffle execution root node
-            val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode)
-            return rootNode.callTarget
+            if (hasModules) {
+                // Use FunkInterpreter for module-based programs
+                val projectRoot = if (source.path != null) {
+                    val sourcePath = java.nio.file.Paths.get(source.path)
+                    sourcePath.parent ?: sourcePath
+                } else {
+                    java.nio.file.Paths.get(".")
+                }
+                
+                val rootNode = FunkInterpreterRootNode(this, typedProgram, projectRoot, sourceCode)
+                return rootNode.callTarget
+            } else {
+                // Use optimized Truffle nodes for non-module programs
+                val converter = ASTToTruffleConverter()
+                val truffleNode = converter.convertProgram(typedProgram)
+                val frameDescriptor = converter.getFrameDescriptor()
+                
+                // Create optimized Truffle execution root node
+                val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode)
+                return rootNode.callTarget
+            }
         } catch (e: Exception) {
             throw FunkException("Parse error: ${e.message}", e)
         }
@@ -90,6 +114,36 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
     // override fun isObjectOfLanguage(`object`: Any): Boolean {
     //     return `object` is FunkValue
     // }
+}
+
+/**
+ * Root node that uses FunkInterpreter for module-based programs
+ */
+class FunkInterpreterRootNode(
+    language: FunkLanguage,
+    private val program: Program,
+    private val projectRoot: java.nio.file.Path,
+    sourceCode: String
+) : RootNode(language, FrameDescriptor.newBuilder().build()) {
+    
+    override fun execute(frame: VirtualFrame): Any {
+        return try {
+            val interpreter = FunkInterpreter(skipParserSetup = true)
+            val result = interpreter.execute(program, projectRoot)
+            
+            // Convert FunkValue to Truffle-compatible value
+            when (result) {
+                is com.funk.language.interpreter.FunkInt -> result.value as Any
+                is com.funk.language.interpreter.FunkFloat -> result.value as Any
+                is com.funk.language.interpreter.FunkString -> result.value as Any
+                is com.funk.language.interpreter.FunkBoolean -> result.value as Any
+                is com.funk.language.interpreter.FunkNull -> null as Any?
+                else -> result.toString() as Any
+            } ?: "null"
+        } catch (e: Exception) {
+            throw FunkException("Execution error: ${e.message}", e)
+        }
+    }
 }
 
 /**

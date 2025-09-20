@@ -58,7 +58,26 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
 
     override fun visitProgram(ctx: FunkParser.ProgramContext): Any {
-        val items = ctx.statement().mapNotNull { visit(it) as? ProgramItem }
+        val items = mutableListOf<ProgramItem>()
+        
+        // Process use declarations first
+        ctx.useDeclaration()?.forEach { useCtx ->
+            items.add(visit(useCtx) as UseDeclaration)
+        }
+        
+        // Process pub use declarations
+        ctx.pubUseDeclaration()?.forEach { pubUseCtx ->
+            items.add(visit(pubUseCtx) as PubUseDeclaration)
+        }
+        
+        // Process regular statements
+        ctx.statement()?.forEach { stmtCtx ->
+            val item = visit(stmtCtx) as? ProgramItem
+            if (item != null) {
+                items.add(item)
+            }
+        }
+        
         return Program(items)
     }
 
@@ -85,22 +104,25 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     // Declarations
     override fun visitLetBinding(ctx: FunkParser.LetBindingContext): Any {
         val variableName = ctx.Identifier().text
+        val visibility = if (ctx.PUB() != null) Visibility.PUBLIC else Visibility.PRIVATE
         val typeAnnotation = ctx.typeAnnotation()?.let { visit(it) as TypeAnnotation }
         val expression = visit(ctx.expression()) as Expression
-        return LetBinding(variableName, typeAnnotation, null, expression)
+        return LetBinding(variableName, visibility, typeAnnotation, null, expression)
     }
 
     override fun visitTypeDeclaration(ctx: FunkParser.TypeDeclarationContext): Any {
         val name = ctx.Identifier().text
+        val visibility = if (ctx.PUB() != null) Visibility.PUBLIC else Visibility.PRIVATE
         val typeParams = ctx.typeParams()?.TypeVariable()?.map { it.text } ?: emptyList()
         val definition = visit(ctx.typeDefinition()) as TypeDefinition
-        return TypeDeclaration(name, typeParams, definition)
+        return TypeDeclaration(name, visibility, typeParams, definition)
     }
     
     override fun visitEffectDeclaration(ctx: FunkParser.EffectDeclarationContext): Any {
         val name = ctx.Identifier().text
+        val visibility = if (ctx.PUB() != null) Visibility.PUBLIC else Visibility.PRIVATE
         val operations = ctx.effectOperation().map { visit(it) as EffectOperation }
-        return EffectDeclaration(name, operations)
+        return EffectDeclaration(name, visibility, operations)
     }
     
     override fun visitEffectOperation(ctx: FunkParser.EffectOperationContext): Any {
@@ -148,13 +170,14 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
     override fun visitAbilityDeclaration(ctx: FunkParser.AbilityDeclarationContext): Any {
         val name = ctx.Identifier().text
+        val visibility = if (ctx.PUB() != null) Visibility.PUBLIC else Visibility.PRIVATE
         val typeParams = ctx.TypeVariable().map { it.text }
         val constraints = emptyList<AbilityConstraint>() // No longer used in new syntax
         val dependencies = ctx.abilityDependencies()?.abilityDependency()?.map {
             visit(it) as AbilityDependency
         } ?: emptyList()
         val operations = ctx.abilityOperation().map { visit(it) as AbilityOperation }
-        return AbilityDeclaration(name, typeParams, constraints, dependencies, operations)
+        return AbilityDeclaration(name, visibility, typeParams, constraints, dependencies, operations)
     }
 
     override fun visitAbilityConstraint(ctx: FunkParser.AbilityConstraintContext): Any {
@@ -197,6 +220,70 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
         val implementation = visit(ctx.expression()) as Expression
         return ImplAbilityOperation(name, paramType, returnType, implementation)
+    }
+    
+    // Module system declarations
+    override fun visitUseDeclaration(ctx: FunkParser.UseDeclarationContext): Any {
+        val path = visit(ctx.usePath()) as UsePath
+        val alias = ctx.Identifier()?.text
+        return UseDeclaration(path, alias)
+    }
+    
+    override fun visitPubUseDeclaration(ctx: FunkParser.PubUseDeclarationContext): Any {
+        val path = visit(ctx.usePath()) as UsePath
+        val alias = ctx.Identifier()?.text
+        return PubUseDeclaration(path, alias)
+    }
+    
+    override fun visitUsePath(ctx: FunkParser.UsePathContext): Any {
+        return when {
+            ctx.moduleSegments() != null && ctx.useList() == null -> {
+                // Simple module path: math::geometry
+                val segments = visit(ctx.moduleSegments()) as List<String>
+                ModulePath(segments)
+            }
+            ctx.moduleSegments() != null && ctx.useList() != null -> {
+                // Selective import: math::geometry::{area, Shape as alias}
+                val module = visit(ctx.moduleSegments()) as List<String>
+                val items = visit(ctx.useList()) as List<ImportItem>
+                SelectivePath(module, items)
+            }
+            else -> throw IllegalArgumentException("Unknown use path: ${ctx.text}")
+        }
+    }
+    
+    override fun visitModuleSegments(ctx: FunkParser.ModuleSegmentsContext): Any {
+        return ctx.Identifier().map { it.text }
+    }
+    
+    override fun visitUseList(ctx: FunkParser.UseListContext): Any {
+        return ctx.useItem().map { visit(it) as ImportItem }
+    }
+    
+    override fun visitUseItem(ctx: FunkParser.UseItemContext): Any {
+        val name = ctx.Identifier(0).text
+        val alias = if (ctx.Identifier().size > 1) ctx.Identifier(1).text else null
+        return ImportItem(name, alias)
+    }
+    
+    override fun visitQualifiedIdentifier(ctx: FunkParser.QualifiedIdentifierContext): Any {
+        val identifiers = ctx.Identifier().map { it.text }
+        val sourceLocation = getSourceLocation(ctx)
+        
+        return if (identifiers.size == 1) {
+            // Simple identifier
+            val name = identifiers[0]
+            // CRITICAL FIX: Convert uppercase identifiers to variant constructions
+            if (name.first().isUpperCase()) {
+                VariantConstruction(name, null, sourceLocation = sourceLocation)  // Variant constructor without arguments
+            } else {
+                Identifier(name, sourceLocation = sourceLocation)  // Regular identifier
+            }
+        } else {
+            // Qualified identifier - join with ::
+            val qualifiedName = identifiers.joinToString("::")
+            Identifier(qualifiedName, sourceLocation = sourceLocation)
+        }
     }
 
     override fun visitFunctionAbilityConstraints(ctx: FunkParser.FunctionAbilityConstraintsContext): Any {
@@ -404,15 +491,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitPrimaryExpression(ctx: FunkParser.PrimaryExpressionContext): Any {
         return when {
             ctx.literal() != null -> visit(ctx.literal())
-            ctx.Identifier() != null -> {
-                val name = ctx.Identifier().text
-                val sourceLocation = getSourceLocation(ctx)
-                // CRITICAL FIX: Convert uppercase identifiers to variant constructions
-                if (name.first().isUpperCase()) {
-                    VariantConstruction(name, null, sourceLocation = sourceLocation)  // Variant constructor without arguments
-                } else {
-                    Identifier(name, sourceLocation = sourceLocation)  // Regular identifier
-                }
+            ctx.qualifiedIdentifier() != null -> {
+                visit(ctx.qualifiedIdentifier())
             }
             ctx.PLACEHOLDER() != null -> {
                 // Create placeholder expression for pipe operator desugaring

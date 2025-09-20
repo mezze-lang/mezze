@@ -4,6 +4,7 @@ import com.funk.language.ast.*
 import com.funk.language.ast.prettyPrintType
 import com.funk.language.ast.prettyPrintTypeWithAliases
 import com.funk.language.ast.TypeAliasInfo
+import com.funk.language.parser.FunkParserImpl
 import com.funk.language.stdlib.StdLib
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -183,6 +184,10 @@ class TypeChecker {
     // Current program being type checked (for looking up ImplDeclarations)
     private var currentProgram: Program? = null
     
+    // Module resolution system (will be initialized with project root)
+    private var moduleResolver: ModuleResolver? = null
+    private val parser = FunkParserImpl()
+    
     // Context tracking for effect handler validation
     private var currentImplContext: ImplDeclaration? = null
     private var currentPerformContext: PerformExpression? = null
@@ -211,7 +216,8 @@ class TypeChecker {
     fun typeCheck(program: Program, currentPath: Path): Program {
         // Reset type variable counter for consistent naming
         com.funk.language.ast.TypeVar.resetCounter()
-        // Simple type checking without module resolution for now
+        // Initialize module resolver with the correct project root
+        moduleResolver = ModuleResolver(currentPath, parser)
         return typeCheckSimple(program)
     }
 
@@ -224,13 +230,23 @@ class TypeChecker {
         constraints.clear() // Reset constraints
         currentProgram = program // Store current program for impl lookup
         
+        // Process imports and collect resolved module values for compilation
+        val resolvedModuleValues = processImportsAndResolveForCompilation(program)
+        
+        // Transform program items to embed resolved module values for compilation
+        val transformedProgram = if (resolvedModuleValues.isNotEmpty()) {
+            transformItemsForCompilation(program, resolvedModuleValues)
+        } else {
+            program
+        }
+        
         // Validate that effect names and impl performer names don't conflict
-        validateEffectImplNameConflicts(program)
+        validateEffectImplNameConflicts(transformedProgram)
         
         // Add built-in functions to the context from stdlib
         registerStdLibTypes()
         
-        val enhancedItems = program.items.map { item ->
+        val enhancedItems = transformedProgram.items.map { item ->
             when (item) {
                 is LetBinding -> {
                     // Reset scope counter for each top-level function to start fresh with 'a
@@ -421,6 +437,9 @@ class TypeChecker {
                 else -> item
             }
         }
+        
+        // For now, just return the enhanced items without transformation
+        // TODO: Implement compile-time module resolution transformation
         return program.copy(items = enhancedItems)
     }
 
@@ -5117,6 +5136,451 @@ class TypeChecker {
             }
         }
         return null
+    }
+    
+    /**
+     * Process import declarations and populate context with imported items
+     */
+    private fun processImports(program: Program) {
+        for (item in program.items) {
+            when (item) {
+                is UseDeclaration -> {
+                    processUseDeclarationSimple(item)
+                }
+                is PubUseDeclaration -> {
+                    // Process pub use: import locally AND make available for re-export
+                    processPubUseDeclaration(item)
+                }
+                is LetBinding, is TypeDeclaration, is EffectDeclaration, 
+                is AbilityDeclaration, is ImplDeclaration, is ImplAbilityDeclaration, 
+                is TopLevelExpression -> {
+                    // These items are processed later in the main type checking loop
+                }
+            }
+        }
+    }
+    
+    /**
+     * Process imports and resolve modules for compilation (embeds actual values in AST)
+     */
+    private fun processImportsAndResolveForCompilation(program: Program): Map<String, Any> {
+        // First, do normal import processing for type checking
+        processImports(program)
+        
+        val resolvedValues = mutableMapOf<String, Any>()
+        val resolver = moduleResolver ?: return emptyMap()
+        
+        // Track modules being resolved to detect circular dependencies
+        val resolutionStack = mutableSetOf<String>()
+        
+        // Compile-time resolution is complex and needs more work to handle all edge cases
+        // The framework is in place but disabled for now to maintain stability
+        // TODO: Complete compile-time resolution implementation
+        return emptyMap()
+    }
+    
+    /**
+     * Simple module resolution for basic use declarations
+     */
+    private fun processUseDeclarationSimple(useDecl: UseDeclaration) {
+        when (val path = useDecl.path) {
+            is ModulePath -> {
+                val modulePath = path.segments.joinToString("::")
+                
+                // Check internal module access
+                if (modulePath.contains("::internal::")) {
+                    val currentModuleName = getCurrentModuleName()
+                    val resolver = moduleResolver ?: throw IllegalStateException("Module resolver not initialized")
+                    if (!resolver.canAccessInternal(currentModuleName, modulePath)) {
+                        throw ModuleError.InternalModuleAccess(currentModuleName, modulePath)
+                    }
+                }
+                
+                // Load the module
+                val resolver = moduleResolver ?: throw IllegalStateException("Module resolver not initialized")
+                val module = resolver.resolveModule(modulePath)
+                
+                // Import all public exports
+                val prefix = useDecl.alias ?: path.segments.last()
+                for ((name, export) in module.exports) {
+                    val qualifiedName = "$prefix::$name"
+                    context[qualifiedName] = export.funkType
+                    
+                    // For types, also add constructors without qualification
+                    if (export.type == ExportedItemType.CONSTRUCTOR) {
+                        context[name] = export.funkType
+                    }
+                }
+            }
+            
+            is SelectivePath -> {
+                val modulePath = path.module.joinToString("::")
+                
+                // Check internal module access
+                if (modulePath.contains("::internal::")) {
+                    val currentModuleName = getCurrentModuleName()
+                    val resolver = moduleResolver ?: throw IllegalStateException("Module resolver not initialized")
+                    if (!resolver.canAccessInternal(currentModuleName, modulePath)) {
+                        throw ModuleError.InternalModuleAccess(currentModuleName, modulePath)
+                    }
+                }
+                
+                // Load the module
+                val resolver = moduleResolver ?: throw IllegalStateException("Module resolver not initialized")
+                val module = resolver.resolveModule(modulePath)
+                
+                // Import only selected items
+                for (item in path.items) {
+                    val export = module.exports[item.name]
+                        ?: throw ModuleError.ExportNotFound(item.name, modulePath, module.exports.keys.toList())
+                    
+                    // Add to context with alias if provided, otherwise use original name
+                    val contextName = item.alias ?: item.name
+                    context[contextName] = export.funkType
+                    
+                    // For types, also add their constructors
+                    if (export.type == ExportedItemType.TYPE) {
+                        // Find and import all constructors for this type
+                        for ((constructorName, constructorExport) in module.exports) {
+                            if (constructorExport.type == ExportedItemType.CONSTRUCTOR) {
+                                context[constructorName] = constructorExport.funkType
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Resolve a use declaration for compile-time embedding
+     */
+    private fun resolveUseDeclarationForCompilation(
+        useDecl: UseDeclaration,
+        resolver: ModuleResolver,
+        resolvedValues: MutableMap<String, Any>,
+        resolutionStack: MutableSet<String>
+    ) {
+        when (val path = useDecl.path) {
+            is ModulePath -> {
+                val modulePath = path.segments.joinToString("::")
+                
+                // Check for circular dependency
+                if (modulePath in resolutionStack) {
+                    throw ModuleError.CircularDependency(resolutionStack.toList() + modulePath)
+                }
+                
+                // Check internal module access
+                if (modulePath.contains("::internal::")) {
+                    val currentModuleName = getCurrentModuleName()
+                    if (!resolver.canAccessInternal(currentModuleName, modulePath)) {
+                        throw ModuleError.InternalModuleAccess(currentModuleName, modulePath)
+                    }
+                }
+                
+                // Add to resolution stack
+                resolutionStack.add(modulePath)
+                
+                try {
+                    // Load and resolve the module
+                    val module = resolver.resolveModule(modulePath)
+                    val moduleValues = resolveModuleValues(module, resolver, resolutionStack)
+                    
+                    // Import all public exports with qualification
+                    val prefix = useDecl.alias ?: path.segments.last()
+                    for ((name, value) in moduleValues) {
+                        val qualifiedName = "$prefix::$name"
+                        resolvedValues[qualifiedName] = value
+                        
+                        // For constructors, also add without qualification
+                        val export = module.exports[name]
+                        if (export?.type == ExportedItemType.CONSTRUCTOR) {
+                            resolvedValues[name] = value
+                        }
+                    }
+                    
+                } finally {
+                    resolutionStack.remove(modulePath)
+                }
+            }
+            
+            is SelectivePath -> {
+                val modulePath = path.module.joinToString("::")
+                
+                // Check for circular dependency
+                if (modulePath in resolutionStack) {
+                    throw ModuleError.CircularDependency(resolutionStack.toList() + modulePath)
+                }
+                
+                // Check internal module access
+                if (modulePath.contains("::internal::")) {
+                    val currentModuleName = getCurrentModuleName()
+                    if (!resolver.canAccessInternal(currentModuleName, modulePath)) {
+                        throw ModuleError.InternalModuleAccess(currentModuleName, modulePath)
+                    }
+                }
+                
+                // Add to resolution stack
+                resolutionStack.add(modulePath)
+                
+                try {
+                    // Load and resolve the module
+                    val module = resolver.resolveModule(modulePath)
+                    val moduleValues = resolveModuleValues(module, resolver, resolutionStack)
+                    
+                    // Import only selected items without qualification
+                    for (item in path.items) {
+                        val value = moduleValues[item.name]
+                            ?: throw ModuleError.ExportNotFound(item.name, modulePath, moduleValues.keys.toList())
+                        
+                        val contextName = item.alias ?: item.name
+                        resolvedValues[contextName] = value
+                        
+                        // For types, also import their constructors
+                        val export = module.exports[item.name]
+                        if (export?.type == ExportedItemType.TYPE) {
+                            for ((constructorName, constructorValue) in moduleValues) {
+                                val constructorExport = module.exports[constructorName]
+                                if (constructorExport?.type == ExportedItemType.CONSTRUCTOR) {
+                                    resolvedValues[constructorName] = constructorValue
+                                }
+                            }
+                        }
+                    }
+                    
+                } finally {
+                    resolutionStack.remove(modulePath)
+                }
+            }
+        }
+    }
+    
+    /**
+     * Resolve all values from a module by executing its program
+     */
+    private fun resolveModuleValues(
+        module: Module,
+        resolver: ModuleResolver,
+        resolutionStack: MutableSet<String>
+    ): Map<String, Any> {
+        // For compile-time resolution, we need to actually execute the module
+        // This is complex because we need to handle dependencies and circular references
+        
+        // For now, create optimized placeholders that preserve the original module structure
+        val moduleValues = mutableMapOf<String, Any>()
+        
+        for ((name, export) in module.exports) {
+            when (export.type) {
+                ExportedItemType.FUNCTION -> {
+                    // Create a reference to the original module function
+                    moduleValues[name] = ModuleReference(module.name, name, export.funkType)
+                }
+                ExportedItemType.TYPE -> {
+                    moduleValues[name] = ModuleReference(module.name, name, export.funkType)
+                }
+                ExportedItemType.CONSTRUCTOR -> {
+                    moduleValues[name] = ModuleReference(module.name, name, export.funkType)
+                }
+                ExportedItemType.EFFECT -> {
+                    moduleValues[name] = ModuleReference(module.name, name, export.funkType)
+                }
+                ExportedItemType.ABILITY -> {
+                    moduleValues[name] = ModuleReference(module.name, name, export.funkType)
+                }
+            }
+        }
+        
+        return moduleValues
+    }
+    
+    /**
+     * Type check with pre-resolved dependency context
+     */
+    private fun typeCheckWithContext(program: Program, dependencyContext: Map<String, Any>): Program {
+        // Add dependency values to context
+        for ((name, value) in dependencyContext) {
+            // Convert values back to types for type checking
+            // This is a simplified approach - in practice we'd need more sophisticated handling
+            context[name] = FunkType.VarType(TypeVar.fresh())
+        }
+        
+        return typeCheckSimple(program)
+    }
+    
+    /**
+     * Create placeholder function for compile-time resolution
+     */
+    private fun createPlaceholderFunction(name: String, type: FunkType): Any {
+        return "COMPILE_TIME_FUNCTION:$name:${prettyPrintType(type)}"
+    }
+    
+    /**
+     * Create placeholder type for compile-time resolution
+     */
+    private fun createPlaceholderType(name: String, type: FunkType): Any {
+        return "COMPILE_TIME_TYPE:$name:${prettyPrintType(type)}"
+    }
+    
+    /**
+     * Create placeholder constructor for compile-time resolution
+     */
+    private fun createPlaceholderConstructor(name: String, type: FunkType): Any {
+        return "COMPILE_TIME_CONSTRUCTOR:$name:${prettyPrintType(type)}"
+    }
+    
+    /**
+     * Create placeholder effect for compile-time resolution
+     */
+    private fun createPlaceholderEffect(name: String, type: FunkType): Any {
+        return "COMPILE_TIME_EFFECT:$name:${prettyPrintType(type)}"
+    }
+    
+    /**
+     * Create placeholder ability for compile-time resolution
+     */
+    private fun createPlaceholderAbility(name: String, type: FunkType): Any {
+        return "COMPILE_TIME_ABILITY:$name:${prettyPrintType(type)}"
+    }
+    
+    /**
+     * Represents a reference to a module item for compile-time resolution
+     */
+    data class ModuleReference(
+        val moduleName: String,
+        val itemName: String,
+        val type: FunkType
+    )
+    
+    /**
+     * Transform program items to embed resolved module values for compilation
+     */
+    private fun transformItemsForCompilation(program: Program, resolvedValues: Map<String, Any>): Program {
+        // Create embedded let bindings for resolved module values
+        val embeddedBindings = mutableListOf<ProgramItem>()
+        
+        for ((name, value) in resolvedValues) {
+            // Create a let binding that embeds the resolved value
+            val embeddedBinding = LetBinding(
+                variableName = name,
+                visibility = Visibility.PRIVATE, // These are internal to the compiled module
+                typeAnnotation = null,
+                inferredType = null, // Will be inferred during type checking
+                expression = createEmbeddedValueExpression(value)
+            )
+            embeddedBindings.add(embeddedBinding)
+        }
+        
+        // Return new program with embedded bindings at the beginning
+        return Program(embeddedBindings + program.items)
+    }
+    
+    /**
+     * Create an expression that represents an embedded compile-time resolved value
+     */
+    private fun createEmbeddedValueExpression(value: Any): Expression {
+        return when {
+            value is ModuleReference -> {
+                // Create a variable reference that will be resolved at runtime
+                // This preserves the original function signature and behavior
+                Identifier(
+                    name = "${value.moduleName}::${value.itemName}",
+                    sourceLocation = SourceLocation(0, 0)
+                )
+            }
+            
+            value is String && value.startsWith("COMPILE_TIME_FUNCTION:") -> {
+                val parts = value.split(":", limit = 3)
+                val functionName = parts.getOrElse(1) { "unknown" }
+                val typeString = parts.getOrElse(2) { "unknown" }
+                
+                // Create a placeholder lambda that will be replaced at runtime
+                LambdaExpression(
+                    parameters = UntypedParameters(listOf("args")),
+                    body = StringLiteral("EMBEDDED_FUNCTION:$functionName")
+                )
+            }
+            
+            value is String && value.startsWith("COMPILE_TIME_CONSTRUCTOR:") -> {
+                val parts = value.split(":", limit = 3)
+                val constructorName = parts.getOrElse(1) { "unknown" }
+                val typeString = parts.getOrElse(2) { "unknown" }
+                
+                // Create a placeholder lambda for constructor
+                LambdaExpression(
+                    parameters = UntypedParameters(listOf("args")),
+                    body = StringLiteral("EMBEDDED_CONSTRUCTOR:$constructorName")
+                )
+            }
+            
+            value is String && value.startsWith("COMPILE_TIME_TYPE:") -> {
+                val parts = value.split(":", limit = 3)
+                val typeName = parts.getOrElse(1) { "unknown" }
+                
+                // Types are handled differently - they don't need runtime values
+                StringLiteral("EMBEDDED_TYPE:$typeName")
+            }
+            
+            else -> {
+                // Fallback for other value types
+                StringLiteral("EMBEDDED_VALUE:$value")
+            }
+        }
+    }
+
+    /**
+     * Get the current module name (placeholder implementation)
+     */
+    private fun getCurrentModuleName(): String {
+        // TODO: This should be determined from the file path or module context
+        return "main"
+    }
+    
+    /**
+     * Process a pub use declaration: import locally AND make available for re-export
+     */
+    private fun processPubUseDeclaration(pubUseDecl: PubUseDeclaration) {
+        // First, import locally (same as regular use)
+        processUseDeclarationSimple(UseDeclaration(pubUseDecl.path, pubUseDecl.alias))
+        
+        // Then, add to re-exports for this module
+        // TODO: This would need to be stored in module metadata for other modules to import
+        when (val path = pubUseDecl.path) {
+            is ModulePath -> {
+                val modulePath = path.segments.joinToString("::")
+                val resolver = moduleResolver ?: return
+                val module = resolver.resolveModule(modulePath)
+                
+                // Re-export all items from the imported module
+                val prefix = pubUseDecl.alias ?: path.segments.last()
+                for ((name, export) in module.exports) {
+                    val reExportName = if (pubUseDecl.alias != null) {
+                        "$prefix::$name"
+                    } else {
+                        name // Direct re-export without prefix
+                    }
+                    
+                    // Add to current module's exports
+                    // TODO: Store in module metadata for other modules to discover
+                    println("DEBUG: Re-exporting $reExportName from $modulePath")
+                }
+            }
+            
+            is SelectivePath -> {
+                val modulePath = path.module.joinToString("::")
+                val resolver = moduleResolver ?: return
+                val module = resolver.resolveModule(modulePath)
+                
+                // Re-export only selected items
+                for (item in path.items) {
+                    val export = module.exports[item.name] ?: continue
+                    
+                    // Add to current module's exports
+                    val exportName = item.alias ?: item.name
+                    // TODO: Store in module metadata for other modules to discover
+                    println("DEBUG: Re-exporting ${item.name} as $exportName from $modulePath")
+                }
+            }
+        }
     }
     
 }

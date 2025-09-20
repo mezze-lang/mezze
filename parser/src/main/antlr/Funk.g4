@@ -2,7 +2,7 @@ grammar Funk;
 
 // --- Parser Rules ---
 
-program: (statement | NEWLINE)* EOF;
+program: useDeclaration* pubUseDeclaration* (statement | NEWLINE)* EOF;
 
 statement:
     letBinding
@@ -17,15 +17,15 @@ statement:
 
 // Declarations
 letBinding:
-    LET Identifier (COLON typeAnnotation)? ASSIGN expression NEWLINE?
+    PUB? LET Identifier (COLON typeAnnotation)? ASSIGN expression NEWLINE?
     ;
 
 typeDeclaration:
-    TYPE Identifier typeParams? ASSIGN typeDefinition NEWLINE?
+    PUB? TYPE Identifier typeParams? ASSIGN typeDefinition NEWLINE?
     ;
 
 effectDeclaration:
-    EFFECT Identifier LBRACE NEWLINE? (effectOperation NEWLINE?)* RBRACE NEWLINE?
+    PUB? EFFECT Identifier LBRACE NEWLINE? (effectOperation NEWLINE?)* RBRACE NEWLINE?
     ;
 
 effectOperation:
@@ -49,7 +49,7 @@ performerOperation:
     ;
 
 abilityDeclaration:
-    ABILITY Identifier TypeVariable+ abilityDependencies? WHERE LBRACE NEWLINE? (abilityOperation NEWLINE?)* RBRACE NEWLINE?
+    PUB? ABILITY Identifier TypeVariable+ abilityDependencies? WHERE LBRACE NEWLINE? (abilityOperation NEWLINE?)* RBRACE NEWLINE?
     ;
 
 abilityConstraints:
@@ -86,6 +86,32 @@ implAbilityDeclaration:
 
 implAbilityOperation:
     Identifier COLON recordType ARROW typeAnnotation ASSIGN expression
+    ;
+
+// Module system declarations
+useDeclaration:
+    USE usePath (AS Identifier)? NEWLINE
+    ;
+
+pubUseDeclaration:
+    PUB usePath (AS Identifier)? NEWLINE
+    ;
+
+usePath:
+    moduleSegments                          // math::geometry
+    | moduleSegments DOUBLE_COLON LBRACE useList RBRACE  // math::geometry::{area, Shape}
+    ;
+
+moduleSegments:
+    Identifier (DOUBLE_COLON Identifier)*   // math or math::geometry
+    ;
+
+useList:
+    useItem (COMMA useItem)*
+    ;
+
+useItem:
+    Identifier (AS Identifier)?
     ;
 
 typeParams:
@@ -196,7 +222,7 @@ memberAccessExpression:
 
 primaryExpression:
     literal
-    | Identifier
+    | qualifiedIdentifier
     | PLACEHOLDER                          // Pipe placeholder
     | LPAREN expression RPAREN
     | recordLiteral
@@ -204,6 +230,10 @@ primaryExpression:
     | lambdaExpression                     // Lambda function
     | performExpression                    // Perform expression
     | primaryExpression recordLiteral      // Function call or record update (disambiguated in AST builder)
+    ;
+
+qualifiedIdentifier:
+    Identifier (DOUBLE_COLON Identifier)*  // Support both simple and qualified identifiers
     ;
 
 performExpression:
@@ -317,6 +347,9 @@ PERFORM: 'perform';
 ABILITY: 'ability';
 WITH: 'with';
 IN: 'in';
+USE: 'use';
+PUB: 'pub';
+AS: 'as';
 
 // Operators
 PLUS: '+';
@@ -352,6 +385,7 @@ LBRACKET: '[';
 RBRACKET: ']';
 PIPE_DELIM: '|';
 COLON: ':';
+DOUBLE_COLON: '::';
 COMMA: ',';
 DOT: '.';
 

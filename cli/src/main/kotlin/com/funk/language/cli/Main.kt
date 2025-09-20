@@ -373,30 +373,22 @@ private fun handleExecCommand(args: List<String>) {
     }
 
     try {
-        // Create Polyglot context with explicit language configuration
-        val engine = Engine.newBuilder()
-            .allowExperimentalOptions(true)
-            .build()
-            
-        println("Available languages: ${engine.languages.keys}")
+        // Parse the source code
+        val parser = FunkParserImpl()
+        val program = parser.parse(source)
         
-        val context = Context.newBuilder("funk")
-            .engine(engine)
-            .allowAllAccess(true)
-            .allowExperimentalOptions(true)
-            .build()
+        // Type check the program with module resolution
+        val projectRoot = filePath?.parent ?: java.nio.file.Paths.get(".")
+        val typeChecker = TypeChecker()
+        val typedProgram = typeChecker.typeCheck(program, projectRoot)
         
-        try {
-            val polyglotSource = Source.newBuilder("funk", source, filePath?.toString() ?: "<stdin>").build()
-            val result = context.eval(polyglotSource)
-            
-            println("✅ Execution successful!")
-            println()
-            println("Result: ${result.toString()}")
-        } finally {
-            context.close()
-            engine.close()
-        }
+        // Execute using FunkInterpreter
+        val interpreter = com.funk.language.interpreter.FunkInterpreter()
+        val result = interpreter.execute(typedProgram, projectRoot)
+        
+        println("✅ Execution successful!")
+        println()
+        println(prettyPrintResult(result))
         
     } catch (e: TypeCheckError) {
         println("❌ Type Error:")
@@ -508,7 +500,8 @@ private fun createKotlinMainClass(tempDir: File, inputFile: File, source: String
     val typeChecker = TypeChecker()
     
     val program = parser.parse(source)
-    val enhancedProgram = typeChecker.typeCheck(program)
+    val projectRoot = inputFile.toPath().parent ?: inputFile.toPath()
+    val enhancedProgram = typeChecker.typeCheck(program, projectRoot)
     
     // Serialize the enhanced AST to JSON
     val json = kotlinx.serialization.json.Json { 
@@ -528,6 +521,7 @@ import kotlinx.serialization.json.Json
 import org.graalvm.polyglot.Context
 import org.graalvm.polyglot.Engine
 import org.graalvm.polyglot.Source
+import java.nio.file.Paths
 
 /**
  * Standalone executable for ${inputFile.name}
@@ -539,6 +533,7 @@ import org.graalvm.polyglot.Source
 object Main {
     private const val ENHANCED_AST_JSON = ${escapeForKotlin(serializedAST)}
     private const val PROGRAM_NAME = "${inputFile.name}"
+    private const val PROJECT_ROOT = "${projectRoot.toAbsolutePath()}"
     
     @JvmStatic
     fun main(args: Array<String>) {
@@ -582,7 +577,7 @@ object Main {
         
         return try {
             // Execute the pre-processed AST directly using Funk interpreter
-            // Create interpreter without parser dependencies since AST is pre-processed
+            // Create interpreter without parser dependencies since modules are resolved at compile time
             val interpreter = com.funk.language.interpreter.FunkInterpreter(skipParserSetup = true)
             val result = interpreter.execute(program)
             
@@ -674,7 +669,7 @@ private fun generateFunkDependencies(): String {
 
 private fun generateTruffleEnabledDependencies(): String {
     return """
-    // AST definitions and full interpreter with Truffle support
+    // AST definitions and interpreter with Truffle support (no parser/typechecker needed!)
     implementation(files("libs/funk-ast.jar"))
     implementation(files("libs/funk-interpreter.jar"))
     """.trimIndent()
@@ -703,6 +698,24 @@ private fun copyFunkLanguageJars(tempDir: File) {
         println("📦 Copied interpreter JAR")
     } else {
         throw IllegalStateException("Interpreter JAR not found: ${interpreterJar.absolutePath}. Please run 'gradle build' first.")
+    }
+    
+    // Copy parser JAR (needed for module resolution)
+    val parserJar = File(projectRoot, "parser/build/libs/parser-1.0.0.jar")
+    if (parserJar.exists()) {
+        parserJar.copyTo(File(libsDir, "funk-parser.jar"), overwrite = true)
+        println("📦 Copied parser JAR")
+    } else {
+        throw IllegalStateException("Parser JAR not found: ${parserJar.absolutePath}. Please run 'gradle build' first.")
+    }
+    
+    // Copy typechecker JAR (needed for module resolution)
+    val typecheckerJar = File(projectRoot, "typechecker/build/libs/typechecker-1.0.0.jar")
+    if (typecheckerJar.exists()) {
+        typecheckerJar.copyTo(File(libsDir, "funk-typechecker.jar"), overwrite = true)
+        println("📦 Copied typechecker JAR")
+    } else {
+        throw IllegalStateException("Typechecker JAR not found: ${typecheckerJar.absolutePath}. Please run 'gradle build' first.")
     }
     
     // Copy Truffle compiler JAR for JIT optimization
@@ -906,4 +919,38 @@ private fun printTypeCheckSuccess(result: Program, typeAliases: Map<String, Type
     
     println()
     println("🎉 All types check out! Your code is ready to run.")
+}
+
+/**
+ * Pretty print a FunkValue result for user-friendly output
+ */
+private fun prettyPrintResult(result: com.funk.language.interpreter.FunkValue): String {
+    return when (result) {
+        is com.funk.language.interpreter.FunkInt -> result.value.toString()
+        is com.funk.language.interpreter.FunkFloat -> result.value.toString()
+        is com.funk.language.interpreter.FunkString -> "\"${result.value}\""
+        is com.funk.language.interpreter.FunkBoolean -> result.value.toString()
+        is com.funk.language.interpreter.FunkNull -> "null"
+        is com.funk.language.interpreter.FunkVariant -> {
+            val value = result.value
+            if (value != null) {
+                if (value is com.funk.language.interpreter.FunkRecord) {
+                    "${result.constructor} ${prettyPrintResult(value)}"
+                } else {
+                    "${result.constructor}(${prettyPrintResult(value)})"
+                }
+            } else {
+                result.constructor
+            }
+        }
+        is com.funk.language.interpreter.FunkRecord -> {
+            val fields = result.fields.map { (key, value) -> 
+                "$key = ${prettyPrintResult(value)}" 
+            }
+            "{ ${fields.joinToString(", ")} }"
+        }
+        is com.funk.language.interpreter.SimpleFunkFunction -> "<function>"
+        is com.funk.language.interpreter.NativeFunkFunction -> "<native-function:${result.name}>"
+        else -> result.getDisplayString()
+    }
 }

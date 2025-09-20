@@ -1,0 +1,5 @@
+use math::{double}
+
+pub let double_value = double  # Re-export with different name
+
+pub let triple = 30

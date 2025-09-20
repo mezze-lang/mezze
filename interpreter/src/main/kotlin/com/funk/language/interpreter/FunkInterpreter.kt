@@ -3,11 +3,13 @@ package com.funk.language.interpreter
 import com.funk.language.parser.FunkParserImpl
 import com.funk.language.ast.*
 import com.funk.language.typechecker.TypeChecker
+import com.funk.language.typechecker.ModuleResolver
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.RootNode
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
+import java.nio.file.Path
 
 /**
  * Truffle-integrated interpreter that works with the shared AST
@@ -19,6 +21,7 @@ class FunkInterpreter {
     
     private val parser: FunkParserImpl?
     private val typeChecker: TypeChecker?
+    private var moduleResolver: ModuleResolver? = null
     
     // Constructor for full parsing/typechecking (used by funk exec)
     constructor() {
@@ -57,6 +60,15 @@ class FunkInterpreter {
     }
     
     /**
+     * Execute a pre-parsed and typechecked program with module resolution support
+     */
+    fun execute(program: Program, projectRoot: Path): FunkValue {
+        // Initialize module resolver
+        moduleResolver = ModuleResolver(projectRoot, parser ?: FunkParserImpl())
+        return executeProgram(program)
+    }
+    
+    /**
      * Public method for testing - executes a program and returns both result and context
      */
     fun executeWithContext(program: Program): Pair<FunkValue, Map<String, FunkValue>> {
@@ -80,6 +92,11 @@ class FunkInterpreter {
         // Register built-in native functions
         registerNativeFunctions(context)
         
+        // Process imports first if module resolver is available
+        if (moduleResolver != null) {
+            processImports(program, context)
+        }
+        
         // Execute each item in the program
         var lastResult: FunkValue = FunkNull
         
@@ -88,6 +105,94 @@ class FunkInterpreter {
         }
         
         return lastResult
+    }
+    
+    /**
+     * Process import declarations and populate context with imported items
+     */
+    private fun processImports(program: Program, context: MutableMap<String, FunkValue>) {
+        for (item in program.items) {
+            when (item) {
+                is UseDeclaration -> {
+                    processUseDeclaration(item, context)
+                }
+                is PubUseDeclaration -> {
+                    // Treat pub use declarations like regular use declarations for local context
+                    processUseDeclaration(UseDeclaration(item.path, item.alias), context)
+                }
+                else -> {
+                    // Other items are processed later
+                }
+            }
+        }
+    }
+    
+    /**
+     * Process a single use declaration and add imported items to context
+     */
+    private fun processUseDeclaration(useDecl: UseDeclaration, context: MutableMap<String, FunkValue>) {
+        val resolver = moduleResolver ?: return
+        
+        when (val path = useDecl.path) {
+            is ModulePath -> {
+                val modulePath = path.segments.joinToString("::")
+                val module = resolver.resolveModule(modulePath)
+                
+                // Execute the module to get runtime values
+                val moduleContext = executeModule(module.program)
+                
+                // Import all public exports
+                val prefix = useDecl.alias ?: path.segments.last()
+                for ((name, export) in module.exports) {
+                    val qualifiedName = "$prefix::$name"
+                    
+                    // Get the actual runtime value from the executed module
+                    val runtimeValue = moduleContext[name] ?: FunkNull
+                    context[qualifiedName] = runtimeValue
+                    
+                    // For constructors, also add without qualification
+                    if (export.type == com.funk.language.typechecker.ExportedItemType.CONSTRUCTOR) {
+                        context[name] = runtimeValue
+                    }
+                }
+            }
+            
+            is SelectivePath -> {
+                val modulePath = path.module.joinToString("::")
+                val module = resolver.resolveModule(modulePath)
+                
+                // Execute the module to get runtime values
+                val moduleContext = executeModule(module.program)
+                
+                // Import only selected items
+                for (item in path.items) {
+                    val export = module.exports[item.name]
+                        ?: throw RuntimeException("Item '${item.name}' not found in module '$modulePath'")
+                    
+                    // Get the actual runtime value from the executed module
+                    val runtimeValue = moduleContext[item.name] ?: FunkNull
+                    val contextName = item.alias ?: item.name
+                    context[contextName] = runtimeValue
+                }
+            }
+        }
+    }
+    
+    /**
+     * Execute a module and return its context (all defined variables)
+     */
+    private fun executeModule(program: Program): Map<String, FunkValue> {
+        val moduleContext = mutableMapOf<String, FunkValue>()
+        
+        // Register built-in native functions
+        registerNativeFunctions(moduleContext)
+        
+        // Execute each item in the module
+        for (item in program.items) {
+            executeItem(item, moduleContext)
+        }
+        
+        return moduleContext.toMap()
     }
     
     /**
@@ -185,6 +290,14 @@ class FunkInterpreter {
             is TopLevelExpression -> {
                 // Top-level expressions are evaluated and their result is returned
                 evaluateExpression(item.expression, context)
+            }
+            is UseDeclaration -> {
+                // Use declarations are processed at type-check time, no runtime effect
+                FunkNull
+            }
+            is PubUseDeclaration -> {
+                // Pub use declarations are processed at type-check time, no runtime effect
+                FunkNull
             }
             else -> {
                 throw RuntimeException("Unsupported program item: ${item::class.simpleName}")
