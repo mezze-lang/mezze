@@ -413,16 +413,25 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val sourceLocation = getSourceLocation(ctx)
         for (i in 1 until ctx.additiveExpression().size) {
             val right = visit(ctx.additiveExpression(i)) as Expression
-            val operator = when {
-                ctx.GT(i-1) != null -> ">"
-                ctx.LT(i-1) != null -> "<"
-                ctx.GTE(i-1) != null -> ">="
-                ctx.LTE(i-1) != null -> "<="
-                ctx.EQ(i-1) != null -> "=="
-                ctx.NEQ(i-1) != null -> "!="
-                else -> "=="
+            val operatorFunction = when {
+                ctx.GT(i-1) != null -> "(>)"
+                ctx.LT(i-1) != null -> "(<)"
+                ctx.GTE(i-1) != null -> "(>=)"
+                ctx.LTE(i-1) != null -> "(<=)"
+                ctx.EQ(i-1) != null -> "(==)"
+                ctx.NEQ(i-1) != null -> "(!=)"
+                else -> "(==)"
             }
-            result = BinaryOperation(result, operator, right, sourceLocation = sourceLocation)
+            
+            // Desugar to function call: (==) { left = a, right = b }
+            result = FunctionCall(
+                function = Identifier(operatorFunction, sourceLocation = sourceLocation),
+                arguments = RecordLiteral(listOf(
+                    RecordEntry("left", result),
+                    RecordEntry("right", right)
+                ), null),
+                sourceLocation = sourceLocation
+            )
         }
         
         return result
@@ -434,13 +443,22 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val sourceLocation = getSourceLocation(ctx)
         for (i in 1 until ctx.multiplicativeExpression().size) {
             val right = visit(ctx.multiplicativeExpression(i)) as Expression
-            val operator = when {
-                ctx.PLUS(i-1) != null -> "+"
-                ctx.MINUS(i-1) != null -> "-"
-                ctx.CONCAT(i-1) != null -> "++"
-                else -> "+"
+            val operatorFunction = when {
+                ctx.PLUS(i-1) != null -> "(+)"
+                ctx.MINUS(i-1) != null -> "(-)"
+                ctx.CONCAT(i-1) != null -> "(++)"
+                else -> "(+)"
             }
-            result = BinaryOperation(result, operator, right, sourceLocation = sourceLocation)
+            
+            // Desugar to function call: (+) { left = a, right = b }
+            result = FunctionCall(
+                function = Identifier(operatorFunction, sourceLocation = sourceLocation),
+                arguments = RecordLiteral(listOf(
+                    RecordEntry("left", result),
+                    RecordEntry("right", right)
+                ), null),
+                sourceLocation = sourceLocation
+            )
         }
         
         return result
@@ -452,12 +470,23 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val sourceLocation = getSourceLocation(ctx)
         for (i in 1 until ctx.unaryExpression().size) {
             val right = visit(ctx.unaryExpression(i)) as Expression
-            val operator = when {
-                ctx.MULTIPLY(i-1) != null -> "*"
-                ctx.DIVIDE(i-1) != null -> "/"
-                else -> "*"
+            val operatorFunction = when {
+                ctx.MULTIPLY(i-1) != null -> "(*)"
+                ctx.DIVIDE(i-1) != null -> "(/)"
+                ctx.FRACTION(i-1) != null -> "(//)"
+                ctx.MODULO(i-1) != null -> "(%)"
+                else -> "(*)"
             }
-            result = BinaryOperation(result, operator, right, sourceLocation = sourceLocation)
+            
+            // Desugar to function call: (*) { left = a, right = b }
+            result = FunctionCall(
+                function = Identifier(operatorFunction, sourceLocation = sourceLocation),
+                arguments = RecordLiteral(listOf(
+                    RecordEntry("left", result),
+                    RecordEntry("right", right)
+                ), null),
+                sourceLocation = sourceLocation
+            )
         }
         
         return result
@@ -613,7 +642,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             LambdaExpression(parameters, body, returnType, abilityConstraints)
         } else {
             val params = ctx.untypedRecordParams().untypedParam().map { it.Identifier().text }
-            val parameters = UntypedParameters(params)
+            val hasEllipsis = ctx.untypedRecordParams().ELLIPSIS() != null
+            val parameters = UntypedParameters(params, hasEllipsis)
             LambdaExpression(parameters, body)
         }
     }

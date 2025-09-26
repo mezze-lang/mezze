@@ -1,7 +1,7 @@
 # Function parameter type inference from usage
 let intToString = { val: Int} -> "number" # expected: intToString : { val: Int } -> String
 
-let add = {x, y} -> x + y # expected: add : { x: Num 'a, y: Num 'a } -> Num 'a
+let add = {x, y} -> x + y # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
 let concat = {a, b} -> a ++ b # expected: concat : { a: String, b: String } -> String
 let getAge = {person} -> person.age # expected: getAge : { person: { age: Int } } -> Int
 let processUser = {user} -> user.name ++ " is " ++ intToString {val = user.age} # expected: processUser : { user: { name: String, age: Int } } -> String

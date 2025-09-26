@@ -590,7 +590,8 @@ data class TypedParameters(
 
 @Serializable
 data class UntypedParameters(
-    val names: List<String>
+    val names: List<String>,
+    val isOpen: Boolean = false  // true if ... was used in parameter list
 ) : LambdaParameters
 
 @Serializable
@@ -967,19 +968,15 @@ fun normalizeTypeVariables(type: FunkType): FunkType {
     val typeVarsInOrder = mutableListOf<TypeVar>()
     collectTypeVariablesInOrder(type, typeVarsInOrder)
     
-    // CRITICAL FIX: Group type variables by name to preserve constraint relationships
-    // Type variables with the same name should get the same normalized name
-    val groupedByName = typeVarsInOrder.groupBy { it.name }
-    val uniqueNames = groupedByName.keys.toList()
+    // CRITICAL FIX: Group type variables by identity to preserve constraint relationships
+    // Only type variables that are the same object should get the same normalized name
+    val uniqueTypeVars = typeVarsInOrder.distinct()
     
-    // Create mapping from old names to new normalized names
+    // Create mapping from old type variables to new normalized names
     val mapping = mutableMapOf<TypeVar, TypeVar>()
-    uniqueNames.forEachIndexed { index, name ->
+    uniqueTypeVars.forEachIndexed { index, typeVar ->
         val normalizedName = "'${('a' + index)}"
-        // All type variables with the same original name get the same normalized name
-        groupedByName[name]?.forEach { typeVar ->
-            mapping[typeVar] = TypeVar(normalizedName, typeVar.level)
-        }
+        mapping[typeVar] = TypeVar(normalizedName, typeVar.level)
     }
     
     return substituteTypeVariables(type, mapping)

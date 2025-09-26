@@ -208,11 +208,12 @@ additiveExpression:
     ;
 
 multiplicativeExpression:
-    unaryExpression ((MULTIPLY | DIVIDE) unaryExpression)*
+    unaryExpression ((MULTIPLY | DIVIDE | FRACTION | MODULO) unaryExpression)*
     ;
 
 unaryExpression:
     MINUS memberAccessExpression               // Unary minus (no double negatives)
+    | NOT memberAccessExpression               // Logical NOT
     | memberAccessExpression
     ;
 
@@ -253,7 +254,7 @@ lambdaExpression:
 
 
 untypedRecordParams:
-    LBRACE (untypedParam (COMMA untypedParam)*)? RBRACE
+    LBRACE (untypedParam (COMMA untypedParam)*)? (COMMA ELLIPSIS)? RBRACE
     ;
 
 untypedParam:
@@ -356,6 +357,8 @@ PLUS: '+';
 MINUS: '-';
 MULTIPLY: '*';
 DIVIDE: '/';
+FRACTION: '//';
+MODULO: '%';
 CONCAT: '++';
 ASSIGN: '=';
 PIPE: '|>';
@@ -375,6 +378,7 @@ NEQ: '!=';
 // Logical operators
 AND: '&&';
 OR: '||';
+NOT: '!';
 
 // Delimiters
 LPAREN: '(';

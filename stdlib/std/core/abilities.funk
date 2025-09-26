@@ -1,0 +1,38 @@
+# std/core/abilities.funk - Core abilities always imported
+
+# Granular numeric abilities
+ability NumAdd 'a where {
+    add: { left: 'a, right: 'a } -> 'a
+}
+
+ability NumSub 'a where {
+    subtract: { left: 'a, right: 'a } -> 'a
+}
+
+ability NumMul 'a where {
+    multiply: { left: 'a, right: 'a } -> 'a
+}
+
+ability NumDiv 'a where {
+    divide: { left: 'a, right: 'a } -> 'a
+}
+
+ability NumMod 'a where {
+    modulo: { left: 'a, right: 'a } -> 'a
+}
+
+ability Eq 'a where {
+    equals: { left: 'a, right: 'a } -> Boolean
+}
+
+ability Ord 'a with Eq 'a where {
+    compare: { left: 'a, right: 'a } -> Ordering
+    less_than: { left: 'a, right: 'a } -> Boolean
+    greater_than: { left: 'a, right: 'a } -> Boolean
+}
+
+ability Show 'a where {
+    to_string: { value: 'a } -> String
+}
+
+type Ordering = | Less, Equal, Greater |

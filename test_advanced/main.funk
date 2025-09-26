@@ -1,6 +1,0 @@
-use utils::{double_value, triple}
-
-type Result = | Success { value: Int } |
-
-let result = double_value + triple
-Success { value = result }

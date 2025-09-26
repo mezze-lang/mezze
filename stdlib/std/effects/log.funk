@@ -1,0 +1,16 @@
+# std/effects/log.funk - Logging effects
+
+effect Log {
+    info: { msg: String } -> {} <Log>,
+    warn: { msg: String } -> {} <Log>,
+    error: { msg: String } -> {} <Log>,
+    debug: { msg: String } -> {} <Log>
+}
+
+# Console-based logging implementation
+impl Log for ConsoleLogger where {
+    info = { msg } -> __native_log_info { msg = msg },
+    warn = { msg } -> __native_log_warn { msg = msg },
+    error = { msg } -> __native_log_error { msg = msg },
+    debug = { msg } -> __native_log_debug { msg = msg }
+}

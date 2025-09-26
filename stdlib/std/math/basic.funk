@@ -1,0 +1,16 @@
+# std/math/basic.funk - Basic mathematical functions
+
+pub let abs = { value: 'a } -> 'a with NumSub 'a, Ord 'a = 
+    if value < 0 then NumSub.subtract { left = 0, right = value } else value
+
+pub let min = { left: 'a, right: 'a } -> 'a with Ord 'a =
+    if left < right then left else right
+
+pub let max = { left: 'a, right: 'a } -> 'a with Ord 'a =
+    if left > right then left else right
+
+pub let pow = { base: Float, exp: Float } -> 
+    __native_float_pow { base = base, exp = exp }
+
+pub let sqrt = { value: Float } -> 
+    __native_float_sqrt { value = value }

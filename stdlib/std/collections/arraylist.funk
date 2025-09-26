@@ -1,0 +1,13 @@
+# std/collections/arraylist.funk - ArrayList operations
+
+pub let map = { list: ArrayList 'a, func: 'a -> 'b } -> ArrayList 'b
+    __native_arraylist_map { list = list, func = func }
+
+pub let filter = { list: ArrayList 'a, predicate: 'a -> Boolean } -> ArrayList 'a
+    __native_arraylist_filter { list = list, predicate = predicate }
+
+pub let fold = { list: ArrayList 'a, initial: 'b, func: { acc: 'b, item: 'a } -> 'b } -> 'b
+    __native_arraylist_fold { list = list, initial = initial, func = func }
+
+pub let length = { list: ArrayList 'a } -> Int
+    __native_arraylist_length { list = list }

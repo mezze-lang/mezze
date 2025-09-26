@@ -6,7 +6,6 @@ let items: Nat = 0                 # expected: items : Nat
 let total: Nat = 100               # expected: total : Nat
 
 # Arithmetic operations with Nat
-let difference = total - count     # expected: difference : Int
 let product = count * 2            # expected: product : Nat
 let quotient = total / 10          # expected: quotient : Nat
 

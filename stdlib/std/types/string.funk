@@ -1,0 +1,66 @@
+# std/types/string.funk - String type operations and conversions
+
+# Comparison operations
+pub let equals = { left: String, right: String } -> Boolean
+    __native_string_equals { left = left, right = right }
+
+pub let less_than = { left: String, right: String } -> Boolean
+    __native_string_less_than { left = left, right = right }
+
+pub let greater_than = { left: String, right: String } -> Boolean
+    __native_string_greater_than { left = left, right = right }
+
+# String conversion (identity for String)
+pub let to_string = { value: String } -> String
+    value
+
+# String operations
+pub let length = { str: String } -> Int
+    __native_string_length { str = str }
+
+pub let concat = { left: String, right: String } -> String
+    __native_string_concat { left = left, right = right }
+
+pub let substring = { str: String, start: Int, end: Int } -> String
+    __native_string_substring { str = str, start = start, end = end }
+
+pub let split = { str: String, delimiter: String } -> ArrayList String
+    __native_string_split { str = str, delimiter = delimiter }
+
+pub let trim = { str: String } -> String
+    __native_string_trim { str = str }
+
+pub let to_upper = { str: String } -> String
+    __native_string_to_upper { str = str }
+
+pub let to_lower = { str: String } -> String
+    __native_string_to_lower { str = str }
+
+pub let contains = { str: String, substring: String } -> Boolean
+    __native_string_contains { str = str, substring = substring }
+
+pub let starts_with = { str: String, prefix: String } -> Boolean
+    __native_string_starts_with { str = str, prefix = prefix }
+
+pub let ends_with = { str: String, suffix: String } -> Boolean
+    __native_string_ends_with { str = str, suffix = suffix }
+
+pub let replace = { str: String, old: String, new: String } -> String
+    __native_string_replace { str = str, old = old, new = new }
+
+# Type conversions (parsing)
+pub let to_int = { str: String } -> Int
+    __native_string_to_int { str = str }
+
+pub let to_float = { str: String } -> Float
+    __native_string_to_float { str = str }
+
+pub let to_nat = { str: String } -> Nat
+    __native_string_to_nat { str = str }
+
+# Utility functions
+pub let is_empty = { str: String } -> Boolean
+    equals { left = length { str = str }, right = 0 }
+
+pub let is_not_empty = { str: String } -> Boolean
+    not (is_empty { str = str })

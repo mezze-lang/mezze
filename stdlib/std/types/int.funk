@@ -1,0 +1,51 @@
+# std/types/int.funk - Int type operations and conversions
+
+# Core arithmetic operations (hidden native implementations)
+pub let add = { left: Int, right: Int } -> Int
+    __native_int_add { left = left, right = right }
+
+pub let subtract = { left: Int, right: Int } -> Int
+    __native_int_subtract { left = left, right = right }
+
+pub let multiply = { left: Int, right: Int } -> Int
+    __native_int_multiply { left = left, right = right }
+
+pub let divide = { left: Int, right: Int } -> Int
+    __native_int_divide { left = left, right = right }
+
+pub let modulo = { left: Int, right: Int } -> Int
+    __native_int_modulo { left = left, right = right }
+
+# Comparison operations
+pub let equals = { left: Int, right: Int } -> Boolean
+    __native_int_equals { left = left, right = right }
+
+pub let less_than = { left: Int, right: Int } -> Boolean
+    __native_int_less_than { left = left, right = right }
+
+pub let greater_than = { left: Int, right: Int } -> Boolean
+    __native_int_greater_than { left = left, right = right }
+
+# String conversion
+pub let to_string = { value: Int } -> String
+    __native_int_to_string { value = value }
+
+# Type conversions
+pub let from_float = { value: Float } -> Int
+    __native_int_from_float { value = value }
+
+pub let from_nat = { value: Nat } -> Int
+    __native_int_from_nat { value = value }
+
+pub let from_string = { value: String } -> Int
+    __native_int_from_string { value = value }
+
+# Utility functions
+pub let abs = { value: Int } -> Int
+    if value < 0 then subtract { left = 0, right = value } else value
+
+pub let min = { left: Int, right: Int } -> Int
+    if left < right then left else right
+
+pub let max = { left: Int, right: Int } -> Int
+    if left > right then left else right

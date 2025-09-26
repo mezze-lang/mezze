@@ -1,5 +1,0 @@
-use math
-
-let x = 21
-let result = math::double(x)
-result

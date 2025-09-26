@@ -1,20 +1,81 @@
 package com.funk.language.ast
 
 /**
- * Pretty printer for Funk types
+ * Pretty printer for Funk types with proper type variable naming
  */
-fun prettyPrintType(type: FunkType): String = when (type) {
+fun prettyPrintType(type: FunkType): String {
+    val typeVarMapping = collectTypeVariables(type)
+    return prettyPrintTypeWithMapping(type, typeVarMapping)
+}
+
+/**
+ * Collect all type variables in a type and assign them readable names
+ */
+private fun collectTypeVariables(type: FunkType): Map<TypeVar, String> {
+    val variables = mutableSetOf<TypeVar>()
+    collectTypeVariablesRecursive(type, variables)
+    
+    // Sort by name to ensure consistent ordering
+    val sortedVars = variables.sortedBy { it.name }
+    
+    // Assign names 'a, 'b, 'c, etc.
+    return sortedVars.mapIndexed { index, typeVar ->
+        val letter = ('a' + index).toString()
+        typeVar to "'$letter"
+    }.toMap()
+}
+
+/**
+ * Recursively collect type variables from a type
+ */
+private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableSet<TypeVar>) {
+    when (type) {
+        is FunkType.VarType -> variables.add(type.variable)
+        is FunkType.NumType -> variables.add(type.constraint)
+        is FunkType.RecordType -> {
+            type.fields.values.forEach { fieldType ->
+                collectTypeVariablesRecursive(fieldType, variables)
+            }
+        }
+        is FunkType.VariantType -> {
+            type.constructors.values.forEach { constructorType ->
+                constructorType?.let { collectTypeVariablesRecursive(it, variables) }
+            }
+        }
+        is FunkType.ArrayListType -> {
+            collectTypeVariablesRecursive(type.elementType, variables)
+        }
+        is FunkType.FunctionType -> {
+            collectTypeVariablesRecursive(type.paramType, variables)
+            collectTypeVariablesRecursive(type.returnType, variables)
+            type.abilityConstraints.forEach { constraint ->
+                constraint.typeArgs.forEach { arg ->
+                    collectTypeVariablesRecursive(arg, variables)
+                }
+            }
+        }
+        // Base types don't contain type variables
+        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
+        is FunkType.EffectRow -> { /* no type variables */ }
+    }
+}
+
+/**
+ * Pretty print a type using the given type variable mapping
+ */
+private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeVar, String>): String = when (type) {
     is FunkType.IntType -> "Int"
     is FunkType.FloatType -> "Float"
     is FunkType.StringType -> "String"
     is FunkType.BooleanType -> "Boolean"
     is FunkType.NatType -> "Nat"
     is FunkType.FracType -> "Frac"
-    is FunkType.NumType -> "Num ${type.constraint.name}"
-    is FunkType.VarType -> type.variable.name
+    is FunkType.NumType -> "Num ${typeVarMapping[type.constraint] ?: type.constraint.name}"
+    is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
-            "$name: ${prettyPrintType(fieldType)}"
+            "$name: ${prettyPrintTypeWithMapping(fieldType, typeVarMapping)}"
         }
         if (type.isOpen) {
             "{ $fields, ... }"
@@ -26,8 +87,8 @@ fun prettyPrintType(type: FunkType): String = when (type) {
         val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
             when (dataType) {
                 null -> name
-                is FunkType.RecordType -> "$name ${prettyPrintType(dataType)}"
-                else -> "$name(${prettyPrintType(dataType)})"
+                is FunkType.RecordType -> "$name ${prettyPrintTypeWithMapping(dataType, typeVarMapping)}"
+                else -> "$name(${prettyPrintTypeWithMapping(dataType, typeVarMapping)})"
             }
         }
         if (type.isOpen) {
@@ -36,14 +97,38 @@ fun prettyPrintType(type: FunkType): String = when (type) {
             "| $constructors |"
         }
     }
+    is FunkType.ArrayListType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
     is FunkType.FunctionType -> {
-        val baseType = "${prettyPrintType(type.paramType)} -> ${prettyPrintType(type.returnType)}"
-        if (type.effects != null && type.effects.effects.isNotEmpty()) {
-            val effectList = type.effects.effects.sorted().joinToString(", ")
-            "$baseType <$effectList>"
+        // Build parameter type string
+        val paramTypeStr = prettyPrintTypeWithMapping(type.paramType, typeVarMapping)
+        
+        // Add ability constraints after parameter type but before arrow
+        val abilityConstraints = if (type.abilityConstraints.isNotEmpty()) {
+            " with " + type.abilityConstraints.joinToString(", ") { constraint ->
+                val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
+                if (typeArgs.isNotEmpty()) {
+                    "${constraint.abilityName} $typeArgs"
+                } else {
+                    constraint.abilityName
+                }
+            }
         } else {
-            baseType
+            ""
         }
+        
+        // Build return type string
+        val returnTypeStr = prettyPrintTypeWithMapping(type.returnType, typeVarMapping)
+        
+        // Add effects
+        val effects = if (type.effects != null && type.effects.effects.isNotEmpty()) {
+            val effectList = type.effects.effects.sorted().joinToString(", ")
+            " <$effectList>"
+        } else {
+            ""
+        }
+        
+        // Construct final string: param with constraints -> return effects
+        paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
     else -> type.toString() // Fallback for any other types
 }
@@ -56,6 +141,8 @@ fun prettyPrintTypeWithAliases(
     typeAliases: Map<String, TypeAliasInfo> = emptyMap(),
     showExpansion: Boolean = false
 ): String {
+    val typeVarMapping = collectTypeVariables(type)
+    
     // First, check if this type matches any alias
     val aliasMatch = findTypeAliasForType(type, typeAliases)
     
@@ -68,13 +155,13 @@ fun prettyPrintTypeWithAliases(
         }
         
         if (showExpansion) {
-            "$aliasName (= ${prettyPrintType(type)})"
+            "$aliasName (= ${prettyPrintTypeWithMapping(type, typeVarMapping)})"
         } else {
             aliasName
         }
     } else {
         // No direct alias match - recursively apply aliases to subcomponents
-        prettyPrintTypeWithAliasesRecursive(type, typeAliases, showExpansion)
+        prettyPrintTypeWithAliasesRecursive(type, typeAliases, showExpansion, typeVarMapping)
     }
 }
 
@@ -84,7 +171,8 @@ fun prettyPrintTypeWithAliases(
 private fun prettyPrintTypeWithAliasesRecursive(
     type: FunkType, 
     typeAliases: Map<String, TypeAliasInfo>,
-    showExpansion: Boolean
+    showExpansion: Boolean,
+    typeVarMapping: Map<TypeVar, String>
 ): String = when (type) {
     is FunkType.IntType -> "Int"
     is FunkType.FloatType -> "Float"
@@ -92,8 +180,8 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is FunkType.BooleanType -> "Boolean"
     is FunkType.NatType -> "Nat"
     is FunkType.FracType -> "Frac"
-    is FunkType.NumType -> "Num ${type.constraint.name}"
-    is FunkType.VarType -> type.variable.name
+    is FunkType.NumType -> "Num ${typeVarMapping[type.constraint] ?: type.constraint.name}"
+    is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
             "$name: ${prettyPrintTypeWithAliases(fieldType, typeAliases, showExpansion)}"
@@ -120,13 +208,36 @@ private fun prettyPrintTypeWithAliasesRecursive(
     }
     is FunkType.ArrayListType -> "[${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}]"
     is FunkType.FunctionType -> {
-        val baseType = "${prettyPrintTypeWithAliases(type.paramType, typeAliases, showExpansion)} -> ${prettyPrintTypeWithAliases(type.returnType, typeAliases, showExpansion)}"
-        if (type.effects != null && type.effects.effects.isNotEmpty()) {
-            val effectList = type.effects.effects.sorted().joinToString(", ")
-            "$baseType <$effectList>"
+        // Build parameter type string
+        val paramTypeStr = prettyPrintTypeWithAliases(type.paramType, typeAliases, showExpansion)
+        
+        // Add ability constraints after parameter type but before arrow
+        val abilityConstraints = if (type.abilityConstraints.isNotEmpty()) {
+            " with " + type.abilityConstraints.joinToString(", ") { constraint ->
+                val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintTypeWithAliases(it, typeAliases, showExpansion) }
+                if (typeArgs.isNotEmpty()) {
+                    "${constraint.abilityName} $typeArgs"
+                } else {
+                    constraint.abilityName
+                }
+            }
         } else {
-            baseType
+            ""
         }
+        
+        // Build return type string
+        val returnTypeStr = prettyPrintTypeWithAliases(type.returnType, typeAliases, showExpansion)
+        
+        // Add effects
+        val effects = if (type.effects != null && type.effects.effects.isNotEmpty()) {
+            val effectList = type.effects.effects.sorted().joinToString(", ")
+            " <$effectList>"
+        } else {
+            ""
+        }
+        
+        // Construct final string: param with constraints -> return effects
+        paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
     else -> type.toString() // Fallback for any other types
 }

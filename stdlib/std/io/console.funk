@@ -1,0 +1,13 @@
+# std/io/console.funk - Console I/O operations
+
+# Note: Direct console I/O should be done through effects
+# These functions are provided for compatibility but effects are preferred
+
+pub let print_line = { text: String } -> 
+    __native_print_line { text = text }
+
+pub let read_line = {} -> String
+    __native_read_line {}
+
+pub let print = { text: String } -> 
+    __native_print { text = text }

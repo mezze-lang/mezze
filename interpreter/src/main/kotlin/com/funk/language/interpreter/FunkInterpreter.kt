@@ -4,12 +4,14 @@ import com.funk.language.parser.FunkParserImpl
 import com.funk.language.ast.*
 import com.funk.language.typechecker.TypeChecker
 import com.funk.language.typechecker.ModuleResolver
+import com.funk.language.interpreter.stdlib.TruffleNativeFunction
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.RootNode
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * Truffle-integrated interpreter that works with the shared AST
@@ -73,6 +75,10 @@ class FunkInterpreter {
      */
     fun executeWithContext(program: Program): Pair<FunkValue, Map<String, FunkValue>> {
         val context = mutableMapOf<String, FunkValue>()
+        
+        // Register built-in native functions and stdlib modules
+        registerNativeFunctions(context)
+        
         var lastResult: FunkValue = FunkNull
         
         for (item in program.items) {
@@ -1502,22 +1508,502 @@ class FunkInterpreter {
      */
     
     /**
-     * Register native functions for built-in effects
+     * Register native functions and load stdlib modules
      */
     private fun registerNativeFunctions(context: MutableMap<String, FunkValue>) {
         // Use the centralized native functions registry
         NativeFunctions.registerAll(context)
         
+        // Load core stdlib modules that should always be available
+        loadCoreStdLibModules(context)
+        
         // Create built-in effect handlers
         context["NativeConsole"] = FunkRecord(mapOf(
-            "print" to context["native_print"]!!,
-            "debug" to context["native_debug"]!!
+            "print" to (context["__native_console_print"] ?: throw RuntimeException("__native_console_print not found")),
+            "debug" to (context["__native_console_debug"] ?: throw RuntimeException("__native_console_debug not found"))
         ))
         
+        // Add legacy native functions for backward compatibility
+        context["native_print"] = context["__native_console_print"]!!
+        context["native_debug"] = context["__native_console_debug"]!!
+        
         context["NativeRandom"] = FunkRecord(mapOf(
-            "nextInt" to context["native_random_int"]!!,
-            "nextDouble" to context["native_random_double"]!!
+            "nextInt" to (context["native_random_int"] ?: throw RuntimeException("native_random_int not found")),
+            "nextDouble" to (context["native_random_double"] ?: throw RuntimeException("native_random_double not found"))
         ))
+    }
+    
+    /**
+     * Load core stdlib modules that should always be available
+     */
+    private fun loadCoreStdLibModules(context: MutableMap<String, FunkValue>) {
+        try {
+            val parser = FunkParserImpl()
+            val currentDir = Paths.get(".").toAbsolutePath()
+            println("DEBUG: Current working directory: $currentDir")
+            
+            // Find the project root (go up from interpreter directory if needed)
+            val projectRoot = if (currentDir.toString().contains("/interpreter")) {
+                // Go up to the parent directory (the actual project root)
+                currentDir.parent?.parent ?: currentDir.parent ?: currentDir
+            } else {
+                currentDir
+            }
+            println("DEBUG: Using project root: $projectRoot")
+            
+            val moduleResolver = ModuleResolver(projectRoot, parser)
+            
+            // List of core modules to auto-import
+            val coreModules = listOf(
+                "std::core::abilities",
+                "std::core::primitives_minimal"
+            )
+            
+            for (modulePath in coreModules) {
+                try {
+                    loadStdLibModule(modulePath, moduleResolver, context)
+                } catch (e: Exception) {
+                    // Log error but continue - some modules might not exist yet
+                    println("DEBUG: Failed to load core module $modulePath: ${e.message}")
+                }
+            }
+            
+            // Register operators directly (since parsing operators from files is complex)
+            registerCoreOperators(context)
+        } catch (e: Exception) {
+            println("DEBUG: Failed to initialize stdlib module loading: ${e.message}")
+        }
+    }
+    
+    /**
+     * Register core operators directly in the context
+     */
+    private fun registerCoreOperators(context: MutableMap<String, FunkValue>) {
+        // Arithmetic operators - directly call the native implementations
+        context["(+)"] = NativeFunkFunction("(+)") { args ->
+            // args is a List<FunkValue>, we expect exactly one FunkRecord argument
+            if (args.size != 1) {
+                throw RuntimeException("(+) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(+) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (+)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (+)")
+            
+            // Determine type and call appropriate native function
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val addFn = context["__native_int_add"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_add not found")
+                    addFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                left is FunkFloat && right is FunkFloat -> {
+                    val addFn = context["__native_float_add"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_float_add not found")
+                    addFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                else -> throw RuntimeException("Unsupported types for (+): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        context["(-)"] = NativeFunkFunction("(-)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(-) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(-) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (-)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (-)")
+            
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val subFn = context["__native_int_subtract"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_subtract not found")
+                    subFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                left is FunkFloat && right is FunkFloat -> {
+                    val subFn = context["__native_float_subtract"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_float_subtract not found")
+                    subFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                else -> throw RuntimeException("Unsupported types for (-): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        context["(*)"] = NativeFunkFunction("(*)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(*) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(*) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (*)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (*)")
+            
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val mulFn = context["__native_int_multiply"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_multiply not found")
+                    mulFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                left is FunkFloat && right is FunkFloat -> {
+                    val mulFn = context["__native_float_multiply"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_float_multiply not found")
+                    mulFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                else -> throw RuntimeException("Unsupported types for (*): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        // String concatenation operator
+        context["(++)"] = NativeFunkFunction("(++)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(++) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(++) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (++)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (++)")
+            
+            when {
+                left is FunkString && right is FunkString -> {
+                    val concatFn = context["__native_string_concat"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_string_concat not found")
+                    concatFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                else -> throw RuntimeException("Unsupported types for (++): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        // Comparison operators
+        context["(==)"] = NativeFunkFunction("(==)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(==) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(==) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (==)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (==)")
+            
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val eqFn = context["__native_int_equals"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_equals not found")
+                    eqFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                left is FunkString && right is FunkString -> {
+                    val eqFn = context["__native_string_equals"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_string_equals not found")
+                    eqFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                left is FunkBoolean && right is FunkBoolean -> {
+                    FunkBoolean(left.value == right.value)
+                }
+                else -> throw RuntimeException("Unsupported types for (==): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        context["(>)"] = NativeFunkFunction("(>)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(>) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(>) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (>)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (>)")
+            
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val gtFn = context["__native_int_greater_than"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_greater_than not found")
+                    gtFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                left is FunkString && right is FunkString -> {
+                    val gtFn = context["__native_string_greater_than"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_string_greater_than not found")
+                    gtFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                else -> throw RuntimeException("Unsupported types for (>): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        context["(<)"] = NativeFunkFunction("(<)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(<) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(<) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (<)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (<)")
+            
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val ltFn = context["__native_int_less_than"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_less_than not found")
+                    ltFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                left is FunkString && right is FunkString -> {
+                    val ltFn = context["__native_string_less_than"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_string_less_than not found")
+                    ltFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                else -> throw RuntimeException("Unsupported types for (<): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        // Division operator (/)
+        context["(/)"] = NativeFunkFunction("(/)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(/) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(/) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (/)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (/)")
+            
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val divFn = context["__native_int_divide"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_divide not found")
+                    divFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                left is FunkFloat && right is FunkFloat -> {
+                    val divFn = context["__native_float_divide"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_float_divide not found")
+                    divFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                }
+                else -> throw RuntimeException("Unsupported types for (/): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        // Not equals operator (!=)
+        context["(!=)"] = NativeFunkFunction("(!=)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(!=) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(!=) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (!=)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (!=)")
+            
+            // Implement != as not(==)
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val eqFn = context["__native_int_equals"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_equals not found")
+                    val result = eqFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    FunkBoolean(!(result as FunkBoolean).value)
+                }
+                left is FunkString && right is FunkString -> {
+                    val eqFn = context["__native_string_equals"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_string_equals not found")
+                    val result = eqFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    FunkBoolean(!(result as FunkBoolean).value)
+                }
+                left is FunkBoolean && right is FunkBoolean -> {
+                    FunkBoolean(left.value != right.value)
+                }
+                else -> throw RuntimeException("Unsupported types for (!=): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        // Less than or equal operator (<=)
+        context["(<=)"] = NativeFunkFunction("(<=)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(<=) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(<=) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (<=)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (<=)")
+            
+            // Implement <= as not(>)
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val gtFn = context["__native_int_greater_than"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_greater_than not found")
+                    val result = gtFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    FunkBoolean(!(result as FunkBoolean).value)
+                }
+                left is FunkString && right is FunkString -> {
+                    val gtFn = context["__native_string_greater_than"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_string_greater_than not found")
+                    val result = gtFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    FunkBoolean(!(result as FunkBoolean).value)
+                }
+                else -> throw RuntimeException("Unsupported types for (<=): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        // Greater than or equal operator (>=)
+        context["(>=)"] = NativeFunkFunction("(>=)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(>=) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(>=) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (>=)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (>=)")
+            
+            // Implement >= as not(<)
+            when {
+                left is FunkInt && right is FunkInt -> {
+                    val ltFn = context["__native_int_less_than"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_int_less_than not found")
+                    val result = ltFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    FunkBoolean(!(result as FunkBoolean).value)
+                }
+                left is FunkString && right is FunkString -> {
+                    val ltFn = context["__native_string_less_than"] as? TruffleNativeFunction
+                        ?: throw RuntimeException("__native_string_less_than not found")
+                    val result = ltFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    FunkBoolean(!(result as FunkBoolean).value)
+                }
+                else -> throw RuntimeException("Unsupported types for (>=): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        // Logical AND operator (&&)
+        context["(&&)"] = NativeFunkFunction("(&&)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(&&) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(&&) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (&&)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (&&)")
+            
+            when {
+                left is FunkBoolean && right is FunkBoolean -> {
+                    FunkBoolean(left.value && right.value)
+                }
+                else -> throw RuntimeException("Unsupported types for (&&): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        // Logical OR operator (||)
+        context["(||)"] = NativeFunkFunction("(||)") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("(||) expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("(||) expects a record argument, got ${args[0]::class.simpleName}")
+            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (||)")
+            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (||)")
+            
+            when {
+                left is FunkBoolean && right is FunkBoolean -> {
+                    FunkBoolean(left.value || right.value)
+                }
+                else -> throw RuntimeException("Unsupported types for (||): ${left::class.simpleName}, ${right::class.simpleName}")
+            }
+        }
+        
+        // Legacy boolean functions
+        context["boolAnd"] = NativeFunkFunction("boolAnd") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("boolAnd expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("boolAnd expects a record argument, got ${args[0]::class.simpleName}")
+            val a = record.fields["a"] as? FunkBoolean ?: throw RuntimeException("Missing 'a' argument for boolAnd")
+            val b = record.fields["b"] as? FunkBoolean ?: throw RuntimeException("Missing 'b' argument for boolAnd")
+            
+            FunkBoolean(a.value && b.value)
+        }
+        
+        context["boolOr"] = NativeFunkFunction("boolOr") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("boolOr expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("boolOr expects a record argument, got ${args[0]::class.simpleName}")
+            val a = record.fields["a"] as? FunkBoolean ?: throw RuntimeException("Missing 'a' argument for boolOr")
+            val b = record.fields["b"] as? FunkBoolean ?: throw RuntimeException("Missing 'b' argument for boolOr")
+            
+            FunkBoolean(a.value || b.value)
+        }
+        
+        context["boolNot"] = NativeFunkFunction("boolNot") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("boolNot expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("boolNot expects a record argument, got ${args[0]::class.simpleName}")
+            val value = record.fields["val"] as? FunkBoolean ?: throw RuntimeException("Missing 'val' argument for boolNot")
+            
+            FunkBoolean(!value.value)
+        }
+        
+        // Random functions
+        context["native_random_int"] = NativeFunkFunction("native_random_int") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("native_random_int expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("native_random_int expects a record argument, got ${args[0]::class.simpleName}")
+            val min = record.fields["min"] as? FunkInt ?: throw RuntimeException("Missing 'min' argument for native_random_int")
+            val max = record.fields["max"] as? FunkInt ?: throw RuntimeException("Missing 'max' argument for native_random_int")
+            
+            val randomValue = kotlin.random.Random.nextInt(min.value.toInt(), max.value.toInt() + 1)
+            FunkInt(randomValue.toLong())
+        }
+        
+        context["native_random_double"] = NativeFunkFunction("native_random_double") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("native_random_double expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val randomValue = kotlin.random.Random.nextDouble()
+            FunkFloat(randomValue)
+        }
+        
+        context["native_random"] = NativeFunkFunction("native_random") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("native_random expects exactly 1 record argument, got ${args.size}")
+            }
+            
+            val record = args[0] as? FunkRecord ?: throw RuntimeException("native_random expects a record argument, got ${args[0]::class.simpleName}")
+            val max = record.fields["max"] as? FunkInt ?: throw RuntimeException("Missing 'max' argument for native_random")
+            
+            val randomValue = kotlin.random.Random.nextInt(0, max.value.toInt() + 1)
+            FunkInt(randomValue.toLong())
+        }
+        
+        println("DEBUG: Registered core operators: (+), (-), (*), (/), (++), (==), (!=), (>), (<), (<=), (>=), (&&), (||)")
+    }
+    
+    /**
+     * Load a specific stdlib module and add its exports to the context
+     */
+    private fun loadStdLibModule(modulePath: String, moduleResolver: ModuleResolver, context: MutableMap<String, FunkValue>) {
+        try {
+            // Resolve the module
+            val module = moduleResolver.resolveModule(modulePath)
+            
+            // Execute the module to get its exports
+            val moduleContext = mutableMapOf<String, FunkValue>()
+            
+            // Add native functions to module context (needed for ability implementations)
+            NativeFunctions.registerAll(moduleContext)
+            
+            // Execute each item in the module
+            for (item in module.program.items) {
+                executeItem(item, moduleContext)
+            }
+            
+            // Add public exports to the main context
+            for ((name, export) in module.exports) {
+                if (moduleContext.containsKey(name)) {
+                    context[name] = moduleContext[name]!!
+                    println("DEBUG: Loaded stdlib function: $name")
+                }
+            }
+            
+            println("DEBUG: Successfully loaded stdlib module: $modulePath")
+        } catch (e: Exception) {
+            println("DEBUG: Failed to load stdlib module $modulePath: ${e.message}")
+            throw e
+        }
     }
     /**
      * Execute function with tail call optimization
