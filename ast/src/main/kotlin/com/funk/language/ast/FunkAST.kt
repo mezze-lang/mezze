@@ -521,10 +521,37 @@ data class UnaryOperation(
 // Records
 @Serializable
 data class RecordLiteral(
-    val entries: List<RecordEntry>,
+    val entries: List<RecordLiteralEntry>,
     val restField: String? = null,
     override val inferredType: FunkType? = null
 ) : Expression
+
+@Serializable
+sealed class RecordLiteralEntry
+
+@Serializable
+data class RecordFieldEntry(
+    val name: String,
+    val value: Expression? = null  // null for shorthand {x} instead of {x = x}
+) : RecordLiteralEntry()
+
+@Serializable
+data class RecordSpreadEntry(
+    val expression: Expression
+) : RecordLiteralEntry()
+
+// Helper extension functions for backward compatibility
+fun RecordLiteral.getFieldEntries(): List<RecordFieldEntry> {
+    return entries.filterIsInstance<RecordFieldEntry>()
+}
+
+fun RecordLiteral.getSpreadEntries(): List<RecordSpreadEntry> {
+    return entries.filterIsInstance<RecordSpreadEntry>()
+}
+
+fun RecordLiteral.findField(name: String): RecordFieldEntry? {
+    return entries.filterIsInstance<RecordFieldEntry>().find { it.name == name }
+}
 
 @Serializable
 data class RecordEntry(

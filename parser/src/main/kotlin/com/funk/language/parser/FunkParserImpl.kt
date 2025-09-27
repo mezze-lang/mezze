@@ -427,8 +427,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             result = FunctionCall(
                 function = Identifier(operatorFunction, sourceLocation = sourceLocation),
                 arguments = RecordLiteral(listOf(
-                    RecordEntry("left", result),
-                    RecordEntry("right", right)
+                    RecordFieldEntry("left", result),
+                    RecordFieldEntry("right", right)
                 ), null),
                 sourceLocation = sourceLocation
             )
@@ -454,8 +454,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             result = FunctionCall(
                 function = Identifier(operatorFunction, sourceLocation = sourceLocation),
                 arguments = RecordLiteral(listOf(
-                    RecordEntry("left", result),
-                    RecordEntry("right", right)
+                    RecordFieldEntry("left", result),
+                    RecordFieldEntry("right", right)
                 ), null),
                 sourceLocation = sourceLocation
             )
@@ -482,8 +482,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             result = FunctionCall(
                 function = Identifier(operatorFunction, sourceLocation = sourceLocation),
                 arguments = RecordLiteral(listOf(
-                    RecordEntry("left", result),
-                    RecordEntry("right", right)
+                    RecordFieldEntry("left", result),
+                    RecordFieldEntry("right", right)
                 ), null),
                 sourceLocation = sourceLocation
             )
@@ -547,7 +547,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
                         }
                     } else {
                         // RecordUpdateExpression cannot be used in function calls or variant construction
-                        throw IllegalArgumentException("Record update expressions cannot be used in function calls or variant construction")
+                        throw SpreadParseError.InvalidRecordUpdateContext
                     }
                 } else {
                     recordExpr
@@ -596,26 +596,53 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
     // Records
     override fun visitRecordLiteral(ctx: FunkParser.RecordLiteralContext): Any {
-        // Check if this is a record update syntax: { expr | field = value, ... }
-        if (ctx.expression() != null && ctx.PIPE_DELIM() != null) {
-            val baseRecord = visit(ctx.expression()) as Expression
-            val updates = ctx.recordUpdateEntry().map { updateEntry ->
-                val fieldPath = if (updateEntry.DOT() != null) {
-                    // Nested field update: y.z = v
-                    listOf(updateEntry.Identifier(0).text, updateEntry.Identifier(1).text)
-                } else {
-                    // Simple field update: x = v
-                    listOf(updateEntry.Identifier(0).text)
-                }
-                val value = visit(updateEntry.expression()) as Expression
-                RecordUpdateEntry(fieldPath, value)
+        // Restrictive spread syntax: { ...record, field = value }
+        val entries = ctx.recordLiteralEntry().map { visit(it) as RecordLiteralEntry }
+        
+        // Validate spread syntax restrictions
+        validateSpreadSyntax(entries, ctx)
+        
+        return RecordLiteral(entries)
+    }
+    
+    private fun validateSpreadSyntax(entries: List<RecordLiteralEntry>, ctx: FunkParser.RecordLiteralContext) {
+        val spreadEntries = entries.filterIsInstance<RecordSpreadEntry>()
+        val fieldEntries = entries.filterIsInstance<RecordFieldEntry>()
+        
+        // Rule 1: Only one spread expression allowed
+        if (spreadEntries.size > 1) {
+            throw SpreadParseError.MultipleSpreadExpressions
+        }
+        
+        // Rule 2: Spread must appear before field entries (if both exist)
+        if (spreadEntries.isNotEmpty() && fieldEntries.isNotEmpty()) {
+            val spreadIndex = entries.indexOfFirst { it is RecordSpreadEntry }
+            val firstFieldIndex = entries.indexOfFirst { it is RecordFieldEntry }
+            
+            if (spreadIndex > firstFieldIndex) {
+                throw SpreadParseError.SpreadAfterFields
             }
-            return RecordUpdateExpression(baseRecord, updates)
-        } else {
-            // Regular record literal: { field = value, ... }
-            val entries = ctx.recordEntry().map { visit(it) as RecordEntry }
-            val hasEllipsis = ctx.ELLIPSIS() != null
-            return RecordLiteral(entries, if (hasEllipsis) "..." else null)
+        }
+    }
+
+    override fun visitRecordLiteralEntry(ctx: FunkParser.RecordLiteralEntryContext): Any {
+        return when {
+            ctx.ELLIPSIS() != null -> {
+                // Spread syntax: ...record
+                val expression = visit(ctx.expression()) as Expression
+                RecordSpreadEntry(expression)
+            }
+            ctx.expression() != null -> {
+                // Full syntax: name = value
+                val name = ctx.Identifier().text
+                val value = visit(ctx.expression()) as Expression
+                RecordFieldEntry(name, value)
+            }
+            else -> {
+                // Punned syntax: name (expands to name = name)
+                val name = ctx.Identifier().text
+                RecordFieldEntry(name, null)
+            }
         }
     }
 
@@ -783,7 +810,15 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             )
             is RecordLiteral -> RecordLiteral(
                 expr.entries.map { entry ->
-                    RecordEntry(entry.name, entry.value?.let { substitutePlaceholdersInAST(it, replacement) })
+                    when (entry) {
+                        is RecordFieldEntry -> RecordFieldEntry(
+                            entry.name, 
+                            entry.value?.let { substitutePlaceholdersInAST(it, replacement) }
+                        )
+                        is RecordSpreadEntry -> RecordSpreadEntry(
+                            substitutePlaceholdersInAST(entry.expression, replacement)
+                        )
+                    }
                 },
                 expr.restField,
                 expr.inferredType

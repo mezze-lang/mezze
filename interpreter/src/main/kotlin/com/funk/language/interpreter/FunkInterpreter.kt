@@ -341,9 +341,25 @@ class FunkInterpreter {
                 evaluateUnaryOperation(expr.operator, operand)
             }
             is RecordLiteral -> {
-                val fields = expr.entries.associate { (name, fieldExpr) ->
-                    name to (fieldExpr?.let { evaluateExpression(it, context) } ?: FunkNull)
+                val fields = mutableMapOf<String, FunkValue>()
+                
+                // Handle spread entries first
+                for (spreadEntry in expr.getSpreadEntries()) {
+                    val spreadValue = evaluateExpression(spreadEntry.expression, context)
+                    if (spreadValue is FunkRecord) {
+                        // Spread all fields from the record (they can be overridden by later fields)
+                        fields.putAll(spreadValue.fields)
+                    } else {
+                        throw RuntimeException("Cannot spread non-record value")
+                    }
                 }
+                
+                // Handle field entries (they can override spread fields)
+                for (entry in expr.getFieldEntries()) {
+                    val value = entry.value?.let { evaluateExpression(it, context) } ?: FunkNull
+                    fields[entry.name] = value
+                }
+                
                 FunkRecord(fields)
             }
             is MemberAccess -> {
@@ -1163,7 +1179,8 @@ class FunkInterpreter {
                                containsEffectCallsInExpression(expr.elseBranch)
             is MatchExpression -> containsEffectCallsInExpression(expr.expression) || 
                                   expr.cases.any { containsEffectCallsInExpression(it.expression) }
-            is RecordLiteral -> expr.entries.any { it.value?.let { v -> containsEffectCallsInExpression(v) } ?: false }
+            is RecordLiteral -> expr.getFieldEntries().any { it.value?.let { v -> containsEffectCallsInExpression(v) } ?: false } ||
+                                 expr.getSpreadEntries().any { containsEffectCallsInExpression(it.expression) }
             is LambdaExpression -> containsEffectCallsInExpression(expr.body)
             is MemberAccess -> containsEffectCallsInExpression(expr.receiver)
             is RecordUpdateExpression -> containsEffectCallsInExpression(expr.baseRecord) || 
@@ -2144,8 +2161,10 @@ class FunkInterpreter {
                     }
                 } || containsSelfReference(expr.result, variableName)
             }
-            is RecordLiteral -> expr.entries.any { (_, fieldExpr) -> 
-                fieldExpr?.let { containsSelfReference(it, variableName) } ?: false 
+            is RecordLiteral -> expr.getFieldEntries().any { entry -> 
+                entry.value?.let { containsSelfReference(it, variableName) } ?: false 
+            } || expr.getSpreadEntries().any { spreadEntry ->
+                containsSelfReference(spreadEntry.expression, variableName)
             }
             is MemberAccess -> containsSelfReference(expr.receiver, variableName)
             is VariantConstruction -> expr.value?.let { containsSelfReference(it, variableName) } ?: false

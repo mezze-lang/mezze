@@ -271,13 +271,18 @@ doStatement:
     ;
 
 recordLiteral:
-    LBRACE (recordEntry (COMMA recordEntry)*)? (COMMA ELLIPSIS)? RBRACE
-    | LBRACE expression PIPE_DELIM (recordUpdateEntry (COMMA recordUpdateEntry)*)? RBRACE
+    LBRACE (recordLiteralEntry (COMMA recordLiteralEntry)*)? (COMMA ELLIPSIS)? RBRACE
     ;
 
 recordUpdateEntry:
     Identifier ASSIGN expression
     | Identifier DOT Identifier ASSIGN expression  // For nested updates like y.z = v
+    ;
+
+recordLiteralEntry:
+    ELLIPSIS expression             // Spread syntax: ...record
+    | Identifier ASSIGN expression  // Full syntax: name = value
+    | Identifier                     // Punned syntax: name (expands to name = name)
     ;
 
 recordEntry:

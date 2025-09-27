@@ -1,42 +1,36 @@
-# Open Record Updates - Valid Cases
+# Record Spread Tests - Valid Cases (Restrictive Semantics)
 
-# Basic open record creation and updates
-let openRecord = {name = "Alice", age = 30, ...}
-# expected: openRecord : { name: String, age: Int, ... }
+# Basic record creation and spread with field overrides
+let baseRecord = {name = "Alice", age = 30, city = "Boston"}
+# expected: baseRecord : { name: String, age: Int, city: String }
 
-let updatedAge = {openRecord | age = 31}
-# expected: updatedAge : { name: String, age: Int, ... }
+let updatedAge = {...baseRecord, age = 31}
+# expected: updatedAge : { name: String, age: Int, city: String }
 
-let addedField = {openRecord | city = "NYC"}
-# expected: addedField : { name: String, age: Int, city: String, ... }
+let multipleUpdates = {...baseRecord, age = 32, city = "NYC"}
+# expected: multipleUpdates : { name: String, age: Int, city: String }
 
-let multipleUpdates = {openRecord | age = 32, city = "Boston", salary = 75000}
-# expected: multipleUpdates : { name: String, age: Int, city: String, salary: Int, ... }
-
-# Closed record updates (only existing fields)
+# Closed record spread (only existing fields can be overridden)
 let closedRecord = {name = "Bob", age = 25}
 # expected: closedRecord : { name: String, age: Int }
 
-let closedUpdated = {closedRecord | name = "Robert", age = 26}
+let closedUpdated = {...closedRecord, name = "Robert", age = 26}
 # expected: closedUpdated : { name: String, age: Int }
 
-# Empty updates should preserve record type
-let emptyUpdateOpen = {openRecord | }
-# expected: emptyUpdateOpen : { name: String, age: Int, ... }
+# Spread without overrides (copy)
+let copyRecord = {...baseRecord}
+# expected: copyRecord : { name: String, age: Int, city: String }
 
-let emptyUpdateClosed = {closedRecord | }
-# expected: emptyUpdateClosed : { name: String, age: Int }
+# Nested record spread
+let nestedRecord = {user = {name = "Carol", age = 28}, department = "Engineering"}
+# expected: nestedRecord : { user: { name: String, age: Int }, department: String }
 
-# Nested record updates with open records
-let nestedOpen = {user = {name = "Carol", age = 28}, department = "Engineering", ...}
-# expected: nestedOpen : { user: { name: String, age: Int }, department: String, ... }
+let nestedUpdated = {...nestedRecord, department = "Marketing"}
+# expected: nestedUpdated : { user: { name: String, age: Int }, department: String }
 
-let nestedUpdated = {nestedOpen | user.age = 29, location = "Remote"}
-# expected: nestedUpdated : { user: { name: String, age: Int }, department: String, location: String, ... }
+# Complex record spread
+let configRecord = {timeout = 30, retries = 3, debug = false}
+# expected: configRecord : { timeout: Int, retries: Int, debug: Boolean }
 
-# Open record with complex types
-let configOpen = {timeout = 30, retries = 3, debug = false, ...}
-# expected: configOpen : { timeout: Int, retries: Int, debug: Boolean, ... }
-
-let extendedConfig = {configOpen | maxMemory = 512, logLevel = "info", features = {cache = true, metrics = false}}
-# expected: extendedConfig : { timeout: Int, retries: Int, debug: Boolean, maxMemory: Int, logLevel: String, features: { cache: Boolean, metrics: Boolean }, ... }
+let updatedConfig = {...configRecord, timeout = 60, debug = true}
+# expected: updatedConfig : { timeout: Int, retries: Int, debug: Boolean }

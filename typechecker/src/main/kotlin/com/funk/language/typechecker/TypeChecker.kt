@@ -510,8 +510,16 @@ class TypeChecker {
             }
             is RecordLiteral -> {
                 val updatedEntries = expr.entries.map { entry ->
-                    val updatedValue = entry.value?.let { setInferredTypes(it) }
-                    entry.copy(value = updatedValue)
+                    when (entry) {
+                        is RecordFieldEntry -> {
+                            val updatedValue = entry.value?.let { setInferredTypes(it) }
+                            entry.copy(value = updatedValue)
+                        }
+                        is RecordSpreadEntry -> {
+                            val updatedExpression = setInferredTypes(entry.expression)
+                            entry.copy(expression = updatedExpression)
+                        }
+                    }
                 }
                 expr.copy(entries = updatedEntries, inferredType = inferredType)
             }
@@ -1640,8 +1648,8 @@ class TypeChecker {
                             if (argumentType is com.funk.language.ast.FunkType.RecordType &&
                                 expr.arguments is RecordLiteral) {
                                 val recordArgs = expr.arguments as RecordLiteral
-                                val leftEntry = recordArgs.entries.find { it.name == "left" }
-                                val rightEntry = recordArgs.entries.find { it.name == "right" }
+                                val leftEntry = recordArgs.findField("left")
+                                val rightEntry = recordArgs.findField("right")
                                 
                                 // Check if both are integer literals (fraction literal syntax)
                                 if (leftEntry?.value is IntLiteral && rightEntry?.value is IntLiteral) {
@@ -1655,8 +1663,8 @@ class TypeChecker {
                             if (argumentType is com.funk.language.ast.FunkType.RecordType &&
                                 expr.arguments is RecordLiteral) {
                                 val recordArgs = expr.arguments as RecordLiteral
-                                val leftEntry = recordArgs.entries.find { it.name == "left" }
-                                val rightEntry = recordArgs.entries.find { it.name == "right" }
+                                val leftEntry = recordArgs.findField("left")
+                                val rightEntry = recordArgs.findField("right")
                                 
                                 // Check if both are integer literals (fraction literal syntax)
                                 if (leftEntry?.value is IntLiteral && rightEntry?.value is IntLiteral) {
@@ -1671,8 +1679,8 @@ class TypeChecker {
                             expr.arguments is RecordLiteral) {
                             
                             val recordArgs = expr.arguments as RecordLiteral
-                            val leftEntry = recordArgs.entries.find { it.name == "left" }
-                            val rightEntry = recordArgs.entries.find { it.name == "right" }
+                            val leftEntry = recordArgs.findField("left")
+                            val rightEntry = recordArgs.findField("right")
                             val leftType = argumentType.fields["left"]
                             val rightType = argumentType.fields["right"]
                             
@@ -1822,7 +1830,7 @@ class TypeChecker {
                                 val argumentRecord = expr.arguments as RecordLiteral
                                 val localSubstitutions = mutableMapOf<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>()
                                 
-                                for (entry in argumentRecord.entries) {
+                                for (entry in argumentRecord.getFieldEntries()) {
                                     val fieldName = entry.name
                                     val expectedType = expectedFields[fieldName]
                                     val entryValue = entry.value
@@ -2074,9 +2082,35 @@ class TypeChecker {
                 }
             }
             is RecordLiteral -> {
-                val fields = expr.entries.associate { (name, fieldExpr) ->
-                    name to (fieldExpr?.let { inferBasicType(it) } ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh()))
+                val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
+                var spreadFields: Map<String, com.funk.language.ast.FunkType>? = null
+                
+                for (entry in expr.entries) {
+                    when (entry) {
+                        is RecordSpreadEntry -> {
+                            // Handle spread: get fields from the spread record
+                            val spreadType = inferBasicType(entry.expression)
+                            if (spreadType is com.funk.language.ast.FunkType.RecordType) {
+                                spreadFields = spreadType.fields
+                                // Add all fields from the spread record
+                                fields.putAll(spreadType.fields)
+                            } else {
+                                throw SpreadSyntaxError.NonRecordSpread(prettyPrintType(spreadType))
+                            }
+                        }
+                        is RecordFieldEntry -> {
+                            // Restrictive validation: only allow overriding existing fields from spread
+                            if (spreadFields != null && !spreadFields.containsKey(entry.name)) {
+                                throw SpreadSyntaxError.FieldAdditionNotAllowed(entry.name, spreadFields.keys.toList())
+                            }
+                            
+                            val fieldType = entry.value?.let { inferBasicType(it) } 
+                                ?: com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
+                            fields[entry.name] = fieldType
+                        }
+                    }
                 }
+                
                 val rowVar = if (expr.restField == "...") com.funk.language.ast.RowVar.fresh() else null
                 com.funk.language.ast.FunkType.RecordType(fields, rowVar)
             }
@@ -3198,7 +3232,7 @@ class TypeChecker {
                             val valueType = inferTypeWithUnification(update.value)
                             
                             if (recordType.fields.containsKey(fieldName)) {
-                                // Updating existing field
+                                // Updating existing field - this is allowed
                                 val expectedType = recordType.fields[fieldName]!!
                                 if (!unifyTypes(valueType, expectedType)) {
                                     // Instead of throwing, add constraint and continue
@@ -3208,12 +3242,9 @@ class TypeChecker {
                                     constraints.add(Pair(valueType, expectedType))
                                 }
                                 resultFields[fieldName] = valueType
-                            } else if (recordType.isOpen) {
-                                // Adding new field to open record
-                                resultFields[fieldName] = valueType
                             } else {
-                                // Trying to add field to closed record
-                                // Instead of throwing, add the field to the record type
+                                // Restrictive validation: cannot add new fields to any record (open or closed)
+                                throw SpreadSyntaxError.FieldAdditionNotAllowed(fieldName, recordType.fields.keys.toList())
                                 if (System.getProperty("funk.typecheck.debug") == "true") {
                                     println("Warning: Field '$fieldName' does not exist in closed record type - adding field")
                                 }
@@ -3226,13 +3257,8 @@ class TypeChecker {
                             val innerField = update.fieldPath[1]
                             
                             if (!recordType.fields.containsKey(outerField)) {
-                                // Instead of throwing, create a fresh type variable for the field
-                                if (System.getProperty("funk.typecheck.debug") == "true") {
-                                    println("Warning: Field '$outerField' does not exist in record type - creating fresh type variable")
-                                }
-                                val freshFieldType = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
-                                resultFields[outerField] = freshFieldType
-                                freshFieldType
+                                // Restrictive validation: cannot access non-existent fields
+                                throw SpreadSyntaxError.NestedFieldNotFound(outerField, innerField, recordType.fields.keys.toList())
                             }
                             
                             val outerFieldType = recordType.fields[outerField]!!
@@ -3248,12 +3274,8 @@ class TypeChecker {
                             }
                             
                             if (!innerRecordType.fields.containsKey(innerField)) {
-                                // Instead of throwing, add the field to the nested record type
-                                if (System.getProperty("funk.typecheck.debug") == "true") {
-                                    println("Warning: Field '$innerField' does not exist in nested record type - adding field")
-                                }
-                                val freshFieldType = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
-                                freshFieldType
+                                // Restrictive validation: cannot add new fields to nested records
+                                throw SpreadSyntaxError.NestedFieldInNonRecord(outerField, innerField, innerRecordType.fields.keys.toList())
                             }
                             
                             val valueType = inferTypeWithUnification(update.value)
@@ -3656,13 +3678,13 @@ class TypeChecker {
                         val argRecord = expr.arguments as RecordLiteral
                         
                         // Only apply enhanced inference for calculator-like patterns
-                        val hasOperationField = argRecord.entries.any { it.name == "operation" }
+                        val hasOperationField = argRecord.getFieldEntries().any { it.name == "operation" }
                         if (!hasOperationField) {
                             // Skip enhanced inference for non-calculator patterns
                         } else {
                             val paramFields = mutableMapOf<String, com.funk.language.ast.FunkType>()
                             
-                            for (entry in argRecord.entries) {
+                            for (entry in argRecord.getFieldEntries()) {
                                 val fieldName = entry.name
                                 val fieldValue = entry.value
                                 
@@ -3715,8 +3737,12 @@ class TypeChecker {
             }
             is RecordLiteral -> {
                 // Analyze all field values in the record
-                for (entry in expr.entries) {
+                for (entry in expr.getFieldEntries()) {
                     entry.value?.let { analyzeExpressionForParameterTypes(it, paramTypes) }
+                }
+                // Also analyze spread expressions
+                for (spreadEntry in expr.getSpreadEntries()) {
+                    analyzeExpressionForParameterTypes(spreadEntry.expression, paramTypes)
                 }
             }
             is DoExpression -> {
@@ -3778,8 +3804,11 @@ class TypeChecker {
                     traverse(e.result)
                 }
                 is RecordLiteral -> {
-                    e.entries.forEach { entry ->
+                    e.getFieldEntries().forEach { entry ->
                         entry.value?.let { traverse(it) }
+                    }
+                    e.getSpreadEntries().forEach { spreadEntry ->
+                        traverse(spreadEntry.expression)
                     }
                 }
                 is RecordUpdate -> {
@@ -3930,8 +3959,11 @@ class TypeChecker {
                     analyzeExpression(e.arguments)
                 }
                 is RecordLiteral -> {
-                    e.entries.forEach { entry ->
+                    e.getFieldEntries().forEach { entry ->
                         entry.value?.let { analyzeExpression(it) }
+                    }
+                    e.getSpreadEntries().forEach { spreadEntry ->
+                        analyzeExpression(spreadEntry.expression)
                     }
                 }
                 is MemberAccess -> {
@@ -4049,7 +4081,8 @@ class TypeChecker {
             }
             is IfExpression -> containsLiterals(expr.condition) || containsLiterals(expr.thenBranch) || containsLiterals(expr.elseBranch)
             is FunctionCall -> containsLiterals(expr.arguments)
-            is RecordLiteral -> expr.entries.any { it.value?.let { v -> containsLiterals(v) } ?: false }
+            is RecordLiteral -> expr.getFieldEntries().any { it.value?.let { v -> containsLiterals(v) } ?: false } ||
+                                 expr.getSpreadEntries().any { containsLiterals(it.expression) }
             is MemberAccess -> containsLiterals(expr.receiver)
             is VariantConstruction -> expr.value?.let { containsLiterals(it) } ?: false
             else -> false
@@ -4087,7 +4120,8 @@ class TypeChecker {
                     (expr.function as Identifier).name in setOf("+", "-", "*", "/", "//", "(+)", "(-)", "(*)", "(/)", "(//")
                 isArithmetic || containsArithmeticOperations(expr.arguments)
             }
-            is RecordLiteral -> expr.entries.any { it.value?.let { v -> containsArithmeticOperations(v) } ?: false }
+            is RecordLiteral -> expr.getFieldEntries().any { it.value?.let { v -> containsArithmeticOperations(v) } ?: false } ||
+                                 expr.getSpreadEntries().any { containsArithmeticOperations(it.expression) }
             is DoExpression -> expr.statements.any { stmt ->
                 when (stmt) {
                     is LetStatement -> containsArithmeticOperations(stmt.expression)
@@ -4315,7 +4349,10 @@ class TypeChecker {
                     collectArithmeticParams(e.elseBranch)
                 }
                 is FunctionCall -> collectArithmeticParams(e.arguments)
-                is RecordLiteral -> e.entries.forEach { it.value?.let { v -> collectArithmeticParams(v) } }
+                is RecordLiteral -> {
+                    e.getFieldEntries().forEach { it.value?.let { v -> collectArithmeticParams(v) } }
+                    e.getSpreadEntries().forEach { collectArithmeticParams(it.expression) }
+                }
                 is MemberAccess -> collectArithmeticParams(e.receiver)
                 is VariantConstruction -> e.value?.let { collectArithmeticParams(it) }
                 else -> {}
@@ -4630,14 +4667,19 @@ class TypeChecker {
                 // Check if the variable is used as an argument
                 val arguments = expr.arguments
                 if (arguments is RecordLiteral) {
-                    for ((_, argExpr) in arguments.entries) {
-                        if (argExpr is Identifier && argExpr.name == varName) {
+                    for (entry in arguments.getFieldEntries()) {
+                        val entryValue = entry.value
+                        if (entryValue is Identifier && entryValue.name == varName) {
                             // Variable used as function argument - could infer from function signature
                             return null // For now, no specific inference
                         }
-                        argExpr?.let { 
+                        entry.value?.let { 
                             analyzeVariableUsageInExpression(varName, it)?.let { return it }
                         }
+                    }
+                    // Also check spread expressions
+                    for (spreadEntry in arguments.getSpreadEntries()) {
+                        analyzeVariableUsageInExpression(varName, spreadEntry.expression)?.let { return it }
                     }
                 }
             }
@@ -5105,8 +5147,11 @@ class TypeChecker {
                 }
             }
             is RecordLiteral -> {
-                expr.entries.forEach { entry ->
+                expr.getFieldEntries().forEach { entry ->
                     entry.value?.let { collectEffectsFromExpression(it, effects) }
+                }
+                expr.getSpreadEntries().forEach { spreadEntry ->
+                    collectEffectsFromExpression(spreadEntry.expression, effects)
                 }
             }
             is LambdaExpression -> {
@@ -5962,8 +6007,11 @@ class TypeChecker {
                 validateNoPerformInExpression(expr.body, context)
             }
             is RecordLiteral -> {
-                expr.entries.forEach { entry ->
+                expr.getFieldEntries().forEach { entry ->
                     entry.value?.let { validateNoPerformInExpression(it, context) }
+                }
+                expr.getSpreadEntries().forEach { spreadEntry ->
+                    validateNoPerformInExpression(spreadEntry.expression, context)
                 }
             }
             is MemberAccess -> {
@@ -6038,8 +6086,11 @@ class TypeChecker {
                 validateSameEffectPerformerReuse(expr.body, currentEffectName)
             }
             is RecordLiteral -> {
-                expr.entries.forEach { entry ->
+                expr.getFieldEntries().forEach { entry ->
                     entry.value?.let { validateSameEffectPerformerReuse(it, currentEffectName) }
+                }
+                expr.getSpreadEntries().forEach { spreadEntry ->
+                    validateSameEffectPerformerReuse(spreadEntry.expression, currentEffectName)
                 }
             }
             is MemberAccess -> {

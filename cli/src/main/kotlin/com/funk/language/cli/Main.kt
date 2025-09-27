@@ -333,7 +333,7 @@ private fun prettyPrintExpression(expr: Expression): String {
             "${prettyPrintExpression(expr.function)} ${prettyPrintExpression(expr.arguments)}"
         }
         is RecordLiteral -> {
-            val entries = expr.entries.joinToString(", ") { entry ->
+            val fieldEntries = expr.getFieldEntries().map { entry ->
                 val value = entry.value
                 if (value != null) {
                     "${entry.name} = ${prettyPrintExpression(value)}"
@@ -341,7 +341,11 @@ private fun prettyPrintExpression(expr: Expression): String {
                     entry.name  // Punned syntax
                 }
             }
-            "{ $entries }"
+            val spreadEntries = expr.getSpreadEntries().map { spreadEntry ->
+                "...${prettyPrintExpression(spreadEntry.expression)}"
+            }
+            val allEntries = (spreadEntries + fieldEntries).joinToString(", ")
+            "{ $allEntries }"
         }
         is IfExpression -> {
             "if ${prettyPrintExpression(expr.condition)} then ${prettyPrintExpression(expr.thenBranch)} else ${prettyPrintExpression(expr.elseBranch)}"
