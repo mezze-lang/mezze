@@ -239,12 +239,15 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         return when {
             ctx.moduleSegments() != null && ctx.useList() == null -> {
                 // Simple module path: math::geometry
+                @Suppress("UNCHECKED_CAST")
                 val segments = visit(ctx.moduleSegments()) as List<String>
                 ModulePath(segments)
             }
             ctx.moduleSegments() != null && ctx.useList() != null -> {
                 // Selective import: math::geometry::{area, Shape as alias}
+                @Suppress("UNCHECKED_CAST")
                 val module = visit(ctx.moduleSegments()) as List<String>
+                @Suppress("UNCHECKED_CAST")
                 val items = visit(ctx.useList()) as List<ImportItem>
                 SelectivePath(module, items)
             }
@@ -663,6 +666,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             // Check if this is the new syntax with explicit return type and constraints
             val returnType = ctx.typeAnnotation()?.let { visit(it) as TypeAnnotation }
             val abilityConstraints = ctx.functionAbilityConstraints()?.let {
+                @Suppress("UNCHECKED_CAST")
                 visit(it) as List<FunctionAbilityConstraint>
             } ?: emptyList()
             
@@ -770,6 +774,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
         val effects = ctx.effectRow()?.let { visit(it) as EffectRowAnnotation }
         val abilityConstraints = ctx.functionAbilityConstraints()?.let { 
+            @Suppress("UNCHECKED_CAST")
             visit(it) as List<FunctionAbilityConstraint> 
         } ?: emptyList()
         return FunctionTypeAnnotation(paramType, returnType, effects, abilityConstraints)

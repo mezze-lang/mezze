@@ -950,9 +950,8 @@ class TypeChecker {
             is DoExpression -> {
                 expr.statements.any { stmt -> 
                     when (stmt) {
-                        is LetBinding -> containsRecursiveReference(stmt.expression, varName)
                         is ExpressionStatement -> containsRecursiveReference(stmt.expression, varName)
-                        is LetStatement -> false // LetStatement doesn't have expressions to check
+                        is LetStatement -> containsRecursiveReference(stmt.expression, varName)
                     }
                 } || containsRecursiveReference(expr.result, varName)
             }
@@ -1283,11 +1282,7 @@ class TypeChecker {
                         }
                         
                         // Infer the body with expected return type (this is the key!)
-                        val bodyType = if (expectedReturnType != null) {
-                            inferBasicTypeWithExpected(expr.body, expectedReturnType)
-                        } else {
-                            inferBasicType(expr.body)
-                        }
+                        val bodyType = inferBasicTypeWithExpected(expr.body, expectedReturnType)
                         
                         // CRITICAL FIX: Collect effects from lambda body even in bidirectional inference
                         val collectedEffects = mutableSetOf<String>()
@@ -4751,6 +4746,7 @@ class TypeChecker {
                                 true
                             } else {
                                 // Both constructors exist, check data compatibility
+                                @Suppress("SENSELESS_COMPARISON")
                                 when {
                                     expectedDataType == actualDataType -> true
                                     expectedDataType != null && actualDataType != null -> isTypeCompatible(actualDataType, expectedDataType)
@@ -4763,6 +4759,7 @@ class TypeChecker {
                         // Actual is open, expected is closed: actual must contain all expected constructors
                         expectedType.constructors.all { (expectedConstructor, expectedDataType) ->
                             val actualDataType = actualType.constructors[expectedConstructor]
+                            @Suppress("SENSELESS_COMPARISON")
                             when {
                                 actualDataType == null -> false // Expected constructor missing in actual
                                 expectedDataType == actualDataType -> true
@@ -4780,6 +4777,7 @@ class TypeChecker {
                                 true
                             } else {
                                 // Both constructors exist, check data compatibility
+                                @Suppress("SENSELESS_COMPARISON")
                                 when {
                                     expectedDataType == actualDataType -> true
                                     expectedDataType != null && actualDataType != null -> isTypeCompatible(actualDataType, expectedDataType)
@@ -4793,6 +4791,7 @@ class TypeChecker {
                         // This allows | Red | to be compatible with | Red, Blue { val: Int } |
                         actualType.constructors.all { (actualConstructor, actualDataType) ->
                             val expectedDataType = expectedType.constructors[actualConstructor]
+                            @Suppress("SENSELESS_COMPARISON")
                             when {
                                 expectedDataType == null -> false // Actual constructor not in expected
                                 expectedDataType == actualDataType -> true

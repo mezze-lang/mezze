@@ -39,10 +39,12 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
         const val MIME_TYPE = "application/x-funk"
         
         fun getCurrentLanguage(node: Node): FunkLanguage {
+            @Suppress("DEPRECATION")
             return getCurrentLanguage(FunkLanguage::class.java)
         }
         
         fun getCurrentContext(node: Node): FunkContext {
+            @Suppress("DEPRECATION")
             return getCurrentContext(FunkLanguage::class.java)
         }
     }

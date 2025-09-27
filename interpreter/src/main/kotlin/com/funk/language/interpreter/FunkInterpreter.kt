@@ -661,19 +661,7 @@ class FunkInterpreter {
                     // effectContext will be populated at execution time
                 )
             }
-            is DoExpression -> {
-                // Check if this do block contains effect calls - if so, lower to state machine
-                if (containsEffectCalls(expr)) {
-                    executeDoBlockAsStateMachine(expr, context)
-                } else {
-                    // Simple sequential execution for pure do blocks
-                    var result: FunkValue = FunkNull
-                    for (stmt in expr.statements) {
-                        result = executeStatement(stmt, context)
-                    }
-                    evaluateExpression(expr.result, context)
-                }
-            }
+
             is PerformExpression -> {
                 // Execute expression with provided handlers
                 // Process handlers in reverse order (last to first) to match semantics:
@@ -798,10 +786,6 @@ class FunkInterpreter {
                 }
                 
                 FunkRecord(updatedFields)
-            }
-            is MatchExpression -> {
-                val value = evaluateExpression(expr.expression, context)
-                evaluateMatchExpression(value, expr.cases, context)
             }
             else -> {
                 throw RuntimeException("Unsupported expression: ${expr::class.simpleName}")
