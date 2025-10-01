@@ -41,4 +41,4 @@ pub let (/) = { left: Int, right: Int } -> Frac =
 
 # String concatenation operator
 pub let (++) = { left: String, right: String } -> String = 
-    __native_string_concat { left = left, right = right }
+    concat { left = left, right = right }

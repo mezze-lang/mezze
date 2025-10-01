@@ -1,51 +1,185 @@
 package com.funk.language.interpreter
 
 /**
- * Base exception class for Funk language runtime errors
+ * Base exception class for all Funk language runtime errors.
+ * Provides structured error handling with context information.
  */
-open class FunkException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+open class FunkException(
+    message: String,
+    cause: Throwable? = null
+) : RuntimeException(message, cause) {
+    
+    /**
+     * Get a user-friendly error message
+     */
+    open fun getUserMessage(): String = message ?: "Unknown error"
+    
+    /**
+     * Get detailed error information for debugging
+     */
+    open fun getDetailedMessage(): String = buildString {
+        append("Funk Runtime Error: ${getUserMessage()}")
+        cause?.message?.let { causeMessage ->
+            append("\nCaused by: $causeMessage")
+        }
+    }
+}
 
 /**
- * Exception thrown when a variable is not found
+ * Exception thrown when a native function is called with invalid arguments
  */
-class UndefinedVariableException(variableName: String) : FunkException("Undefined variable: $variableName")
+class NativeFunctionException(
+    val functionName: String,
+    val reason: String,
+    cause: Throwable? = null
+) : FunkException("Native function '$functionName' error: $reason", cause) {
+    
+    override fun getUserMessage(): String = "Error in native function '$functionName': $reason"
+}
 
 /**
- * Exception thrown when a function is not found
+ * Exception thrown when an ability constraint is not satisfied
  */
-class UndefinedFunctionException(functionName: String) : FunkException("Undefined function: $functionName")
+class AbilityConstraintException(
+    val typeName: String,
+    val abilityName: String,
+    val operation: String? = null
+) : FunkException(buildMessage(typeName, abilityName, operation)) {
+    
+    companion object {
+        private fun buildMessage(typeName: String, abilityName: String, operation: String?): String {
+            return if (operation != null) {
+                "Type '$typeName' does not implement ability '$abilityName' required for operation '$operation'"
+            } else {
+                "Type '$typeName' does not implement required ability '$abilityName'"
+            }
+        }
+    }
+    
+    override fun getUserMessage(): String = message ?: "Ability constraint not satisfied"
+}
+
+/**
+ * Exception thrown when an effect is performed without a proper handler
+ */
+class EffectHandlerException(
+    val effectName: String,
+    val operationName: String? = null
+) : FunkException(buildMessage(effectName, operationName)) {
+    
+    companion object {
+        private fun buildMessage(effectName: String, operationName: String?): String {
+            return if (operationName != null) {
+                "No handler found for effect '$effectName' operation '$operationName'"
+            } else {
+                "No handler found for effect '$effectName'"
+            }
+        }
+    }
+    
+    override fun getUserMessage(): String = "Effect handler not found: $effectName${operationName?.let { ".$it" } ?: ""}"
+}
+
+/**
+ * Exception thrown when arithmetic operations fail (overflow, division by zero, etc.)
+ */
+class ArithmeticException : FunkException {
+    val operation: String
+    val leftOperand: String?
+    val rightOperand: String?
+    
+    constructor(operation: String) : super("Arithmetic error in $operation") {
+        this.operation = operation
+        this.leftOperand = null
+        this.rightOperand = null
+    }
+    
+    constructor(operation: String, operands: String? = null) : super("Arithmetic error in $operation${operands?.let { " with operands: $it" } ?: ""}") {
+        this.operation = operation
+        this.leftOperand = null
+        this.rightOperand = null
+    }
+    
+    constructor(operation: String, leftOperand: String, rightOperand: String) : super("Arithmetic error in $operation with operands: $leftOperand, $rightOperand") {
+        this.operation = operation
+        this.leftOperand = leftOperand
+        this.rightOperand = rightOperand
+    }
+    
+    override fun getUserMessage(): String = "Arithmetic error: $operation"
+}
+
+/**
+ * Exception thrown when type conversion fails
+ */
+class ConversionException(
+    val fromType: String,
+    val toType: String,
+    val value: String? = null
+) : FunkException(buildMessage(fromType, toType, value)) {
+    
+    companion object {
+        private fun buildMessage(fromType: String, toType: String, value: String?): String {
+            return if (value != null) {
+                "Cannot convert value '$value' from type '$fromType' to '$toType'"
+            } else {
+                "Cannot convert from type '$fromType' to '$toType'"
+            }
+        }
+    }
+    
+    override fun getUserMessage(): String = "Type conversion failed: $fromType -> $toType"
+}
+
+/**
+ * Exception thrown when I/O operations fail
+ */
+class IOException(
+    val operation: String,
+    val resource: String? = null,
+    cause: Throwable? = null
+) : FunkException(buildMessage(operation, resource), cause) {
+    
+    companion object {
+        private fun buildMessage(operation: String, resource: String?): String {
+            return if (resource != null) {
+                "I/O error during $operation on resource: $resource"
+            } else {
+                "I/O error during $operation"
+            }
+        }
+    }
+    
+    override fun getUserMessage(): String = "I/O error: $operation${resource?.let { " ($it)" } ?: ""}"
+}
+
+/**
+ * Exception thrown when a variable is not defined
+ */
+class UndefinedVariableException(
+    val variableName: String
+) : FunkException("Undefined variable: $variableName") {
+    
+    override fun getUserMessage(): String = "Variable '$variableName' is not defined"
+}
 
 /**
  * Exception thrown when an effect handler is not found
  */
-class HandlerNotFoundException(handlerName: String) : FunkException("Handler not found: $handlerName")
-
-/**
- * Exception thrown when an effect operation is not found
- */
-class OperationNotFoundException(effectName: String, operationName: String) : 
-    FunkException("Operation $operationName not found in effect $effectName")
-
-/**
- * Exception thrown when there are type mismatches at runtime
- */
-class TypeMismatchException(expected: String, actual: String) : 
-    FunkException("Type mismatch: expected $expected, got $actual")
-
-/**
- * Exception thrown when arithmetic operations fail
- */
-class ArithmeticException(operation: String, leftType: String, rightType: String) : 
-    FunkException("Cannot apply arithmetic operator '$operation' to $leftType and $rightType")
-
-/**
- * Exception thrown when native function calls fail
- */
-class NativeFunctionException(functionName: String, reason: String) : 
-    FunkException("Native function '$functionName' failed: $reason")
-
-/**
- * Exception thrown when effect calls fail
- */
-class EffectCallException(effectName: String, reason: String) : 
-    FunkException("Effect call '$effectName' failed: $reason")
+class HandlerNotFoundException(
+    val effectName: String,
+    val operationName: String? = null
+) : FunkException(buildMessage(effectName, operationName)) {
+    
+    companion object {
+        private fun buildMessage(effectName: String, operationName: String?): String {
+            return if (operationName != null) {
+                "Handler not found for effect '$effectName' operation '$operationName'"
+            } else {
+                "Handler not found for effect '$effectName'"
+            }
+        }
+    }
+    
+    override fun getUserMessage(): String = "Handler not found: $effectName${operationName?.let { ".$it" } ?: ""}"
+}

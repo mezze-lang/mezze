@@ -1,12 +1,33 @@
-# std/effects/filesystem.funk - File system effects
+# std/effects/filesystem.funk - File system effects (async by default)
 
 effect FileSystem {
     read_file: { path: String } -> String <FileSystem>,
-    write_file: { path: String, content: String } -> {} <FileSystem>
+    write_file: { path: String, content: String } -> {} <FileSystem>,
+    exists: { path: String } -> Boolean <FileSystem>,
+    delete: { path: String } -> {} <FileSystem>,
+    list_directory: { path: String } -> [String] <FileSystem>,
+    create_directory: { path: String } -> {} <FileSystem>,
+    file_size: { path: String } -> Int <FileSystem>
 }
 
-# Local disk implementation
+# Local disk implementation (runs in virtual threads transparently)
 impl FileSystem for LocalDisk where {
     read_file = { path } -> __native_fs_read_file { path = path },
-    write_file = { path, content } -> __native_fs_write_file { path = path, content = content }
+    write_file = { path, content } -> __native_fs_write_file { path = path, content = content },
+    exists = { path } -> __native_fs_exists { path = path },
+    delete = { path } -> __native_fs_delete { path = path },
+    list_directory = { path } -> __native_fs_list_directory { path = path },
+    create_directory = { path } -> __native_fs_create_directory { path = path },
+    file_size = { path } -> __native_fs_file_size { path = path }
+}
+
+# Memory-based file system (for testing)
+impl FileSystem for MemoryFS where {
+    read_file = { path } -> __native_memfs_read_file { path = path },
+    write_file = { path, content } -> __native_memfs_write_file { path = path, content = content },
+    exists = { path } -> __native_memfs_exists { path = path },
+    delete = { path } -> __native_memfs_delete { path = path },
+    list_directory = { path } -> __native_memfs_list_directory { path = path },
+    create_directory = { path } -> __native_memfs_create_directory { path = path },
+    file_size = { path } -> __native_memfs_file_size { path = path }
 }

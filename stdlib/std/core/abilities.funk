@@ -36,3 +36,10 @@ ability Show 'a where {
 }
 
 type Ordering = | Less, Equal, Greater |
+
+# Core functions needed by operators
+pub let not = { value: Boolean } -> Boolean = 
+    __native_boolean_not { value = value }
+
+pub let concat = { left: String, right: String } -> String = 
+    __native_string_concat { left = left, right = right }

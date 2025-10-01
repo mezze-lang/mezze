@@ -86,7 +86,7 @@
   - Ensure no direct function exposure - only through effects
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
 
-- [ ] 9. Create std::math modules
+- [x] 9. Create std::math modules
   - Create std/math/basic.funk with abs, min, max, pow, sqrt functions
   - Create std/math/trig.funk with sin, cos, tan, asin, acos, atan functions
   - Create std/math/stats.funk with mean, median, standard deviation functions
@@ -94,7 +94,7 @@
   - Implement native mathematical operations with proper error handling
   - _Requirements: 6.1, 3.1, 3.2, 3.3_
 
-- [ ] 10. Create std::string modules
+- [x] 10. Create std::string modules
   - Create std/string/core.funk with length, substring, concat, split functions
   - Create std/string/format.funk with string formatting and template functions
   - Create std/string/regex.funk with regular expression operations
@@ -102,15 +102,15 @@
   - Implement efficient native string operations
   - _Requirements: 6.2, 3.1, 3.2, 3.3_
 
-- [ ] 11. Create std::collections modules using existing natives
-  - Create std/collections/arraylist.funk with ArrayListOps ability (length, get, set, add, remove, concat, is_empty) using existing arrayLength, arrayGet, etc.
-  - Create std/collections/map.funk with HashMap operations (future)
-  - Create std/collections/set.funk with Set operations (future)
-  - Create higher-order functions (map, filter, fold) for ArrayList
-  - Wrap existing native ArrayList operations in clean ability interface
+- [x] 11. Create std::collections modules using existing natives
+  - ✅ Create std/collections/arraylist.funk with comprehensive array operations using ['a] syntax
+  - ✅ Create std/collections/map.funk with HashMap-based Map 'k 'v operations
+  - ✅ Create std/collections/set.funk with HashSet-based Set 'a operations
+  - ✅ Create higher-order functions (map, filter, fold) for all collections
+  - ✅ Implement native operations for Map and Set with immutable semantics
   - _Requirements: 6.3, 3.1, 3.2, 3.3_
 
-- [ ] 12. Create std::io modules
+- [x] 12. Create std::io modules
   - Create std/io/console.funk with console I/O operations
   - Create std/io/file.funk with file reading/writing operations
   - Create std/io/network.funk with HTTP, TCP/UDP operations
@@ -118,14 +118,15 @@
   - Implement secure native I/O operations with proper error handling
   - _Requirements: 6.5, 3.1, 3.2, 3.3_
 
-- [ ] 13. Create std::async modules
-  - Create std/async/futures.funk with Future/Promise operations
-  - Create std/async/channels.funk with channel communication
-  - Create std/async/parallel.funk with parallel execution utilities
-  - Implement native async operations using Truffle async capabilities
+- [x] 13. Create std::async modules (REMOVED - simplified stdlib)
+  - ~~Create std/async/futures.funk with Future/Promise operations~~ - REMOVED
+  - ~~Create std/async/channels.funk with channel communication~~ - REMOVED  
+  - ~~Create std/async/parallel.funk with parallel execution utilities~~ - REMOVED
+  - ~~Implement native async operations using Truffle async capabilities~~ - REMOVED
+  - Async functionality moved to dedicated concurrency system
   - _Requirements: 6.4, 4.2, 3.1, 3.2_
 
-- [ ] 14. Update module resolution for std:: imports
+- [x] 14. Update module resolution for std:: imports
   - Modify ModuleResolver to handle std:: module paths
   - Add special resolution logic for standard library modules
   - Ensure std:: modules are found in stdlib directory

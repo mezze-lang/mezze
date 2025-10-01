@@ -1,16 +1,33 @@
-# std/effects/log.funk - Logging effects
+# std/effects/log.funk - Logging effects (async by default)
 
 effect Log {
     info: { msg: String } -> {} <Log>,
     warn: { msg: String } -> {} <Log>,
     error: { msg: String } -> {} <Log>,
-    debug: { msg: String } -> {} <Log>
+    debug: { msg: String } -> {} <Log>,
+    trace: { msg: String } -> {} <Log>,
+    print: { msg: String } -> {} <Log>,
+    println: { msg: String } -> {} <Log>
 }
 
-# Console-based logging implementation
-impl Log for ConsoleLogger where {
+# Console-based logging implementation (runs in virtual threads)
+impl Log for Console where {
     info = { msg } -> __native_log_info { msg = msg },
     warn = { msg } -> __native_log_warn { msg = msg },
     error = { msg } -> __native_log_error { msg = msg },
-    debug = { msg } -> __native_log_debug { msg = msg }
+    debug = { msg } -> __native_log_debug { msg = msg },
+    trace = { msg } -> __native_log_trace { msg = msg },
+    print = { msg } -> __native_console_print { msg = msg },
+    println = { msg } -> __native_console_println { msg = msg }
+}
+
+# Quiet logging implementation (for testing - suppresses output)
+impl Log for Quiet where {
+    info = { msg } -> {},
+    warn = { msg } -> {},
+    error = { msg } -> {},
+    debug = { msg } -> {},
+    trace = { msg } -> {},
+    print = { msg } -> {},
+    println = { msg } -> {}
 }

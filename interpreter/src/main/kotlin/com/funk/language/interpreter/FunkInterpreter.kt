@@ -4,7 +4,7 @@ import com.funk.language.parser.FunkParserImpl
 import com.funk.language.ast.*
 import com.funk.language.typechecker.TypeChecker
 import com.funk.language.typechecker.ModuleResolver
-import com.funk.language.interpreter.stdlib.TruffleNativeFunction
+
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.RootNode
@@ -714,10 +714,13 @@ class FunkInterpreter {
                     // Evaluate the expression with handlers available
                     val result = evaluateExpression(expr.expression, context)
                     
-                    // CRITICAL FIX: For the specific failing test case
-                    // perform Console in (program {}) should return Int(105) directly
-                    // If the result is a direct value (not a function), return it as-is
-                    result
+                    // CRITICAL FIX: Ensure perform expressions return unit type when result is null
+                    // This handles cases where effect operations should return unit but return null
+                    if (result is FunkNull) {
+                        FunkRecord(emptyMap()) // Unit type
+                    } else {
+                        result
+                    }
                 } finally {
                     // Restore original handlers
                     if (originalHandlers != null) {
@@ -1002,12 +1005,8 @@ class FunkInterpreter {
         // println("DEBUG: callFunctionWithRecord called with function type: ${function::class.simpleName}")
         return when (function) {
             is NativeFunkFunction -> {
-                // Call native function directly with the record argument
+                // Call native function directly - it expects a single FunkValue argument
                 function.call(listOf(arguments))
-            }
-            is com.funk.language.interpreter.stdlib.TruffleNativeFunction -> {
-                // Call Truffle native function directly - it expects a single FunkValue argument
-                function.execute(arrayOf(arguments))
             }
             is SimpleFunkFunction -> {
                 val providedParams = arguments.fields.keys
@@ -1594,14 +1593,14 @@ class FunkInterpreter {
             // Determine type and call appropriate native function
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val addFn = context["__native_int_add"] as? TruffleNativeFunction
+                    val addFn = context["__native_int_add"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_add not found")
-                    addFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    addFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 left is FunkFloat && right is FunkFloat -> {
-                    val addFn = context["__native_float_add"] as? TruffleNativeFunction
+                    val addFn = context["__native_float_add"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_float_add not found")
-                    addFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    addFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (+): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1618,14 +1617,14 @@ class FunkInterpreter {
             
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val subFn = context["__native_int_subtract"] as? TruffleNativeFunction
+                    val subFn = context["__native_int_subtract"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_subtract not found")
-                    subFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    subFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 left is FunkFloat && right is FunkFloat -> {
-                    val subFn = context["__native_float_subtract"] as? TruffleNativeFunction
+                    val subFn = context["__native_float_subtract"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_float_subtract not found")
-                    subFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    subFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (-): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1642,14 +1641,14 @@ class FunkInterpreter {
             
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val mulFn = context["__native_int_multiply"] as? TruffleNativeFunction
+                    val mulFn = context["__native_int_multiply"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_multiply not found")
-                    mulFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    mulFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 left is FunkFloat && right is FunkFloat -> {
-                    val mulFn = context["__native_float_multiply"] as? TruffleNativeFunction
+                    val mulFn = context["__native_float_multiply"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_float_multiply not found")
-                    mulFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    mulFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (*): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1667,9 +1666,9 @@ class FunkInterpreter {
             
             when {
                 left is FunkString && right is FunkString -> {
-                    val concatFn = context["__native_string_concat"] as? TruffleNativeFunction
+                    val concatFn = context["__native_string_concat"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_concat not found")
-                    concatFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    concatFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (++): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1687,14 +1686,14 @@ class FunkInterpreter {
             
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val eqFn = context["__native_int_equals"] as? TruffleNativeFunction
+                    val eqFn = context["__native_int_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_equals not found")
-                    eqFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    eqFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 left is FunkString && right is FunkString -> {
-                    val eqFn = context["__native_string_equals"] as? TruffleNativeFunction
+                    val eqFn = context["__native_string_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_equals not found")
-                    eqFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    eqFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 left is FunkBoolean && right is FunkBoolean -> {
                     FunkBoolean(left.value == right.value)
@@ -1714,14 +1713,14 @@ class FunkInterpreter {
             
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val gtFn = context["__native_int_greater_than"] as? TruffleNativeFunction
+                    val gtFn = context["__native_int_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_greater_than not found")
-                    gtFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    gtFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 left is FunkString && right is FunkString -> {
-                    val gtFn = context["__native_string_greater_than"] as? TruffleNativeFunction
+                    val gtFn = context["__native_string_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_greater_than not found")
-                    gtFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    gtFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (>): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1738,14 +1737,14 @@ class FunkInterpreter {
             
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val ltFn = context["__native_int_less_than"] as? TruffleNativeFunction
+                    val ltFn = context["__native_int_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_less_than not found")
-                    ltFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    ltFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 left is FunkString && right is FunkString -> {
-                    val ltFn = context["__native_string_less_than"] as? TruffleNativeFunction
+                    val ltFn = context["__native_string_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_less_than not found")
-                    ltFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    ltFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (<): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1763,14 +1762,14 @@ class FunkInterpreter {
             
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val divFn = context["__native_int_divide"] as? TruffleNativeFunction
+                    val divFn = context["__native_int_divide"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_divide not found")
-                    divFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    divFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 left is FunkFloat && right is FunkFloat -> {
-                    val divFn = context["__native_float_divide"] as? TruffleNativeFunction
+                    val divFn = context["__native_float_divide"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_float_divide not found")
-                    divFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    divFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (/): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1789,15 +1788,15 @@ class FunkInterpreter {
             // Implement != as not(==)
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val eqFn = context["__native_int_equals"] as? TruffleNativeFunction
+                    val eqFn = context["__native_int_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_equals not found")
-                    val result = eqFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = eqFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 left is FunkString && right is FunkString -> {
-                    val eqFn = context["__native_string_equals"] as? TruffleNativeFunction
+                    val eqFn = context["__native_string_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_equals not found")
-                    val result = eqFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = eqFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 left is FunkBoolean && right is FunkBoolean -> {
@@ -1820,15 +1819,15 @@ class FunkInterpreter {
             // Implement <= as not(>)
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val gtFn = context["__native_int_greater_than"] as? TruffleNativeFunction
+                    val gtFn = context["__native_int_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_greater_than not found")
-                    val result = gtFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = gtFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 left is FunkString && right is FunkString -> {
-                    val gtFn = context["__native_string_greater_than"] as? TruffleNativeFunction
+                    val gtFn = context["__native_string_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_greater_than not found")
-                    val result = gtFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = gtFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 else -> throw RuntimeException("Unsupported types for (<=): ${left::class.simpleName}, ${right::class.simpleName}")
@@ -1848,15 +1847,15 @@ class FunkInterpreter {
             // Implement >= as not(<)
             when {
                 left is FunkInt && right is FunkInt -> {
-                    val ltFn = context["__native_int_less_than"] as? TruffleNativeFunction
+                    val ltFn = context["__native_int_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_less_than not found")
-                    val result = ltFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = ltFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 left is FunkString && right is FunkString -> {
-                    val ltFn = context["__native_string_less_than"] as? TruffleNativeFunction
+                    val ltFn = context["__native_string_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_less_than not found")
-                    val result = ltFn.execute(arrayOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = ltFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 else -> throw RuntimeException("Unsupported types for (>=): ${left::class.simpleName}, ${right::class.simpleName}")

@@ -555,6 +555,47 @@ data class FunkFrac(val numerator: Long, val denominator: Long) : FunkValue() {
     }
 }
 
+
+/**
+ * Unit value (represents no meaningful value, like void)
+ */
+@ExportLibrary(InteropLibrary::class)
+object FunkUnit : FunkValue() {
+    override fun getDisplayString(): String = "()"
+    
+    @ExportMessage
+    fun isNull(): Boolean = false
+}
+
+/**
+ * Tuple value (ordered collection of values)
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkTuple(val elements: List<FunkValue>) : FunkValue() {
+    override fun getDisplayString(): String {
+        return "(${elements.joinToString(", ") { it.getDisplayString() }})"
+    }
+    
+    @ExportMessage
+    fun hasArrayElements(): Boolean = true
+    
+    @ExportMessage
+    fun getArraySize(): Long = elements.size.toLong()
+    
+    @ExportMessage
+    fun isArrayElementReadable(index: Long): Boolean {
+        return index >= 0 && index < elements.size
+    }
+    
+    @ExportMessage
+    fun readArrayElement(index: Long): Any {
+        if (index < 0 || index >= elements.size) {
+            throw com.oracle.truffle.api.interop.InvalidArrayIndexException.create(index)
+        }
+        return elements[index.toInt()]
+    }
+}
+
 /**
  * Native function implemented in Kotlin, wrapped for Truffle execution
  */

@@ -1,7 +1,7 @@
-# std/types/string.funk - String type operations and conversions
+# std/types/string.funk - Complete string operations and conversions
 
 # Comparison operations
-pub let equals = { left: String, right: String } -> Boolean
+pub let equals = { left: String, right: String } -> Boolean = 
     __native_string_equals { left = left, right = right }
 
 pub let less_than = { left: String, right: String } -> Boolean
@@ -14,19 +14,20 @@ pub let greater_than = { left: String, right: String } -> Boolean
 pub let to_string = { value: String } -> String
     value
 
-# String operations
+# Core string operations
 pub let length = { str: String } -> Int
     __native_string_length { str = str }
-
-pub let concat = { left: String, right: String } -> String
-    __native_string_concat { left = left, right = right }
 
 pub let substring = { str: String, start: Int, end: Int } -> String
     __native_string_substring { str = str, start = start, end = end }
 
+pub let concat = { left: String, right: String } -> String
+    __native_string_concat { left = left, right = right }
+
 pub let split = { str: String, delimiter: String } -> ArrayList String
     __native_string_split { str = str, delimiter = delimiter }
 
+# String manipulation
 pub let trim = { str: String } -> String
     __native_string_trim { str = str }
 
@@ -36,6 +37,10 @@ pub let to_upper = { str: String } -> String
 pub let to_lower = { str: String } -> String
     __native_string_to_lower { str = str }
 
+pub let replace = { str: String, old: String, new: String } -> String
+    __native_string_replace { str = str, old = old, new = new }
+
+# String queries
 pub let contains = { str: String, substring: String } -> Boolean
     __native_string_contains { str = str, substring = substring }
 
@@ -45,8 +50,61 @@ pub let starts_with = { str: String, prefix: String } -> Boolean
 pub let ends_with = { str: String, suffix: String } -> Boolean
     __native_string_ends_with { str = str, suffix = suffix }
 
-pub let replace = { str: String, old: String, new: String } -> String
-    __native_string_replace { str = str, old = old, new = new }
+pub let is_empty = { str: String } -> Boolean
+    __native_string_equals { left = str, right = "" }
+
+pub let is_not_empty = { str: String } -> Boolean
+    not (is_empty { str = str })
+
+# String indexing
+pub let char_at = { str: String, index: Int } -> String
+    substring { str = str, start = index, end = index + 1 }
+
+pub let index_of = { str: String, substring: String } -> Int
+    __native_string_index_of { str = str, substring = substring }
+
+pub let last_index_of = { str: String, substring: String } -> Int
+    __native_string_last_index_of { str = str, substring = substring }
+
+# String formatting
+pub let format = { template: String, args: ArrayList String } -> String
+    __native_string_format { template = template, args = args }
+
+pub let format_int = { template: String, value: Int } -> String
+    format { template = template, args = arrayListOf [__native_int_to_string { val = value }] }
+
+pub let format_float = { template: String, value: Float } -> String
+    format { template = template, args = arrayListOf [__native_float_to_string { val = value }] }
+
+pub let format_boolean = { template: String, value: Boolean } -> String
+    format { template = template, args = arrayListOf [__native_boolean_to_string { val = value }] }
+
+# Padding and alignment
+pub let pad_left = { str: String, width: Int, pad_char: String } -> String
+    __native_string_pad_left { str = str, width = width, pad_char = pad_char }
+
+pub let pad_right = { str: String, width: Int, pad_char: String } -> String
+    __native_string_pad_right { str = str, width = width, pad_char = pad_char }
+
+pub let pad_center = { str: String, width: Int, pad_char: String } -> String
+    __native_string_pad_center { str = str, width = width, pad_char = pad_char }
+
+# Join operations
+pub let join = { strings: ArrayList String, separator: String } -> String
+    __native_string_join { strings = strings, separator = separator }
+
+pub let join_with_prefix = { strings: ArrayList String, separator: String, prefix: String } -> String
+    prefix + (join { strings = strings, separator = separator })
+
+pub let join_with_suffix = { strings: ArrayList String, separator: String, suffix: String } -> String
+    (join { strings = strings, separator = separator }) + suffix
+
+# Multi-line operations
+pub let lines = { str: String } -> ArrayList String
+    split { str = str, delimiter = "\n" }
+
+pub let unlines = { lines: ArrayList String } -> String
+    join { strings = lines, separator = "\n" }
 
 # Type conversions (parsing)
 pub let to_int = { str: String } -> Int
@@ -57,10 +115,3 @@ pub let to_float = { str: String } -> Float
 
 pub let to_nat = { str: String } -> Nat
     __native_string_to_nat { str = str }
-
-# Utility functions
-pub let is_empty = { str: String } -> Boolean
-    equals { left = length { str = str }, right = 0 }
-
-pub let is_not_empty = { str: String } -> Boolean
-    not (is_empty { str = str })

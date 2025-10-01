@@ -1,13 +1,80 @@
-# std/collections/arraylist.funk - ArrayList operations
+# std/collections/arraylist.funk - Array operations using existing natives
 
-pub let map = { list: ArrayList 'a, func: 'a -> 'b } -> ArrayList 'b
-    __native_arraylist_map { list = list, func = func }
+# Basic array operations
+pub let length = { list: ['a] } -> Int
+    __native_arraylist_length { arr = list }
 
-pub let filter = { list: ArrayList 'a, predicate: 'a -> Boolean } -> ArrayList 'a
-    __native_arraylist_filter { list = list, predicate = predicate }
+pub let get = { list: ['a], index: Int } -> 'a
+    __native_arraylist_get { arr = list, index = index }
 
-pub let fold = { list: ArrayList 'a, initial: 'b, func: { acc: 'b, item: 'a } -> 'b } -> 'b
-    __native_arraylist_fold { list = list, initial = initial, func = func }
+pub let set = { list: ['a], index: Int, value: 'a } -> ['a]
+    __native_arraylist_set { arr = list, index = index, value = value }
 
-pub let length = { list: ArrayList 'a } -> Int
-    __native_arraylist_length { list = list }
+pub let add = { list: ['a], value: 'a } -> ['a]
+    __native_arraylist_add { arr = list, value = value }
+
+pub let remove = { list: ['a], index: Int } -> ['a]
+    __native_arraylist_remove { arr = list, index = index }
+
+pub let concat = { list1: ['a], list2: ['a] } -> ['a]
+    __native_arraylist_concat { arr1 = list1, arr2 = list2 }
+
+pub let is_empty = { list: ['a] } -> Boolean
+    __native_arraylist_is_empty { arr = list }
+
+# Higher-order functions
+pub let map = { list: ['a], func: 'a -> 'b } -> ['b]
+    __native_arraylist_map { arr = list, func = func }
+
+pub let filter = { list: ['a], predicate: 'a -> Boolean } -> ['a]
+    __native_arraylist_filter { arr = list, predicate = predicate }
+
+pub let fold = { list: ['a], initial: 'b, func: { acc: 'b, item: 'a } -> 'b } -> 'b
+    __native_arraylist_fold { arr = list, initial = initial, func = func }
+
+pub let fold_right = { list: ['a], initial: 'b, func: { item: 'a, acc: 'b } -> 'b } -> 'b
+    __native_arraylist_fold_right { arr = list, initial = initial, func = func }
+
+pub let reduce = { list: ['a], func: { acc: 'a, item: 'a } -> 'a } -> 'a
+    __native_arraylist_reduce { arr = list, func = func }
+
+# Utility functions
+pub let find = { list: ['a], predicate: 'a -> Boolean } -> Option 'a
+    __native_arraylist_find { arr = list, predicate = predicate }
+
+pub let find_index = { list: ['a], predicate: 'a -> Boolean } -> Option Int
+    __native_arraylist_find_index { arr = list, predicate = predicate }
+
+pub let contains = { list: ['a], value: 'a } where { Eq 'a } -> Boolean
+    __native_arraylist_contains { arr = list, value = value }
+
+pub let index_of = { list: ['a], value: 'a } where { Eq 'a } -> Option Int
+    __native_arraylist_index_of { arr = list, value = value }
+
+pub let reverse = { list: ['a] } -> ['a]
+    __native_arraylist_reverse { arr = list }
+
+pub let sort = { list: ['a] } where { Ord 'a } -> ['a]
+    __native_arraylist_sort { arr = list }
+
+pub let sort_by = { list: ['a], compare: { left: 'a, right: 'a } -> Int } -> ['a]
+    __native_arraylist_sort_by { arr = list, compare = compare }
+
+# Slicing operations
+pub let slice = { list: ['a], start: Int, end: Int } -> ['a]
+    __native_arraylist_slice { arr = list, start = start, end = end }
+
+pub let take = { list: ['a], count: Int } -> ['a]
+    slice { list = list, start = 0, end = count }
+
+pub let drop = { list: ['a], count: Int } -> ['a]
+    slice { list = list, start = count, end = length { list = list } }
+
+pub let head = { list: ['a] } -> Option 'a
+    if is_empty { list = list } then
+        None
+    else
+        Some (get { list = list, index = 0 })
+
+pub let tail = { list: ['a] } -> ['a]
+    drop { list = list, count = 1 }

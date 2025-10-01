@@ -1,0 +1,53 @@
+# std/math/trig.funk - Trigonometric functions
+
+use std::math::basic
+
+# Basic trigonometric functions
+pub let sin = { value: Float } -> Float =
+    __native_float_sin { value = value }
+
+pub let cos = { value: Float } -> Float =
+    __native_float_cos { value = value }
+
+pub let tan = { value: Float } -> Float =
+    __native_float_tan { value = value }
+
+# Inverse trigonometric functions
+pub let asin = { value: Float } -> Float =
+    __native_float_asin { value = value }
+
+pub let acos = { value: Float } -> Float =
+    __native_float_acos { value = value }
+
+pub let atan = { value: Float } -> Float =
+    __native_float_atan { value = value }
+
+pub let atan2 = { y: Float, x: Float } -> Float =
+    __native_float_atan2 { y = y, x = x }
+
+# Mathematical constants
+pub let pi = 3.141592653589793
+pub let e = 2.718281828459045
+
+# Utility functions
+pub let degrees_to_radians = { degrees: Float } -> Float =
+    degrees * (pi / 180.0)
+
+pub let radians_to_degrees = { radians: Float } -> Float =
+    radians * (180.0 / pi)
+
+# Additional trigonometric functions
+pub let tanh = { value: Float } -> Float =
+    let exp_pos = exp { value = value }
+    let exp_neg = exp { value = -value }
+    (exp_pos - exp_neg) / (exp_pos + exp_neg)
+
+pub let sinh = { value: Float } -> Float =
+    let exp_pos = exp { value = value }
+    let exp_neg = exp { value = -value }
+    (exp_pos - exp_neg) / 2.0
+
+pub let cosh = { value: Float } -> Float =
+    let exp_pos = exp { value = value }
+    let exp_neg = exp { value = -value }
+    (exp_pos + exp_neg) / 2.0

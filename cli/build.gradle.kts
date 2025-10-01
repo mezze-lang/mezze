@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
+    kotlin("kapt") // Add for Truffle annotation processing
     application
     id("com.github.johnrengelman.shadow") version "8.1.1"
     id("org.graalvm.buildtools.native") version "0.10.3"
@@ -32,6 +33,7 @@ dependencies {
     
     // Truffle API (Language, Node, etc.) - guest language API - match native-image version
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
+    kapt("org.graalvm.truffle:truffle-dsl-processor:24.2.2") // Add annotation processor
     
     // JSON serialization for enhanced AST
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")

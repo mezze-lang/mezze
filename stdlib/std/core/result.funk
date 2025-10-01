@@ -1,0 +1,79 @@
+# std/core/result.funk - Safe Result type for error handling
+
+# Core Result type definition with correct variant syntax
+type Result 'a 'e = | Ok { val: 'a }, Err { error: 'e } |
+
+# === SAFE UTILITY FUNCTIONS ===
+
+# Map a function over the success value
+let map = { result, f } -> match result is
+    Ok { val } -> Ok { val = f { val } }
+    Err { error } -> Err { error = error }
+
+# Map a function over the error value
+let map_err = { result, f } -> match result is
+    Ok { val } -> Ok { val = val }
+    Err { error } -> Err { error = f { error } }
+
+# Get the success value or return a default
+let get_or_else = { result, default } -> match result is
+    Ok { val } -> val
+    Err { error } -> default
+
+# Check if Result is successful
+let is_ok = { result } -> match result is
+    Ok { val } -> true
+    Err { error } -> false
+
+# Check if Result is an error
+let is_err = { result } -> match result is
+    Ok { val } -> false
+    Err { error } -> true
+
+# Chain operations that return Results
+let flat_map = { result, f } -> match result is
+    Ok { val } -> f { val }
+    Err { error } -> Err { error = error }
+
+# Chain operations on the error value
+let or_else = { result, f } -> match result is
+    Ok { val } -> Ok { val = val }
+    Err { error } -> f { error }
+
+# === CONVERSION FUNCTIONS ===
+
+# Convert Result to Option, discarding error information
+let to_option = { result } -> match result is
+    Ok { val } -> Some { val = val }
+    Err { error } -> None
+
+# Convert Option to Result with a provided error
+let from_option = { opt, error } -> match opt is
+    Some { val } -> Ok { val = val }
+    None -> Err { error = error }
+
+# === COMBINING RESULTS ===
+
+# Combine two Results with a function
+let map2 = { result_a, result_b, f } -> match result_a is
+    Ok { val = a } -> match result_b is
+        Ok { val = b } -> Ok { val = f { a = a, b = b } }
+        Err { error } -> Err { error = error }
+    Err { error } -> Err { error = error }
+
+# === CONDITIONAL OPERATIONS ===
+
+# Execute an action if Result is Ok
+let if_ok = { result, action } -> match result is
+    Ok { val } -> action { val }
+    Err { error } -> {}
+
+# Execute an action if Result is Err
+let if_err = { result, action } -> match result is
+    Ok { val } -> {}
+    Err { error } -> action { error }
+
+# Execute different actions based on Result state
+let fold = { result, on_err, on_ok } -> match result is
+    Ok { val } -> on_ok { val }
+    Err { error } -> on_err { error }

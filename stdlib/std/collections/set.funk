@@ -1,0 +1,80 @@
+# std/collections/set.funk - Set operations using HashSet
+
+# Set 'a is a built-in type implemented using HashSet internally  
+# No explicit type definition needed - handled by native runtime
+
+# Basic set operations
+pub let empty = {} -> Set 'a
+    __native_set_empty {}
+
+pub let insert = { set: Set 'a, value: 'a } -> Set 'a where { Eq 'a }
+    __native_set_insert { set = set, value = value }
+
+pub let remove = { set: Set 'a, value: 'a } -> Set 'a where { Eq 'a }
+    __native_set_remove { set = set, value = value }
+
+pub let contains = { set: Set 'a, value: 'a } -> Boolean where { Eq 'a }
+    __native_set_contains { set = set, value = value }
+
+pub let size = { set: Set 'a } -> Int
+    __native_set_size { set = set }
+
+pub let is_empty = { set: Set 'a } -> Boolean
+    size { set = set } == 0
+
+# Set operations
+pub let union = { set1: Set 'a, set2: Set 'a } -> Set 'a where { Eq 'a }
+    __native_set_union { set1 = set1, set2 = set2 }
+
+pub let intersection = { set1: Set 'a, set2: Set 'a } -> Set 'a where { Eq 'a }
+    __native_set_intersection { set1 = set1, set2 = set2 }
+
+pub let difference = { set1: Set 'a, set2: Set 'a } -> Set 'a where { Eq 'a }
+    __native_set_difference { set1 = set1, set2 = set2 }
+
+# Set queries
+pub let is_subset = { set1: Set 'a, set2: Set 'a } -> Boolean where { Eq 'a }
+    __native_set_is_subset { set1 = set1, set2 = set2 }
+
+pub let is_superset = { set1: Set 'a, set2: Set 'a } -> Boolean where { Eq 'a }
+    is_subset { set1 = set2, set2 = set1 }
+
+pub let is_disjoint = { set1: Set 'a, set2: Set 'a } -> Boolean where { Eq 'a }
+    is_empty { set = intersection { set1 = set1, set2 = set2 } }
+
+# Conversion functions
+pub let to_list = { set: Set 'a } -> ['a]
+    __native_set_to_list { set = set }
+
+pub let from_list = { list: ['a] } -> Set 'a where { Eq 'a }
+    __native_set_from_list { list = list }
+
+# Higher-order functions
+pub let filter = { set: Set 'a, predicate: 'a -> Boolean } -> Set 'a where { Eq 'a }
+    __native_set_filter { set = set, predicate = predicate }
+
+pub let map = { set: Set 'a, func: 'a -> 'b } -> Set 'b where { Eq 'a, Eq 'b }
+    __native_set_map { set = set, func = func }
+
+pub let fold = { set: Set 'a, initial: 'acc, func: { acc: 'acc, item: 'a } -> 'acc } -> 'acc
+    __native_set_fold { set = set, initial = initial, func = func }
+
+# Utility functions
+pub let singleton = { value: 'a } -> Set 'a where { Eq 'a }
+    insert { set = empty {}, value = value }
+
+pub let insert_all = { set: Set 'a, values: ['a] } -> Set 'a where { Eq 'a }
+    fold { 
+        list = values, 
+        initial = set, 
+        func = { acc: Set 'a, item: 'a } -> Set 'a
+            insert { set = acc, value = item }
+    }
+
+pub let remove_all = { set: Set 'a, values: ['a] } -> Set 'a where { Eq 'a }
+    fold { 
+        list = values, 
+        initial = set, 
+        func = { acc: Set 'a, item: 'a } -> Set 'a
+            remove { set = acc, value = item }
+    }

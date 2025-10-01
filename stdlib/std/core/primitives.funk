@@ -1,33 +1,33 @@
 # std/core/primitives.funk - Primitive type implementations always imported
 
-# Int implementations (using hidden native functions)
+# Int implementations (using simplified native functions)
 impl NumAdd Int where {
-    add: { left: Int, right: Int } -> Int = { left, right } -> __native_int_add { left = left, right = right }
+    add: { left: Int, right: Int } -> Int = { left, right } -> add_int { left = left, right = right }
 }
 
 impl NumSub Int where {
-    subtract: { left: Int, right: Int } -> Int = { left, right } -> __native_int_subtract { left = left, right = right }
+    subtract: { left: Int, right: Int } -> Int = { left, right } -> subtract_int { left = left, right = right }
 }
 
 impl NumMul Int where {
-    multiply: { left: Int, right: Int } -> Int = { left, right } -> __native_int_multiply { left = left, right = right }
+    multiply: { left: Int, right: Int } -> Int = { left, right } -> multiply_int { left = left, right = right }
 }
 
 # NumDiv removed for Int to avoid ambiguity with special case operator
 # Int division now uses special case that returns Frac
 
 impl NumMod Int where {
-    modulo: { left: Int, right: Int } -> Int = { left, right } -> __native_int_modulo { left = left, right = right }
+    modulo: { left: Int, right: Int } -> Int = { left, right } -> modulo_int { left = left, right = right }
 }
 
 impl Eq Int where {
-    equals: { left: Int, right: Int } -> Boolean = { left, right } -> __native_int_equals { left = left, right = right }
+    equals: { left: Int, right: Int } -> Boolean = { left, right } -> equal_int { left = left, right = right }
 }
 
 impl Ord Int where {
-    compare: { left: Int, right: Int } -> Ordering = { left, right } -> __native_int_compare { left = left, right = right }
-    less_than: { left: Int, right: Int } -> Boolean = { left, right } -> __native_int_less_than { left = left, right = right }
-    greater_than: { left: Int, right: Int } -> Boolean = { left, right } -> __native_int_greater_than { left = left, right = right }
+    compare: { left: Int, right: Int } -> Ordering = { left, right } -> compare_int { left = left, right = right }
+    less_than: { left: Int, right: Int } -> Boolean = { left, right } -> less_than_int { left = left, right = right }
+    greater_than: { left: Int, right: Int } -> Boolean = { left, right } -> greater_than_int { left = left, right = right }
 }
 
 impl Show Int where {
@@ -71,13 +71,13 @@ impl Show Float where {
 
 # String implementations
 impl Eq String where {
-    equals = { left, right } -> __native_string_equals { left = left, right = right }
+    equals = { left, right } -> equal_string { left = left, right = right }
 }
 
 impl Ord String where {
-    compare = { left, right } -> __native_string_compare { left = left, right = right },
-    less_than = { left, right } -> __native_string_less_than { left = left, right = right },
-    greater_than = { left, right } -> __native_string_greater_than { left = left, right = right }
+    compare = { left, right } -> compare_string { left = left, right = right },
+    less_than = { left, right } -> less_than_string { left = left, right = right },
+    greater_than = { left, right } -> greater_than_string { left = left, right = right }
 }
 
 impl Show String where {
@@ -98,9 +98,8 @@ impl NumAdd Nat where {
     add = { left, right } -> __native_nat_add { left = left, right = right }
 }
 
-impl NumSub Nat where {
-    subtract = { left, right } -> __native_nat_subtract { left = left, right = right }
-}
+# Note: Nat does not implement NumSub because subtraction can result in negative numbers
+# Use natToInt first if subtraction is needed: (natToInt left) - (natToInt right)
 
 impl NumMul Nat where {
     multiply = { left, right } -> __native_nat_multiply { left = left, right = right }
@@ -127,3 +126,8 @@ impl Ord Nat where {
 impl Show Nat where {
     to_string = { value } -> __native_nat_to_string { value = value }
 }
+
+# === SYSTEM FUNCTIONS ===
+
+# Crash function for unrecoverable errors - exits the program
+let crash = { msg } -> __native_crash { msg = msg }

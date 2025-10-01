@@ -1,0 +1,78 @@
+# std/math/core.funk - Core mathematical functions
+
+
+# Mathematical constants for distributions
+pub let pi = 3.141592653589793
+pub let e = 2.718281828459045
+
+# Absolute value - polymorphic over numeric types
+pub let abs = { value: 'a } -> 'a with NumSub 'a, Ord 'a = 
+    if value < 0 then NumSub.subtract { left = 0, right = value } else value
+
+# Minimum of two values
+pub let min = { left: 'a, right: 'a } -> 'a with Ord 'a =
+    if left < right then left else right
+
+# Maximum of two values  
+pub let max = { left: 'a, right: 'a } -> 'a with Ord 'a =
+    if left > right then left else right
+
+# Power function for floats
+pub let pow = { base: Float, exp: Float } -> Float =
+    __native_float_pow { base = base, exp = exp }
+
+# Integer power function
+pub let pow_int = { base: Int, exp: Int } -> Int =
+    __native_int_pow { base = base, exponent = exp }
+
+# Natural number power function
+pub let pow_nat = { base: Nat, exp: Nat } -> Nat =
+    __native_nat_pow { base = base, exponent = exp }
+
+# Square root
+pub let sqrt = { value: Float } -> Float =
+    __native_float_sqrt { value = value }
+
+# Natural logarithm
+pub let ln = { value: Float } -> Float =
+    __native_float_ln { value = value }
+
+# Logarithm base 10
+pub let log10 = { value: Float } -> Float =
+    __native_float_log10 { value = value }
+
+# Exponential function (e^x)
+pub let exp = { value: Float } -> Float =
+    __native_float_exp { value = value }
+
+# Floor function
+pub let floor = { value: Float } -> Float =
+    __native_float_floor { value = value }
+
+# Ceiling function
+pub let ceil = { value: Float } -> Float =
+    __native_float_ceil { value = value }
+
+# Round to nearest integer
+pub let round = { value: Float } -> Float =
+    __native_float_round { value = value }
+
+# Check if value is NaN
+pub let is_nan = { value: Float } -> Boolean =
+    __native_float_is_nan { value = value }
+
+# Check if value is infinite
+pub let is_infinite = { value: Float } -> Boolean =
+    __native_float_is_infinite { value = value }
+
+# Check if value is finite
+pub let is_finite = { value: Float } -> Boolean =
+    __native_float_is_finite { value = value }
+
+# Sign function (-1, 0, or 1)
+pub let sign = { value: Float } -> Float =
+    __native_float_sign { value = value }
+
+# Integer sign function
+pub let sign_int = { value: Int } -> Int =
+    __native_int_sign { value = value }
