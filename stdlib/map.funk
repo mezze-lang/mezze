@@ -1,0 +1,74 @@
+# std/collections/map.funk - Map operations using HashMap
+
+# Map 'k 'v is a built-in type implemented using HashMap internally
+# No explicit type definition needed - handled by native runtime
+
+# Basic map operations
+pub let empty: {} -> (Map 'k 'v) = {} ->
+    __native_map_empty {}
+
+pub let insert: { m: (Map 'k 'v), k: 'k, v: 'v } -> (Map 'k 'v) with Eq 'k = {m, k, v} ->
+    __native_map_insert { m = m, k = k, v = v }
+
+pub let get: { m: (Map 'k 'v), k: 'k } -> (Option 'v) with Eq 'k = {m, k} ->
+    __native_map_get { m = m, k = k }
+
+pub let remove: { m: (Map 'k 'v), k: 'k } -> (Map 'k 'v) with Eq 'k = {m, k} ->
+    __native_map_remove { m = m, k = k }
+
+pub let contains_key: { m: (Map 'k 'v), k: 'k } -> Boolean with Eq 'k= {m, k} ->
+    __native_map_contains_key { m = m, k = k }
+
+pub let size: { m: (Map 'k 'v) } -> Int = {m} ->
+    __native_map_size { m = m }
+
+pub let is_empty: { m: (Map 'k 'v) } -> Boolean = {m} ->
+    size { m = m } == 0
+
+# Map queries and utilities
+pub let keys: { m: (Map 'k 'v) } -> ['k] = {m} ->
+    __native_map_keys { m = m }
+
+pub let values: { m: (Map 'k 'v) } -> ['v] = {m} ->
+    __native_map_values { m = m }
+
+# TODO: Tuple syntax not yet supported in type annotations
+# pub let entries: { m: (Map 'k 'v) } -> [('k, 'v)] = {m} ->
+#     __native_map_entries { m = m }
+
+# Higher-order functions
+pub let map_values: { m: (Map 'k 'v), f: 'v -> 'w } -> (Map 'k 'w) with Eq 'k = {m, f} ->
+    __native_map_map_values { m = m, f = f }
+
+pub let filter: { m: (Map 'k 'v), p: { k: 'k, v: 'v } -> Boolean } -> (Map 'k 'v) with Eq 'k = {m, p} ->
+    __native_map_filter { m = m, p = p }
+
+pub let fold: { m: (Map 'k 'v), init: 'acc, f: { acc: 'acc, k: 'k, v: 'v } -> 'acc } -> 'acc = {m, init, f} ->
+    __native_map_fold { m = m, init = init, f = f }
+
+pub let from_keys: { ks: ['k], f: 'k -> 'v } -> (Map 'k 'v) with Eq 'k = {ks, f} ->
+    __native_map_from_keys { ks = ks, f = f }
+
+# Map operations
+pub let merge: { m1: (Map 'k 'v), m2: (Map 'k 'v) } -> (Map 'k 'v) with Eq 'k = {m1, m2} ->
+    __native_map_merge { m1 = m1, m2 = m2 }
+
+pub let merge_with: { m1: (Map 'k 'v), m2: (Map 'k 'v), f: { l: 'v, r: 'v } -> 'v } -> (Map 'k 'v) with Eq 'k = {m1, m2, f} ->
+    __native_map_merge_with { m1 = m1, m2 = m2, f = f }
+
+# Lookup with default
+pub let get_or_default: { m: (Map 'k 'v), k: 'k, def: 'v } -> 'v with Eq 'k = {m, k, def} ->
+    match get { m = m, k = k } is
+        Some { val } -> val
+        None -> def
+
+# Update operations
+pub let update: { m: (Map 'k 'v), k: 'k, f: (Option 'v) -> (Option 'v) } -> (Map 'k 'v) with Eq 'k = {m, k, f} -> do
+    let current = get { m = m, k = k }
+    let new_val = f { current }
+    match new_val is
+        Some { val } -> insert { m = m, k = k, v = val }
+        None -> remove { m = m, k = k }
+
+pub let remove_all: { m: (Map 'k 'v), ks: ['k] } -> (Map 'k 'v) with Eq 'k = {m, ks} ->
+    __native_map_remove_all { m = m, ks = ks }

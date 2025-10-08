@@ -916,13 +916,16 @@ class FunkInterpreter {
     }
     
     /**
-     * Evaluate binary operations
+     * Evaluate binary operations using built-in ability dispatch
      */
     private fun evaluateBinaryOperation(left: FunkValue, operator: String, right: FunkValue): FunkValue {
+        // Use optimized built-in ability dispatch for primitive types
         return when (operator) {
             "+" -> when {
+                // Built-in NumAdd ability implementations for primitive types
                 left is FunkInt && right is FunkInt -> FunkInt(left.value + right.value)
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value + right.value)
+                // TODO: Add support for user-defined NumAdd implementations
                 else -> throw ArithmeticException("+", left::class.simpleName ?: "Unknown", right::class.simpleName ?: "Unknown")
             }
             "++" -> when {
@@ -948,8 +951,14 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value % right.value)
                 else -> throw RuntimeException("Cannot take modulo of ${left::class.simpleName} and ${right::class.simpleName}")
             }
-            "==" -> FunkBoolean(left == right)
-            "!=" -> FunkBoolean(left != right)
+            "==" -> {
+                // Built-in Eq ability implementation for all types
+                FunkBoolean(evaluateEquality(left, right))
+            }
+            "!=" -> {
+                // Built-in Eq ability implementation (negated)
+                FunkBoolean(!evaluateEquality(left, right))
+            }
             "<" -> when {
                 left is FunkInt && right is FunkInt -> FunkBoolean(left.value < right.value)
                 left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value < right.value)
@@ -973,6 +982,43 @@ class FunkInterpreter {
             "&&" -> FunkBoolean(isTruthy(left) && isTruthy(right))
             "||" -> FunkBoolean(isTruthy(left) || isTruthy(right))
             else -> throw RuntimeException("Unknown binary operator: $operator")
+        }
+    }
+    
+    /**
+     * Evaluate equality using built-in Eq ability implementations
+     */
+    private fun evaluateEquality(left: FunkValue, right: FunkValue): Boolean {
+        return when {
+            // Built-in Eq implementations for primitive types
+            left is FunkInt && right is FunkInt -> left.value == right.value
+            left is FunkFloat && right is FunkFloat -> left.value == right.value
+            left is FunkString && right is FunkString -> left.value == right.value
+            left is FunkBoolean && right is FunkBoolean -> left.value == right.value
+            left is FunkNull && right is FunkNull -> true
+            
+            // Built-in Eq implementations for built-in types
+            left is FunkVariant && right is FunkVariant -> {
+                left.constructor == right.constructor && 
+                when {
+                    left.value == null && right.value == null -> true
+                    left.value != null && right.value != null -> evaluateEquality(left.value, right.value)
+                    else -> false
+                }
+            }
+            left is FunkList && right is FunkList -> {
+                left.elements.size == right.elements.size &&
+                left.elements.zip(right.elements).all { (l, r) -> evaluateEquality(l, r) }
+            }
+            left is FunkRecord && right is FunkRecord -> {
+                left.fields.size == right.fields.size &&
+                left.fields.all { (key, value) ->
+                    right.fields.containsKey(key) && evaluateEquality(value, right.fields[key]!!)
+                }
+            }
+            
+            // Default case - different types are not equal
+            else -> false
         }
     }
     
@@ -1514,6 +1560,9 @@ class FunkInterpreter {
         // Use the centralized native functions registry
         NativeFunctions.registerAll(context)
         
+        // Register built-in constructors (always available without imports)
+        registerBuiltinConstructors(context)
+        
         // Load core stdlib modules that should always be available
         loadCoreStdLibModules(context)
         
@@ -1534,14 +1583,108 @@ class FunkInterpreter {
     }
     
     /**
+     * Register built-in constructors that are always available without imports
+     */
+    private fun registerBuiltinConstructors(context: MutableMap<String, FunkValue>) {
+        // Option constructors
+        context["Some"] = NativeFunkFunction("Some") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("Some constructor expects exactly one argument")
+            }
+            val value = args[0]
+            // Accept any record - the user may define their own Option type with different field names
+            if (value is FunkRecord) {
+                FunkVariant("Some", value)
+            } else {
+                throw RuntimeException("Some constructor expects a record argument")
+            }
+        }
+
+        context["None"] = FunkVariant("None", null)
+
+        // Result constructors
+        context["Ok"] = NativeFunkFunction("Ok") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("Ok constructor expects exactly one argument")
+            }
+            val value = args[0]
+            // Accept any record - the user may define their own Result type with different field names
+            if (value is FunkRecord) {
+                FunkVariant("Ok", value)
+            } else {
+                throw RuntimeException("Ok constructor expects a record argument")
+            }
+        }
+
+        context["Err"] = NativeFunkFunction("Err") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("Err constructor expects exactly one argument")
+            }
+            val value = args[0]
+            if (value is FunkRecord && value.fields.containsKey("err")) {
+                FunkVariant("Err", value)
+            } else {
+                throw RuntimeException("Err constructor expects a record with 'err' field")
+            }
+        }
+        
+        // Ordering constructors
+        context["LT"] = FunkVariant("LT", null)
+        context["EQ"] = FunkVariant("EQ", null)
+        context["GT"] = FunkVariant("GT", null)
+        
+        // Built-in List constructor (for internal use)
+        context["List"] = NativeFunkFunction("List") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("List constructor expects exactly one argument")
+            }
+            val elements = args[0]
+            if (elements is FunkArrayList) {
+                // Convert ArrayList to built-in List representation
+                FunkList(elements.elements)
+            } else {
+                throw RuntimeException("List constructor expects an array")
+            }
+        }
+        
+        // Built-in Map constructor (for internal use)
+        context["Map"] = NativeFunkFunction("Map") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("Map constructor expects exactly one argument")
+            }
+            val record = args[0]
+            if (record is FunkRecord) {
+                // Convert record to built-in Map representation
+                val entries: Map<FunkValue, FunkValue> = record.fields.map { (k, v) -> FunkString(k) as FunkValue to v }.toMap()
+                FunkMap(entries)
+            } else {
+                throw RuntimeException("Map constructor expects a record")
+            }
+        }
+        
+        // Built-in Set constructor (for internal use)
+        context["Set"] = NativeFunkFunction("Set") { args ->
+            if (args.size != 1) {
+                throw RuntimeException("Set constructor expects exactly one argument")
+            }
+            val elements = args[0]
+            if (elements is FunkArrayList) {
+                // Convert ArrayList to built-in Set representation
+                FunkSet(elements.elements.toSet())
+            } else {
+                throw RuntimeException("Set constructor expects an array")
+            }
+        }
+    }
+    
+    /**
      * Load core stdlib modules that should always be available
      */
     private fun loadCoreStdLibModules(context: MutableMap<String, FunkValue>) {
         try {
             val parser = FunkParserImpl()
             val currentDir = Paths.get(".").toAbsolutePath()
-            println("DEBUG: Current working directory: $currentDir")
-            
+
             // Find the project root (go up from interpreter directory if needed)
             val projectRoot = if (currentDir.toString().contains("/interpreter")) {
                 // Go up to the parent directory (the actual project root)
@@ -1549,29 +1692,27 @@ class FunkInterpreter {
             } else {
                 currentDir
             }
-            println("DEBUG: Using project root: $projectRoot")
-            
+
             val moduleResolver = ModuleResolver(projectRoot, parser)
-            
+
             // List of core modules to auto-import
             val coreModules = listOf(
                 "std::core::abilities",
                 "std::core::primitives_minimal"
             )
-            
+
             for (modulePath in coreModules) {
                 try {
                     loadStdLibModule(modulePath, moduleResolver, context)
                 } catch (e: Exception) {
-                    // Log error but continue - some modules might not exist yet
-                    println("DEBUG: Failed to load core module $modulePath: ${e.message}")
+                    // Silently ignore missing modules - some might not exist yet
                 }
             }
-            
+
             // Register operators directly (since parsing operators from files is complex)
             registerCoreOperators(context)
         } catch (e: Exception) {
-            println("DEBUG: Failed to initialize stdlib module loading: ${e.message}")
+            // Silently ignore initialization errors
         }
     }
     
@@ -1595,12 +1736,12 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val addFn = context["__native_int_add"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_add not found")
-                    addFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    addFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 left is FunkFloat && right is FunkFloat -> {
                     val addFn = context["__native_float_add"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_float_add not found")
-                    addFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    addFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (+): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1619,12 +1760,12 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val subFn = context["__native_int_subtract"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_subtract not found")
-                    subFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    subFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 left is FunkFloat && right is FunkFloat -> {
                     val subFn = context["__native_float_subtract"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_float_subtract not found")
-                    subFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    subFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (-): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1643,12 +1784,12 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val mulFn = context["__native_int_multiply"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_multiply not found")
-                    mulFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    mulFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 left is FunkFloat && right is FunkFloat -> {
                     val mulFn = context["__native_float_multiply"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_float_multiply not found")
-                    mulFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    mulFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (*): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1668,7 +1809,7 @@ class FunkInterpreter {
                 left is FunkString && right is FunkString -> {
                     val concatFn = context["__native_string_concat"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_concat not found")
-                    concatFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    concatFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (++): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1688,12 +1829,12 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val eqFn = context["__native_int_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_equals not found")
-                    eqFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    eqFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 left is FunkString && right is FunkString -> {
                     val eqFn = context["__native_string_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_equals not found")
-                    eqFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    eqFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 left is FunkBoolean && right is FunkBoolean -> {
                     FunkBoolean(left.value == right.value)
@@ -1715,12 +1856,12 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val gtFn = context["__native_int_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_greater_than not found")
-                    gtFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    gtFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 left is FunkString && right is FunkString -> {
                     val gtFn = context["__native_string_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_greater_than not found")
-                    gtFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    gtFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (>): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1739,12 +1880,12 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val ltFn = context["__native_int_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_less_than not found")
-                    ltFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    ltFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 left is FunkString && right is FunkString -> {
                     val ltFn = context["__native_string_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_less_than not found")
-                    ltFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    ltFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (<): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1764,12 +1905,12 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val divFn = context["__native_int_divide"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_divide not found")
-                    divFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    divFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 left is FunkFloat && right is FunkFloat -> {
                     val divFn = context["__native_float_divide"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_float_divide not found")
-                    divFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    divFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (/): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -1790,13 +1931,13 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val eqFn = context["__native_int_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_equals not found")
-                    val result = eqFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = eqFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 left is FunkString && right is FunkString -> {
                     val eqFn = context["__native_string_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_equals not found")
-                    val result = eqFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = eqFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 left is FunkBoolean && right is FunkBoolean -> {
@@ -1821,13 +1962,13 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val gtFn = context["__native_int_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_greater_than not found")
-                    val result = gtFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = gtFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 left is FunkString && right is FunkString -> {
                     val gtFn = context["__native_string_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_greater_than not found")
-                    val result = gtFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = gtFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 else -> throw RuntimeException("Unsupported types for (<=): ${left::class.simpleName}, ${right::class.simpleName}")
@@ -1849,13 +1990,13 @@ class FunkInterpreter {
                 left is FunkInt && right is FunkInt -> {
                     val ltFn = context["__native_int_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_less_than not found")
-                    val result = ltFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = ltFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 left is FunkString && right is FunkString -> {
                     val ltFn = context["__native_string_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_less_than not found")
-                    val result = ltFn.call(listOf(FunkRecord(mapOf("left" to left, "right" to right))))
+                    val result = ltFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                     FunkBoolean(!(result as FunkBoolean).value)
                 }
                 else -> throw RuntimeException("Unsupported types for (>=): ${left::class.simpleName}, ${right::class.simpleName}")
@@ -1968,8 +2109,6 @@ class FunkInterpreter {
             val randomValue = kotlin.random.Random.nextInt(0, max.value.toInt() + 1)
             FunkInt(randomValue.toLong())
         }
-        
-        println("DEBUG: Registered core operators: (+), (-), (*), (/), (++), (==), (!=), (>), (<), (<=), (>=), (&&), (||)")
     }
     
     /**
@@ -1995,13 +2134,9 @@ class FunkInterpreter {
             for ((name, export) in module.exports) {
                 if (moduleContext.containsKey(name)) {
                     context[name] = moduleContext[name]!!
-                    println("DEBUG: Loaded stdlib function: $name")
                 }
             }
-            
-            println("DEBUG: Successfully loaded stdlib module: $modulePath")
         } catch (e: Exception) {
-            println("DEBUG: Failed to load stdlib module $modulePath: ${e.message}")
             throw e
         }
     }

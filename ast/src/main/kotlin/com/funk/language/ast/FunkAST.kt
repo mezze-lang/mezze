@@ -18,6 +18,287 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  */
 
 // ============================================================================
+// BUILT-IN ABILITIES
+// ============================================================================
+
+/**
+ * Built-in abilities that are always available in the language
+ */
+object BuiltinAbilities {
+    // Comparison abilities
+    const val EQ = "Eq"
+    const val ORD = "Ord"
+    
+    // Numeric abilities
+    const val NUM_ADD = "NumAdd"
+    const val NUM_SUB = "NumSub"
+    const val NUM_MUL = "NumMul"
+    const val NUM_DIV = "NumDiv"
+    const val NUM_MOD = "NumMod"
+    
+    // Display ability
+    const val SHOW = "Show"
+    
+    // All built-in abilities
+    val ALL = setOf(EQ, ORD, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, SHOW)
+    
+    /**
+     * Check if an ability name is a built-in ability
+     */
+    fun isBuiltin(abilityName: String): Boolean = abilityName in ALL
+    
+    /**
+     * Automatic ability implementations for built-in types
+     * Maps type to the set of abilities it automatically implements
+     */
+    private val automaticImplementations = mapOf(
+        // Primitive types
+        "Int" to setOf(EQ, ORD, SHOW, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD),
+        "Float" to setOf(EQ, ORD, SHOW, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
+        "String" to setOf(EQ, ORD, SHOW),
+        "Boolean" to setOf(EQ, ORD, SHOW),
+        "Nat" to setOf(EQ, ORD, SHOW, NUM_ADD, NUM_MUL, NUM_DIV, NUM_MOD),
+        "Frac" to setOf(EQ, ORD, SHOW, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
+        
+        // Built-in core types (conditional implementations based on element types)
+        "Option" to setOf(EQ, ORD, SHOW), // if element type has these abilities
+        "Result" to setOf(EQ, ORD, SHOW), // if both error and value types have these abilities
+        "List" to setOf(EQ, ORD, SHOW),   // if element type has these abilities
+        "Map" to setOf(EQ, SHOW),         // if key and value types have these abilities
+        "Set" to setOf(EQ, SHOW),         // if element type has these abilities
+        "Ordering" to setOf(EQ, ORD, SHOW)
+    )
+    
+    /**
+     * Check if a built-in type automatically implements an ability
+     */
+    fun hasAutomaticImplementation(typeName: String, abilityName: String): Boolean {
+        return automaticImplementations[typeName]?.contains(abilityName) == true
+    }
+    
+    /**
+     * Get all abilities that a built-in type automatically implements
+     */
+    fun getAutomaticImplementations(typeName: String): Set<String> {
+        return automaticImplementations[typeName] ?: emptySet()
+    }
+    
+    /**
+     * Check if a FunkType automatically implements an ability
+     * This handles both primitive types and parameterized built-in types
+     */
+    fun typeHasAutomaticImplementation(type: FunkType, abilityName: String): Boolean {
+        return when (type) {
+            is FunkType.IntType -> hasAutomaticImplementation("Int", abilityName)
+            is FunkType.FloatType -> hasAutomaticImplementation("Float", abilityName)
+            is FunkType.StringType -> hasAutomaticImplementation("String", abilityName)
+            is FunkType.BooleanType -> hasAutomaticImplementation("Boolean", abilityName)
+            is FunkType.NatType -> hasAutomaticImplementation("Nat", abilityName)
+            is FunkType.FracType -> hasAutomaticImplementation("Frac", abilityName)
+            is FunkType.OrderingType -> hasAutomaticImplementation("Ordering", abilityName)
+            
+            // Parameterized types - check if element types support the ability
+            is FunkType.OptionType -> {
+                hasAutomaticImplementation("Option", abilityName) && 
+                typeHasAutomaticImplementation(type.elementType, abilityName)
+            }
+            is FunkType.ResultType -> {
+                hasAutomaticImplementation("Result", abilityName) && 
+                typeHasAutomaticImplementation(type.errorType, abilityName) &&
+                typeHasAutomaticImplementation(type.valueType, abilityName)
+            }
+            is FunkType.ListType -> {
+                hasAutomaticImplementation("List", abilityName) && 
+                typeHasAutomaticImplementation(type.elementType, abilityName)
+            }
+            is FunkType.MapType -> {
+                hasAutomaticImplementation("Map", abilityName) && 
+                typeHasAutomaticImplementation(type.keyType, abilityName) &&
+                typeHasAutomaticImplementation(type.valueType, abilityName)
+            }
+            is FunkType.SetType -> {
+                hasAutomaticImplementation("Set", abilityName) && 
+                typeHasAutomaticImplementation(type.elementType, abilityName)
+            }
+            
+            else -> false
+        }
+    }
+}
+
+/**
+ * Built-in operator mappings to abilities
+ * Maps operators to their corresponding ability operations
+ */
+object BuiltinOperators {
+    
+    /**
+     * Arithmetic operators mapped to abilities
+     */
+    val arithmeticOperators = mapOf(
+        "+" to BuiltinAbilities.NUM_ADD,
+        "-" to BuiltinAbilities.NUM_SUB,
+        "*" to BuiltinAbilities.NUM_MUL,
+        "/" to BuiltinAbilities.NUM_DIV,
+        "%" to BuiltinAbilities.NUM_MOD
+    )
+    
+    /**
+     * Comparison operators mapped to abilities
+     */
+    val comparisonOperators = mapOf(
+        "==" to BuiltinAbilities.EQ,
+        "!=" to BuiltinAbilities.EQ, // negated
+        "<" to BuiltinAbilities.ORD,
+        ">" to BuiltinAbilities.ORD,
+        "<=" to BuiltinAbilities.ORD,
+        ">=" to BuiltinAbilities.ORD
+    )
+    
+    /**
+     * Boolean operators (built-in language constructs)
+     */
+    val booleanOperators = setOf("&&", "||", "!")
+    
+    /**
+     * All built-in operators
+     */
+    val allOperators = arithmeticOperators.keys + comparisonOperators.keys + booleanOperators
+    
+    /**
+     * Check if an operator is a built-in operator
+     */
+    fun isBuiltinOperator(operator: String): Boolean {
+        return operator in allOperators
+    }
+    
+    /**
+     * Get the ability required for an operator
+     */
+    fun getRequiredAbility(operator: String): String? {
+        return arithmeticOperators[operator] ?: comparisonOperators[operator]
+    }
+    
+    /**
+     * Check if an operator is a boolean operator (no ability constraint needed)
+     */
+    fun isBooleanOperator(operator: String): Boolean {
+        return operator in booleanOperators
+    }
+    
+    /**
+     * Get the ability operation name for an operator
+     */
+    fun getAbilityOperation(operator: String): String? {
+        return when (operator) {
+            "+" -> "add"
+            "-" -> "subtract"
+            "*" -> "multiply"
+            "/" -> "divide"
+            "%" -> "modulo"
+            "==", "!=" -> "equals"
+            "<" -> "less_than"
+            ">" -> "greater_than"
+            "<=", ">=" -> null // derived from other operations
+            else -> null
+        }
+    }
+}
+
+/**
+ * Built-in ability interface definitions
+ * These define the structure and operations for each built-in ability
+ */
+object BuiltinAbilityDefinitions {
+    
+    /**
+     * Equality ability - provides equals operation
+     */
+    data class EqAbility(
+        val equals: String = "equals" // { l: 'a, r: 'a } -> Boolean
+    )
+    
+    /**
+     * Ordering ability - provides comparison operations
+     */
+    data class OrdAbility(
+        val compare: String = "compare",        // { l: 'a, r: 'a } -> Ordering
+        val lessThan: String = "less_than",     // { l: 'a, r: 'a } -> Boolean
+        val greaterThan: String = "greater_than" // { l: 'a, r: 'a } -> Boolean
+    )
+    
+    /**
+     * Numeric addition ability
+     */
+    data class NumAddAbility(
+        val add: String = "add" // { l: 'a, r: 'a } -> 'a
+    )
+    
+    /**
+     * Numeric subtraction ability
+     */
+    data class NumSubAbility(
+        val subtract: String = "subtract" // { l: 'a, r: 'a } -> 'a
+    )
+    
+    /**
+     * Numeric multiplication ability
+     */
+    data class NumMulAbility(
+        val multiply: String = "multiply" // { l: 'a, r: 'a } -> 'a
+    )
+    
+    /**
+     * Numeric division ability
+     */
+    data class NumDivAbility(
+        val divide: String = "divide" // { l: 'a, r: 'a } -> 'a
+    )
+    
+    /**
+     * Numeric modulo ability
+     */
+    data class NumModAbility(
+        val modulo: String = "modulo" // { l: 'a, r: 'a } -> 'a
+    )
+    
+    /**
+     * Display ability - provides string representation
+     */
+    data class ShowAbility(
+        val toString: String = "to_string" // { val: 'a } -> String
+    )
+    
+    /**
+     * Get the operation names for a built-in ability
+     */
+    fun getAbilityOperations(abilityName: String): List<String> {
+        return when (abilityName) {
+            BuiltinAbilities.EQ -> listOf(EqAbility().equals)
+            BuiltinAbilities.ORD -> listOf(
+                OrdAbility().compare, 
+                OrdAbility().lessThan, 
+                OrdAbility().greaterThan
+            )
+            BuiltinAbilities.NUM_ADD -> listOf(NumAddAbility().add)
+            BuiltinAbilities.NUM_SUB -> listOf(NumSubAbility().subtract)
+            BuiltinAbilities.NUM_MUL -> listOf(NumMulAbility().multiply)
+            BuiltinAbilities.NUM_DIV -> listOf(NumDivAbility().divide)
+            BuiltinAbilities.NUM_MOD -> listOf(NumModAbility().modulo)
+            BuiltinAbilities.SHOW -> listOf(ShowAbility().toString)
+            else -> emptyList()
+        }
+    }
+    
+    /**
+     * Check if an operation belongs to a built-in ability
+     */
+    fun isBuiltinAbilityOperation(abilityName: String, operationName: String): Boolean {
+        return getAbilityOperations(abilityName).contains(operationName)
+    }
+}
+
+// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -72,9 +353,33 @@ sealed interface FunkType {
         val isClosed: Boolean get() = rowVar == null
     }
     
-    // ArrayList types (maps to java.util.ArrayList)
+    // Built-in core types (always available)
+    @Serializable
+    data class OptionType(val elementType: FunkType) : FunkType
+    
+    @Serializable
+    data class ResultType(val errorType: FunkType, val valueType: FunkType) : FunkType
+    
+    @Serializable
+    data class ListType(val elementType: FunkType) : FunkType
+    
+    @Serializable
+    data class MapType(val keyType: FunkType, val valueType: FunkType) : FunkType
+    
+    @Serializable
+    data class SetType(val elementType: FunkType) : FunkType
+    
+    // Built-in ordering type for comparisons
+    @Serializable
+    object OrderingType : FunkType
+    
+    // ArrayList types (maps to java.util.ArrayList) - kept for backward compatibility
     @Serializable
     data class ArrayListType(val elementType: FunkType) : FunkType
+    
+    // Array types (for native arrays)
+    @Serializable
+    data class ArrayType(val elementType: FunkType) : FunkType
     
     // Function types
     @Serializable
@@ -111,7 +416,8 @@ sealed interface FunkType {
 @Serializable
 data class TypeScheme(
     val quantifiedVars: Set<TypeVar>,
-    val type: FunkType
+    val type: FunkType,
+    val constraints: List<AbilityConstraint> = emptyList()
 ) {
     /**
      * Check if this type scheme is monomorphic (no quantified variables)
@@ -128,6 +434,23 @@ data class TypeScheme(
             FunkType.VarType(TypeVar.fresh()) 
         }
         return applySubstitutionToType(type, substitution)
+    }
+    
+    companion object {
+        /**
+         * Generalize a type into a type scheme by quantifying over free type variables
+         */
+        fun generalize(type: FunkType, constraints: List<AbilityConstraint> = emptyList()): TypeScheme {
+            val typeVars = mutableSetOf<TypeVar>()
+            collectTypeVariables(type, typeVars)
+            
+            // Filter constraints to only include those relevant to the type variables
+            val relevantConstraints = constraints.filter { constraint ->
+                typeVars.any { it.name == constraint.typeParam }
+            }
+            
+            return TypeScheme(typeVars, type, relevantConstraints)
+        }
     }
     
     /**
@@ -154,7 +477,27 @@ data class TypeScheme(
                 },
                 type.rowVar
             )
+            is FunkType.OptionType -> FunkType.OptionType(
+                applySubstitutionToType(type.elementType, substitution)
+            )
+            is FunkType.ResultType -> FunkType.ResultType(
+                applySubstitutionToType(type.errorType, substitution),
+                applySubstitutionToType(type.valueType, substitution)
+            )
+            is FunkType.ListType -> FunkType.ListType(
+                applySubstitutionToType(type.elementType, substitution)
+            )
+            is FunkType.MapType -> FunkType.MapType(
+                applySubstitutionToType(type.keyType, substitution),
+                applySubstitutionToType(type.valueType, substitution)
+            )
+            is FunkType.SetType -> FunkType.SetType(
+                applySubstitutionToType(type.elementType, substitution)
+            )
             is FunkType.ArrayListType -> FunkType.ArrayListType(
+                applySubstitutionToType(type.elementType, substitution)
+            )
+            is FunkType.ArrayType -> FunkType.ArrayType(
                 applySubstitutionToType(type.elementType, substitution)
             )
             is FunkType.NumType -> FunkType.NumType(
@@ -164,7 +507,8 @@ data class TypeScheme(
             )
             // Concrete types remain unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
-            is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType -> type
+            is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType, 
+            is FunkType.OrderingType -> type
             is FunkType.EffectRow -> type // Effects don't contain type variables for now
         }
     }
@@ -405,6 +749,15 @@ data class FunctionAbilityConstraint(
     val typeArgs: List<TypeAnnotation> = emptyList()  // Type arguments for the ability
 )
 
+/**
+ * Display constraint for debugging and testing purposes
+ */
+@Serializable
+data class DisplayAbilityConstraint(
+    val typeParam: String,
+    val abilityName: String
+)
+
 @Serializable
 data class AbilityDependency(
     val abilityName: String,
@@ -486,6 +839,23 @@ data class ArrayListLiteral(
     override val sourceLocation: SourceLocation? = null
 ) : Expression
 
+@Serializable
+data class ArrayLiteral(
+    val elements: List<Expression>,
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
+) : Expression
+
+@Serializable
+data class ArrayAccess(
+    val array: Expression,
+    val index: Expression,
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
+) : Expression
+
+
+
 // Variables
 @Serializable
 data class Identifier(
@@ -527,7 +897,33 @@ data class RecordLiteral(
     val entries: List<RecordLiteralEntry>,
     val restField: String? = null,
     override val inferredType: FunkType? = null
-) : Expression
+) : Expression {
+    // Thread-local to track nesting depth to prevent infinite recursion
+    companion object {
+        internal val toStringDepth = ThreadLocal.withInitial { 0 }
+        internal const val MAX_DEPTH = 20
+    }
+
+    override fun toString(): String {
+        val depth = toStringDepth.get()
+        if (depth > MAX_DEPTH) {
+            return "RecordLiteral{<max depth reached>}"
+        }
+
+        return try {
+            toStringDepth.set(depth + 1)
+            val entriesStr = if (depth > 5) "<truncated>" else "size=${entries.size}"
+            "RecordLiteral($entriesStr)"
+        } catch (e: StackOverflowError) {
+            "RecordLiteral{<StackOverflowError during toString>}"
+        } finally {
+            toStringDepth.set(depth)
+            if (depth == 0) {
+                toStringDepth.remove() // Clean up thread-local when back to top level
+            }
+        }
+    }
+}
 
 @Serializable
 sealed class RecordLiteralEntry
@@ -536,12 +932,44 @@ sealed class RecordLiteralEntry
 data class RecordFieldEntry(
     val name: String,
     val value: Expression? = null  // null for shorthand {x} instead of {x = x}
-) : RecordLiteralEntry()
+) : RecordLiteralEntry() {
+    override fun toString(): String {
+        val depth = RecordLiteral.toStringDepth.get()
+        if (depth > 5) {
+            return "RecordFieldEntry{<truncated>}"
+        }
+
+        return try {
+            RecordLiteral.toStringDepth.set(depth + 1)
+            "RecordFieldEntry($name)"
+        } catch (e: StackOverflowError) {
+            "RecordFieldEntry{<StackOverflowError>}"
+        } finally {
+            RecordLiteral.toStringDepth.set(depth)
+        }
+    }
+}
 
 @Serializable
 data class RecordSpreadEntry(
     val expression: Expression
-) : RecordLiteralEntry()
+) : RecordLiteralEntry() {
+    override fun toString(): String {
+        val depth = RecordLiteral.toStringDepth.get()
+        if (depth > 5) {
+            return "RecordSpreadEntry{<truncated>}"
+        }
+
+        return try {
+            RecordLiteral.toStringDepth.set(depth + 1)
+            "RecordSpreadEntry(...)"
+        } catch (e: StackOverflowError) {
+            "RecordSpreadEntry{<StackOverflowError>}"
+        } finally {
+            RecordLiteral.toStringDepth.set(depth)
+        }
+    }
+}
 
 // Helper extension functions for backward compatibility
 fun RecordLiteral.getFieldEntries(): List<RecordFieldEntry> {
@@ -630,7 +1058,23 @@ data class FunctionCall(
     val arguments: Expression,
     override val inferredType: FunkType? = null,
     override val sourceLocation: SourceLocation? = null
-) : Expression
+) : Expression {
+    override fun toString(): String {
+        val depth = RecordLiteral.toStringDepth.get()
+        if (depth > 5) {
+            return "FunctionCall{<truncated>}"
+        }
+
+        return try {
+            RecordLiteral.toStringDepth.set(depth + 1)
+            "FunctionCall(...)"
+        } catch (e: StackOverflowError) {
+            "FunctionCall{<StackOverflowError>}"
+        } finally {
+            RecordLiteral.toStringDepth.set(depth)
+        }
+    }
+}
 
 // Control flow
 @Serializable
@@ -786,6 +1230,11 @@ data class ArrayListTypeAnnotation(
 ) : TypeAnnotation
 
 @Serializable
+data class ArrayTypeAnnotation(
+    val elementType: TypeAnnotation
+) : TypeAnnotation
+
+@Serializable
 data class EffectRowAnnotation(
     val effects: List<String>
 ) : TypeAnnotation
@@ -859,6 +1308,9 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
                 "Float" -> FunkType.FloatType
                 "String" -> FunkType.StringType
                 "Boolean" -> FunkType.BooleanType
+                "Nat" -> FunkType.NatType
+                "Frac" -> FunkType.FracType
+                "Ordering" -> FunkType.OrderingType
                 else -> FunkType.VarType(TypeVar(annotation.name))
             }
         }
@@ -899,8 +1351,53 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
             FunkType.VariantType(constructorTypes)
         }
         is TypeApplicationAnnotation -> {
-            // For now, just return a simple identifier type - proper generic support would be more complex
-            FunkType.VarType(TypeVar(annotation.constructor))
+            when (annotation.constructor) {
+                "Option" -> {
+                    if (annotation.args.size == 1) {
+                        FunkType.OptionType(convertTypeAnnotation(annotation.args[0]))
+                    } else {
+                        throw RuntimeException("Option type requires exactly 1 type argument")
+                    }
+                }
+                "Result" -> {
+                    if (annotation.args.size == 2) {
+                        FunkType.ResultType(
+                            convertTypeAnnotation(annotation.args[0]),
+                            convertTypeAnnotation(annotation.args[1])
+                        )
+                    } else {
+                        throw RuntimeException("Result type requires exactly 2 type arguments")
+                    }
+                }
+                "List" -> {
+                    if (annotation.args.size == 1) {
+                        FunkType.ListType(convertTypeAnnotation(annotation.args[0]))
+                    } else {
+                        throw RuntimeException("List type requires exactly 1 type argument")
+                    }
+                }
+                "Map" -> {
+                    if (annotation.args.size == 2) {
+                        FunkType.MapType(
+                            convertTypeAnnotation(annotation.args[0]),
+                            convertTypeAnnotation(annotation.args[1])
+                        )
+                    } else {
+                        throw RuntimeException("Map type requires exactly 2 type arguments")
+                    }
+                }
+                "Set" -> {
+                    if (annotation.args.size == 1) {
+                        FunkType.SetType(convertTypeAnnotation(annotation.args[0]))
+                    } else {
+                        throw RuntimeException("Set type requires exactly 1 type argument")
+                    }
+                }
+                else -> {
+                    // For other generic types, return a simple identifier type
+                    FunkType.VarType(TypeVar(annotation.constructor))
+                }
+            }
         }
         else -> {
             throw RuntimeException("Unsupported type annotation: ${annotation::class.simpleName}")
@@ -985,6 +1482,29 @@ private fun extractTypeVariables(type: FunkType): Set<TypeVar> {
                 constructorType?.let { result.addAll(extractTypeVariables(it)) }
             }
         }
+        is FunkType.OptionType -> {
+            result.addAll(extractTypeVariables(type.elementType))
+        }
+        is FunkType.ResultType -> {
+            result.addAll(extractTypeVariables(type.errorType))
+            result.addAll(extractTypeVariables(type.valueType))
+        }
+        is FunkType.ListType -> {
+            result.addAll(extractTypeVariables(type.elementType))
+        }
+        is FunkType.MapType -> {
+            result.addAll(extractTypeVariables(type.keyType))
+            result.addAll(extractTypeVariables(type.valueType))
+        }
+        is FunkType.SetType -> {
+            result.addAll(extractTypeVariables(type.elementType))
+        }
+        is FunkType.ArrayListType -> {
+            result.addAll(extractTypeVariables(type.elementType))
+        }
+        is FunkType.ArrayType -> {
+            result.addAll(extractTypeVariables(type.elementType))
+        }
         else -> { /* Base types don't contain type variables */ }
     }
     return result
@@ -1038,12 +1558,33 @@ private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<T
                 type.constructors[constructorName]?.let { collectTypeVariablesInOrder(it, collector) }
             }
         }
+        is FunkType.OptionType -> {
+            collectTypeVariablesInOrder(type.elementType, collector)
+        }
+        is FunkType.ResultType -> {
+            collectTypeVariablesInOrder(type.errorType, collector)
+            collectTypeVariablesInOrder(type.valueType, collector)
+        }
+        is FunkType.ListType -> {
+            collectTypeVariablesInOrder(type.elementType, collector)
+        }
+        is FunkType.MapType -> {
+            collectTypeVariablesInOrder(type.keyType, collector)
+            collectTypeVariablesInOrder(type.valueType, collector)
+        }
+        is FunkType.SetType -> {
+            collectTypeVariablesInOrder(type.elementType, collector)
+        }
         is FunkType.ArrayListType -> {
+            collectTypeVariablesInOrder(type.elementType, collector)
+        }
+        is FunkType.ArrayType -> {
             collectTypeVariablesInOrder(type.elementType, collector)
         }
         // Base types don't contain type variables
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
-        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType -> {
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType, 
+        is FunkType.OrderingType -> {
             // No type variables to collect
         }
         is FunkType.EffectRow -> {
@@ -1073,12 +1614,33 @@ private fun collectTypeVariables(type: FunkType, collector: MutableSet<TypeVar>)
                 caseType?.let { collectTypeVariables(it, collector) }
             }
         }
+        is FunkType.OptionType -> {
+            collectTypeVariables(type.elementType, collector)
+        }
+        is FunkType.ResultType -> {
+            collectTypeVariables(type.errorType, collector)
+            collectTypeVariables(type.valueType, collector)
+        }
+        is FunkType.ListType -> {
+            collectTypeVariables(type.elementType, collector)
+        }
+        is FunkType.MapType -> {
+            collectTypeVariables(type.keyType, collector)
+            collectTypeVariables(type.valueType, collector)
+        }
+        is FunkType.SetType -> {
+            collectTypeVariables(type.elementType, collector)
+        }
         is FunkType.ArrayListType -> {
+            collectTypeVariables(type.elementType, collector)
+        }
+        is FunkType.ArrayType -> {
             collectTypeVariables(type.elementType, collector)
         }
         // Base types don't contain type variables
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
-        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType -> {
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType, 
+        is FunkType.OrderingType -> {
             // No type variables to collect
         }
         is FunkType.EffectRow -> {
@@ -1118,9 +1680,140 @@ private fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVa
             // CRITICAL FIX: Preserve row variable during type variable normalization
             FunkType.VariantType(newConstructors, type.rowVar)
         }
+        is FunkType.OptionType -> {
+            val newElementType = substituteTypeVariables(type.elementType, mapping)
+            FunkType.OptionType(newElementType)
+        }
+        is FunkType.ResultType -> {
+            val newErrorType = substituteTypeVariables(type.errorType, mapping)
+            val newValueType = substituteTypeVariables(type.valueType, mapping)
+            FunkType.ResultType(newErrorType, newValueType)
+        }
+        is FunkType.ListType -> {
+            val newElementType = substituteTypeVariables(type.elementType, mapping)
+            FunkType.ListType(newElementType)
+        }
+        is FunkType.MapType -> {
+            val newKeyType = substituteTypeVariables(type.keyType, mapping)
+            val newValueType = substituteTypeVariables(type.valueType, mapping)
+            FunkType.MapType(newKeyType, newValueType)
+        }
+        is FunkType.SetType -> {
+            val newElementType = substituteTypeVariables(type.elementType, mapping)
+            FunkType.SetType(newElementType)
+        }
+        is FunkType.ArrayListType -> {
+            val newElementType = substituteTypeVariables(type.elementType, mapping)
+            FunkType.ArrayListType(newElementType)
+        }
+        is FunkType.ArrayType -> {
+            val newElementType = substituteTypeVariables(type.elementType, mapping)
+            FunkType.ArrayType(newElementType)
+        }
         // Base types and effect rows remain unchanged
         else -> type
     }
 }
 
 
+
+/**
+ * Merge two lists of ability constraints, removing duplicates
+ */
+fun mergeConstraints(constraints1: List<AbilityConstraint>, constraints2: List<AbilityConstraint>): List<AbilityConstraint> {
+    val merged = (constraints1 + constraints2).distinctBy { "${it.abilityName}:${it.typeParam}" }
+    return merged
+}
+
+// ============================================================================
+// BUILT-IN TYPE UTILITIES
+// ============================================================================
+
+/**
+ * Built-in type constructors and utilities
+ */
+object BuiltinTypes {
+    
+    /**
+     * Built-in type constructor names
+     */
+    val coreTypeNames = setOf("Option", "Result", "List", "Map", "Set")
+    val primitiveTypeNames = setOf("Int", "Float", "String", "Boolean", "Nat", "Frac", "Ordering")
+    val allBuiltinTypeNames = coreTypeNames + primitiveTypeNames
+    
+    /**
+     * Built-in constructor names for Option
+     */
+    val optionConstructors = setOf("Some", "None")
+    
+    /**
+     * Built-in constructor names for Result
+     */
+    val resultConstructors = setOf("Ok", "Err")
+    
+    /**
+     * Built-in constructor names for List
+     */
+    val listConstructors = setOf("Nil", "Cons") // Internal representation
+    
+    /**
+     * Built-in constructor names for Ordering
+     */
+    val orderingConstructors = setOf("LT", "EQ", "GT")
+    
+    /**
+     * All built-in constructors
+     */
+    val allBuiltinConstructors = optionConstructors + resultConstructors + 
+                                listConstructors + orderingConstructors
+    
+    /**
+     * Check if a type name is a built-in type
+     */
+    fun isBuiltinTypeName(typeName: String): Boolean {
+        return typeName in allBuiltinTypeNames
+    }
+    
+    /**
+     * Check if a constructor name is a built-in constructor
+     */
+    fun isBuiltinConstructor(constructorName: String): Boolean {
+        return constructorName in allBuiltinConstructors
+    }
+    
+    /**
+     * Get the type name for a built-in constructor
+     */
+    fun getTypeForConstructor(constructorName: String): String? {
+        return when (constructorName) {
+            in optionConstructors -> "Option"
+            in resultConstructors -> "Result"
+            in listConstructors -> "List"
+            in orderingConstructors -> "Ordering"
+            else -> null
+        }
+    }
+    
+    /**
+     * Create built-in type instances
+     */
+    fun createOptionType(elementType: FunkType): FunkType.OptionType {
+        return FunkType.OptionType(elementType)
+    }
+    
+    fun createResultType(errorType: FunkType, valueType: FunkType): FunkType.ResultType {
+        return FunkType.ResultType(errorType, valueType)
+    }
+    
+    fun createListType(elementType: FunkType): FunkType.ListType {
+        return FunkType.ListType(elementType)
+    }
+    
+    fun createMapType(keyType: FunkType, valueType: FunkType): FunkType.MapType {
+        return FunkType.MapType(keyType, valueType)
+    }
+    
+    fun createSetType(elementType: FunkType): FunkType.SetType {
+        return FunkType.SetType(elementType)
+    }
+}

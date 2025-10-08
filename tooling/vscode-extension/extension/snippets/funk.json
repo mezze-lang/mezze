@@ -1,0 +1,219 @@
+{
+  "Let Binding": {
+    "prefix": "let",
+    "body": [
+      "let ${1:name} = ${2:value}"
+    ],
+    "description": "Create a let binding"
+  },
+  "Let with Type Annotation": {
+    "prefix": "lett",
+    "body": [
+      "let ${1:name}: ${2:Type} = ${3:value}"
+    ],
+    "description": "Create a let binding with type annotation"
+  },
+  "Public Let Binding": {
+    "prefix": "publet",
+    "body": [
+      "pub let ${1:name} = ${2:value}"
+    ],
+    "description": "Create a public let binding"
+  },
+  "Lambda Expression": {
+    "prefix": "lambda",
+    "body": [
+      "{${1:param}} -> ${2:body}"
+    ],
+    "description": "Create a lambda expression"
+  },
+  "Lambda with Multiple Parameters": {
+    "prefix": "lambdap",
+    "body": [
+      "{${1:param1}, ${2:param2}} -> ${3:body}"
+    ],
+    "description": "Create a lambda with multiple parameters"
+  },
+  "Typed Lambda": {
+    "prefix": "lambdat",
+    "body": [
+      "{${1:param}: ${2:Type}} -> ${3:ReturnType} = ${4:body}"
+    ],
+    "description": "Create a typed lambda expression"
+  },
+  "Type Declaration": {
+    "prefix": "type",
+    "body": [
+      "type ${1:Name} = ${2:definition}"
+    ],
+    "description": "Create a type declaration"
+  },
+  "Variant Type": {
+    "prefix": "variant",
+    "body": [
+      "type ${1:Name} = | ${2:Constructor1}, ${3:Constructor2} |"
+    ],
+    "description": "Create a variant type"
+  },
+  "Record Type": {
+    "prefix": "record",
+    "body": [
+      "type ${1:Name} = {${2:field}: ${3:Type}}"
+    ],
+    "description": "Create a record type"
+  },
+  "Effect Declaration": {
+    "prefix": "effect",
+    "body": [
+      "effect ${1:Name} {",
+      "  ${2:operation}: {${3:params}} -> ${4:ReturnType} <>",
+      "}"
+    ],
+    "description": "Create an effect declaration"
+  },
+  "Ability Declaration": {
+    "prefix": "ability",
+    "body": [
+      "ability ${1:Name} '${2:a} where {",
+      "  ${3:operation}: {${4:params}} -> ${5:ReturnType}",
+      "}"
+    ],
+    "description": "Create an ability declaration"
+  },
+  "Impl Effect": {
+    "prefix": "impl",
+    "body": [
+      "impl ${1:Effect} for ${2:Type} where {",
+      "  ${3:operation}: {${4:params}} -> ${5:ReturnType} = ${6:body}",
+      "}"
+    ],
+    "description": "Implement an effect for a type"
+  },
+  "Impl Ability": {
+    "prefix": "implability",
+    "body": [
+      "impl ${1:Ability} ${2:Type} where {",
+      "  ${3:operation}: {${4:params}} -> ${5:ReturnType} = ${6:body}",
+      "}"
+    ],
+    "description": "Implement an ability for a type"
+  },
+  "Match Expression": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} is",
+      "  ${2:Pattern} -> ${3:result}",
+      "  _ -> ${4:default}"
+    ],
+    "description": "Create a match expression"
+  },
+  "Match with Guard": {
+    "prefix": "matchg",
+    "body": [
+      "match ${1:value} is",
+      "  ${2:Pattern} if ${3:condition} -> ${4:result}",
+      "  _ -> ${5:default}"
+    ],
+    "description": "Create a match expression with guard"
+  },
+  "If Expression": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition}",
+      "then ${2:trueCase}",
+      "else ${3:falseCase}"
+    ],
+    "description": "Create an if-then-else expression"
+  },
+  "Do Expression": {
+    "prefix": "do",
+    "body": [
+      "do",
+      "  ${1:statement}",
+      "  ${2:result}"
+    ],
+    "description": "Create a do expression"
+  },
+  "Perform Expression": {
+    "prefix": "perform",
+    "body": [
+      "perform ${1:Handler} in",
+      "  ${2:expression}"
+    ],
+    "description": "Create a perform expression"
+  },
+  "Use Declaration": {
+    "prefix": "use",
+    "body": [
+      "use ${1:module::path}"
+    ],
+    "description": "Import a module"
+  },
+  "Use with Alias": {
+    "prefix": "useas",
+    "body": [
+      "use ${1:module::path} as ${2:Alias}"
+    ],
+    "description": "Import a module with alias"
+  },
+  "Public Use": {
+    "prefix": "pubuse",
+    "body": [
+      "pub ${1:module::path}"
+    ],
+    "description": "Re-export a module"
+  },
+  "Function with Effects": {
+    "prefix": "funeffect",
+    "body": [
+      "let ${1:name}: {${2:params}} -> ${3:ReturnType} <${4:Effect}> = {${5:params}} ->",
+      "  ${6:body}"
+    ],
+    "description": "Create a function with effect annotation"
+  },
+  "Function with Ability Constraints": {
+    "prefix": "funability",
+    "body": [
+      "let ${1:name}: {${2:params}} -> ${3:ReturnType} with ${4:Ability} ${5:Type} = {${6:params}} ->",
+      "  ${7:body}"
+    ],
+    "description": "Create a function with ability constraints"
+  },
+  "Record Literal": {
+    "prefix": "rec",
+    "body": [
+      "{${1:field} = ${2:value}}"
+    ],
+    "description": "Create a record literal"
+  },
+  "Record with Spread": {
+    "prefix": "recspread",
+    "body": [
+      "{...${1:record}, ${2:field} = ${3:value}}"
+    ],
+    "description": "Create a record with spread syntax"
+  },
+  "Array Literal": {
+    "prefix": "arr",
+    "body": [
+      "[${1:element}]"
+    ],
+    "description": "Create an array literal"
+  },
+  "Pipe Expression": {
+    "prefix": "pipe",
+    "body": [
+      "${1:value} |> ${2:function}"
+    ],
+    "description": "Create a pipe expression"
+  },
+  "Comment Section": {
+    "prefix": "section",
+    "body": [
+      "# ==================",
+      "# ${1:Section Name}",
+      "# =================="
+    ],
+    "description": "Create a comment section header"
+  }
+}

@@ -1,0 +1,3 @@
+use int
+
+let test = to_string {value = 42}

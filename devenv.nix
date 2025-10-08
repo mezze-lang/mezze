@@ -46,6 +46,7 @@ in
         gradle build
       fi
       java \
+        $JAVA_OPTS \
         --enable-native-access=ALL-UNNAMED \
         -Dpolyglot.engine.WarnInterpreterOnly=false \
         -Dtruffle.TruffleRuntime=com.oracle.truffle.api.impl.DefaultTruffleRuntime \
@@ -83,7 +84,7 @@ in
     echo ""
     echo "📦 Build Commands:"
     echo "  build        - Build the project"
-    echo "  clean        - Clean build artifacts"  
+    echo "  clean        - Clean build artifacts"
     echo "  test         - Run tests"
     echo ""
     echo "🎯 Funk CLI:"

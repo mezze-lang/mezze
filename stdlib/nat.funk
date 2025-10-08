@@ -1,0 +1,33 @@
+# Natural number utility functions
+# This module provides utility functions for working with natural numbers
+# Note: The Nat type and basic operations are now built-in
+
+# Special subtraction that returns Int (since Nat - Nat can be negative)
+pub let subtract_to_int = { l: Nat, r: Nat } ->
+    __native_nat_subtract_to_int { l = l, r = r }
+
+# Type conversions
+pub let from_int = { x: Int } ->
+    __native_nat_from_int { x = x }
+
+pub let from_float = { x: Float } ->
+    __native_nat_from_float { x = x }
+
+pub let from_string = { s: String } ->
+    __native_nat_from_string { s = s }
+
+# Utility functions
+pub let min = { l: Nat, r: Nat } ->
+    if l < r then l else r
+
+pub let max = { l: Nat, r: Nat } ->
+    if l > r then l else r
+
+pub let is_zero = { x: Nat } ->
+    x == 0
+
+pub let is_even = { x: Nat } ->
+    (x % 2) == 0
+
+pub let is_odd = { x: Nat } ->
+    not (is_even { x = x })

@@ -30,7 +30,7 @@
 
 ## Phase 2: Native Collections
 
-- [-] 4. Implement native JS-style List type
+- [ ] 4. Implement native JS-style List type
   - Create native JavaScript array backing implementation
   - Add parser support for [1, 2, 3] literal syntax
   - Add parser support for list[index] access syntax

@@ -1,0 +1,2 @@
+# Test Log without proper import - what does the typechecker do?
+let test = perform Log.info { msg = "hello" }

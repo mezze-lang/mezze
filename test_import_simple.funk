@@ -1,0 +1,3 @@
+use test_simple_module::{add_one}
+
+let test = add_one

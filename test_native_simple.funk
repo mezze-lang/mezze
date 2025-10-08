@@ -1,0 +1,2 @@
+let wrapper: { val: Int } -> String = __native_int_to_string
+let test = wrapper { val = 42 }

@@ -17,7 +17,7 @@ statement:
 
 // Declarations
 letBinding:
-    PUB? LET Identifier (COLON typeAnnotation)? ASSIGN expression NEWLINE?
+    PUB? LET Identifier (COLON typeAnnotation)? ASSIGN NEWLINE? expression NEWLINE?
     ;
 
 typeDeclaration:
@@ -25,7 +25,7 @@ typeDeclaration:
     ;
 
 effectDeclaration:
-    PUB? EFFECT Identifier LBRACE NEWLINE? (effectOperation NEWLINE?)* RBRACE NEWLINE?
+    PUB? EFFECT Identifier LBRACE NEWLINE? (effectOperation (COMMA NEWLINE? effectOperation)*)? RBRACE NEWLINE?
     ;
 
 effectOperation:
@@ -150,7 +150,7 @@ variantExpression:
     ;
 
 matchExpression:
-    MATCH expression IS NEWLINE? (matchCase NEWLINE?)*
+    MATCH expression IS NEWLINE? matchCase (NEWLINE? matchCase)*
     | ifExpression
     ;
 
@@ -218,7 +218,7 @@ unaryExpression:
     ;
 
 memberAccessExpression:
-    primaryExpression (DOT Identifier)* (recordLiteral)?  // Allow function calls on member access
+    primaryExpression (DOT Identifier | LBRACKET expression RBRACKET)* (recordLiteral)?  // Allow member access and array indexing
     ;
 
 primaryExpression:
@@ -226,9 +226,9 @@ primaryExpression:
     | qualifiedIdentifier
     | PLACEHOLDER                          // Pipe placeholder
     | LPAREN expression RPAREN
-    | recordLiteral
+    | lambdaExpression                     // Lambda function (must come before recordLiteral to avoid ambiguity)
     | doExpression                         // Do block
-    | lambdaExpression                     // Lambda function
+    | recordLiteral                        // Record literal
     | performExpression                    // Perform expression
     | primaryExpression recordLiteral      // Function call or record update (disambiguated in AST builder)
     ;
@@ -247,9 +247,11 @@ performHandler:
 
 
 lambdaExpression:
-    recordType ARROW typeAnnotation? functionAbilityConstraints? ASSIGN expression    // Typed with constraints: { x: Int } -> String with Show Int = ...
-    | recordType ARROW NEWLINE? expression                                            // Typed parameters: { x: Int, y: Int } -> x + y
-    | untypedRecordParams ARROW NEWLINE? expression                                   // Untyped parameters: { x, y } -> x + y
+    recordType ARROW typeAnnotation functionAbilityConstraints? ASSIGN NEWLINE? expression    // Typed with return type and constraints: { x: Int } -> String with Show Int = ...
+    | recordType ARROW functionAbilityConstraints ASSIGN NEWLINE? expression                  // Typed with just constraints: { x: Int } with Show Int = ...
+    | recordType ARROW ASSIGN NEWLINE? expression                                             // Typed params only: { x: Int } = ...
+    | recordType ARROW NEWLINE? expression                                                     // Typed parameters: { x: Int, y: Int } -> x + y
+    | untypedRecordParams ARROW NEWLINE? expression                                            // Untyped parameters: { x, y } -> x + y
     ;
 
 
@@ -299,13 +301,26 @@ recordTypeEntry:
     ;
 
 typeAnnotation:
-    Identifier                             // Simple type (Int, String, etc.)
-    | TypeVariable                         // Type variable ('a, 'b, etc.)
-    | LPAREN Identifier typeAnnotation+ RPAREN  // Type application (Maybe Int), etc.
+    functionType                           // Function type (must come first to avoid ambiguity with TypeVariable/Identifier)
+    | LPAREN Identifier typeAnnotation+ RPAREN  // Type application with parens (Option 'a), etc.
+    | LPAREN typeAnnotation RPAREN         // Parenthesized type for disambiguation
     | recordType                           // Record type
     | variantType                          // Variant type
-    | functionType                         // Function type
     | arrayListType                        // ArrayList type
+    | Identifier nonIdentifierTypeAnnotation+   // Type application without parens: Set 'a, Map 'k 'v (but not Set String to avoid ambiguity with ability constraints)
+    | Identifier                             // Simple type (Int, String, etc.)
+    | TypeVariable                         // Type variable ('a, 'b, etc.)
+    ;
+
+nonIdentifierTypeAnnotation:
+    functionType                           // Function type
+    | LPAREN Identifier typeAnnotation+ RPAREN  // Type application with parens
+    | LPAREN typeAnnotation RPAREN         // Parenthesized type
+    | recordType                           // Record type
+    | variantType                          // Variant type
+    | arrayListType                        // ArrayList type
+    | Identifier nonIdentifierTypeAnnotation+   // Nested type application
+    | TypeVariable                         // Type variable ('a, 'b, etc.) - this is the key difference!
     ;
 
 arrayListType:
@@ -313,7 +328,16 @@ arrayListType:
     ;
 
 functionType:
-    recordType ARROW typeAnnotation effectRow? functionAbilityConstraints?    // { params } -> ReturnType <Effects> with Abilities
+    recordType functionAbilityConstraints? ARROW typeAnnotation effectRow? functionAbilityConstraints?    // { params } with Abilities -> ReturnType <Effects> with Abilities
+    | simpleType ARROW typeAnnotation effectRow? functionAbilityConstraints?  // Shorthand: 'a -> 'b, Int -> String, etc.
+    ;
+
+simpleType:
+    Identifier
+    | TypeVariable
+    | LPAREN Identifier typeAnnotation+ RPAREN  // Type application
+    | LPAREN typeAnnotation RPAREN              // Parenthesized
+    | arrayListType
     ;
 
 effectRow:
@@ -331,7 +355,7 @@ literal:
     ;
 
 arrayListLiteral:
-    LBRACKET (expression (COMMA expression)*)? RBRACKET
+    LBRACKET (expression (COMMA expression)* COMMA?)? RBRACKET
     ;
 
 // --- Lexer Rules ---

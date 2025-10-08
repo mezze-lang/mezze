@@ -1,0 +1,5 @@
+use int
+
+let test = {x, y} -> do
+    let sum = x + y
+    to_string {value = sum}

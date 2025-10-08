@@ -1,0 +1,3 @@
+use std::effects::log::{info}
+
+let my_test = info

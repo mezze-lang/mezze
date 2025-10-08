@@ -2,312 +2,186 @@
 
 ## Overview
 
-This design addresses the critical syntax errors in the Funk standard library and establishes a robust architecture for stdlib modules, native function integration, and comprehensive testing. The current stdlib contains incorrect syntax for variant types, match expressions, and function definitions that prevent proper parsing and execution.
+This design addresses the systematic syntax errors in the Funk standard library modules that prevent qualified calls from working correctly. The core issue is that most stdlib modules use incorrect function definition syntax, missing the required `=` operator before function bodies. The solution involves identifying all affected modules, correcting their syntax, and validating the fixes through comprehensive testing.
 
 ## Architecture
 
-### Stdlib Module Structure
-```
-stdlib/std/
-├── core/           # Core types and abilities (auto-imported)
-│   ├── primitives.funk    # Basic types and operations
-│   ├── option.funk        # Option 'a variant type
-│   ├── result.funk        # Result 'a 'e variant type
-│   ├── abilities.funk     # Core abilities
-│   └── operators.funk     # Operator definitions
-├── collections/    # Collection types
-│   ├── list.funk          # List 'a operations (native List implementation)
-│   ├── map.funk           # Map 'a 'b operations (native Map implementation)
-│   └── array.funk         # ['a] operations (array list syntax)
+### Problem Analysis
 
-├── types/          # Type-specific operations
-│   ├── int.funk          # Int operations
-│   ├── float.funk        # Float operations
-│   ├── frac.funk         # Fraction operations
-│   ├── string.funk       # String operations
-│   ├── boolean.funk      # Boolean operations
-│   └── nat.funk          # Natural number operations
-├── math/           # Mathematical operations
-│   └── basic.funk        # Basic math functions
-└── effects/        # Effect system (expanded)
-    ├── console.funk       # Console I/O effects
-    ├── filesystem.funk    # File system effects
-    ├── log.funk          # Logging effects
-    └── concurrency.funk   # Concurrency and async operations (Loom-based)
-```
+The qualified call system works correctly - the issue is purely syntactic in the stdlib modules:
 
-### Native Function Integration Architecture
-```
-interpreter/src/main/kotlin/com/funk/language/interpreter/stdlib/
-├── TruffleNativeImplementations.kt    # Main native function registry
-├── numeric/
-│   └── TruffleNumericImplementations.kt  # Numeric operations
-├── collections/
-│   ├── TruffleListImplementations.kt        # Native List 'a operations
-│   ├── TruffleMapImplementations.kt         # Native Map 'a 'b operations
-│   └── TruffleArrayImplementations.kt       # Native ['a] array operations
-├── effects/
-│   ├── TruffleEffectImplementations.kt     # Basic effect implementations
-│   └── TruffleConcurrencyImplementations.kt # Loom-based concurrency implementations
-└── types/
-    └── TruffleTypeImplementations.kt       # Type-specific operations
-```
+1. **Working Example (int.funk):**
+   ```funk
+   pub let to_string = { value: Int } -> String =
+       __native_int_to_string { value = value }
+   ```
+
+2. **Broken Example (string.funk):**
+   ```funk
+   pub let length = { str: String } -> Int
+       __native_string_length { str = str }  # Missing '='
+   ```
+
+### Module Categories
+
+Based on investigation, stdlib modules fall into these categories:
+
+1. **Correct Syntax:** `int.funk` - serves as the template
+2. **Missing Equals:** `string.funk`, `boolean.funk`, `float.funk` - need `=` added
+3. **Unknown Status:** Other modules in collections, core, effects, math - need assessment
 
 ## Components and Interfaces
 
-### 1. Corrected Variant Type Syntax
+### Syntax Correction Engine
 
-**Option Type:**
-```funk
-type Option 'a = | Some { val: 'a }, None |
-```
+**Purpose:** Systematically identify and fix syntax errors in stdlib modules
 
-**Result Type:**
-```funk
-type Result 'a 'e = | Ok { val: 'a }, Err { error: 'e } |
-```
+**Interface:**
+- Input: Stdlib module file path
+- Output: Corrected module content
+- Validation: Parse test to ensure syntax correctness
 
-**List Type (Native Implementation):**
-```funk
-# List 'a uses native Java List implementation
-type List 'a = __native_list_type
-```
+**Implementation Strategy:**
+1. **Pattern Detection:** Identify lines with `pub let name = { params } -> ReturnType` followed by function body without `=`
+2. **Correction Application:** Insert `=` between type annotation and function body
+3. **Validation:** Parse corrected content to ensure syntax correctness
 
-**Map Type (Native Implementation):**
-```funk
-# Map 'a 'b uses native Java Map implementation
-type Map 'a 'b = __native_map_type
-```
+### Module Assessment Tool
 
-**Array Syntax:**
-```funk
-# ['a] syntax maps to ArrayList operations
-let empty: ['a] = []
-let numbers: [Int] = [1, 2, 3, 4]
-```
+**Purpose:** Scan all stdlib modules to identify syntax issues
 
-### 2. Corrected Match Expression Syntax
+**Interface:**
+- Input: Stdlib directory structure
+- Output: Report of modules needing fixes
+- Categories: Correct, needs fixing, parse errors
 
-**Option Matching (Safe Operations Only):**
-```funk
-let map = { opt, f } -> match opt is
-    Some { val } -> Some { val = f { val } }
-    None -> None
+### Testing Framework
 
-let get_or_else = { opt, default } -> match opt is
-    Some { val } -> val
-    None -> default
-```
+**Purpose:** Validate that syntax fixes enable qualified calls
 
-**Result Matching (Safe Operations Only):**
-```funk
-let map = { result, f } -> match result is
-    Ok { val } -> Ok { val = f { x = val } }
-    Err { error } -> Err { error = error }
-
-let map_err = { result, f } -> match result is
-    Ok { val } -> Ok { val = val }
-    Err { error } -> Err { error = f { x = error } }
-```
-
-### 3. Function Definition Patterns
-
-**Simple Functions:**
-```funk
-let add = { x, y } -> x + y
-let greet = { name } -> "Hello " ++ name
-let result = add { x = 10, y = 20 }
-```
-
-**Typed Functions:**
-```funk
-let is_some: { opt: Option 'a } -> Boolean = { opt } -> match opt is
-    Some { val } -> true
-    None -> false
-
-let is_none: { opt: Option 'a } -> Boolean = { opt } -> match opt is
-    Some { val } -> false
-    None -> true
-```
-
-### 4. Native Function Integration
-
-**Registry Pattern:**
-```kotlin
-object TruffleNativeImplementations {
-    fun registerAll(context: MutableMap<String, FunkValue>) {
-        registerCoreOperations(context)
-        registerOptionOperations(context)
-        registerResultOperations(context)
-        registerCollectionOperations(context)
-        registerEffectOperations(context)
-    }
-}
-```
-
-**Native Function Naming Convention:**
-- `__native_*` - Hidden from user code, only accessible through abilities
-- `show` - Public utility functions
-- Type-specific operations follow pattern: `__native_{type}_{operation}`
+**Interface:**
+- Input: Module name and function name
+- Output: Qualified call test result
+- Validation: Type checking and resolution success
 
 ## Data Models
 
-### Variant Type Representation
+### Syntax Error Pattern
+
 ```kotlin
-// In FunkValue.kt
-sealed class FunkVariant : FunkValue {
-    abstract val constructor: String
-    abstract val data: FunkValue?
-    
-    data class OptionSome(val value: FunkValue) : FunkVariant() {
-        override val constructor = "Some"
-        override val data = FunkRecord(mapOf("value" to value))
-    }
-    
-    object OptionNone : FunkVariant() {
-        override val constructor = "None"
-        override val data = null
-    }
+data class SyntaxError(
+    val file: String,
+    val lineNumber: Int,
+    val pattern: String,
+    val correction: String
+)
+```
+
+### Module Status
+
+```kotlin
+enum class ModuleStatus {
+    CORRECT,           // Already has correct syntax
+    NEEDS_EQUALS,      // Missing = in function definitions
+    PARSE_ERROR,       // Has other syntax issues
+    UNKNOWN            // Not yet assessed
 }
 ```
 
-### Native Function Integration
+### Fix Report
+
 ```kotlin
-// Pattern for native function implementation
-context["__native_option_map"] = createNativeFunction("__native_option_map") { record ->
-    val opt = record.getField("opt") as FunkVariant
-    val f = record.getField("f") as FunkFunction
-    
-    when (opt) {
-        is FunkVariant.OptionSome -> {
-            val result = f.call(FunkRecord(mapOf("value" to opt.value)))
-            FunkVariant.OptionSome(result)
-        }
-        is FunkVariant.OptionNone -> FunkVariant.OptionNone
-    }
-}
+data class FixReport(
+    val module: String,
+    val originalStatus: ModuleStatus,
+    val fixesApplied: List<SyntaxError>,
+    val finalStatus: ModuleStatus,
+    val testResults: List<QualifiedCallTest>
+)
 ```
 
 ## Error Handling
 
-### Syntax Error Prevention
-1. **Grammar Validation**: All .funk files must parse successfully with the Funk grammar
-2. **Type Checking**: All stdlib functions must type-check correctly
-3. **Native Integration**: All `__native_*` functions must have corresponding implementations
+### Syntax Error Recovery
 
-### Runtime Error Handling
-1. **Crash Functions**: Use `crash { msg = "..." }` for unrecoverable errors (avoid unsafe operations like unwrap)
-2. **Result Types**: Use Result 'a 'e for recoverable errors with safe operations (map, map_err, get_or_else)
-3. **Option Types**: Use Option 'a for optional values with safe operations (map, get_or_else, is_some, is_none)
+1. **Backup Strategy:** Create `.backup` files before making changes
+2. **Rollback Capability:** Restore from backup if fixes fail validation
+3. **Incremental Fixing:** Fix one module at a time to isolate issues
+
+### Validation Failures
+
+1. **Parse Errors:** If corrected syntax still doesn't parse, flag for manual review
+2. **Type Errors:** If qualified calls fail after syntax fix, investigate type issues
+3. **Missing Functions:** If expected functions aren't found, check function names
+
+### Module Resolution Issues
+
+1. **Path Problems:** Ensure module resolver can find corrected files
+2. **Import Conflicts:** Check for naming conflicts after fixes
+3. **Dependency Issues:** Verify inter-module dependencies still work
 
 ## Testing Strategy
 
-### 1. Syntax Validation Tests
-```kotlin
-class StdLibSyntaxTest {
-    @Test
-    fun `all stdlib files parse successfully`() {
-        val stdlibFiles = listOf(
-            "stdlib/std/core/option.funk",
-            "stdlib/std/core/result.funk",
-            // ... all stdlib files
-        )
-        
-        stdlibFiles.forEach { file ->
-            assertDoesNotThrow("$file should parse without errors") {
-                FunkParser.parseFile(file)
-            }
-        }
-    }
-}
-```
+### Unit Testing
 
-### 2. Native Function Integration Tests
-```kotlin
-class NativeIntegrationTest {
-    @Test
-    fun `option operations work correctly`() {
-        val some = interpretExpression("Some { value = 42 }")
-        val none = interpretExpression("None")
-        
-        val mapped = interpretExpression("map { opt = some, f = { x } -> x + 1 }")
-        assertEquals(43, (mapped as OptionSome).value)
-    }
-}
-```
+1. **Syntax Correction Tests:**
+   - Test pattern detection accuracy
+   - Verify correction application
+   - Validate edge cases (multi-line functions, complex types)
 
-### 3. Comprehensive Stdlib Tests
-```kotlin
-class StdLibComprehensiveTest {
-    @Test
-    fun `option type operations`() {
-        // Test all Option operations: map, flatMap, unwrap, etc.
-    }
-    
-    @Test
-    fun `result type operations`() {
-        // Test all Result operations: map, mapErr, unwrap, etc.
-    }
-    
-    @Test
-    fun `collection operations`() {
-        // Test List 'a operations (native implementation)
-        // Test Map 'a 'b operations (native implementation)
-        // Test ['a] array syntax operations
-    }
-    
-    @Test
-    fun `fraction type operations`() {
-        // Test Frac operations and arithmetic
-    }
-    
-    @Test
-    fun `effect operations`() {
-        // Test console, filesystem, logging effects
-    }
-}
-```
+2. **Module Parsing Tests:**
+   - Test each corrected module parses successfully
+   - Verify function definitions are recognized
+   - Check type annotations are preserved
 
-### 4. Backward Compatibility Tests
-```kotlin
-class BackwardCompatibilityTest {
-    @Test
-    fun `existing tests still pass`() {
-        // Run all existing tests to ensure no regressions
-        // Add use statements only if needed for module resolution
-    }
-}
-```
+### Integration Testing
 
-### 5. Test File Updates
-- **Minimal Changes**: Only add `use` statements if tests fail due to missing imports
-- **Module Resolution**: Ensure tests can find stdlib modules
-- **Preserve Behavior**: All existing test behavior must be maintained
+1. **Qualified Call Tests:**
+   - Test `string::length` resolves correctly
+   - Test `boolean::to_string` works with arguments
+   - Test `float::add` performs arithmetic
+   - Test multiple qualified calls in same file
+
+2. **Module Resolution Tests:**
+   - Verify module paths resolve correctly
+   - Test function lookup within modules
+   - Validate type checking of qualified calls
+
+### Regression Testing
+
+1. **Existing Functionality:**
+   - Ensure `int::to_string` continues working
+   - Verify all currently working qualified calls remain functional
+   - Test non-qualified function calls still work
+
+2. **Parser Stability:**
+   - Ensure comment parsing works correctly
+   - Verify other language features unaffected
+   - Test complex expressions with qualified calls
 
 ## Implementation Phases
 
-### Phase 1: Core Type Fixes
-1. Fix Option and Result variant syntax
-2. Fix match expressions in core types
-3. Update native function calls
+### Phase 1: Assessment and Planning
+- Scan all stdlib modules to categorize their status
+- Create comprehensive inventory of syntax issues
+- Establish baseline tests for currently working functionality
 
-### Phase 2: Function Definition Fixes
-1. Correct all function definition syntax
-2. Fix type variable usage
-3. Update parameter passing
+### Phase 2: Core Type Modules
+- Fix string.funk, boolean.funk, float.funk syntax
+- Validate each fix with parsing and qualified call tests
+- Ensure int.funk remains unaffected
 
-### Phase 3: Native Integration Restructure
-1. Reorganize native function implementations
-2. Ensure all referenced `__native_*` functions exist
-3. Add missing implementations
+### Phase 3: Extended Modules
+- Assess and fix collections, core, effects, math modules
+- Handle more complex syntax patterns if discovered
+- Validate inter-module dependencies
 
 ### Phase 4: Comprehensive Testing
-1. Create syntax validation tests
-2. Add native integration tests
-3. Update existing tests with minimal changes
-4. Verify backward compatibility
+- Test all qualified call combinations
+- Validate complete stdlib functionality
+- Performance testing of module resolution
 
-### Phase 5: Documentation and Validation
-1. Update stdlib documentation
-2. Validate all modules load correctly
-3. Performance testing of native integrations
+### Phase 5: Documentation and Cleanup
+- Document syntax patterns and fixes applied
+- Remove backup files after validation
+- Update any relevant documentation

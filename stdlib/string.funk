@@ -1,0 +1,41 @@
+# String utility functions
+# This module provides utility functions for working with strings
+# Note: The String type and basic operations are now built-in
+
+# String concatenation
+pub let concat = { l: String, r: String } ->
+    __native_string_concat { l = l, r = r }
+
+# String utility functions
+pub let length = { value: String } ->
+    __native_string_length { s = value }
+
+pub let is_empty = { value: String } ->
+    length { value = value } == 0
+
+pub let to_upper = { value: String } ->
+    __native_string_to_upper { s = value }
+
+pub let to_lower = { value: String } ->
+    __native_string_to_lower { s = value }
+
+pub let trim = { value: String } ->
+    __native_string_trim { s = value }
+
+pub let reverse = { value: String } ->
+    __native_string_reverse { s = value }
+
+# Additional string utilities
+pub let starts_with = { s: String, prefix: String } ->
+    __native_string_starts_with { s = s, prefix = prefix }
+
+pub let ends_with = { s: String, suffix: String } ->
+    __native_string_ends_with { s = s, suffix = suffix }
+
+pub let contains = { s: String, substring: String } ->
+    __native_string_contains { s = s, substring = substring }
+
+pub let repeat = { s: String, n: Int } ->
+    if n <= 0 then ""
+    else if n == 1 then s
+    else concat { l = s, r = repeat { s = s, n = n - 1 } }

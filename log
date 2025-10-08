@@ -1,0 +1,28 @@
+DEBUG: Hidden 50 native functions from user access
+DEBUG: Hidden function: __native_int_equals
+DEBUG: Hidden function: __native_int_less_than
+DEBUG: Hidden function: __native_int_greater_than
+DEBUG: Hidden function: __native_int_compare
+DEBUG: Hidden function: __native_int_to_string
+DEBUG: ... and 45 more
+DEBUG: Current working directory: /Users/shriyans/Projects/funk/.
+DEBUG: Using project root: /Users/shriyans/Projects/funk/.
+DEBUG: Hidden 50 native functions from user access
+DEBUG: Hidden function: __native_int_equals
+DEBUG: Hidden function: __native_int_less_than
+DEBUG: Hidden function: __native_int_greater_than
+DEBUG: Hidden function: __native_int_compare
+DEBUG: Hidden function: __native_int_to_string
+DEBUG: ... and 45 more
+DEBUG: Successfully loaded stdlib module: std::core::abilities
+DEBUG: Failed to load stdlib module std::core::primitives_minimal: Module not found: std::core::primitives_minimal. Searched in: stdlib/std/core/primitives_minimal.funk
+DEBUG: Failed to load core module std::core::primitives_minimal: Module not found: std::core::primitives_minimal. Searched in: stdlib/std/core/primitives_minimal.funk
+DEBUG: Registered core operators: (+), (-), (*), (/), (++), (==), (!=), (>), (<), (<=), (>=), (&&), (||)
+✅ Execution successful!
+
+11
+
+let noise_add = {x, y} -> do
+    let sum = x + y
+    Log.info { msg = "it is a sum" ++ int::to_string {value = sum}}
+    sum

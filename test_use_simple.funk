@@ -1,0 +1,6 @@
+# Test importing from simple module
+use test_module_simple::{simple_int, simple_func}
+
+# These should have the correct types
+let test_int = simple_int
+let test_func = simple_func

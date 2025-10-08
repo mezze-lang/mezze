@@ -1,0 +1,10 @@
+# Module that exports various types for testing type preservation
+# This tests that types are preserved when importing from modules
+
+pub let exported_int: Int = 42
+pub let exported_string: String = "hello"
+pub let exported_bool: Boolean = true
+
+pub let add_func: { x: Int, y: Int } -> Int = { x, y } -> x + y
+
+pub let identity: { value: Int } -> Int = { value } -> value

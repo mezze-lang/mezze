@@ -45,6 +45,26 @@ private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableSet<
         is FunkType.ArrayListType -> {
             collectTypeVariablesRecursive(type.elementType, variables)
         }
+        is FunkType.ArrayType -> {
+            collectTypeVariablesRecursive(type.elementType, variables)
+        }
+        is FunkType.OptionType -> {
+            collectTypeVariablesRecursive(type.elementType, variables)
+        }
+        is FunkType.ResultType -> {
+            collectTypeVariablesRecursive(type.errorType, variables)
+            collectTypeVariablesRecursive(type.valueType, variables)
+        }
+        is FunkType.ListType -> {
+            collectTypeVariablesRecursive(type.elementType, variables)
+        }
+        is FunkType.MapType -> {
+            collectTypeVariablesRecursive(type.keyType, variables)
+            collectTypeVariablesRecursive(type.valueType, variables)
+        }
+        is FunkType.SetType -> {
+            collectTypeVariablesRecursive(type.elementType, variables)
+        }
         is FunkType.FunctionType -> {
             collectTypeVariablesRecursive(type.paramType, variables)
             collectTypeVariablesRecursive(type.returnType, variables)
@@ -57,7 +77,7 @@ private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableSet<
         // Base types don't contain type variables
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.EffectRow -> { /* no type variables */ }
+        is FunkType.OrderingType, is FunkType.EffectRow -> { /* no type variables */ }
     }
 }
 
@@ -98,6 +118,12 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
         }
     }
     is FunkType.ArrayListType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
+    is FunkType.ArrayType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
+    is FunkType.OptionType -> "Option ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
+    is FunkType.ResultType -> "Result ${prettyPrintTypeWithMapping(type.errorType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
+    is FunkType.ListType -> "List ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
+    is FunkType.MapType -> "Map ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
+    is FunkType.SetType -> "Set ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is FunkType.FunctionType -> {
         // Build parameter type string
         val paramTypeStr = prettyPrintTypeWithMapping(type.paramType, typeVarMapping)
@@ -207,6 +233,12 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
     }
     is FunkType.ArrayListType -> "[${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}]"
+    is FunkType.ArrayType -> "[${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}]"
+    is FunkType.OptionType -> "Option ${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}"
+    is FunkType.ResultType -> "Result ${prettyPrintTypeWithAliases(type.errorType, typeAliases, showExpansion)} ${prettyPrintTypeWithAliases(type.valueType, typeAliases, showExpansion)}"
+    is FunkType.ListType -> "List ${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}"
+    is FunkType.MapType -> "Map ${prettyPrintTypeWithAliases(type.keyType, typeAliases, showExpansion)} ${prettyPrintTypeWithAliases(type.valueType, typeAliases, showExpansion)}"
+    is FunkType.SetType -> "Set ${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}"
     is FunkType.FunctionType -> {
         // Build parameter type string
         val paramTypeStr = prettyPrintTypeWithAliases(type.paramType, typeAliases, showExpansion)
@@ -435,4 +467,114 @@ private fun effectRowsMatch(
         effects1 != null && effects2 != null -> effects1.effects == effects2.effects
         else -> false // One has effects, the other doesn't
     }
+}
+
+/**
+ * Print a list of display ability constraints in a readable format
+ */
+fun printConstraints(constraints: List<DisplayAbilityConstraint>): String {
+    if (constraints.isEmpty()) return ""
+    
+    // Group constraints by type parameter
+    val grouped = constraints.groupBy { it.typeParam }
+    
+    return grouped.entries.joinToString(", ") { (typeParam, constraintList) ->
+        val abilities = constraintList.map { it.abilityName }.distinct().sorted().joinToString(" + ")
+        "$typeParam : $abilities"
+    }
+}
+
+/**
+ * Print a type with its constraints
+ */
+fun printTypeWithConstraints(type: FunkType, constraints: List<DisplayAbilityConstraint>): String {
+    val typeStr = prettyPrintType(type)
+    val constraintStr = printConstraints(constraints)
+    
+    return if (constraintStr.isNotEmpty()) {
+        "$typeStr with $constraintStr"
+    } else {
+        typeStr
+    }
+}
+
+/**
+ * Print a function type with its constraints
+ */
+fun printFunctionTypeWithConstraints(type: FunkType.FunctionType, constraints: List<DisplayAbilityConstraint>): String {
+    return printTypeWithConstraints(type, constraints)
+}
+
+/**
+ * Print a type scheme
+ */
+fun printTypeScheme(scheme: TypeScheme): String {
+    return if (scheme.isMonomorphic) {
+        prettyPrintType(scheme.type)
+    } else {
+        val vars = scheme.quantifiedVars.map { "'${it.name}" }.sorted().joinToString(" ")
+        "∀$vars. ${prettyPrintType(scheme.type)}"
+    }
+}
+
+/**
+ * Check if a type is a built-in type (as opposed to a user-defined or stdlib type)
+ */
+fun isBuiltinType(type: FunkType): Boolean {
+    return when (type) {
+        // Primitive built-in types
+        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
+        is FunkType.OrderingType -> true
+        
+        // Core built-in types
+        is FunkType.OptionType, is FunkType.ResultType, is FunkType.ListType,
+        is FunkType.MapType, is FunkType.SetType -> true
+        
+        // Function types are built-in constructs
+        is FunkType.FunctionType -> true
+        
+        // Effect rows are built-in constructs
+        is FunkType.EffectRow -> true
+        
+        // Type variables and other constructs are not built-in types per se
+        is FunkType.VarType, is FunkType.NumType -> false
+        
+        // Record and variant types are user-defined (unless they're built-in constructors)
+        is FunkType.RecordType, is FunkType.VariantType -> false
+        
+        // ArrayList and Array types are legacy/compatibility types
+        is FunkType.ArrayListType, is FunkType.ArrayType -> false
+    }
+}
+
+/**
+ * Get the name of a built-in type for display purposes
+ */
+fun getBuiltinTypeName(type: FunkType): String? {
+    return when (type) {
+        is FunkType.IntType -> "Int"
+        is FunkType.FloatType -> "Float"
+        is FunkType.StringType -> "String"
+        is FunkType.BooleanType -> "Boolean"
+        is FunkType.NatType -> "Nat"
+        is FunkType.FracType -> "Frac"
+        is FunkType.OrderingType -> "Ordering"
+        is FunkType.OptionType -> "Option"
+        is FunkType.ResultType -> "Result"
+        is FunkType.ListType -> "List"
+        is FunkType.MapType -> "Map"
+        is FunkType.SetType -> "Set"
+        else -> null
+    }
+}
+
+/**
+ * Pretty print a type with built-in type highlighting
+ * Returns a pair of (printed type, is built-in)
+ */
+fun prettyPrintTypeWithBuiltinInfo(type: FunkType): Pair<String, Boolean> {
+    val typeStr = prettyPrintType(type)
+    val isBuiltin = isBuiltinType(type)
+    return Pair(typeStr, isBuiltin)
 }

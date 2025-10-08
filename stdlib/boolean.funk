@@ -1,0 +1,39 @@
+# Boolean utility functions
+# This module provides utility functions for working with booleans
+# Note: The Boolean type and basic operations are now built-in
+
+# Boolean logic operations
+pub let and = { l: Boolean, r: Boolean } ->
+    if l then r else false
+
+pub let or = { l: Boolean, r: Boolean } ->
+    if l then true else r
+
+pub let not = { x: Boolean } ->
+    if x then false else true
+
+pub let xor = { l: Boolean, r: Boolean } ->
+    (l && not { x = r }) || (not { x = l } && r)
+
+pub let implies = { l: Boolean, r: Boolean } ->
+    not { x = l } || r
+
+pub let iff = { l: Boolean, r: Boolean } ->
+    (l && r) || (not { x = l } && not { x = r })
+
+# Additional boolean utilities
+# TODO: Array pattern matching [head, ...tail] not yet supported in parser
+# These functions are temporarily commented out until the feature is implemented
+
+# pub let all = { xs: [Boolean] } ->
+#     match xs is
+#         [] -> true
+#         [head, ...tail] -> if head then all { xs = tail } else false
+
+# pub let any = { xs: [Boolean] } ->
+#     match xs is
+#         [] -> false
+#         [head, ...tail] -> if head then true else any { xs = tail }
+
+# pub let none = { xs: [Boolean] } ->
+#     not { x = any { xs = xs } }

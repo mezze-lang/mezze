@@ -1,0 +1,4 @@
+# Test using time effect from stdlib
+use std::effects::time
+
+perform time.now

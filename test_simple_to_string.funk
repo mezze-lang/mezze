@@ -1,0 +1,3 @@
+let test = {x, y} -> do
+    let sum = x + y
+    int::to_string {value = sum}

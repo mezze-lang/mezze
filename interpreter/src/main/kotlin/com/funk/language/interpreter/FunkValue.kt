@@ -336,6 +336,122 @@ data class FunkVariant(val constructor: String, val value: FunkValue?) : FunkVal
 }
 
 /**
+ * Built-in List value (immutable, functional list)
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkList(val elements: List<FunkValue>) : FunkValue() {
+    override fun getDisplayString(): String = "[${elements.joinToString(", ") { it.getDisplayString() }}]"
+    
+    @ExportMessage
+    fun hasArrayElements(): Boolean = true
+    
+    @ExportMessage
+    fun getArraySize(): Long = elements.size.toLong()
+    
+    @ExportMessage
+    fun isArrayElementReadable(index: Long): Boolean = index >= 0 && index < elements.size
+    
+    @ExportMessage
+    fun readArrayElement(index: Long): FunkValue {
+        if (index < 0 || index >= elements.size) {
+            throw FunkException("List index out of bounds: $index")
+        }
+        return elements[index.toInt()]
+    }
+    
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+    
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(listOf("length", "head", "tail", "isEmpty"))
+    }
+    
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean {
+        return member in setOf("length", "head", "tail", "isEmpty")
+    }
+    
+    @ExportMessage
+    fun readMember(member: String): Any {
+        return when (member) {
+            "length" -> FunkInt(elements.size.toLong())
+            "head" -> if (elements.isNotEmpty()) elements.first() else FunkNull
+            "tail" -> if (elements.isNotEmpty()) FunkList(elements.drop(1)) else FunkList(emptyList())
+            "isEmpty" -> FunkBoolean(elements.isEmpty())
+            else -> throw FunkException("Property '$member' not found in List")
+        }
+    }
+}
+
+/**
+ * Built-in Map value (immutable, functional map)
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkMap(val entries: Map<FunkValue, FunkValue>) : FunkValue() {
+    override fun getDisplayString(): String {
+        val entriesStr = entries.entries.joinToString(", ") { (k, v) ->
+            "${k.getDisplayString()} = ${v.getDisplayString()}"
+        }
+        return "{ $entriesStr }"
+    }
+    
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+    
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(listOf("size", "keys", "values", "isEmpty"))
+    }
+    
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean {
+        return member in setOf("size", "keys", "values", "isEmpty")
+    }
+    
+    @ExportMessage
+    fun readMember(member: String): Any {
+        return when (member) {
+            "size" -> FunkInt(entries.size.toLong())
+            "keys" -> FunkList(entries.keys.toList())
+            "values" -> FunkList(entries.values.toList())
+            "isEmpty" -> FunkBoolean(entries.isEmpty())
+            else -> throw FunkException("Property '$member' not found in Map")
+        }
+    }
+}
+
+/**
+ * Built-in Set value (immutable, functional set)
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkSet(val elements: Set<FunkValue>) : FunkValue() {
+    override fun getDisplayString(): String = "{${elements.joinToString(", ") { it.getDisplayString() }}}"
+    
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+    
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(listOf("size", "isEmpty"))
+    }
+    
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean {
+        return member in setOf("size", "isEmpty")
+    }
+    
+    @ExportMessage
+    fun readMember(member: String): Any {
+        return when (member) {
+            "size" -> FunkInt(elements.size.toLong())
+            "isEmpty" -> FunkBoolean(elements.isEmpty())
+            else -> throw FunkException("Property '$member' not found in Set")
+        }
+    }
+}
+
+/**
  * Function value for Truffle-based execution
  */
 @ExportLibrary(InteropLibrary::class)

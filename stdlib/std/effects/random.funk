@@ -4,7 +4,7 @@ use std::math::basic
 use std::math::trig
 
 # Random effect definition
-effect Random {
+pub effect Random {
     # Generate a random float between 0.0 and 1.0
     random_float: {} -> Float <Random>,
     

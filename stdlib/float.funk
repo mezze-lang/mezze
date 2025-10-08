@@ -1,0 +1,38 @@
+# Float utility functions
+# This module provides utility functions for working with floats
+# Note: The Float type and basic operations are now built-in
+
+# Mathematical functions
+pub let abs = { x: Float } ->
+    if x < 0.0 then -x else x
+
+pub let min = { l: Float, r: Float } ->
+    if l < r then l else r
+
+pub let max = { l: Float, r: Float } ->
+    if l > r then l else r
+
+pub let pow = { base: Float, exp: Float } ->
+    __native_float_pow { base = base, exp = exp }
+
+pub let sqrt = { x: Float } ->
+    __native_float_sqrt { x = x }
+
+pub let floor = { x: Float } ->
+    __native_float_floor { x = x }
+
+pub let ceil = { x: Float } ->
+    __native_float_ceil { x = x }
+
+pub let round = { x: Float } ->
+    __native_float_round { x = x }
+
+# Type conversions
+pub let from_int = { x: Int } ->
+    __native_float_from_int { x = x }
+
+pub let from_nat = { x: Nat } ->
+    __native_float_from_nat { x = x }
+
+pub let from_string = { s: String } ->
+    __native_float_from_string { s = s }

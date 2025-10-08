@@ -1,0 +1,57 @@
+# Integer utility functions
+# This module provides utility functions for working with integers
+# Note: The Int type and basic operations are now built-in
+
+# Basic arithmetic operations (for qualified calls)
+pub let add = { left: Int, right: Int } ->
+    __native_int_add { l = left, r = right }
+
+pub let subtract = { left: Int, right: Int } ->
+    __native_int_subtract { l = left, r = right }
+
+pub let multiply = { left: Int, right: Int } ->
+    __native_int_multiply { l = left, r = right }
+
+pub let divide = { left: Int, right: Int } ->
+    __native_int_divide { l = left, r = right }
+
+pub let modulo = { left: Int, right: Int } ->
+    __native_int_modulo { l = left, r = right }
+
+pub let to_string: { value: Int } -> String = { value } ->
+    __native_int_to_string { val = value }
+
+# Utility functions for integers
+pub let abs = { x: Int } ->
+    if x < 0 then -x else x
+
+pub let max = { l: Int, r: Int } ->
+    if l > r then l else r
+
+pub let min = { l: Int, r: Int } ->
+    if l < r then l else r
+
+pub let sign = { x: Int } ->
+    if x > 0 then 1
+    else if x < 0 then -1
+    else 0
+
+pub let is_even = { x: Int } -> Boolean = { x } ->
+    (x % 2) == 0
+
+pub let is_odd = { x: Int } -> Boolean = { x } ->
+    (x % 2) != 0
+
+pub let pow = { base: Int, exp: Int } ->
+    if exp == 0 then 1
+    else if exp == 1 then base
+    else if is_even { x = exp }
+        then pow { base = base, exp = exp / 2 } * pow { base = base, exp = exp / 2 }
+        else base * pow { base = base, exp = exp - 1 }
+
+pub let gcd = { l: Int, r: Int } ->
+    if r == 0 then abs { x = l }
+    else gcd { l = r, r = l % r }
+
+pub let lcm = { l: Int, r: Int } ->
+    abs { x = (l * r) / gcd { l = l, r = r } }

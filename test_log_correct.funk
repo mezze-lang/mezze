@@ -1,0 +1,7 @@
+# Test with correct import syntax
+use std::effects::log
+
+let noise_add = {x, y} -> do
+    let sum = x + y
+    perform Log.info { msg = "it is a sum" }
+    sum

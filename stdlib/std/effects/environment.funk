@@ -1,7 +1,7 @@
 # std/effects/environment.funk - Environment and system information effects
 
 # Environment effect definition
-effect Environment {
+pub effect Environment {
     # Get environment variable
     get_env: { name: String } -> Option String,
     

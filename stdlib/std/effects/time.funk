@@ -1,7 +1,7 @@
 # std/effects/time.funk - Time and date effects
 
 # Time effect definition
-effect Time {
+pub effect Time {
     # Get current timestamp in milliseconds since epoch
     now: {} -> Int,
     

@@ -32,6 +32,27 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     }
 
     /**
+     * Desugar binary operations to function calls with parenthesized operator names
+     */
+    private fun createBinaryOperationCall(
+        left: Expression,
+        operator: String,
+        right: Expression,
+        sourceLocation: SourceLocation? = null
+    ): FunctionCall {
+        return FunctionCall(
+            function = Identifier("($operator)", sourceLocation = sourceLocation),
+            arguments = RecordLiteral(
+                entries = listOf(
+                    RecordFieldEntry("left", left),
+                    RecordFieldEntry("right", right)
+                )
+            ),
+            sourceLocation = sourceLocation
+        )
+    }
+
+    /**
      * Heuristic to determine if an identifier is likely a record variable vs a function.
      * This is conservative - when in doubt, we prefer function calls.
      */
@@ -55,6 +76,25 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
             // Otherwise, prefer function call (conservative)
             else -> false
         }
+    }
+    
+    /**
+     * Check if an identifier is a built-in constructor
+     */
+    private fun isBuiltinConstructor(name: String): Boolean {
+        return name in setOf("Some", "None", "Ok", "Err", "LT", "EQ", "GT")
+    }
+    
+    /**
+     * Check if an operator is a built-in operator that should be parsed specially
+     */
+    private fun isBuiltinOperator(operator: String): Boolean {
+        return operator in setOf(
+            "+", "-", "*", "/", "%",           // Arithmetic
+            "==", "!=", "<", ">", "<=", ">=",  // Comparison  
+            "&&", "||", "!",                   // Boolean
+            "++"                               // String concatenation
+        )
     }
 
     override fun visitProgram(ctx: FunkParser.ProgramContext): Any {
@@ -392,7 +432,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         
         for (i in 1 until ctx.logicalAndExpression().size) {
             val right = visit(ctx.logicalAndExpression(i)) as Expression
-            result = BinaryOperation(result, "||", right, sourceLocation = sourceLocation)
+            // Desugar logical OR to function call
+            result = createBinaryOperationCall(result, "||", right, sourceLocation)
         }
         
         return result
@@ -404,7 +445,8 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         
         for (i in 1 until ctx.comparisonExpression().size) {
             val right = visit(ctx.comparisonExpression(i)) as Expression
-            result = BinaryOperation(result, "&&", right, sourceLocation = sourceLocation)
+            // Desugar logical AND to function call
+            result = createBinaryOperationCall(result, "&&", right, sourceLocation)
         }
         
         return result
@@ -416,25 +458,18 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val sourceLocation = getSourceLocation(ctx)
         for (i in 1 until ctx.additiveExpression().size) {
             val right = visit(ctx.additiveExpression(i)) as Expression
-            val operatorFunction = when {
-                ctx.GT(i-1) != null -> "(>)"
-                ctx.LT(i-1) != null -> "(<)"
-                ctx.GTE(i-1) != null -> "(>=)"
-                ctx.LTE(i-1) != null -> "(<=)"
-                ctx.EQ(i-1) != null -> "(==)"
-                ctx.NEQ(i-1) != null -> "(!=)"
-                else -> "(==)"
+            val operator = when {
+                ctx.GT(i-1) != null -> ">"
+                ctx.LT(i-1) != null -> "<"
+                ctx.GTE(i-1) != null -> ">="
+                ctx.LTE(i-1) != null -> "<="
+                ctx.EQ(i-1) != null -> "=="
+                ctx.NEQ(i-1) != null -> "!="
+                else -> "=="
             }
             
-            // Desugar to function call: (==) { left = a, right = b }
-            result = FunctionCall(
-                function = Identifier(operatorFunction, sourceLocation = sourceLocation),
-                arguments = RecordLiteral(listOf(
-                    RecordFieldEntry("left", result),
-                    RecordFieldEntry("right", right)
-                ), null),
-                sourceLocation = sourceLocation
-            )
+            // Desugar comparison operators to function calls
+            result = createBinaryOperationCall(result, operator, right, sourceLocation)
         }
         
         return result
@@ -446,22 +481,15 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val sourceLocation = getSourceLocation(ctx)
         for (i in 1 until ctx.multiplicativeExpression().size) {
             val right = visit(ctx.multiplicativeExpression(i)) as Expression
-            val operatorFunction = when {
-                ctx.PLUS(i-1) != null -> "(+)"
-                ctx.MINUS(i-1) != null -> "(-)"
-                ctx.CONCAT(i-1) != null -> "(++)"
-                else -> "(+)"
+            val operator = when {
+                ctx.PLUS(i-1) != null -> "+"
+                ctx.MINUS(i-1) != null -> "-"
+                ctx.CONCAT(i-1) != null -> "++"
+                else -> "+"
             }
             
-            // Desugar to function call: (+) { left = a, right = b }
-            result = FunctionCall(
-                function = Identifier(operatorFunction, sourceLocation = sourceLocation),
-                arguments = RecordLiteral(listOf(
-                    RecordFieldEntry("left", result),
-                    RecordFieldEntry("right", right)
-                ), null),
-                sourceLocation = sourceLocation
-            )
+            // Desugar arithmetic operators to function calls
+            result = createBinaryOperationCall(result, operator, right, sourceLocation)
         }
         
         return result
@@ -473,23 +501,16 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
         val sourceLocation = getSourceLocation(ctx)
         for (i in 1 until ctx.unaryExpression().size) {
             val right = visit(ctx.unaryExpression(i)) as Expression
-            val operatorFunction = when {
-                ctx.MULTIPLY(i-1) != null -> "(*)"
-                ctx.DIVIDE(i-1) != null -> "(/)"
-                ctx.FRACTION(i-1) != null -> "(//)"
-                ctx.MODULO(i-1) != null -> "(%)"
-                else -> "(*)"
+            val operator = when {
+                ctx.MULTIPLY(i-1) != null -> "*"
+                ctx.DIVIDE(i-1) != null -> "/"
+                ctx.FRACTION(i-1) != null -> "//"
+                ctx.MODULO(i-1) != null -> "%"
+                else -> "*"
             }
             
-            // Desugar to function call: (*) { left = a, right = b }
-            result = FunctionCall(
-                function = Identifier(operatorFunction, sourceLocation = sourceLocation),
-                arguments = RecordLiteral(listOf(
-                    RecordFieldEntry("left", result),
-                    RecordFieldEntry("right", right)
-                ), null),
-                sourceLocation = sourceLocation
-            )
+            // Desugar multiplicative operators to function calls
+            result = createBinaryOperationCall(result, operator, right, sourceLocation)
         }
         
         return result
@@ -507,8 +528,33 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitMemberAccessExpression(ctx: FunkParser.MemberAccessExpressionContext): Any {
         var result = visit(ctx.primaryExpression()) as Expression
         
-        ctx.Identifier().forEach { identifier ->
-            result = MemberAccess(result, identifier.text)
+        // Handle member access and array access
+        val identifiers = ctx.Identifier()
+        val expressions = ctx.expression()
+        
+        var identifierIndex = 0
+        var expressionIndex = 0
+        
+        // Process all access operations in order
+        for (i in 0 until (identifiers.size + expressions.size)) {
+            // Check which comes first in the source
+            val nextIdentifier = if (identifierIndex < identifiers.size) identifiers[identifierIndex] else null
+            val nextExpression = if (expressionIndex < expressions.size) expressions[expressionIndex] else null
+            
+            when {
+                nextIdentifier != null && (nextExpression == null || 
+                    nextIdentifier.symbol.startIndex < nextExpression.start.startIndex) -> {
+                    // Member access: obj.field
+                    result = MemberAccess(result, nextIdentifier.text)
+                    identifierIndex++
+                }
+                nextExpression != null -> {
+                    // Array access: obj[index]
+                    val index = visit(nextExpression) as Expression
+                    result = ArrayAccess(result, index)
+                    expressionIndex++
+                }
+            }
         }
         
         // Check if this is a function call (member access followed by record literal)
@@ -594,7 +640,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     override fun visitArrayListLiteral(ctx: FunkParser.ArrayListLiteralContext): Any {
         val sourceLocation = getSourceLocation(ctx)
         val elements = ctx.expression().map { visit(it) as Expression }
-        return ArrayListLiteral(elements, sourceLocation = sourceLocation)
+        return ArrayLiteral(elements, sourceLocation = sourceLocation)
     }
 
     // Records
@@ -748,6 +794,10 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
                 }
             }
             ctx.TypeVariable() != null -> IdentifierTypeAnnotation(ctx.TypeVariable().text)
+            ctx.LPAREN() != null && ctx.typeAnnotation().isNotEmpty() -> {
+                // Parenthesized type - just unwrap it
+                visit(ctx.typeAnnotation(0)) as TypeAnnotation
+            }
             ctx.recordType() != null -> visit(ctx.recordType())
             ctx.variantType() != null -> visit(ctx.variantType())
             ctx.functionType() != null -> visit(ctx.functionType())
@@ -770,14 +820,44 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
 
 
     override fun visitFunctionType(ctx: FunkParser.FunctionTypeContext): Any {
-        val paramType = visit(ctx.recordType()) as TypeAnnotation
+        val paramType = if (ctx.recordType() != null) {
+            visit(ctx.recordType()) as TypeAnnotation
+        } else {
+            // Shorthand syntax: 'a -> 'b
+            visit(ctx.simpleType()) as TypeAnnotation
+        }
         val returnType = visit(ctx.typeAnnotation()) as TypeAnnotation
         val effects = ctx.effectRow()?.let { visit(it) as EffectRowAnnotation }
-        val abilityConstraints = ctx.functionAbilityConstraints()?.let { 
+
+        // Collect ability constraints from both positions (before and after arrow)
+        val allConstraints = mutableListOf<FunctionAbilityConstraint>()
+        ctx.functionAbilityConstraints().forEach { constraintsCtx ->
             @Suppress("UNCHECKED_CAST")
-            visit(it) as List<FunctionAbilityConstraint> 
-        } ?: emptyList()
-        return FunctionTypeAnnotation(paramType, returnType, effects, abilityConstraints)
+            val constraints = visit(constraintsCtx) as List<FunctionAbilityConstraint>
+            allConstraints.addAll(constraints)
+        }
+
+        return FunctionTypeAnnotation(paramType, returnType, effects, allConstraints)
+    }
+
+    override fun visitSimpleType(ctx: FunkParser.SimpleTypeContext): Any {
+        return when {
+            ctx.Identifier() != null -> {
+                val constructor = ctx.Identifier().text
+                val args = ctx.typeAnnotation().map { visit(it) as TypeAnnotation }
+                if (args.isEmpty()) {
+                    IdentifierTypeAnnotation(constructor)
+                } else {
+                    TypeApplicationAnnotation(constructor, args)
+                }
+            }
+            ctx.TypeVariable() != null -> IdentifierTypeAnnotation(ctx.TypeVariable().text)
+            ctx.LPAREN() != null && ctx.typeAnnotation().isNotEmpty() -> {
+                visit(ctx.typeAnnotation(0)) as TypeAnnotation
+            }
+            ctx.arrayListType() != null -> visit(ctx.arrayListType())
+            else -> throw IllegalArgumentException("Unknown simple type: ${ctx.text}")
+        }
     }
     
     override fun visitEffectRow(ctx: FunkParser.EffectRowContext): Any {
@@ -787,7 +867,7 @@ private class FunkASTBuilder : FunkBaseVisitor<Any>() {
     
     override fun visitArrayListType(ctx: FunkParser.ArrayListTypeContext): Any {
         val elementType = visit(ctx.typeAnnotation()) as TypeAnnotation
-        return ArrayListTypeAnnotation(elementType)
+        return ArrayTypeAnnotation(elementType)
     }
     
     override fun visitPerformExpression(ctx: FunkParser.PerformExpressionContext): Any {

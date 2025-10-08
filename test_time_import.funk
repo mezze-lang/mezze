@@ -1,0 +1,3 @@
+use std::effects::time::{sleep}
+
+let test_sleep = sleep
