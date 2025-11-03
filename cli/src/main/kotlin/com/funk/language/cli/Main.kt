@@ -1,6 +1,6 @@
 package com.funk.language.cli
 
-import com.funk.language.parser.FunkParserImpl
+import com.funk.language.parser.FunkParser
 import com.funk.language.ast.*
 import com.funk.language.ast.prettyPrintType
 import com.funk.language.ast.prettyPrintTypeWithAliases
@@ -215,7 +215,7 @@ private fun handleParseCommand(args: List<String>) {
     }
 
     try {
-        val parser = FunkParserImpl()
+        val parser = FunkParser()
         val ast = parser.parse(source)
         println("✅ Parsing successful!")
         println()
@@ -249,7 +249,7 @@ private fun handleCheckCommand(args: List<String>) {
     }
 
     try {
-        val parser = FunkParserImpl()
+        val parser = FunkParser()
         val ast = parser.parse(source)
         
         // Use improved type checker (92% test success rate)
@@ -378,7 +378,7 @@ private fun handleExecCommand(args: List<String>) {
 
     try {
         // Parse the source code
-        val parser = FunkParserImpl()
+        val parser = FunkParser()
         val program = parser.parse(source)
         
         // Type check the program with module resolution
@@ -449,7 +449,7 @@ private fun handleCompileCommand(args: List<String>) {
         
         // Parse and type check the source
         val source = inputFile.readText()
-        val parser = FunkParserImpl()
+        val parser = FunkParser()
         val ast = parser.parse(source)
         
         val typeChecker = TypeChecker()
@@ -500,7 +500,7 @@ private fun createStandaloneJar(inputFile: File, outputFile: File, source: Strin
 
 private fun createKotlinMainClass(tempDir: File, inputFile: File, source: String) {
     // Parse and type-check at compile time to get enhanced AST
-    val parser = FunkParserImpl()
+    val parser = FunkParser()
     val typeChecker = TypeChecker()
     
     val program = parser.parse(source)

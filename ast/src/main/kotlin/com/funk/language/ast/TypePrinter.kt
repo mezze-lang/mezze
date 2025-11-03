@@ -31,7 +31,6 @@ private fun collectTypeVariables(type: FunkType): Map<TypeVar, String> {
 private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableSet<TypeVar>) {
     when (type) {
         is FunkType.VarType -> variables.add(type.variable)
-        is FunkType.NumType -> variables.add(type.constraint)
         is FunkType.RecordType -> {
             type.fields.values.forEach { fieldType ->
                 collectTypeVariablesRecursive(fieldType, variables)
@@ -91,7 +90,6 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     is FunkType.BooleanType -> "Boolean"
     is FunkType.NatType -> "Nat"
     is FunkType.FracType -> "Frac"
-    is FunkType.NumType -> "Num ${typeVarMapping[type.constraint] ?: type.constraint.name}"
     is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
@@ -206,7 +204,6 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is FunkType.BooleanType -> "Boolean"
     is FunkType.NatType -> "Nat"
     is FunkType.FracType -> "Frac"
-    is FunkType.NumType -> "Num ${typeVarMapping[type.constraint] ?: type.constraint.name}"
     is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
@@ -536,9 +533,9 @@ fun isBuiltinType(type: FunkType): Boolean {
         
         // Effect rows are built-in constructs
         is FunkType.EffectRow -> true
-        
+
         // Type variables and other constructs are not built-in types per se
-        is FunkType.VarType, is FunkType.NumType -> false
+        is FunkType.VarType -> false
         
         // Record and variant types are user-defined (unless they're built-in constructors)
         is FunkType.RecordType, is FunkType.VariantType -> false

@@ -1,1 +1,0 @@
-let test = int::to_string {value = 42}

@@ -1,5 +1,0 @@
-# Test 1: Log.info WITHOUT import - should ERROR
-let noise_add = {x, y} -> do
-    let sum = x + y
-    Log.info { msg = "it is a sum" ++ int::to_string {value = sum}}
-    sum

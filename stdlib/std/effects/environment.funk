@@ -46,10 +46,10 @@ impl Environment for SystemEnvironment where {
 }
 
 # Mock environment for testing
-impl Environment for MockEnvironment { 
+impl Environment for MockEnvironment {
     env_vars: [(String, String)],
     current_directory: String,
-    mock_os: String 
+    mock_os: String
 } where {
     get_env = { name } -> __native_mock_env_get { env_vars = env_vars, name = name },
     set_env = { name, value } -> {},  # No-op in mock

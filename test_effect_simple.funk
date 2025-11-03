@@ -1,5 +1,0 @@
-use std::effects::log::{info}
-
-let test_effect = {} -> do
-    info { msg = "hello" }
-    42

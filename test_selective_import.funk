@@ -1,7 +1,0 @@
-use std::effects::log::{info}
-use int
-
-let noise_add = {x, y} -> do
-    let sum = x + y
-    info { msg = "sum is: " ++ to_string {value = sum}}
-    sum

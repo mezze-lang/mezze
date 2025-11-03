@@ -25,7 +25,7 @@ class FunkNativeImageFeature : Feature {
         
         // Register parser classes
         try {
-            val parserClass = Class.forName("com.funk.language.parser.FunkParserImpl")
+            val parserClass = Class.forName("com.funk.language.parserv2.FunkParser")
             RuntimeReflection.register(parserClass)
             RuntimeReflection.register(*parserClass.declaredConstructors)
             RuntimeReflection.register(*parserClass.declaredMethods)

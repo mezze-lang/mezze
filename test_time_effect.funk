@@ -1,2 +1,0 @@
-# Test perform with time effect
-let test_perform = perform Time.now {}

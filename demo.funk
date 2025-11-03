@@ -1,0 +1,10 @@
+# Simple demo with effects, variants and pattern matching
+
+# type Result = | Success { value: String }, Failure { error: String } |
+
+# Function without effects first
+let simpleHandle = {result} -> match result is
+  Success { value } -> "Got: " ++ value
+  Failure { error } -> "Error: " ++ error
+
+simpleHandle { result = Success { value = "test" } }

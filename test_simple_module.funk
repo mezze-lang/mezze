@@ -1,1 +1,0 @@
-pub let add_one: { x: Int } -> Int = { x } -> x + 1

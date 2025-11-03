@@ -1,6 +1,0 @@
-use std::effects::log
-
-let test = {} -> do
-    Log.info { msg = "first" }
-    Log.info { msg = "second" }
-    42

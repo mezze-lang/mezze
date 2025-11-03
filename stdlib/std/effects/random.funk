@@ -5,25 +5,18 @@ use std::math::trig
 
 # Random effect definition
 pub effect Random {
-    # Generate a random float between 0.0 and 1.0
-    random_float: {} -> Float <Random>,
-    
-    # Generate a random integer in range [min, max]
-    random_int: { min: Int, max: Int } -> Int <Random>,
-    
-    # Generate a random natural number in range [0, max]
-    random_nat: { max: Nat } -> Nat <Random>,
-    
-    # Seed the random number generator
-    seed: { seed: Int } -> {} <Random>
+    random_float: {} -> Float,
+    random_int: { min: Int, max: Int } -> Int,
+    random_nat: { max: Nat } -> Nat,
+    seed: { seed: Int } -> {}
 }
 
 # Seeded random implementation with deterministic behavior
 impl Random for SeededRandom { seed: Int } where {
-    random_float = { } -> __native_seeded_random_float { seed = seed },
-    random_int = { min, max } -> __native_seeded_random_int { seed = seed, min = min, max = max },
-    random_nat = { max } -> __native_seeded_random_nat { seed = seed, max = max },
-    seed = { new_seed } -> __native_update_seed { old_seed = seed, new_seed = new_seed }
+    random_float: {} -> Float = { } -> __native_seeded_random_float { seed = seed },
+    random_int: { min: Int, max: Int } -> Int = { min, max } -> __native_seeded_random_int { seed = seed, min = min, max = max },
+    random_nat: { max: Nat } -> Nat = { max } -> __native_seeded_random_nat { seed = seed, max = max },
+    seed: { seed: Int } -> {} = { new_seed } -> __native_update_seed { old_seed = seed, new_seed = new_seed }
 }
 
 # Convenience functions that use the Random effect
@@ -33,11 +26,11 @@ pub let random_int = { min: Int, max: Int } -> Random.random_int { min = min, ma
 
 pub let random_nat = { max: Nat } -> Random.random_nat { max = max }
 
-pub let random_boolean = { probability: Float } -> 
+pub let random_boolean = { probability: Float } -> do
     let rand = Random.random_float { }
     rand < probability
 
-pub let random_range = { min: Float, max: Float } -> 
+pub let random_range = { min: Float, max: Float } -> do
     let rand = Random.random_float { }
     min + (rand * (max - min))
 
@@ -47,14 +40,14 @@ pub let seed_random = { seed: Int } -> Random.seed { seed = seed }
 pub let uniform = { min: Float, max: Float } -> random_range { min = min, max = max }
 
 # Normal distribution using Box-Muller transform
-pub let normal = { mean: Float, std_dev: Float } -> 
+pub let normal = { mean: Float, std_dev: Float } -> do
     let u1 = Random.random_float { }
     let u2 = Random.random_float { }
     let z0 = sqrt { value = -2.0 * ln { value = u1 } } * cos { value = 2.0 * pi * u2 }
     mean + (std_dev * z0)
 
 # Exponential distribution
-pub let exponential = { rate: Float } -> 
+pub let exponential = { rate: Float } -> do
     let u = Random.random_float { }
     (-1.0 / rate) * ln { value = u }
 

@@ -1,1 +1,0 @@
-let test = __native_int_to_string { val = 42 }

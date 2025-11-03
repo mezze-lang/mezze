@@ -325,10 +325,6 @@ sealed interface FunkType {
     @Serializable
     object FracType : FunkType
     
-    // Generic numeric type
-    @Serializable
-    data class NumType(val constraint: TypeVar) : FunkType
-    
     // Type variables (for inference)
     @Serializable
     data class VarType(val variable: TypeVar) : FunkType
@@ -499,11 +495,6 @@ data class TypeScheme(
             )
             is FunkType.ArrayType -> FunkType.ArrayType(
                 applySubstitutionToType(type.elementType, substitution)
-            )
-            is FunkType.NumType -> FunkType.NumType(
-                substitution[type.constraint]?.let { 
-                    if (it is FunkType.VarType) it.variable else type.constraint 
-                } ?: type.constraint
             )
             // Concrete types remain unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
@@ -689,7 +680,8 @@ data class RecordDefinition(
 
 @Serializable
 data class VariantDefinition(
-    val constructors: List<VariantConstructorDef>
+    val constructors: List<VariantConstructorDef>,
+    val isOpen: Boolean = false
 ) : TypeDefinition
 
 
@@ -828,6 +820,14 @@ data class StringLiteral(
 @Serializable
 data class BooleanLiteral(
     val value: Boolean,
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
+) : Expression
+
+@Serializable
+data class FractionLiteral(
+    val numerator: Long,
+    val denominator: Long,
     override val inferredType: FunkType? = null,
     override val sourceLocation: SourceLocation? = null
 ) : Expression
@@ -1467,7 +1467,6 @@ private fun extractTypeVariables(type: FunkType): Set<TypeVar> {
     val result = mutableSetOf<TypeVar>()
     when (type) {
         is FunkType.VarType -> result.add(type.variable)
-        is FunkType.NumType -> result.add(type.constraint)
         is FunkType.FunctionType -> {
             result.addAll(extractTypeVariables(type.paramType))
             result.addAll(extractTypeVariables(type.returnType))
@@ -1538,7 +1537,6 @@ fun normalizeTypeVariables(type: FunkType): FunkType {
 private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<TypeVar>) {
     when (type) {
         is FunkType.VarType -> collector.add(type.variable)
-        is FunkType.NumType -> collector.add(type.constraint)
         is FunkType.FunctionType -> {
             // Collect parameters first (left side), then return type (right side)
             collectTypeVariablesInOrder(type.paramType, collector)
@@ -1599,7 +1597,6 @@ private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<T
 private fun collectTypeVariables(type: FunkType, collector: MutableSet<TypeVar>) {
     when (type) {
         is FunkType.VarType -> collector.add(type.variable)
-        is FunkType.NumType -> collector.add(type.constraint)
         is FunkType.FunctionType -> {
             collectTypeVariables(type.paramType, collector)
             collectTypeVariables(type.returnType, collector)
@@ -1657,10 +1654,6 @@ private fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVa
         is FunkType.VarType -> {
             val newVar = mapping[type.variable] ?: type.variable
             FunkType.VarType(newVar)
-        }
-        is FunkType.NumType -> {
-            val newConstraint = mapping[type.constraint] ?: type.constraint
-            FunkType.NumType(newConstraint)
         }
         is FunkType.FunctionType -> {
             val newParamType = substituteTypeVariables(type.paramType, mapping)

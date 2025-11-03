@@ -1,3 +1,0 @@
-# Simple test to verify module type preservation
-pub let simple_int: Int = 42
-pub let simple_func: { x: Int } -> Int = { x } -> x + 1

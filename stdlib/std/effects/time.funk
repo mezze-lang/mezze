@@ -49,8 +49,8 @@ impl Time for SystemTime where {
 impl Time for MockTime { fixed_time: Int } where {
     now = { } -> fixed_time,
     now_nanos = { } -> fixed_time * 1000000,
-    sleep = { millis } -> {},  # No-op in mock
-    sleep_nanos = { nanos } -> {},  # No-op in mock
+    sleep = { millis } -> {},
+    sleep_nanos = { nanos } -> {},
     current_year = { } -> __native_time_year_from_timestamp { timestamp = fixed_time },
     current_month = { } -> __native_time_month_from_timestamp { timestamp = fixed_time },
     current_day = { } -> __native_time_day_from_timestamp { timestamp = fixed_time },
@@ -65,12 +65,11 @@ impl Time for MockTime { fixed_time: Int } where {
 pub let now = { } -> Time.now { }
 pub let sleep = { millis: Int } -> Time.sleep { millis = millis }
 pub let current_timestamp = { } -> Time.now { }
-pub let current_date = { } -> do {
+pub let current_date = { } -> do
     let year = Time.current_year { }
     let month = Time.current_month { }
     let day = Time.current_day { }
     { year = year, month = month, day = day }
-}
 
 # Usage examples:
 # 

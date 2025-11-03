@@ -54,3 +54,11 @@ com/
 
 # tests
 interpreter/result.txt
+
+# debug files
+debug_*.txt
+*.bak
+*.bak[0-9]
+
+# ai tools
+.claude

@@ -1,6 +1,0 @@
-use int
-
-let noise_add = {x, y} -> do
-    let sum = x + y
-    let msg = "it is a sum: " ++ to_string {value = sum}
-    sum

@@ -1,7 +1,7 @@
 rootProject.name = "funk"
 
 include("ast")
-include("parser") 
+include("parser")
 include("stdlib")
 include("typechecker")
 include("interpreter")

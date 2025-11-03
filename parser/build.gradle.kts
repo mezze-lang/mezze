@@ -1,42 +1,32 @@
 plugins {
-    antlr
+    kotlin("jvm")
 }
 
 dependencies {
     implementation(project(":ast"))
-    antlr("org.antlr:antlr4:4.13.1")
-    implementation("org.antlr:antlr4-runtime:4.13.1")
 
-    // Add testing dependencies
-    testImplementation(kotlin("test-junit5"))
-    testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.0")
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.0")
+    // Parser combinator library - we'll use Kotlin's own or a lightweight one
+    // For now, we'll hand-roll combinators
+
+    // Testing
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.0")
+    testImplementation(kotlin("test"))
 }
 
-tasks.withType<Test> {
+tasks.test {
     useJUnitPlatform()
-}
 
-tasks.generateGrammarSource {
-    maxHeapSize = "64m"
-    arguments = arguments + listOf("-visitor", "-long-messages", "-package", "com.funk.language.parser.generated")
-    outputDirectory = file("build/generated-src/antlr/main")
-}
-
-tasks.compileKotlin {
-    dependsOn(tasks.generateGrammarSource)
-}
-
-tasks.compileTestKotlin {
-    dependsOn(tasks.generateGrammarSource)
-    dependsOn(tasks.generateTestGrammarSource)
-}
-
-sourceSets {
-    main {
-        kotlin {
-            srcDir("src/main/kotlin")
-            srcDir("build/generated-src/antlr/main")
-        }
+    // Add timeout to prevent tests from hanging indefinitely
+    testLogging {
+        events("passed", "skipped", "failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStandardStreams = false
     }
+
+    // Set max parallel forks to 1 to avoid test interference
+    maxParallelForks = 1
+
+    // Set timeout for each test
+    systemProperty("junit.jupiter.execution.timeout.default", "30s")
+    systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
 }

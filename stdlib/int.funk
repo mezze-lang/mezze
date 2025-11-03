@@ -18,7 +18,7 @@ pub let divide = { left: Int, right: Int } ->
 pub let modulo = { left: Int, right: Int } ->
     __native_int_modulo { l = left, r = right }
 
-pub let to_string: { value: Int } -> String = { value } ->
+pub let to_string = { value: Int } ->
     __native_int_to_string { val = value }
 
 # Utility functions for integers
@@ -36,10 +36,10 @@ pub let sign = { x: Int } ->
     else if x < 0 then -1
     else 0
 
-pub let is_even = { x: Int } -> Boolean = { x } ->
+pub let is_even = { x: Int } ->
     (x % 2) == 0
 
-pub let is_odd = { x: Int } -> Boolean = { x } ->
+pub let is_odd = { x: Int } ->
     (x % 2) != 0
 
 pub let pow = { base: Int, exp: Int } ->

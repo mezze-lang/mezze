@@ -1,6 +1,6 @@
 package com.funk.language.typechecker
 
-import com.funk.language.parser.FunkParserImpl
+import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.DynamicTest
@@ -16,7 +16,7 @@ import java.nio.file.Paths
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TypeCheckerComprehensiveTest {
     
-    private val parser = FunkParserImpl()
+    private val parser = FunkParser()
     private val typeChecker = TypeChecker()
     
     private fun getFixturesPath(): String {
@@ -113,11 +113,10 @@ class TypeCheckerComprehensiveTest {
                             
                             assertTrue(addBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType)
                             assertTrue(concatBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType)
-                            
+
                             val addType = addBinding?.inferredType as com.funk.language.ast.FunkType.FunctionType
-                            // add = {x, y} -> x + y should infer some numeric type (may be NumType, IntType, or VarType)
-                            assertTrue(addType.returnType is com.funk.language.ast.FunkType.NumType || 
-                                      addType.returnType is com.funk.language.ast.FunkType.IntType ||
+                            // add = {x, y} -> x + y should infer some numeric type (VarType or concrete IntType)
+                            assertTrue(addType.returnType is com.funk.language.ast.FunkType.IntType ||
                                       addType.returnType is com.funk.language.ast.FunkType.VarType)
                         }
                         

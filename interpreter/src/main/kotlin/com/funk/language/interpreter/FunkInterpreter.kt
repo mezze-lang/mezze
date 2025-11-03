@@ -1,6 +1,6 @@
 package com.funk.language.interpreter
 
-import com.funk.language.parser.FunkParserImpl
+import com.funk.language.parser.FunkParser
 import com.funk.language.ast.*
 import com.funk.language.typechecker.TypeChecker
 import com.funk.language.typechecker.ModuleResolver
@@ -20,14 +20,14 @@ import java.nio.file.Paths
 class FunkInterpreter {
     // Centralized effect handling system
     private val effectHandler = EffectHandler()
-    
-    private val parser: FunkParserImpl?
+
+    private val parser: FunkParser?
     private val typeChecker: TypeChecker?
     private var moduleResolver: ModuleResolver? = null
     
     // Constructor for full parsing/typechecking (used by funk exec)
     constructor() {
-        parser = FunkParserImpl()
+        parser = FunkParser()
         typeChecker = TypeChecker()
     }
     
@@ -37,7 +37,7 @@ class FunkInterpreter {
             parser = null
             typeChecker = null
         } else {
-            parser = FunkParserImpl()
+            parser = FunkParser()
             typeChecker = TypeChecker()
         }
     }
@@ -66,7 +66,7 @@ class FunkInterpreter {
      */
     fun execute(program: Program, projectRoot: Path): FunkValue {
         // Initialize module resolver
-        moduleResolver = ModuleResolver(projectRoot, parser ?: FunkParserImpl())
+        moduleResolver = ModuleResolver(projectRoot, parser ?: FunkParser())
         return executeProgram(program)
     }
     
@@ -332,9 +332,17 @@ class FunkInterpreter {
                 }
             }
             is BinaryOperation -> {
-                val left = evaluateExpression(expr.left, context)
-                val right = evaluateExpression(expr.right, context)
-                evaluateBinaryOperation(left, expr.operator, right)
+                // Handle pipe operator specially - desugar before evaluation
+                if (expr.operator == "|>") {
+                    val leftValue = evaluateExpression(expr.left, context)
+                    // Desugar: replace @ placeholders in right side with leftValue
+                    val desugaredRight = replaceAtPlaceholder(expr.right, leftValue, context)
+                    evaluateExpression(desugaredRight, context)
+                } else {
+                    val left = evaluateExpression(expr.left, context)
+                    val right = evaluateExpression(expr.right, context)
+                    evaluateBinaryOperation(left, expr.operator, right)
+                }
             }
             is UnaryOperation -> {
                 val operand = evaluateExpression(expr.operand, context)
@@ -984,7 +992,186 @@ class FunkInterpreter {
             else -> throw RuntimeException("Unknown binary operator: $operator")
         }
     }
-    
+
+    /**
+     * Replace @ placeholders with the piped value in an expression
+     * Used to desugar pipe operator: value |> function {param = @}
+     */
+    private fun replaceAtPlaceholder(expr: Expression, value: FunkValue, context: Map<String, FunkValue>): Expression {
+        return when (expr) {
+            // Base case: @ placeholder gets replaced with value literal
+            is Identifier -> {
+                if (expr.name == "@") {
+                    // Convert FunkValue to Expression literal
+                    valueToExpression(value)
+                } else {
+                    expr
+                }
+            }
+
+            // Recursive cases: transform child expressions
+            is RecordLiteral -> {
+                // RecordLiteral has entries, not a simple map
+                // Need to rebuild with transformed entries
+                val newEntries = mutableListOf<RecordLiteralEntry>()
+                for (entry in expr.entries) {
+                    when (entry) {
+                        is RecordFieldEntry -> {
+                            val newValue = entry.value?.let { replaceAtPlaceholder(it, value, context) }
+                            newEntries.add(RecordFieldEntry(entry.name, newValue))
+                        }
+                        is RecordSpreadEntry -> {
+                            newEntries.add(RecordSpreadEntry(replaceAtPlaceholder(entry.expression, value, context)))
+                        }
+                    }
+                }
+                RecordLiteral(newEntries)
+            }
+
+            is FunctionCall -> {
+                FunctionCall(
+                    replaceAtPlaceholder(expr.function, value, context),
+                    replaceAtPlaceholder(expr.arguments, value, context)
+                )
+            }
+
+            is BinaryOperation -> {
+                BinaryOperation(
+                    replaceAtPlaceholder(expr.left, value, context),
+                    expr.operator,
+                    replaceAtPlaceholder(expr.right, value, context)
+                )
+            }
+
+            is UnaryOperation -> {
+                UnaryOperation(
+                    expr.operator,
+                    replaceAtPlaceholder(expr.operand, value, context)
+                )
+            }
+
+            is IfExpression -> {
+                IfExpression(
+                    replaceAtPlaceholder(expr.condition, value, context),
+                    replaceAtPlaceholder(expr.thenBranch, value, context),
+                    replaceAtPlaceholder(expr.elseBranch, value, context)
+                )
+            }
+
+            is MatchExpression -> {
+                MatchExpression(
+                    replaceAtPlaceholder(expr.expression, value, context),
+                    expr.cases.map { case ->
+                        MatchCase(
+                            case.patterns,
+                            case.guard?.let { replaceAtPlaceholder(it, value, context) },
+                            replaceAtPlaceholder(case.expression, value, context)
+                        )
+                    }
+                )
+            }
+
+            is DoExpression -> {
+                DoExpression(
+                    expr.statements.map { stmt ->
+                        when (stmt) {
+                            is LetStatement -> LetStatement(
+                                stmt.variableName,
+                                stmt.typeAnnotation,
+                                replaceAtPlaceholder(stmt.expression, value, context)
+                            )
+                            is ExpressionStatement -> ExpressionStatement(
+                                replaceAtPlaceholder(stmt.expression, value, context)
+                            )
+                        }
+                    },
+                    replaceAtPlaceholder(expr.result, value, context)
+                )
+            }
+
+            is ArrayLiteral -> {
+                ArrayLiteral(
+                    expr.elements.map { replaceAtPlaceholder(it, value, context) }
+                )
+            }
+
+            is LambdaExpression -> {
+                // Replace placeholders in lambda body
+                LambdaExpression(
+                    expr.parameters,
+                    replaceAtPlaceholder(expr.body, value, context),
+                    expr.returnType,
+                    expr.abilityConstraints
+                )
+            }
+
+            is MemberAccess -> {
+                MemberAccess(
+                    replaceAtPlaceholder(expr.receiver, value, context),
+                    expr.member
+                )
+            }
+
+            is RecordUpdateExpression -> {
+                RecordUpdateExpression(
+                    replaceAtPlaceholder(expr.baseRecord, value, context),
+                    expr.updates.map { update ->
+                        RecordUpdateEntry(update.fieldPath, replaceAtPlaceholder(update.value, value, context))
+                    }
+                )
+            }
+
+            is PerformExpression -> {
+                PerformExpression(
+                    replaceAtPlaceholder(expr.expression, value, context),
+                    expr.handlers
+                )
+            }
+
+            // Literals and other expressions don't contain placeholders
+            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral,
+            is ArrayListLiteral, is TypeDeclaration, is EffectCallExpression -> expr
+
+            else -> expr
+        }
+    }
+
+    /**
+     * Convert a FunkValue to an Expression literal
+     * Used for desugaring pipe operator placeholders
+     */
+    private fun valueToExpression(value: FunkValue): Expression {
+        return when (value) {
+            is FunkInt -> IntLiteral(value.value)
+            is FunkFloat -> FloatLiteral(value.value)
+            is FunkString -> StringLiteral(value.value)
+            is FunkBoolean -> BooleanLiteral(value.value)
+            is FunkNull -> StringLiteral("null") // Create a placeholder since there's no NullLiteral object
+            is FunkRecord -> {
+                // Convert record to RecordLiteral
+                val entries = value.fields.map { (name, v) ->
+                    RecordFieldEntry(name, valueToExpression(v))
+                }
+                RecordLiteral(entries)
+            }
+            is FunkList -> ArrayLiteral(
+                value.elements.map { valueToExpression(it) }
+            )
+            is FunkVariant -> {
+                // Variant constructor application
+                val constructorExpr = Identifier(value.constructor)
+                if (value.value != null) {
+                    FunctionCall(constructorExpr, valueToExpression(value.value))
+                } else {
+                    constructorExpr
+                }
+            }
+            // For closures and other complex values, we can't convert them back to expressions
+            // This should not happen in practice since @ is meant for simple values
+            else -> throw RuntimeException("Cannot convert ${value::class.simpleName} to expression for pipe operator placeholder")
+        }
+    }
+
     /**
      * Evaluate equality using built-in Eq ability implementations
      */
@@ -1682,7 +1869,7 @@ class FunkInterpreter {
      */
     private fun loadCoreStdLibModules(context: MutableMap<String, FunkValue>) {
         try {
-            val parser = FunkParserImpl()
+            val parser = FunkParser()
             val currentDir = Paths.get(".").toAbsolutePath()
 
             // Find the project root (go up from interpreter directory if needed)

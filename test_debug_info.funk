@@ -1,3 +1,0 @@
-use std::effects::log::{info}
-
-let test_info_ref = info

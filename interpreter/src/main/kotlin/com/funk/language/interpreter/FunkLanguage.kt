@@ -7,15 +7,11 @@ import com.oracle.truffle.api.nodes.Node
 import com.oracle.truffle.api.nodes.RootNode
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.frame.FrameDescriptor
-import com.funk.language.parser.FunkParserImpl
+import com.funk.language.parser.FunkParser
 import com.funk.language.ast.*
 import com.funk.language.typechecker.TypeChecker
 import com.funk.language.interpreter.nodes.ASTToTruffleConverter
 import com.funk.language.interpreter.nodes.FunkNode
-import org.antlr.v4.runtime.CharStreams
-import org.antlr.v4.runtime.CommonTokenStream
-import com.funk.language.parser.generated.FunkLexer
-import com.funk.language.parser.generated.FunkParser
 
 /**
  * The main Funk language implementation for GraalVM Truffle.
@@ -62,12 +58,8 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
         NativeGlobalStore.clear()
         
         try {
-            // Parse the source code using our existing ANTLR parser
-            val lexer = FunkLexer(CharStreams.fromString(sourceCode))
-            val tokens = CommonTokenStream(lexer)
-            val parser = FunkParser(tokens)
-            
-            val parserImpl = FunkParserImpl()
+            // Parse the source code using ParserV2
+            val parserImpl = FunkParser()
             val ast = parserImpl.parse(sourceCode)
             
             // Type check the program
