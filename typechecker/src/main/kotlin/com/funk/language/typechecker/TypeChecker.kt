@@ -680,7 +680,7 @@ class TypeChecker {
         val substitutions = solveConstraints()
 
         if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("🔍 SUBSTITUTIONS BEFORE APPLYING:")
+            // // println("🔍 SUBSTITUTIONS BEFORE APPLYING:")
             println("   inferredType = ${prettyPrintType(inferredType)}")
             println("   substitutions = ${substitutions.map { (k, v) -> "${k} -> ${prettyPrintType(v)}" }}")
         }
@@ -688,7 +688,7 @@ class TypeChecker {
         val finalType = applySubstitutionToType(inferredType, substitutions)
 
         if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("🔍 SUBSTITUTIONS AFTER APPLYING:")
+            // // println("🔍 SUBSTITUTIONS AFTER APPLYING:")
             println("   finalType = ${prettyPrintType(finalType)}")
         }
 
@@ -1438,14 +1438,14 @@ class TypeChecker {
                 val inferredType = inferBasicType(expr)
 
                 if (System.getProperty("funk.typecheck.debug") == "true") {
-                    println("🔍 BIDIRECTIONAL FunctionCall: inferredType = ${prettyPrintType(inferredType)}, expectedType = ${prettyPrintType(expectedType)}")
+                    // // println("🔍 BIDIRECTIONAL FunctionCall: inferredType = ${prettyPrintType(inferredType)}, expectedType = ${prettyPrintType(expectedType)}")
                 }
 
                 // Add constraint that the inferred type should match the expected type
                 if (inferredType != expectedType) {
                     constraints.add(Pair(inferredType, expectedType))
                     if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("🔍 BIDIRECTIONAL FunctionCall: ADDED CONSTRAINT")
+                        // // println("🔍 BIDIRECTIONAL FunctionCall: ADDED CONSTRAINT")
                     }
                 }
 
@@ -1548,51 +1548,51 @@ class TypeChecker {
                 }
             }
             is VariantConstruction -> {
-                println("🔍 DEBUG inferBasicTypeWithExpected: VariantConstruction for ${expr.constructor}")
-                println("🔍 DEBUG: Expected type = $expectedType")
+                // println("🔍 DEBUG inferBasicTypeWithExpected: VariantConstruction for ${expr.constructor}")
+                // println("🔍 DEBUG: Expected type = $expectedType")
                 // Bidirectional type checking for variant constructors
                 // When expected type is a VariantType, use its constructor's expected data type
                 if (expectedType is com.funk.language.ast.FunkType.VariantType) {
-                    println("🔍 DEBUG: Expected type IS a VariantType!")
+                    // println("🔍 DEBUG: Expected type IS a VariantType!")
                     val expectedDataType = expectedType.constructors[expr.constructor]
-                    println("🔍 DEBUG: Expected data type for ${expr.constructor} = $expectedDataType")
+                    // println("🔍 DEBUG: Expected data type for ${expr.constructor} = $expectedDataType")
                     if (expectedDataType != null) {
                         val value = expr.value
                         if (value != null) {
-                            println("🔍 DEBUG: Recursively inferring value with expected type $expectedDataType")
+                            // println("🔍 DEBUG: Recursively inferring value with expected type $expectedDataType")
                             // Recursively infer the value with the expected type
                             val inferredValueType = inferBasicTypeWithExpected(value, expectedDataType)
                             
                             // CRITICAL FIX: Add constraint if inferred type differs from expected
                             // This matches the pattern used for function call arguments (lines 2055-2063)
                             if (inferredValueType != expectedDataType) {
-                                println("🔍 DEBUG: Adding constraint for variant constructor:")
-                                println("🔍 DEBUG:   Inferred: ${prettyPrintType(inferredValueType)}")
-                                println("🔍 DEBUG:   Expected: ${prettyPrintType(expectedDataType)}")
+                                // println("🔍 DEBUG: Adding constraint for variant constructor:")
+                                // println("🔍 DEBUG:   Inferred: ${prettyPrintType(inferredValueType)}")
+                                // println("🔍 DEBUG:   Expected: ${prettyPrintType(expectedDataType)}")
                                 constraints.add(Pair(inferredValueType, expectedDataType))
                             }
                         }
                         // Return the expected variant type
                         expectedType
                     } else {
-                        println("🔍 DEBUG: Constructor not found in variant, falling back")
+                        // println("🔍 DEBUG: Constructor not found in variant, falling back")
                         // Constructor not found, fall back to forward inference
                         inferBasicType(expr)
                     }
                 } else {
-                    println("🔍 DEBUG: Expected type is NOT a VariantType, falling back")
+                    // println("🔍 DEBUG: Expected type is NOT a VariantType, falling back")
                     // Expected type is not a variant, fall back to forward inference
                     inferBasicType(expr)
                 }
             }
             is RecordLiteral -> {
-                println("🔍 DEBUG inferBasicTypeWithExpected: RecordLiteral")
-                println("🔍 DEBUG: Expected type = $expectedType")
+                // println("🔍 DEBUG inferBasicTypeWithExpected: RecordLiteral")
+                // println("🔍 DEBUG: Expected type = $expectedType")
                 // Bidirectional type checking for record literals
                 // When expected type is a RecordType, use field types to guide inference
                 if (expectedType is com.funk.language.ast.FunkType.RecordType) {
-                    println("🔍 DEBUG: Expected type IS a RecordType!")
-                    println("🔍 DEBUG: Expected fields = ${expectedType.fields}")
+                    // println("🔍 DEBUG: Expected type IS a RecordType!")
+                    // println("🔍 DEBUG: Expected fields = ${expectedType.fields}")
 
                     val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
 
@@ -1601,17 +1601,17 @@ class TypeChecker {
                         val fieldName = entry.name
                         val fieldValue = entry.value
                         val expectedFieldType = expectedType.fields[fieldName]
-                        println("🔍 DEBUG: Field $fieldName, expected type = $expectedFieldType, value = $fieldValue")
+                        // println("🔍 DEBUG: Field $fieldName, expected type = $expectedFieldType, value = $fieldValue")
 
                         val fieldType = if (fieldValue != null && expectedFieldType != null) {
-                            println("🔍 DEBUG: Recursively inferring field $fieldName with expected type $expectedFieldType")
+                            // println("🔍 DEBUG: Recursively inferring field $fieldName with expected type $expectedFieldType")
                             // Recursively infer the field value with expected type
                             val inferredFieldType = inferBasicTypeWithExpected(fieldValue, expectedFieldType)
                             // Add constraint to ensure they match
                             if (inferredFieldType != expectedFieldType) {
-                                println("🔍 DEBUG: Adding constraint for field $fieldName:")
-                                println("🔍 DEBUG:   Inferred: $inferredFieldType")
-                                println("🔍 DEBUG:   Expected: $expectedFieldType")
+                                // println("🔍 DEBUG: Adding constraint for field $fieldName:")
+                                // println("🔍 DEBUG:   Inferred: $inferredFieldType")
+                                // println("🔍 DEBUG:   Expected: $expectedFieldType")
                                 constraints.add(Pair(inferredFieldType, expectedFieldType))
                             }
                             inferredFieldType
@@ -1629,7 +1629,7 @@ class TypeChecker {
                     // Return the inferred record type
                     com.funk.language.ast.FunkType.RecordType(fields, expectedType.rowVar)
                 } else {
-                    println("🔍 DEBUG: Expected type is NOT a RecordType, falling back")
+                    // println("🔍 DEBUG: Expected type is NOT a RecordType, falling back")
                     // Expected type is not a record, fall back to forward inference
                     inferBasicType(expr)
                 }
@@ -1779,8 +1779,8 @@ class TypeChecker {
                         } else if (expr.name.contains("Concat") || expr.name.contains("concat") || expr.name.contains("array")) {
                             // Debug: Check if this is actually in the context
                             if (System.getProperty("funk.typecheck.debug") == "true") {
-                                println("DEBUG: Looking for ${expr.name}, context has: ${context.keys.take(10)}")
-                                println("DEBUG: Context size: ${context.size}")
+                                // println("DEBUG: Looking for ${expr.name}, context has: ${context.keys.take(10)}")
+                                // println("DEBUG: Context size: ${context.size}")
                                 println("DEBUG: Array functions in context: ${context.keys.filter { it.contains("array") }}")
                             }
                             // Throw for function names that look like they should be defined (array-related)
@@ -1798,7 +1798,7 @@ class TypeChecker {
             is FunctionCall -> {
                 // Debug output for string concatenation
                 // if (expr.function is Identifier && (expr.function as Identifier).name == "(++)")  {
-                //     println("DEBUG: inferBasicType - FunctionCall with (++)")
+                //     // println("DEBUG: inferBasicType - FunctionCall with (++)")
                 // }
 
                 // Check if this is an effect call (function is a member access like Log.log)
@@ -1894,7 +1894,7 @@ class TypeChecker {
                     inferBasicType(expr.arguments)
                 } else {
                     if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("🔍 SKIPPING eager argument inference for VariantType")
+                        // // println("🔍 SKIPPING eager argument inference for VariantType")
                     }
                     // Placeholder for variant constructors - will be properly typed in the variant case
                     com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
@@ -2167,7 +2167,7 @@ class TypeChecker {
                                 
                                 // Debug output for string concatenation
                                 // if (expr.function is Identifier && (expr.function as Identifier).name == "(++)") {
-                                //     println("DEBUG: Function call (++) - returnType: $returnType")
+                                //     // println("DEBUG: Function call (++) - returnType: $returnType")
                                 // }
                                 
                                 returnType
@@ -2199,7 +2199,7 @@ class TypeChecker {
                                 expr.arguments is RecordLiteral) {
 
                                 if (System.getProperty("funk.typecheck.debug") == "true") {
-                                    println("🔍 BIDIRECTIONAL VariantType: Checking variant constructor '$constructorName' with expected data type ${prettyPrintType(expectedDataType)}")
+                                    // // println("🔍 BIDIRECTIONAL VariantType: Checking variant constructor '$constructorName' with expected data type ${prettyPrintType(expectedDataType)}")
                                 }
 
                                 // Set flag to disable heuristic for lambda parameters inside variant constructor arguments
@@ -2216,14 +2216,14 @@ class TypeChecker {
 
                                     if (fieldExpectedType != null && entryValue != null) {
                                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                                            println("🔍 BIDIRECTIONAL VariantType: Field '$fieldName' expects type ${prettyPrintType(fieldExpectedType)}, value is ${entryValue::class.simpleName}")
+                                            // // println("🔍 BIDIRECTIONAL VariantType: Field '$fieldName' expects type ${prettyPrintType(fieldExpectedType)}, value is ${entryValue::class.simpleName}")
                                         }
 
                                         // Use bidirectional inference with expected type
                                         val providedType = inferBasicTypeWithExpected(entryValue, fieldExpectedType)
 
                                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                                            println("🔍 BIDIRECTIONAL VariantType: Field '$fieldName' provided type ${prettyPrintType(providedType)}")
+                                            // // println("🔍 BIDIRECTIONAL VariantType: Field '$fieldName' provided type ${prettyPrintType(providedType)}")
                                         }
 
                                         // Add constraint for type variables
@@ -2273,7 +2273,7 @@ class TypeChecker {
                         constraints.add(Pair(functionType, expectedFunctionType))
 
                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                            println("🔍 DEBUG VarType function application: ${prettyPrintType(functionType)} ~ ${prettyPrintType(expectedFunctionType)}")
+                            // println("🔍 DEBUG VarType function application: ${prettyPrintType(functionType)} ~ ${prettyPrintType(expectedFunctionType)}")
                         }
 
                         // Return the fresh return type variable
@@ -2377,12 +2377,12 @@ class TypeChecker {
                     try {
                         // Add pattern bindings to context
                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                            println("🔍 DEBUG: Pattern bindings for case: $patternBindings")
-                            println("🔍 DEBUG: Context size before adding bindings: ${context.size}")
+                            // println("🔍 DEBUG: Pattern bindings for case: $patternBindings")
+                            // println("🔍 DEBUG: Context size before adding bindings: ${context.size}")
                         }
                         context.putAll(patternBindings)
                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                            println("🔍 DEBUG: Context size after adding bindings: ${context.size}")
+                            // println("🔍 DEBUG: Context size after adding bindings: ${context.size}")
                         }
 
                         // Type check guard condition if present
@@ -2401,8 +2401,8 @@ class TypeChecker {
                         // NOTE: We should NOT use bidirectional checking with the variant type here.
                         // The variant type is what's being matched, not the return type of the case expressions.
                         // Each case expression should infer its own type, and all case types should unify.
-                        println("🔍 DEBUG: About to infer case expression, inferredVariantType = $inferredVariantType")
-                        println("🔍 DEBUG: Case expression = ${case.expression}")
+                        // println("🔍 DEBUG: About to infer case expression, inferredVariantType = $inferredVariantType")
+                        // println("🔍 DEBUG: Case expression = ${case.expression}")
                         val caseType = inferBasicType(case.expression)
                         caseTypes.add(caseType)
                         
@@ -2871,18 +2871,18 @@ class TypeChecker {
                     val actualValueType = expr.value?.let { value ->
                         // CRITICAL FIX: Use bidirectional checking with expected type!
                         val inferredType = if (expectedDataType != null) {
-                            println("🔍 DEBUG VariantConstruction: Using bidirectional checking")
-                            println("🔍 DEBUG:   Constructor: ${expr.constructor}")
-                            println("🔍 DEBUG:   Expected data type: $expectedDataType")
+                            // println("🔍 DEBUG VariantConstruction: Using bidirectional checking")
+                            // println("🔍 DEBUG:   Constructor: ${expr.constructor}")
+                            // println("🔍 DEBUG:   Expected data type: $expectedDataType")
                             inferBasicTypeWithExpected(value, expectedDataType)
                         } else {
                             inferBasicType(value)
                         }
                         // Still add constraint for safety
                         if (expectedDataType != null && inferredType != expectedDataType) {
-                            println("🔍 DEBUG VariantConstruction: Adding constraint")
-                            println("🔍 DEBUG:   Inferred: $inferredType")
-                            println("🔍 DEBUG:   Expected: $expectedDataType")
+                            // println("🔍 DEBUG VariantConstruction: Adding constraint")
+                            // println("🔍 DEBUG:   Inferred: $inferredType")
+                            // println("🔍 DEBUG:   Expected: $expectedDataType")
                             constraints.add(Pair(inferredType, expectedDataType))
                         }
                         inferredType
@@ -2897,15 +2897,15 @@ class TypeChecker {
                 }
             }
             is LambdaExpression -> {
-                println("🔍 LAMBDA: Entered lambda inference for lambda expression")
+                // // println("🔍 LAMBDA: Entered lambda inference for lambda expression")
                 // Try bidirectional inference for polymorphic cases
                 val useBidirectional = shouldUseBidirectionalInference(expr)
-                println("🔍 LAMBDA: shouldUseBidirectionalInference = $useBidirectional")
+                // // println("🔍 LAMBDA: shouldUseBidirectionalInference = $useBidirectional")
                 if (useBidirectional) {
-                    println("🔍 LAMBDA: Taking BIDIRECTIONAL path")
+                    // // // println("🔍 LAMBDA: Taking BIDIRECTIONAL path")
                     return inferLambdaBidirectionally(expr)
                 }
-                println("🔍 LAMBDA: NOT taking bidirectional path, continuing...")
+                // // println("🔍 LAMBDA: NOT taking bidirectional path, continuing...")
 
                 // Enter new scope for lambda parameters
                 val originalContext = context.toMap()
@@ -2970,7 +2970,7 @@ class TypeChecker {
                     
                     // DEBUG: Print constraints
                     if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("DEBUG: Direct constraints for lambda with params $paramNames:")
+                        // println("DEBUG: Direct constraints for lambda with params $paramNames:")
                         directConstraints.forEach { (name, type) ->
                             println("  $name -> $type")
                         }
@@ -3038,11 +3038,11 @@ class TypeChecker {
                     }
 
                     // For simple cases, return the heuristic result if it has concrete types
-                    println("🔍 HEURISTIC CHECK: hasConcreteTypes(refinedParamTypeWithSubst) = ${hasConcreteTypes(refinedParamTypeWithSubst)}")
-                    println("🔍   refinedParamTypeWithSubst = $refinedParamTypeWithSubst")
-                    println("🔍   finalReturnType = $finalReturnType")
+                    // // println("🔍 HEURISTIC CHECK: hasConcreteTypes(refinedParamTypeWithSubst) = ${hasConcreteTypes(refinedParamTypeWithSubst)}")
+                    // println("🔍   refinedParamTypeWithSubst = $refinedParamTypeWithSubst")
+                    // println("🔍   finalReturnType = $finalReturnType")
                     if (hasConcreteTypes(refinedParamTypeWithSubst)) {
-                        println("🔍 TAKING HEURISTIC PATH - returning early")
+                        // // println("🔍 TAKING HEURISTIC PATH - returning early")
                         // Handle ability constraints from lambda expression
                         val explicitAbilityConstraints = expr.abilityConstraints?.map { constraint ->
                             com.funk.language.ast.FunkType.FunctionAbilityConstraint(
@@ -3061,7 +3061,7 @@ class TypeChecker {
 
                         return com.funk.language.ast.FunkType.FunctionType(refinedParamTypeWithSubst, finalReturnType, effectRow, allAbilityConstraints)
                     }
-                    println("🔍 NOT TAKING HEURISTIC PATH - continuing to constraint solver")
+                    // // println("🔍 NOT TAKING HEURISTIC PATH - continuing to constraint solver")
 
                     // Store the heuristic result for comparison with constraint solver
                     heuristicParamType = refinedParamType
@@ -3069,25 +3069,25 @@ class TypeChecker {
                     heuristicEffectRow = effectRow
                 }
 
-                println("🔍 LAMBDA: Reached CONSTRAINT-BASED PATH (after heuristic check)")
+                // // println("🔍 LAMBDA: Reached CONSTRAINT-BASED PATH (after heuristic check)")
 
                 // CRITICAL FIX: Use inferTypeWithUnification to collect constraints
                 // inferBasicType doesn't collect constraints, which causes polymorphic functions to fail
-                println("🔍 LAMBDA INFERENCE: About to infer lambda body")
-                println("🔍   Parameter names: ${(paramType as? com.funk.language.ast.FunkType.RecordType)?.fields?.keys}")
-                println("🔍   Context before body inference:")
+                // // println("🔍 LAMBDA INFERENCE: About to infer lambda body")
+                // println("🔍   Parameter names: ${(paramType as? com.funk.language.ast.FunkType.RecordType)?.fields?.keys}")
+                // println("🔍   Context before body inference:")
                 (paramType as? com.funk.language.ast.FunkType.RecordType)?.fields?.keys?.forEach { name ->
                     val contextType = context[name]
-                    println("🔍     $name -> $contextType (TypeVar name: ${(contextType as? com.funk.language.ast.FunkType.VarType)?.variable?.name})")
+                    // println("🔍     $name -> $contextType (TypeVar name: ${(contextType as? com.funk.language.ast.FunkType.VarType)?.variable?.name})")
                 }
 
                 val (returnType, substitutions) = inferTypeWithUnificationAndSubstitutions(expr.body, null)
 
-                println("🔍 LAMBDA INFERENCE: Body inference complete")
-                println("🔍   Return type: $returnType")
-                println("🔍   Substitutions: ${substitutions.size} entries")
+                // // println("🔍 LAMBDA INFERENCE: Body inference complete")
+                // println("🔍   Return type: $returnType")
+                // println("🔍   Substitutions: ${substitutions.size} entries")
                 substitutions.forEach { (typeVar, type) ->
-                    println("🔍     TypeVar(name=${typeVar.name}) -> $type")
+                    // println("🔍     TypeVar(name=${typeVar.name}) -> $type")
                 }
 
                 // Note: inferTypeWithUnification already calls solveConstraints() internally,
@@ -3095,13 +3095,13 @@ class TypeChecker {
                 // Now we have the substitutions and can apply them to parameter types
 
                 // Apply substitutions to context
-                println("🔍 LAMBDA INFERENCE: Applying substitutions to context")
+                // // println("🔍 LAMBDA INFERENCE: Applying substitutions to context")
                 for ((name, varType) in context.toMap()) {
                     val oldType = varType
                     val newType = applySubstitutionToType(varType, substitutions)
                     context[name] = newType
                     if (oldType != newType) {
-                        println("🔍   Updated $name: $oldType -> $newType")
+                        // println("🔍   Updated $name: $oldType -> $newType")
                     }
                 }
 
@@ -3134,7 +3134,7 @@ class TypeChecker {
 
                 // CRITICAL FIX: Reconstruct parameter type from context to ensure type variable consistency
                 // The context has the correct, unified type variables after body inference
-                println("🔍 LAMBDA INFERENCE: Building final parameter type")
+                // // println("🔍 LAMBDA INFERENCE: Building final parameter type")
                 val finalParamType = if (paramType is com.funk.language.ast.FunkType.RecordType) {
                     val updatedFields = paramType.fields.keys.associateWith { name ->
                         // IMPORTANT: Prefer context over resolvedDirectConstraints to preserve type variable instances
@@ -3144,7 +3144,7 @@ class TypeChecker {
                         val constraintType = resolvedDirectConstraints[name]
                         val originalType = paramType.fields[name]!!
                         val chosenType = contextType ?: constraintType ?: originalType
-                        println("🔍   $name: context=$contextType, constraint=$constraintType, original=$originalType -> CHOSEN=$chosenType")
+                        // println("🔍   $name: context=$contextType, constraint=$constraintType, original=$originalType -> CHOSEN=$chosenType")
                         chosenType
                     }
                     com.funk.language.ast.FunkType.RecordType(updatedFields, paramType.rowVar)
@@ -4246,38 +4246,38 @@ class TypeChecker {
                 val result = mutableMapOf<String, com.funk.language.ast.FunkType>()
 
                 // TEMP: Always print for debugging
-                println("DEBUG extractPatternVariableTypes: Looking for constructor '${pattern.constructor}'")
-                println("DEBUG extractPatternVariableTypes: Type context has ${typeContext.size} entries")
+                // println("DEBUG extractPatternVariableTypes: Looking for constructor '${pattern.constructor}'")
+                // println("DEBUG extractPatternVariableTypes: Type context has ${typeContext.size} entries")
                 val variantCount = typeContext.values.count { it is com.funk.language.ast.FunkType.VariantType }
-                println("DEBUG extractPatternVariableTypes: Found $variantCount variant types in context")
+                // println("DEBUG extractPatternVariableTypes: Found $variantCount variant types in context")
 
                 // Look up the constructor from the type context (similar to inferVariantTypeFromPatterns)
                 var constructorType: com.funk.language.ast.FunkType? = null
                 for ((typeName, typeValue) in typeContext) {
                     if (typeValue is com.funk.language.ast.FunkType.VariantType) {
-                        println("DEBUG extractPatternVariableTypes: Checking variant $typeName with constructors: ${typeValue.constructors.keys}")
+                        // println("DEBUG extractPatternVariableTypes: Checking variant $typeName with constructors: ${typeValue.constructors.keys}")
                         if (typeValue.constructors.containsKey(pattern.constructor)) {
                             constructorType = typeValue.constructors[pattern.constructor]
-                            println("DEBUG extractPatternVariableTypes: ✓ Found constructor ${pattern.constructor} in $typeName with type $constructorType")
+                            // println("DEBUG extractPatternVariableTypes: ✓ Found constructor ${pattern.constructor} in $typeName with type $constructorType")
                             break
                         }
                     }
                 }
 
                 if (constructorType == null) {
-                    println("DEBUG extractPatternVariableTypes: ✗ Constructor ${pattern.constructor} NOT FOUND")
+                    // println("DEBUG extractPatternVariableTypes: ✗ Constructor ${pattern.constructor} NOT FOUND")
                 }
 
                 if (constructorType != null) {
                     // Extract variables from the pattern
-                    println("DEBUG extractPatternVariableTypes: recordPattern = ${pattern.recordPattern}")
+                    // println("DEBUG extractPatternVariableTypes: recordPattern = ${pattern.recordPattern}")
                     pattern.recordPattern?.let { recordPattern ->
-                        println("DEBUG extractPatternVariableTypes: Inside recordPattern let, entries = ${recordPattern.entries}")
+                        // println("DEBUG extractPatternVariableTypes: Inside recordPattern let, entries = ${recordPattern.entries}")
                         // Match record fields with constructor data type fields
                         if (constructorType is com.funk.language.ast.FunkType.RecordType) {
-                            println("DEBUG extractPatternVariableTypes: constructorType is RecordType with fields ${constructorType.fields.keys}")
+                            // println("DEBUG extractPatternVariableTypes: constructorType is RecordType with fields ${constructorType.fields.keys}")
                             recordPattern.entries.forEach { entry ->
-                                println("DEBUG extractPatternVariableTypes: Processing entry name='${entry.name}', pattern=${entry.pattern}")
+                                // println("DEBUG extractPatternVariableTypes: Processing entry name='${entry.name}', pattern=${entry.pattern}")
                                 // Get the type from the constructor's record type
                                 val fieldType = constructorType.fields[entry.name]
                                 if (fieldType != null) {
@@ -4293,9 +4293,9 @@ class TypeChecker {
                                     if (variableName != null) {
                                         // Bind the pattern variable to the field type
                                         result[variableName] = fieldType
-                                        println("DEBUG extractPatternVariableTypes: Bound variable '$variableName' to type $fieldType")
+                                        // println("DEBUG extractPatternVariableTypes: Bound variable '$variableName' to type $fieldType")
                                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                                            println("🔍 DEBUG extractPatternVariableTypes: Bound $variableName to $fieldType")
+                                            // println("🔍 DEBUG extractPatternVariableTypes: Bound $variableName to $fieldType")
                                         }
                                     }
                                 }
@@ -4330,23 +4330,23 @@ class TypeChecker {
         val mutablePatternContext = patternContext.toMutableMap()
 
         // TEMP: Always print for debugging
-        println("DEBUG extractParameterConstraints: STARTING with paramNames=$paramNames, expr=${expr::class.simpleName}")
-        println("DEBUG extractParameterConstraints: typeContext has ${typeContext.size} types")
+        // println("DEBUG extractParameterConstraints: STARTING with paramNames=$paramNames, expr=${expr::class.simpleName}")
+        // println("DEBUG extractParameterConstraints: typeContext has ${typeContext.size} types")
 
         if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("🔍 DEBUG extractParameterConstraints: STARTING with paramNames=$paramNames")
-            println("🔍 DEBUG extractParameterConstraints: Expression type: ${expr::class.simpleName}")
-            println("🔍 DEBUG extractParameterConstraints: Pattern context: $patternContext")
+            // println("🔍 DEBUG extractParameterConstraints: STARTING with paramNames=$paramNames")
+            // println("🔍 DEBUG extractParameterConstraints: Expression type: ${expr::class.simpleName}")
+            // println("🔍 DEBUG extractParameterConstraints: Pattern context: $patternContext")
         }
 
         fun analyzeExpression(e: Expression, localPatternContext: Map<String, com.funk.language.ast.FunkType> = mutablePatternContext) {
             if (System.getProperty("funk.typecheck.debug") == "true") {
-                println("🔍 DEBUG analyzeExpression: Analyzing ${e::class.simpleName}")
+                // println("🔍 DEBUG analyzeExpression: Analyzing ${e::class.simpleName}")
                 if (e is FunctionCall) {
-                    println("🔍 DEBUG analyzeExpression: FunctionCall with function=${e.function::class.simpleName}")
+                    // println("🔍 DEBUG analyzeExpression: FunctionCall with function=${e.function::class.simpleName}")
                     if (e.function is Identifier) {
                         val funcName = (e.function as Identifier).name
-                        println("🔍 DEBUG analyzeExpression: FunctionCall identifier='$funcName', is param? ${paramNames.contains(funcName)}")
+                        // println("🔍 DEBUG analyzeExpression: FunctionCall identifier='$funcName', is param? ${paramNames.contains(funcName)}")
                     }
                 }
             }
@@ -4494,7 +4494,7 @@ class TypeChecker {
                             constraints[paramName] = functionType
 
                             if (System.getProperty("funk.typecheck.debug") == "true") {
-                                println("🔍 DEBUG extractParameterConstraints: Setting function constraint for '$paramName': ${prettyPrintType(functionType)}")
+                                // println("🔍 DEBUG extractParameterConstraints: Setting function constraint for '$paramName': ${prettyPrintType(functionType)}")
                             }
                         }
                     }
@@ -4538,16 +4538,16 @@ class TypeChecker {
                     if (matchedExpr is Identifier && paramNames.contains(matchedExpr.name)) {
                         val paramName = matchedExpr.name
                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                            println("🔍 DEBUG extractParameterConstraints: Inferring type for parameter '$paramName' from match patterns")
+                            // println("🔍 DEBUG extractParameterConstraints: Inferring type for parameter '$paramName' from match patterns")
                         }
                         val inferredType = inferTypeFromMatchPatterns(e.cases)
                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                            println("🔍 DEBUG extractParameterConstraints: Inferred type for '$paramName': $inferredType")
+                            // println("🔍 DEBUG extractParameterConstraints: Inferred type for '$paramName': $inferredType")
                         }
                         if (inferredType != null && !constraints.containsKey(paramName)) {
                             constraints[paramName] = inferredType
                             if (System.getProperty("funk.typecheck.debug") == "true") {
-                                println("🔍 DEBUG extractParameterConstraints: Set constraint for '$paramName' to $inferredType")
+                                // println("🔍 DEBUG extractParameterConstraints: Set constraint for '$paramName' to $inferredType")
                             }
                         }
                     }
@@ -4555,26 +4555,26 @@ class TypeChecker {
                     // CRITICAL FIX: Extract pattern variable types for each case BEFORE analyzing
                     // This allows variables bound in patterns (like `value` from `Success { value }`)
                     // to have their types available when analyzing the case body
-                    println("DEBUG: About to process ${e.cases.size} match cases")
+                    // println("DEBUG: About to process ${e.cases.size} match cases")
                     e.cases.forEach { case ->
-                        println("DEBUG: Processing case with ${case.patterns.size} patterns: ${case.patterns}")
+                        // println("DEBUG: Processing case with ${case.patterns.size} patterns: ${case.patterns}")
                         // Extract pattern variable types from all patterns in this case
                         val patternVarTypes = mutableMapOf<String, com.funk.language.ast.FunkType>()
                         case.patterns.forEach { pattern ->
                             val extractedTypes = extractPatternVariableTypes(pattern, typeContext)
-                            println("DEBUG: Extracted types from pattern $pattern: $extractedTypes")
+                            // println("DEBUG: Extracted types from pattern $pattern: $extractedTypes")
                             patternVarTypes.putAll(extractedTypes)
                         }
 
-                        println("DEBUG: Total pattern variables for case: $patternVarTypes")
+                        // println("DEBUG: Total pattern variables for case: $patternVarTypes")
 
                         if (System.getProperty("funk.typecheck.debug") == "true" && patternVarTypes.isNotEmpty()) {
-                            println("🔍 DEBUG: Pattern variables for case ${case.patterns}: $patternVarTypes")
+                            // println("🔍 DEBUG: Pattern variables for case ${case.patterns}: $patternVarTypes")
                         }
 
                         // Merge with existing pattern context for this case
                         val casePatternContext = localPatternContext + patternVarTypes
-                        println("DEBUG: Case pattern context size: ${casePatternContext.size}")
+                        // println("DEBUG: Case pattern context size: ${casePatternContext.size}")
 
                         // Analyze the case expression with the enriched pattern context
                         analyzeExpression(case.expression, casePatternContext)
@@ -4790,26 +4790,26 @@ class TypeChecker {
         val constraints = mutableListOf<com.funk.language.ast.FunkType.FunctionAbilityConstraint>()
 
         if (System.getProperty("funk.debug.constraints") == "true") {
-            println("DEBUG: analyzeForAbilityConstraints called with body=$body, paramTypes=$paramTypes")
+            // println("DEBUG: analyzeForAbilityConstraints called with body=$body, paramTypes=$paramTypes")
         }
 
         // Find arithmetic operations in the body
         findArithmeticOperations(body) { operatorName, leftExpr, rightExpr ->
             if (System.getProperty("funk.debug.constraints") == "true") {
-                println("DEBUG: Found arithmetic op: $operatorName, left=$leftExpr, right=$rightExpr")
+                // println("DEBUG: Found arithmetic op: $operatorName, left=$leftExpr, right=$rightExpr")
             }
 
             // Check if this involves parameters (making it polymorphic)
             val involvesParams = involvesParameters(leftExpr, paramTypes.keys) || involvesParameters(rightExpr, paramTypes.keys)
             if (System.getProperty("funk.debug.constraints") == "true") {
-                println("DEBUG: involvesParams=$involvesParams")
+                // println("DEBUG: involvesParams=$involvesParams")
             }
 
             if (involvesParams) {
                 // Get the type variable for the constraint
                 val typeVar = getTypeVariableForConstraint(leftExpr, rightExpr, paramTypes)
                 if (System.getProperty("funk.debug.constraints") == "true") {
-                    println("DEBUG: typeVar=$typeVar")
+                    // println("DEBUG: typeVar=$typeVar")
                 }
 
                 if (typeVar != null) {
@@ -4828,7 +4828,7 @@ class TypeChecker {
                         constraints.add(constraint)
 
                         if (System.getProperty("funk.debug.constraints") == "true") {
-                            println("DEBUG: Added constraint: $constraint")
+                            // println("DEBUG: Added constraint: $constraint")
                         }
                     }
                 }
@@ -4836,7 +4836,7 @@ class TypeChecker {
         }
 
         if (System.getProperty("funk.debug.constraints") == "true") {
-            println("DEBUG: Total constraints generated: ${constraints.size}, constraints=$constraints")
+            // println("DEBUG: Total constraints generated: ${constraints.size}, constraints=$constraints")
         }
 
         return constraints.distinctBy { it.abilityName } // Remove duplicates
@@ -5216,18 +5216,18 @@ class TypeChecker {
             return null
         }
 
-        println("🔍 DEBUG inferVariantTypeFromPatterns: Looking for constructors: $usedConstructors")
+        // println("🔍 DEBUG inferVariantTypeFromPatterns: Looking for constructors: $usedConstructors")
 
         // CRITICAL FIX: Try context first for already-registered types
         for ((typeName, typeValue) in context) {
             if (typeValue is com.funk.language.ast.FunkType.VariantType) {
-                println("🔍 DEBUG: Found variant type in context: $typeName with constructors: ${typeValue.constructors.keys}")
-                println("🔍 DEBUG: Constructor types: ${typeValue.constructors}")
+                // println("🔍 DEBUG: Found variant type in context: $typeName with constructors: ${typeValue.constructors.keys}")
+                // println("🔍 DEBUG: Constructor types: ${typeValue.constructors}")
                 val hasAllConstructors = usedConstructors.all { constructor ->
                     typeValue.constructors.containsKey(constructor)
                 }
                 if (hasAllConstructors) {
-                    println("🔍 DEBUG: MATCH! Using context type $typeName: $typeValue")
+                    // println("🔍 DEBUG: MATCH! Using context type $typeName: $typeValue")
                     // Found the type in context - use it directly!
                     // Apply wildcard logic: if patterns have wildcard, make it open
                     if (hasWildcard && typeValue.rowVar == null) {
@@ -5330,15 +5330,15 @@ class TypeChecker {
      * Infer type from match patterns (for nested matches on pattern-bound variables)
      */
     private fun inferTypeFromMatchPatterns(cases: List<MatchCase>): com.funk.language.ast.FunkType? {
-        println("🔍 DEBUG inferTypeFromMatchPatterns: Analyzing ${cases.size} match cases")
+        // println("🔍 DEBUG inferTypeFromMatchPatterns: Analyzing ${cases.size} match cases")
         // Look for record patterns to infer record types
         for (case in cases) {
             // Check the first pattern in each case (simplified approach)
             val pattern = case.patterns.firstOrNull() ?: continue
-            println("🔍 DEBUG inferTypeFromMatchPatterns: Pattern type: ${pattern::class.simpleName}")
+            // println("🔍 DEBUG inferTypeFromMatchPatterns: Pattern type: ${pattern::class.simpleName}")
             when (pattern) {
                 is RecordPattern -> {
-                    println("🔍 DEBUG inferTypeFromMatchPatterns: Found RecordPattern")
+                    // println("🔍 DEBUG inferTypeFromMatchPatterns: Found RecordPattern")
                     val fields = mutableMapOf<String, com.funk.language.ast.FunkType>()
                     for (entry in pattern.entries) {
                         if (entry.pattern == null) {
@@ -5356,18 +5356,18 @@ class TypeChecker {
                     }
                 }
                 is ConstructorPattern -> {
-                    println("🔍 DEBUG inferTypeFromMatchPatterns: Found ConstructorPattern, delegating to inferVariantTypeFromPatterns")
+                    // println("🔍 DEBUG inferTypeFromMatchPatterns: Found ConstructorPattern, delegating to inferVariantTypeFromPatterns")
                     // CRITICAL FIX: Instead of manually building variant type from patterns,
                     // use inferVariantTypeFromPatterns which properly looks up the actual type definition
                     return inferVariantTypeFromPatterns(cases)
                 }
                 else -> {
                     // Other patterns don't give us type information
-                    println("🔍 DEBUG inferTypeFromMatchPatterns: Pattern type ${pattern::class.simpleName} doesn't provide type info")
+                    // println("🔍 DEBUG inferTypeFromMatchPatterns: Pattern type ${pattern::class.simpleName} doesn't provide type info")
                 }
             }
         }
-        println("🔍 DEBUG inferTypeFromMatchPatterns: Returning null")
+        // println("🔍 DEBUG inferTypeFromMatchPatterns: Returning null")
         return null
     }
     
@@ -8055,7 +8055,7 @@ class TypeChecker {
         val concreteType = ModuleTypeRegistry.getConcreteType(moduleName, functionName)
         if (concreteType != null) {
             if (System.getProperty("funk.typecheck.debug") == "true") {
-                println("DEBUG: Found concrete type for $moduleName::$functionName: $concreteType")
+                // println("DEBUG: Found concrete type for $moduleName::$functionName: $concreteType")
             }
             return concreteType
         }
@@ -8074,7 +8074,7 @@ class TypeChecker {
                 val export = module.exports[functionName]
                 if (export != null) {
                     if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("DEBUG: Found type for $moduleName::$functionName from module: ${export.funkType}")
+                        // println("DEBUG: Found type for $moduleName::$functionName from module: ${export.funkType}")
                     }
                     return export.funkType
                 }
@@ -8082,14 +8082,14 @@ class TypeChecker {
         } catch (e: Exception) {
             // Module resolution failed, continue to fallback
             if (System.getProperty("funk.typecheck.debug") == "true") {
-                println("DEBUG: Failed to resolve module $moduleName: ${e.message}")
+                // println("DEBUG: Failed to resolve module $moduleName: ${e.message}")
             }
         }
 
         // If not found in registry or modules, return a fresh type variable to avoid infinite recursion
         // This prevents the circular call back to inferBasicType with the same MemberAccess
         if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("DEBUG: No concrete type found for $moduleName::$functionName, returning fresh type variable")
+            // println("DEBUG: No concrete type found for $moduleName::$functionName, returning fresh type variable")
         }
         return com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
     }
