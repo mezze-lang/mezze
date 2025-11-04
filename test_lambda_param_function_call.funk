@@ -1,0 +1,12 @@
+# Test case for lambda parameter in function call position
+
+# Simple case: parameter f used as function
+let apply = { f, x } -> f { x = x }
+
+# More complex case from the issue: safeMap
+let safeMap = { f, result } -> match result is
+  Success { value } -> Success { value = f { x = value } }
+  Failure { error } -> Failure { error = error }
+
+# Another test: parameter used multiple times
+let applyTwice = { f, x } -> f { x = f { x = x } }

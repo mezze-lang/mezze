@@ -1,0 +1,27 @@
+# Comprehensive test for lambda parameter function call inference
+
+# Basic case: simple function application
+let apply = { f, x } -> f { x = x }
+# Expected: { f: { x: 'a } -> 'b, x: 'a } -> 'b
+
+# Multiple parameters in function call
+let applyBinary = { f, x, y } -> f { left = x, right = y }
+# Expected: { f: { left: 'a, right: 'b } -> 'c, x: 'a, y: 'b } -> 'c
+
+# Nested function calls
+let applyTwice = { f, x } -> f { x = f { x = x } }
+# Expected: { f: { x: 'a } -> 'a, x: 'a } -> 'a
+
+# Function parameter used with match result
+let mapResult = { f, result } -> match result is
+  Success { value } -> Success { value = f { x = value } }
+  Failure { error } -> Failure { error = error }
+# Expected: { f: { x: String } -> 'a, result: Result } -> Result
+
+# Function parameter with literal argument
+let applyToFive = { f } -> f { x = 5 }
+# Expected: { f: { x: Int } -> 'a } -> 'a
+
+# Multiple function parameters
+let compose = { f, g, x } -> f { x = g { x = x } }
+# Expected: { f: { x: 'a } -> 'b, g: { x: 'c } -> 'a, x: 'c } -> 'b
