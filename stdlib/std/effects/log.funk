@@ -10,7 +10,7 @@ pub effect Log {
     println: { msg: String } -> {} }
 
 # Console-based logging implementation (runs in virtual threads)
-impl Log for Console where {
+pub impl Log for Console where {
     info: { msg: String } -> {} = { msg } -> __native_log_info { msg = msg },
     warn: { msg: String } -> {} = { msg } -> __native_log_warn { msg = msg },
     error: { msg: String } -> {} = { msg } -> __native_log_error { msg = msg },
@@ -21,7 +21,7 @@ impl Log for Console where {
 }
 
 # Quiet logging implementation (for testing - suppresses output)
-impl Log for QuietConsole where {
+pub impl Log for QuietConsole where {
     info: { msg: String } -> {} = { msg } -> {},
     warn: { msg: String } -> {} = { msg } -> {},
     error: { msg: String } -> {} = { msg } -> {},

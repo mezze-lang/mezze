@@ -3383,15 +3383,29 @@ class TypeChecker {
                 
                 // Process handlers in reverse order (right-to-left) with effect consumption
                 for (handlerName in handlerNames.reversed()) {
+                    // CRITICAL: Check if handler is in scope (imported or defined locally)
+                    val handlerImported = importedValues.containsKey(handlerName)
+                    val handlerInEffectMap = performerToEffectMap.containsKey(handlerName)
+                    val handlerLocallyDefined = handlerInEffectMap && !handlerImported
+
+                    if (!handlerImported && !handlerLocallyDefined) {
+                        throw TypeCheckError("Handler '$handlerName' is not in scope. Import it with: use module::{$handlerName}")
+                    }
+
                     // Find which effect this handler implements
-                    var handlerEffect: String? = null
-                    for (item in currentProgram?.items ?: emptyList()) {
-                        if (item is ImplDeclaration && item.performerName == handlerName) {
-                            handlerEffect = item.effectName
-                            break
+                    // First check the global performer-to-effect map (includes stdlib and local handlers)
+                    var handlerEffect: String? = performerToEffectMap[handlerName]
+
+                    // If not found, check current program's impl declarations
+                    if (handlerEffect == null) {
+                        for (item in currentProgram?.items ?: emptyList()) {
+                            if (item is ImplDeclaration && item.performerName == handlerName) {
+                                handlerEffect = item.effectName
+                                break
+                            }
                         }
                     }
-                    
+
                     if (handlerEffect != null) {
                         // Check if this effect is still available (not already consumed)
                         if (!consumableEffects.contains(handlerEffect)) {
@@ -3435,14 +3449,15 @@ class TypeChecker {
                             com.funk.language.ast.FunkType.EffectRow(currentEffects, exprType.effects!!.rowVar)
                         }
                         
+                        // Check if this is a thunk call (function with unit parameter {} being called)
+                        val isThunk = exprType.paramType is com.funk.language.ast.FunkType.RecordType &&
+                            (exprType.paramType as com.funk.language.ast.FunkType.RecordType).fields.isEmpty()
+                        val isThunkCall = isThunk && expr.expression is FunctionCall
+
                         // When all effects are handled
                         if (newEffectRow == null) {
                             // All effects handled
-                            // Check if this is a thunk (function with unit parameter {})
-                            val isThunk = exprType.paramType is com.funk.language.ast.FunkType.RecordType && 
-                                (exprType.paramType as com.funk.language.ast.FunkType.RecordType).fields.isEmpty()
-                            
-                            if (isThunk && expr.expression is FunctionCall) {
+                            if (isThunkCall) {
                                 // This is perform Console in (thunk {}) - return the result type directly
                                 exprType.returnType
                             } else {
@@ -3454,20 +3469,58 @@ class TypeChecker {
                                 )
                             }
                         } else {
-                            // Some effects remain, return function type with remaining effects
-                        com.funk.language.ast.FunkType.FunctionType(
-                            exprType.paramType,
-                            exprType.returnType,
-                            newEffectRow
-                        )
+                            // Some effects remain
+                            if (isThunkCall) {
+                                // This is perform Console in (thunk {}) with remaining effects
+                                // Return the result type with remaining effects as a computation type
+                                // The result is a value of type returnType with the remaining effects
+                                if (exprType.returnType is com.funk.language.ast.FunkType.RecordType &&
+                                    (exprType.returnType as com.funk.language.ast.FunkType.RecordType).fields.isEmpty()) {
+                                    // Result is {}, wrap with effects: {} <remaining>
+                                    // Represented as a thunk: {} -> {} <remaining>
+                                    com.funk.language.ast.FunkType.FunctionType(
+                                        com.funk.language.ast.FunkType.RecordType(emptyMap(), null),
+                                        com.funk.language.ast.FunkType.RecordType(emptyMap(), null),
+                                        newEffectRow
+                                    )
+                                } else {
+                                    // Result is non-unit, wrap with effects
+                                    com.funk.language.ast.FunkType.FunctionType(
+                                        com.funk.language.ast.FunkType.RecordType(emptyMap(), null),
+                                        exprType.returnType,
+                                        newEffectRow
+                                    )
+                                }
+                            } else {
+                                // Not a thunk call - return function type with remaining effects
+                                com.funk.language.ast.FunkType.FunctionType(
+                                    exprType.paramType,
+                                    exprType.returnType,
+                                    newEffectRow
+                                )
+                            }
                         }
                     } else {
                         exprType
                     }
                 } else {
-                    // For non-function types, return the result type of executing the expression
-                    // If there were effects to handle, they've been handled, so return the base type
-                    exprType
+                    // For non-function types (e.g., calling an effectful thunk produces a value, not a function)
+                    // Check if there are unhandled effects remaining
+                    val remainingEffects = actualEffects.toMutableSet()
+                    remainingEffects.removeAll(handledEffects)
+
+                    if (remainingEffects.isNotEmpty()) {
+                        // There are unhandled effects - wrap the result in a thunk with those effects
+                        // Result: {} -> resultType <remaining effects>
+                        com.funk.language.ast.FunkType.FunctionType(
+                            com.funk.language.ast.FunkType.RecordType(emptyMap(), null),
+                            exprType,
+                            com.funk.language.ast.FunkType.EffectRow(remainingEffects, null)
+                        )
+                    } else {
+                        // All effects handled, return the base type
+                        exprType
+                    }
                 }
                 } finally {
                     // Restore previous context
@@ -5901,6 +5954,17 @@ class TypeChecker {
                 // Determine which effects are handled by the performers
                 val handledEffects = mutableSetOf<String>()
                 for (handler in expr.handlers) {
+                    // Check if the handler is in scope (imported or defined locally)
+                    // Effect handlers must be explicitly imported via 'use module::{Handler}'
+                    // If handler is in performerToEffectMap but not imported, it must be locally defined
+                    val handlerImported = importedValues.containsKey(handler.name)
+                    val handlerInEffectMap = performerToEffectMap.containsKey(handler.name)
+                    val handlerLocallyDefined = handlerInEffectMap && !handlerImported
+
+                    if (!handlerImported && !handlerLocallyDefined) {
+                        throw TypeCheckError("Handler '${handler.name}' is not in scope. Import it with: use module::{${handler.name}}")
+                    }
+
                     // Look up the effect this handler implements
                     val effectName = performerToEffectMap[handler.name]
                     if (effectName != null) {
@@ -6380,10 +6444,25 @@ class TypeChecker {
                 for (moduleName in coreModules) {
                     try {
                         val module = resolver.resolveModule(moduleName)
+
+                        // Save context before type-checking module
+                        val moduleCheckSavedContext = context.toMap()
+                        val moduleCheckSavedTypeAliases = typeAliases.toMap()
+
                         // Type check the module to register its ability implementations
                         val typedModule = typeCheckSimple(module.program)
+
+                        // Extract module context
+                        val moduleContext = getContext()
+
+                        // Restore context (don't let module pollute parent scope)
+                        context.clear()
+                        context.putAll(moduleCheckSavedContext)
+                        typeAliases.clear()
+                        typeAliases.putAll(moduleCheckSavedTypeAliases)
+
                         // Update the module cache with typed exports so imports get correct types
-                        resolver.updateModuleExports(moduleName, typedModule, getContext())
+                        resolver.updateModuleExports(moduleName, typedModule, moduleContext)
                         // The ability implementations are now registered in the context
                     } catch (e: Exception) {
                         // Continue if a module can't be loaded - some tests might not have full stdlib
@@ -7377,22 +7456,34 @@ class TypeChecker {
                 val resolver = moduleResolver ?: throw IllegalStateException("Module resolver not initialized")
                 val module = resolver.resolveModule(modulePath)
 
+                // Save current context before type-checking module
+                val savedContext = context.toMap()
+                val savedTypeAliases = typeAliases.toMap()
+
                 // Type-check the module to ensure exports have correct inferred types
                 val typedModule = typeCheckSimple(module.program)
-                val currentContext = getContext()
+
+                // Extract only the module's own context (exports)
+                val moduleContext = getContext()
+
+                // Restore the saved context (don't let module declarations pollute parent scope)
+                context.clear()
+                context.putAll(savedContext)
+                typeAliases.clear()
+                typeAliases.putAll(savedTypeAliases)
 
                     // DEBUG: Track context propagation
                     if (System.getProperty("funk.typecheck.debug") == "true") {
                         println("\n=== TypeChecker.processUseDeclarationSimple (ModulePath) DEBUG ===")
                         println("Module path: $modulePath")
-                        println("Context size after typeCheckSimple: ${currentContext.size}")
-                        println("Context keys: ${currentContext.keys.joinToString(", ")}")
-                        currentContext.forEach { (k, v) ->
+                        println("Module context size: ${moduleContext.size}")
+                        println("Module context keys: ${moduleContext.keys.joinToString(", ")}")
+                        moduleContext.forEach { (k, v) ->
                             println("  $k -> ${prettyPrintType(v)}")
                         }
                     }
 
-                    resolver.updateModuleExports(modulePath, typedModule, currentContext)
+                    resolver.updateModuleExports(modulePath, typedModule, moduleContext)
 
                     // Re-fetch the module with updated exports
                     val updatedModule = resolver.resolveModule(modulePath)
@@ -7428,22 +7519,34 @@ class TypeChecker {
                 val resolver = moduleResolver ?: throw IllegalStateException("Module resolver not initialized")
                 val module = resolver.resolveModule(modulePath)
 
+                // Save current context before type-checking module
+                val savedContext = context.toMap()
+                val savedTypeAliases = typeAliases.toMap()
+
                 // Type-check the module to ensure exports have correct inferred types
                 val typedModule = typeCheckSimple(module.program)
-                val currentContext = getContext()
+
+                // Extract only the module's own context (exports)
+                val moduleContext = getContext()
+
+                // Restore the saved context (don't let module declarations pollute parent scope)
+                context.clear()
+                context.putAll(savedContext)
+                typeAliases.clear()
+                typeAliases.putAll(savedTypeAliases)
 
                 // DEBUG: Track context propagation
                 if (System.getProperty("funk.typecheck.debug") == "true") {
                     println("\n=== TypeChecker.processUseDeclarationSimple (SelectivePath) DEBUG ===")
                     println("Module path: $modulePath")
-                    println("Context size after typeCheckSimple: ${currentContext.size}")
-                    println("Context keys: ${currentContext.keys.joinToString(", ")}")
-                    currentContext.forEach { (k, v) ->
+                    println("Module context size: ${moduleContext.size}")
+                    println("Module context keys: ${moduleContext.keys.joinToString(", ")}")
+                    moduleContext.forEach { (k, v) ->
                         println("  $k -> ${prettyPrintType(v)}")
                     }
                 }
 
-                resolver.updateModuleExports(modulePath, typedModule, currentContext)
+                resolver.updateModuleExports(modulePath, typedModule, moduleContext)
 
                 // Re-fetch the module with updated exports
                 val updatedModule = resolver.resolveModule(modulePath)
