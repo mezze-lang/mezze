@@ -64,6 +64,9 @@ private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableSet<
         is FunkType.SetType -> {
             collectTypeVariablesRecursive(type.elementType, variables)
         }
+        is FunkType.SuspendedType -> {
+            collectTypeVariablesRecursive(type.valueType, variables)
+        }
         is FunkType.FunctionType -> {
             collectTypeVariablesRecursive(type.paramType, variables)
             collectTypeVariablesRecursive(type.returnType, variables)
@@ -122,6 +125,12 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     is FunkType.ListType -> "List ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is FunkType.MapType -> "Map ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
     is FunkType.SetType -> "Set ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
+    is FunkType.SuspendedType -> {
+        // Suspended types print as: valueType <effects>
+        val valueTypeStr = prettyPrintTypeWithMapping(type.valueType, typeVarMapping)
+        val effectList = type.effects.effects.sorted().joinToString(", ")
+        "$valueTypeStr <$effectList>"
+    }
     is FunkType.FunctionType -> {
         // Build parameter type string
         val paramTypeStr = prettyPrintTypeWithMapping(type.paramType, typeVarMapping)
@@ -239,7 +248,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is FunkType.FunctionType -> {
         // Build parameter type string
         val paramTypeStr = prettyPrintTypeWithAliases(type.paramType, typeAliases, showExpansion)
-        
+
         // Add ability constraints after parameter type but before arrow
         val abilityConstraints = if (type.abilityConstraints.isNotEmpty()) {
             " with " + type.abilityConstraints.joinToString(", ") { constraint ->
@@ -253,10 +262,10 @@ private fun prettyPrintTypeWithAliasesRecursive(
         } else {
             ""
         }
-        
+
         // Build return type string
         val returnTypeStr = prettyPrintTypeWithAliases(type.returnType, typeAliases, showExpansion)
-        
+
         // Add effects
         val effects = if (type.effects != null && type.effects.effects.isNotEmpty()) {
             val effectList = type.effects.effects.sorted().joinToString(", ")
@@ -264,9 +273,15 @@ private fun prettyPrintTypeWithAliasesRecursive(
         } else {
             ""
         }
-        
+
         // Construct final string: param with constraints -> return effects
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
+    }
+    is FunkType.SuspendedType -> {
+        // Suspended types print as: valueType <effects>
+        val valueTypeStr = prettyPrintTypeWithAliases(type.valueType, typeAliases, showExpansion)
+        val effectList = type.effects.effects.sorted().joinToString(", ")
+        "$valueTypeStr <$effectList>"
     }
     else -> type.toString() // Fallback for any other types
 }
@@ -530,16 +545,19 @@ fun isBuiltinType(type: FunkType): Boolean {
         
         // Function types are built-in constructs
         is FunkType.FunctionType -> true
-        
+
+        // Suspended types are built-in constructs (values with unhandled effects)
+        is FunkType.SuspendedType -> true
+
         // Effect rows are built-in constructs
         is FunkType.EffectRow -> true
 
         // Type variables and other constructs are not built-in types per se
         is FunkType.VarType -> false
-        
+
         // Record and variant types are user-defined (unless they're built-in constructors)
         is FunkType.RecordType, is FunkType.VariantType -> false
-        
+
         // ArrayList and Array types are legacy/compatibility types
         is FunkType.ArrayListType, is FunkType.ArrayType -> false
     }

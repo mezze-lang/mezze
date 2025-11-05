@@ -385,7 +385,17 @@ sealed interface FunkType {
         val effects: EffectRow? = null,  // null = pure function, non-null = effectful function
         val abilityConstraints: List<FunctionAbilityConstraint> = emptyList()  // Ability constraints for this function
     ) : FunkType
-    
+
+    // Suspended computation types (values with unhandled effects)
+    // This represents a value of type valueType that has unhandled effects
+    // Unlike FunctionType, this is not a function - it's an already-computed value
+    // that cannot be used until its effects are handled
+    @Serializable
+    data class SuspendedType(
+        val valueType: FunkType,
+        val effects: EffectRow
+    ) : FunkType
+
     // Effect rows
     @Serializable
     data class EffectRow(
@@ -496,9 +506,13 @@ data class TypeScheme(
             is FunkType.ArrayType -> FunkType.ArrayType(
                 applySubstitutionToType(type.elementType, substitution)
             )
+            is FunkType.SuspendedType -> FunkType.SuspendedType(
+                applySubstitutionToType(type.valueType, substitution),
+                type.effects
+            )
             // Concrete types remain unchanged
-            is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
-            is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType, 
+            is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
+            is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
             is FunkType.OrderingType -> type
             is FunkType.EffectRow -> type // Effects don't contain type variables for now
         }
@@ -1579,9 +1593,12 @@ private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<T
         is FunkType.ArrayType -> {
             collectTypeVariablesInOrder(type.elementType, collector)
         }
+        is FunkType.SuspendedType -> {
+            collectTypeVariablesInOrder(type.valueType, collector)
+        }
         // Base types don't contain type variables
-        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
-        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType, 
+        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
         is FunkType.OrderingType -> {
             // No type variables to collect
         }
@@ -1634,9 +1651,12 @@ private fun collectTypeVariables(type: FunkType, collector: MutableSet<TypeVar>)
         is FunkType.ArrayType -> {
             collectTypeVariables(type.elementType, collector)
         }
+        is FunkType.SuspendedType -> {
+            collectTypeVariables(type.valueType, collector)
+        }
         // Base types don't contain type variables
-        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType, 
-        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType, 
+        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
         is FunkType.OrderingType -> {
             // No type variables to collect
         }

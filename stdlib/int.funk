@@ -3,23 +3,23 @@
 # Note: The Int type and basic operations are now built-in
 
 # Basic arithmetic operations (for qualified calls)
-pub let add = { left: Int, right: Int } ->
-    __native_int_add { l = left, r = right }
+pub let add = { l: Int, r: Int } ->
+    __native_int_add { l = l, r = r }
 
-pub let subtract = { left: Int, right: Int } ->
-    __native_int_subtract { l = left, r = right }
+pub let subtract = { l: Int, r: Int } ->
+    __native_int_subtract { l = l, r = r }
 
-pub let multiply = { left: Int, right: Int } ->
-    __native_int_multiply { l = left, r = right }
+pub let multiply = { l: Int, r: Int } ->
+    __native_int_multiply { l = l, r = r }
 
-pub let divide = { left: Int, right: Int } ->
-    __native_int_divide { l = left, r = right }
+pub let divide = { l: Int, r: Int } ->
+    __native_int_divide { l = l, r = r }
 
-pub let modulo = { left: Int, right: Int } ->
-    __native_int_modulo { l = left, r = right }
+pub let modulo = { l: Int, r: Int } ->
+    __native_int_modulo { l = l, r = r }
 
-pub let to_string = { value: Int } ->
-    __native_int_to_string { val = value }
+pub let to_string = { val: Int } ->
+    __native_int_to_string { val = val }
 
 # Utility functions for integers
 pub let abs = { x: Int } ->

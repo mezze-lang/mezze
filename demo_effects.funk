@@ -2,6 +2,7 @@
 
 use std::effects::log::{Log, Console, QuietConsole}
 use std::effects::filesystem::{FileSystem, LocalDisk, MemoryFS}
+use int
 
 # Create a greeting message
 let create_greeting = { name } ->
@@ -26,7 +27,7 @@ let process_greeting = { name } -> do
 let calculate_sum = { a, b } -> do
     Log.debug { msg = "Starting calculation..." }
     let result = a + b
-    Log.info { msg = "Result: " ++ string_of_int { n = result } }
+    Log.info { msg = "Result: " ++ int::to_string { val = result } }
     result
 
 # Write to a file (demonstrates FileSystem effect)
@@ -49,12 +50,12 @@ let demo = {} -> do
     Log.println { msg = "Demo 2: Calculation" }
     Log.println { msg = "Calculating 42 + 58..." }
     let sum = calculate_sum { a = 42, b = 58 }
-    Log.println { msg = "" }
+    Log.println { msg = int::to_string {val = sum} }
 
     # Demo 3: File Writing
     Log.println { msg = "Demo 3: FileSystem Effect" }
     let greeting = create_greeting { name = "World" }
-    write_greeting_to_file { filename = "./tmp/funk_greeting.txt", content = greeting }
+    write_greeting_to_file { filename = "./funk_greeting.txt", content = greeting }
     Log.println { msg = "" }
 
     # Demo 4: Different log levels
@@ -69,6 +70,7 @@ let demo = {} -> do
     Log.println { msg = "=== Demo Complete ===" }
 
 # Run the demo with Console handler for Log and LocalDisk for FileSystem
-let mainWithoutFile = perform Console in demo {}
-
-let main = perform LocalDisk in mainWithoutFile
+# Main must be a function so exec can call it after loading all modules
+let main = {} ->
+    perform LocalDisk in 
+        perform Console in demo {}

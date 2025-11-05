@@ -720,12 +720,12 @@ data class NativeFunkFunction(
     val name: String,
     val implementation: (List<FunkValue>) -> FunkValue
 ) : FunkValue() {
-    
+
     override fun getDisplayString(): String = "<native-function:$name>"
-    
+
     @ExportMessage
     fun isExecutable(): Boolean = true
-    
+
     @ExportMessage
     fun execute(arguments: Array<Any?>): Any {
         // Convert arguments to FunkValues and call implementation
@@ -741,12 +741,49 @@ data class NativeFunkFunction(
         }
         return implementation(funkArgs)
     }
-    
+
     /**
      * Call function with FunkValue arguments
      */
     fun call(arguments: List<FunkValue>): FunkValue {
         return implementation(arguments)
+    }
+}
+
+/**
+ * Suspended computation - a value with unhandled effects that cannot be used
+ * until all effects are handled via perform expressions.
+ *
+ * This is distinct from FunkFunction - it's not a function to be called,
+ * but rather an already-computed value that has unhandled effects.
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkSuspended(
+    val value: FunkValue,
+    val unhandledEffects: Set<String>
+) : FunkValue() {
+    override fun getDisplayString(): String {
+        val effectList = unhandledEffects.sorted().joinToString(", ")
+        return "${value.getDisplayString()} <$effectList>"
+    }
+
+    @ExportMessage
+    fun isExecutable(): Boolean = false
+
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun execute(arguments: Array<Any?>): Any {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+
+    /**
+     * Attempting to use a suspended value should fail
+     */
+    fun unwrap(): FunkValue {
+        throw FunkException(
+            "Cannot use suspended value with unhandled effects: ${unhandledEffects.sorted().joinToString(", ")}. " +
+            "Use 'perform' to handle these effects first."
+        )
     }
 }
 

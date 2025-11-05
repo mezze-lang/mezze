@@ -24,6 +24,9 @@ class FunkInterpreter {
     private val parser: FunkParser?
     private val typeChecker: TypeChecker?
     private var moduleResolver: ModuleResolver? = null
+
+    // Store last execution context for CLI access
+    private var lastExecutionContext: Map<String, FunkValue> = emptyMap()
     
     // Constructor for full parsing/typechecking (used by funk exec)
     constructor() {
@@ -89,27 +92,35 @@ class FunkInterpreter {
     }
     
     /**
+     * Get the context from the last program execution
+     */
+    fun getLastExecutionContext(): Map<String, FunkValue> = lastExecutionContext
+
+    /**
      * Execute a program (enhanced with type information)
      */
     private fun executeProgram(program: Program): FunkValue {
         // Simple execution context
         val context = mutableMapOf<String, FunkValue>()
-        
+
         // Register built-in native functions
         registerNativeFunctions(context)
-        
+
         // Process imports first if module resolver is available
         if (moduleResolver != null) {
             processImports(program, context)
         }
-        
+
         // Execute each item in the program
         var lastResult: FunkValue = FunkNull
-        
+
         for (item in program.items) {
             lastResult = executeItem(item, context)
         }
-        
+
+        // Store the context for CLI access
+        lastExecutionContext = context.toMap()
+
         return lastResult
     }
     
@@ -166,15 +177,24 @@ class FunkInterpreter {
             is SelectivePath -> {
                 val modulePath = path.module.joinToString("::")
                 val module = resolver.resolveModule(modulePath)
-                
+
                 // Execute the module to get runtime values
                 val moduleContext = executeModule(module.program)
-                
+
+                // Import __impl_mappings from the module
+                val moduleImplMappings = moduleContext["__impl_mappings"] as? FunkRecord
+                if (moduleImplMappings != null) {
+                    val currentImplMappings = context["__impl_mappings"] as? FunkRecord
+                    val mergedMappings = (currentImplMappings?.fields ?: emptyMap()).toMutableMap()
+                    mergedMappings.putAll(moduleImplMappings.fields)
+                    context["__impl_mappings"] = FunkRecord(mergedMappings)
+                }
+
                 // Import only selected items
                 for (item in path.items) {
                     val export = module.exports[item.name]
                         ?: throw RuntimeException("Item '${item.name}' not found in module '$modulePath'")
-                    
+
                     // Get the actual runtime value from the executed module
                     val runtimeValue = moduleContext[item.name] ?: FunkNull
                     val contextName = item.alias ?: item.name
@@ -662,9 +682,9 @@ class FunkInterpreter {
                 }
                 // Don't capture effect context at creation time - get it dynamically at execution time
                 SimpleFunkFunction(
-                    parameters = paramNames, 
-                    body = expr.body, 
-                    closure = context.toMap(), 
+                    parameters = paramNames,
+                    body = expr.body,
+                    closure = context.toMap(),
                     inferredType = expr.inferredType
                     // effectContext will be populated at execution time
                 )
@@ -675,12 +695,12 @@ class FunkInterpreter {
                 // Process handlers in reverse order (last to first) to match semantics:
                 // perform A, B, C do expr  =>  A handles outermost, C handles innermost
                 val handlerMap = mutableMapOf<String, FunkValue>()
-                
+
                 expr.handlers.reversed().forEach { performHandler ->
                     val handlerName = performHandler.name
-                    val handlerOrFactory = context[handlerName] 
+                    val handlerOrFactory = context[handlerName]
                         ?: throw HandlerNotFoundException(handlerName)
-                    
+
                     val handler = when (handlerOrFactory) {
                         is FunkRecord -> {
                             // Direct handler (non-parameterized)
@@ -697,15 +717,15 @@ class FunkInterpreter {
                             throw RuntimeException("Invalid handler type: ${handlerOrFactory::class.simpleName}")
                         }
                     }
-                    
+
                     // Map performer to its effect based on impl declarations
                     val effectName = findEffectForPerformer(handlerName, context)
                     handlerMap[effectName] = handler
-                    
+
                     // Also make the performer available by its name for delegation
                     context[handlerName] = handler
                 }
-                
+
                 // Set up handlers in context before evaluating the expression
                 val originalHandlers = context["__handlers"]
                 val existingHandlers = (originalHandlers as? FunkRecord)?.fields ?: emptyMap()
@@ -713,22 +733,48 @@ class FunkInterpreter {
                 mergedHandlers.putAll(handlerMap)
                 val handlersRecord = FunkRecord(mergedHandlers)
                 context["__handlers"] = handlersRecord
-                
-                
+
                 // Push handlers onto effect handler stack
                 effectHandler.pushHandlers(handlersRecord)
-                
+
                 try {
                     // Evaluate the expression with handlers available
                     val result = evaluateExpression(expr.expression, context)
-                    
-                    // CRITICAL FIX: Ensure perform expressions return unit type when result is null
-                    // This handles cases where effect operations should return unit but return null
-                    if (result is FunkNull) {
-                        FunkRecord(emptyMap()) // Unit type
+
+                    // Check if result is a suspended value (performing on already suspended computation)
+                    val finalResult = if (result is FunkSuspended) {
+                        // Handle effects on suspended computation
+                        val handledEffects = handlerMap.keys
+                        val remainingEffects = result.unhandledEffects - handledEffects
+
+                        if (remainingEffects.isEmpty()) {
+                            // All effects handled - unwrap the value
+                            result.value
+                        } else {
+                            // Some effects remain - return new suspended value
+                            FunkSuspended(result.value, remainingEffects)
+                        }
                     } else {
-                        result
+                        // Check if the result type is SuspendedType and wrap if needed
+                        when (val resultType = expr.inferredType) {
+                            is com.funk.language.ast.FunkType.SuspendedType -> {
+                                // The result has unhandled effects - wrap it in FunkSuspended
+                                FunkSuspended(
+                                    value = if (result is FunkNull) FunkRecord(emptyMap()) else result,
+                                    unhandledEffects = resultType.effects.effects
+                                )
+                            }
+                            else -> {
+                                // No unhandled effects - return as normal
+                                if (result is FunkNull) {
+                                    FunkRecord(emptyMap()) // Unit type
+                                } else {
+                                    result
+                                }
+                            }
+                        }
                     }
+                    finalResult
                 } finally {
                     // Restore original handlers
                     if (originalHandlers != null) {
@@ -1247,27 +1293,28 @@ class FunkInterpreter {
                 val missingParams = requiredParams - providedParams
                 
                 if (missingParams.isEmpty()) {
-                    // All parameters provided - check for unhandled effects before execution
-                    if (function.hasUnhandledEffects()) {
-                        val unhandledEffects = function.getUnhandledEffects()
-                        val availableHandlers = (context["__handlers"] as? FunkRecord)?.fields?.keys ?: emptySet()
-                        val actuallyUnhandledEffects = unhandledEffects - availableHandlers
-                        
-                        
-                        if (actuallyUnhandledEffects.isNotEmpty()) {
-                            throw FunkException(
-                                "No handlers available for effect call: ${actuallyUnhandledEffects.first()}"
-                            )
-                        }
-                    }
-                    
+                    // All parameters provided - execute function
+                    // Note: We don't check for unhandled effects here because the function body
+                    // may contain perform expressions that will install handlers during execution
+
                     // Execute function with inherited context
                     val newContext = function.closure.toMutableMap()
                     
                     // CRITICAL FIX: Merge current context with closure context
                     // This ensures that all performers (like BasicLogger) are available for delegation
+                    // For imports and handlers, ALWAYS use the current context value (prefer fresh over stale)
                     context.forEach { (key, value) ->
-                        if (!newContext.containsKey(key)) {
+                        // Always overwrite with current context for these cases:
+                        // - New keys not in closure
+                        // - Effect/handler-related items (Console, LocalDisk, Log, FileSystem, etc.)
+                        // - Native functions (__native_* or native_*)
+                        if (!newContext.containsKey(key) ||
+                            effectHandler.isEffectDeclared(key) ||
+                            value is FunkRecord ||
+                            value is NativeFunkFunction ||
+                            key.startsWith("__native_") ||
+                            key.startsWith("native_") ||
+                            key == "__impl_mappings") {
                             newContext[key] = value
                         }
                     }
@@ -1650,15 +1697,20 @@ class FunkInterpreter {
                 }
             }
             
-            op.name to SimpleFunkFunction(
-                paramNames,
-                // If implementation is a lambda, extract its body
-                when (val impl = op.implementation) {
-                    is LambdaExpression -> impl.body
-                    else -> impl
-                },
-                context.toMap()
-            )
+            op.name to when (val impl = op.implementation) {
+                is LambdaExpression -> {
+                    // Evaluate the lambda expression to create a proper function with parameters
+                    evaluateExpression(impl, context)
+                }
+                else -> {
+                    // For non-lambda implementations, wrap in a function
+                    SimpleFunkFunction(
+                        paramNames,
+                        impl,
+                        context.toMap()
+                    )
+                }
+            }
         }
         val performer = FunkRecord(operations)
         context[item.performerName] = performer

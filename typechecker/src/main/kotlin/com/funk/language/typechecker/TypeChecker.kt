@@ -1092,6 +1092,7 @@ class TypeChecker {
             is com.funk.language.ast.FunkType.OrderingType -> emptySet()
             is com.funk.language.ast.FunkType.ResultType -> getFreeTypeVariables(type.valueType) + getFreeTypeVariables(type.errorType)
             is com.funk.language.ast.FunkType.SetType -> getFreeTypeVariables(type.elementType)
+            is com.funk.language.ast.FunkType.SuspendedType -> getFreeTypeVariables(type.valueType)
         }
     }
     
@@ -2897,15 +2898,11 @@ class TypeChecker {
                 }
             }
             is LambdaExpression -> {
-                // // println("🔍 LAMBDA: Entered lambda inference for lambda expression")
                 // Try bidirectional inference for polymorphic cases
                 val useBidirectional = shouldUseBidirectionalInference(expr)
-                // // println("🔍 LAMBDA: shouldUseBidirectionalInference = $useBidirectional")
                 if (useBidirectional) {
-                    // // // println("🔍 LAMBDA: Taking BIDIRECTIONAL path")
                     return inferLambdaBidirectionally(expr)
                 }
-                // // println("🔍 LAMBDA: NOT taking bidirectional path, continuing...")
 
                 // Enter new scope for lambda parameters
                 val originalContext = context.toMap()
@@ -3001,7 +2998,7 @@ class TypeChecker {
                     paramTypes.forEach { (name, type) ->
                         context[name] = type
                     }
-                    
+
                     // Update paramType with refined types
                     val refinedParamType = com.funk.language.ast.FunkType.RecordType(paramTypes)
 
@@ -3329,11 +3326,12 @@ class TypeChecker {
                 // Get available effects from the expression
                 val availableEffects: MutableSet<String> = when (exprType) {
                     is com.funk.language.ast.FunkType.FunctionType -> (exprType.effects?.effects ?: emptySet()).toMutableSet()
+                    is com.funk.language.ast.FunkType.SuspendedType -> exprType.effects.effects.toMutableSet()
                     else -> {
                         // For non-function types, we need to look at the expression itself
                         // Special case: if the expression is a function call, check the function's type for effects
                         val effectsInExpression = mutableSetOf<String>()
-                        
+
                         if (expr.expression is FunctionCall) {
                             val functionCall = expr.expression as FunctionCall
                             val functionType = inferTypeWithUnification(functionCall.function)
@@ -3343,7 +3341,7 @@ class TypeChecker {
                                 }
                             }
                         }
-                        
+
                         // Also collect direct effect calls
                         collectEffectsFromExpression(expr.expression, effectsInExpression)
                         effectsInExpression
@@ -3436,8 +3434,23 @@ class TypeChecker {
                 // For now, we allow perform expressions and let the interpreter handle validation
                 // The type system focuses on effect removal from function types
                 
-                // If the expression type is a function with effects, remove the handled effects
-                if (exprType is com.funk.language.ast.FunkType.FunctionType && exprType.effects != null) {
+                // Handle suspended types (values with unhandled effects)
+                if (exprType is com.funk.language.ast.FunkType.SuspendedType) {
+                    // Remove handled effects from the suspended computation
+                    val currentEffects = exprType.effects.effects.toMutableSet()
+                    currentEffects.removeAll(handledEffects)
+
+                    if (currentEffects.isEmpty()) {
+                        // All effects handled - return the plain value
+                        exprType.valueType
+                    } else {
+                        // Some effects remain - return suspended type with remaining effects
+                        com.funk.language.ast.FunkType.SuspendedType(
+                            exprType.valueType,
+                            com.funk.language.ast.FunkType.EffectRow(currentEffects, exprType.effects.rowVar)
+                        )
+                    }
+                } else if (exprType is com.funk.language.ast.FunkType.FunctionType && exprType.effects != null) {
                     if (handledEffects.isNotEmpty()) {
                         // Remove the handled effects from the effect row
                         val currentEffects = exprType.effects!!.effects.toMutableSet()
@@ -3472,25 +3485,11 @@ class TypeChecker {
                             // Some effects remain
                             if (isThunkCall) {
                                 // This is perform Console in (thunk {}) with remaining effects
-                                // Return the result type with remaining effects as a computation type
-                                // The result is a value of type returnType with the remaining effects
-                                if (exprType.returnType is com.funk.language.ast.FunkType.RecordType &&
-                                    (exprType.returnType as com.funk.language.ast.FunkType.RecordType).fields.isEmpty()) {
-                                    // Result is {}, wrap with effects: {} <remaining>
-                                    // Represented as a thunk: {} -> {} <remaining>
-                                    com.funk.language.ast.FunkType.FunctionType(
-                                        com.funk.language.ast.FunkType.RecordType(emptyMap(), null),
-                                        com.funk.language.ast.FunkType.RecordType(emptyMap(), null),
-                                        newEffectRow
-                                    )
-                                } else {
-                                    // Result is non-unit, wrap with effects
-                                    com.funk.language.ast.FunkType.FunctionType(
-                                        com.funk.language.ast.FunkType.RecordType(emptyMap(), null),
-                                        exprType.returnType,
-                                        newEffectRow
-                                    )
-                                }
+                                // Return a suspended computation (not a thunk!)
+                                com.funk.language.ast.FunkType.SuspendedType(
+                                    exprType.returnType,
+                                    newEffectRow
+                                )
                             } else {
                                 // Not a thunk call - return function type with remaining effects
                                 com.funk.language.ast.FunkType.FunctionType(
@@ -3510,10 +3509,9 @@ class TypeChecker {
                     remainingEffects.removeAll(handledEffects)
 
                     if (remainingEffects.isNotEmpty()) {
-                        // There are unhandled effects - wrap the result in a thunk with those effects
-                        // Result: {} -> resultType <remaining effects>
-                        com.funk.language.ast.FunkType.FunctionType(
-                            com.funk.language.ast.FunkType.RecordType(emptyMap(), null),
+                        // There are unhandled effects - create a suspended computation
+                        // This represents a value with unhandled effects (not a thunk!)
+                        com.funk.language.ast.FunkType.SuspendedType(
                             exprType,
                             com.funk.language.ast.FunkType.EffectRow(remainingEffects, null)
                         )

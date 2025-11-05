@@ -386,13 +386,67 @@ private fun handleExecCommand(args: List<String>) {
         val typeChecker = TypeChecker()
         val typedProgram = typeChecker.typeCheck(program, projectRoot)
         
-        // Execute using FunkInterpreter
+        // Execute using FunkInterpreter with module loading
         val interpreter = com.funk.language.interpreter.FunkInterpreter()
+
+        // Execute the program to load all definitions and get the context
         val result = interpreter.execute(typedProgram, projectRoot)
-        
+        val context = interpreter.getLastExecutionContext()
+
+        // Check if 'main' exists and is a function
+        val mainValue = context["main"]
+        if (mainValue == null) {
+            println("❌ Error: No 'main' function found")
+            println()
+            println("The program must define a 'main' function:")
+            println("  let main = {} -> ...")
+            println()
+            println("Example:")
+            println("  let main = {} -> do")
+            println("    Log.println { msg = \"Hello, World!\" }")
+            kotlin.system.exitProcess(1)
+        }
+
+        // Check if main is a function
+        val isFunctionType = mainValue is com.funk.language.interpreter.SimpleFunkFunction ||
+                            mainValue is com.funk.language.interpreter.FunkTruffleFunction ||
+                            mainValue is com.funk.language.interpreter.NativeFunkFunction
+
+        if (!isFunctionType) {
+            println("❌ Error: 'main' must be a function, not a value")
+            println()
+            println("Found: ${mainValue::class.simpleName}")
+            println()
+            println("Change your code from:")
+            println("  let main = perform Console in demo {}")
+            println()
+            println("To:")
+            println("  let main = {} -> perform Console in demo {}")
+            kotlin.system.exitProcess(1)
+        }
+
+        // Call main with empty record argument
+        // Use the execution context that has all the imports
+        val emptyArgs = com.funk.language.interpreter.FunkRecord(emptyMap())
+        val mainContext = context.toMutableMap()
+
+        val mainResult = when (mainValue) {
+            is com.funk.language.interpreter.SimpleFunkFunction -> {
+                interpreter.callFunctionWithRecord(mainValue, emptyArgs, mainContext)
+            }
+            is com.funk.language.interpreter.NativeFunkFunction -> {
+                mainValue.call(listOf(emptyArgs))
+            }
+            else -> {
+                println("❌ Error: Unsupported function type for main")
+                kotlin.system.exitProcess(1)
+                com.funk.language.interpreter.FunkNull
+            }
+        }
+
         println("✅ Execution successful!")
         println()
-        println(prettyPrintResult(result))
+        println(prettyPrintResult(mainResult))
         
     } catch (e: TypeCheckError) {
         println("❌ Type Error:")
