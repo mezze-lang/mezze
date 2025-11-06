@@ -2,7 +2,7 @@
 
 use std::effects::log::{Log, Console, QuietConsole}
 use std::effects::filesystem::{FileSystem, LocalDisk, MemoryFS}
-use int
+use std::int
 
 # Create a greeting message
 let create_greeting = { name } ->

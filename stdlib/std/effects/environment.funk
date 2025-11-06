@@ -1,6 +1,5 @@
 # std/effects/environment.funk - Environment and system information effects
 
-# Environment effect definition
 pub effect Environment {
     # Get environment variable
     get_env: { name: String } -> Option String,
@@ -9,7 +8,7 @@ pub effect Environment {
     set_env: { name: String, value: String } -> {},
     
     # Get all environment variables
-    get_all_env: {} -> [(String, String)],
+    get_all_env: {} -> [String],
     
     # Get current working directory
     current_dir: {} -> String,
@@ -47,7 +46,7 @@ impl Environment for SystemEnvironment where {
 
 # Mock environment for testing
 impl Environment for MockEnvironment {
-    env_vars: [(String, String)],
+    env_vars: [String],
     current_directory: String,
     mock_os: String
 } where {
@@ -67,12 +66,11 @@ impl Environment for MockEnvironment {
 # Convenience functions
 pub let get_env = { name: String } -> Environment.get_env { name = name }
 pub let current_dir = { } -> Environment.current_dir { }
-pub let os_info = { } -> do {
+pub let os_info = { } -> do
     let name = Environment.os_name { }
     let version = Environment.os_version { }
     let architecture = Environment.arch { }
     { name = name, version = version, arch = architecture }
-}
 
 # Usage examples:
 # 

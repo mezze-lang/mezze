@@ -1,6 +1,6 @@
 # std/effects/random.funk - Random number generation as an effect
 
-use std::math::basic
+use std::math::core
 use std::math::trig
 
 # Random effect definition
@@ -13,10 +13,10 @@ pub effect Random {
 
 # Seeded random implementation with deterministic behavior
 impl Random for SeededRandom { seed: Int } where {
-    random_float: {} -> Float = { } -> __native_seeded_random_float { seed = seed },
-    random_int: { min: Int, max: Int } -> Int = { min, max } -> __native_seeded_random_int { seed = seed, min = min, max = max },
-    random_nat: { max: Nat } -> Nat = { max } -> __native_seeded_random_nat { seed = seed, max = max },
-    seed: { seed: Int } -> {} = { new_seed } -> __native_update_seed { old_seed = seed, new_seed = new_seed }
+    random_float = { } -> __native_seeded_random_float { seed = seed },
+    random_int = { min, max } -> __native_seeded_random_int { seed = seed, min = min, max = max },
+    random_nat = { max } -> __native_seeded_random_nat { seed = seed, max = max },
+    seed = { new_seed } -> __native_update_seed { old_seed = seed, new_seed = new_seed }
 }
 
 # Convenience functions that use the Random effect
@@ -43,13 +43,13 @@ pub let uniform = { min: Float, max: Float } -> random_range { min = min, max = 
 pub let normal = { mean: Float, std_dev: Float } -> do
     let u1 = Random.random_float { }
     let u2 = Random.random_float { }
-    let z0 = sqrt { value = -2.0 * ln { value = u1 } } * cos { value = 2.0 * pi * u2 }
+    let z0 = core::sqrt { x = -2.0 * core::ln { x = u1 } } * trig::cos { value = 2.0 * trig::pi * u2 }
     mean + (std_dev * z0)
 
 # Exponential distribution
 pub let exponential = { rate: Float } -> do
     let u = Random.random_float { }
-    (-1.0 / rate) * ln { value = u }
+    (-1.0 / rate) * core::ln { x = u }
 
 # Usage examples:
 # 

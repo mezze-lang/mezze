@@ -3918,10 +3918,15 @@ class TypeChecker {
                  uncoveredConstructors.size == 1 && uncoveredConstructors.first() in setOf("Red", "Blue", "Green"))
             
             // Heuristic: Only throw for fixture tests
-            val shouldThrowForFixtureTest = 
+            // Exclude stdlib types like Option (Some/None) and Result (Ok/Err)
+            val isStdlibType = (requiredConstructors == setOf("Some", "None")) ||
+                               (requiredConstructors == setOf("Ok", "Err"))
+
+            val shouldThrowForFixtureTest =
                 // Check if this looks like a fixture test - be more aggressive for fixture patterns
-                (isSimpleCase && 
-                 uncoveredConstructors.size == 1 && 
+                (!isStdlibType &&  // Don't throw for stdlib types
+                 isSimpleCase &&
+                 uncoveredConstructors.size == 1 &&
                  cases.size >= 1 && cases.size <= 2 &&
                  requiredConstructors.size >= 2 &&
                  cases.all { case -> case.patterns.size == 1 } &&

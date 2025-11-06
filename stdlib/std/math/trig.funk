@@ -1,6 +1,6 @@
 # std/math/trig.funk - Trigonometric functions
 
-use std::math::basic
+use std::math::core
 
 # Basic trigonometric functions
 pub let sin = { value: Float } ->
@@ -37,17 +37,17 @@ pub let radians_to_degrees = { radians: Float } ->
     radians * (180.0 / pi)
 
 # Additional trigonometric functions
-pub let tanh = { value: Float } ->
-    let exp_pos = exp { value = value }
-    let exp_neg = exp { value = -value }
+pub let tanh = { value: Float } -> do
+    let exp_pos = core::exp { x = value }
+    let exp_neg = core::exp { x = -value }
     (exp_pos - exp_neg) / (exp_pos + exp_neg)
 
-pub let sinh = { value: Float } ->
-    let exp_pos = exp { value = value }
-    let exp_neg = exp { value = -value }
+pub let sinh = { value: Float } -> do
+    let exp_pos = core::exp { x = value }
+    let exp_neg = core::exp { x = -value }
     (exp_pos - exp_neg) / 2.0
 
-pub let cosh = { value: Float } ->
-    let exp_pos = exp { value = value }
-    let exp_neg = exp { value = -value }
+pub let cosh = { value: Float } -> do
+    let exp_pos = core::exp { x = value }
+    let exp_neg = core::exp { x = -value }
     (exp_pos + exp_neg) / 2.0

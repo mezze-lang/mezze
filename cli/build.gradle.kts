@@ -27,16 +27,24 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":interpreter"))
-    
+
     // Polyglot API (Context, Value, Source) - host API - match native-image version
     implementation("org.graalvm.sdk:graal-sdk:24.2.2")
-    
+
     // Truffle API (Language, Node, etc.) - guest language API - match native-image version
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
     kapt("org.graalvm.truffle:truffle-dsl-processor:24.2.2") // Add annotation processor
-    
+
     // JSON serialization for enhanced AST
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+}
+
+// Include stdlib funk files as resources in the JAR
+tasks.named<ProcessResources>("processResources") {
+    from(project.rootDir.resolve("stdlib")) {
+        include("**/*.funk")
+        into(".")
+    }
 }
 
 tasks.shadowJar {
@@ -113,6 +121,9 @@ graalvmNative {
                 // Essential Polyglot support
                 "-H:IncludeResources=META-INF/truffle-languages/.*",
                 "-H:IncludeResources=META-INF/services/.*",
+
+                // Include stdlib as resources
+                "-H:IncludeResources=std/.*\\.funk",
                 
                 // Enable experimental options
                 "-H:+UnlockExperimentalVMOptions",
