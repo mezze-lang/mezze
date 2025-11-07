@@ -1,0 +1,112 @@
+# std/collections/list.funk - Immutable linked list operations
+#
+# List 'a is a built-in type conceptually defined as:
+# type List 'a = Cons { head: 'a, tail: List 'a } | Nil
+#
+# Implementation uses native JVM List for performance with Truffle
+# Lists are immutable - all operations return new lists
+
+# Basic list operations
+pub let empty: {} -> List 'a = {} ->
+    __native_list_empty {}
+
+pub let cons: { head: 'a, tail: List 'a } -> List 'a = { head, tail } ->
+    __native_list_cons { head = head, tail = tail }
+
+pub let is_empty: { xs: List 'a } -> Boolean = { xs } ->
+    __native_list_is_empty { xs = xs }
+
+pub let head: { xs: List 'a } -> 'a = { xs } ->
+    __native_list_head { xs = xs }
+
+pub let tail: { xs: List 'a } -> List 'a = { xs } ->
+    __native_list_tail { xs = xs }
+
+pub let length: { xs: List 'a } -> Int = { xs } ->
+    __native_list_length { xs = xs }
+
+# List construction
+pub let singleton: { x: 'a } -> List 'a = { x } ->
+    cons { head = x, tail = empty {} }
+
+pub let prepend: { x: 'a, xs: List 'a } -> List 'a = { x, xs } ->
+    cons { head = x, tail = xs }
+
+pub let append: { xs: List 'a, ys: List 'a } -> List 'a = { xs, ys } ->
+    __native_list_append { xs = xs, ys = ys }
+
+# List access
+pub let get: { xs: List 'a, index: Int } -> 'a = { xs, index } ->
+    __native_list_get { xs = xs, index = index }
+
+pub let take: { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+    __native_list_take { xs = xs, n = n }
+
+pub let drop: { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+    __native_list_drop { xs = xs, n = n }
+
+# Higher-order functions
+pub let map: { xs: List 'a, f: 'a -> 'b } -> List 'b = { xs, f } ->
+    __native_list_map { xs = xs, f = f }
+
+pub let filter: { xs: List 'a, p: 'a -> Boolean } -> List 'a = { xs, p } ->
+    __native_list_filter { xs = xs, p = p }
+
+pub let fold_left: { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc } -> 'acc = { xs, init, f } ->
+    __native_list_fold_left { xs = xs, init = init, f = f }
+
+pub let fold_right: { xs: List 'a, init: 'acc, f: { x: 'a, acc: 'acc } -> 'acc } -> 'acc = { xs, init, f } ->
+    __native_list_fold_right { xs = xs, init = init, f = f }
+
+pub let reduce: { xs: List 'a, f: { acc: 'a, x: 'a } -> 'a } -> 'a = { xs, f } ->
+    __native_list_reduce { xs = xs, f = f }
+
+# List predicates
+pub let any: { xs: List 'a, p: 'a -> Boolean } -> Boolean = { xs, p } ->
+    __native_list_any { xs = xs, p = p }
+
+pub let all: { xs: List 'a, p: 'a -> Boolean } -> Boolean = { xs, p } ->
+    __native_list_all { xs = xs, p = p }
+
+pub let contains: { xs: List 'a, x: 'a } -> Boolean = { xs, x } ->
+    __native_list_contains { xs = xs, x = x }
+
+# List transformations
+pub let reverse: { xs: List 'a } -> List 'a = { xs } ->
+    __native_list_reverse { xs = xs }
+
+pub let concat: { xss: List (List 'a) } -> List 'a = { xss } ->
+    __native_list_concat { xss = xss }
+
+pub let flat_map: { xs: List 'a, f: 'a -> List 'b } -> List 'b = { xs, f } ->
+    concat { xss = map { xs = xs, f = f } }
+
+pub let zip: { xs: List 'a, ys: List 'b } -> List { fst: 'a, snd: 'b } = { xs, ys } ->
+    __native_list_zip { xs = xs, ys = ys }
+
+pub let unzip: { xs: List { fst: 'a, snd: 'b } } -> { fsts: List 'a, snds: List 'b } = { xs } ->
+    __native_list_unzip { xs = xs }
+
+# Conversion functions
+pub let to_array: { xs: List 'a } -> ['a] = { xs } ->
+    __native_list_to_array { xs = xs }
+
+pub let from_array: { xs: ['a] } -> List 'a = { xs } ->
+    __native_list_from_array { xs = xs }
+
+# List utilities
+pub let range: { start: Int, end: Int } -> List Int = { start, end } ->
+    __native_list_range { start = start, end = end }
+
+pub let repeat: { x: 'a, n: Int } -> List 'a = { x, n } ->
+    __native_list_repeat { x = x, n = n }
+
+pub let intersperse: { xs: List 'a, sep: 'a } -> List 'a = { xs, sep } ->
+    __native_list_intersperse { xs = xs, sep = sep }
+
+# Sorting
+pub let sort: { xs: List 'a } -> List 'a = { xs } ->
+    __native_list_sort { xs = xs }
+
+pub let sort_by: { xs: List 'a, cmp: { l: 'a, r: 'a } -> Int } -> List 'a = { xs, cmp } ->
+    __native_list_sort_by { xs = xs, cmp = cmp }

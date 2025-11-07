@@ -1,6 +1,7 @@
 # Integer utility functions
 # This module provides utility functions for working with integers
 # Note: The Int type and basic operations are now built-in
+# Built-in ability implementations (NumAdd, NumSub, NumMul, NumDiv, Eq, Inspect) are automatically available
 
 # Basic arithmetic operations (for qualified calls)
 pub let add = { l: Int, r: Int } ->

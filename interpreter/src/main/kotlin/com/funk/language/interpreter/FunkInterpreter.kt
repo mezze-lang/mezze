@@ -157,19 +157,32 @@ class FunkInterpreter {
                 
                 // Execute the module to get runtime values
                 val moduleContext = executeModule(module.program)
-                
+
                 // Import all public exports
                 val prefix = useDecl.alias ?: path.segments.last()
                 for ((name, export) in module.exports) {
                     val qualifiedName = "$prefix::$name"
-                    
+
                     // Get the actual runtime value from the executed module
                     val runtimeValue = moduleContext[name] ?: FunkNull
                     context[qualifiedName] = runtimeValue
-                    
+
                     // For constructors, also add without qualification
                     if (export.type == com.funk.language.typechecker.ExportedItemType.CONSTRUCTOR) {
                         context[name] = runtimeValue
+                    }
+                }
+
+                // Import ability implementations from the module
+                // Ability implementations have keys like "NumAdd_Int", "Eq_String", etc.
+                for ((key, value) in moduleContext) {
+                    if (key.contains("_") && !key.startsWith("__") && value is FunkRecord) {
+                        // Check if this looks like an ability implementation key
+                        val parts = key.split("_")
+                        if (parts.size >= 2 && !key.endsWith("_ability")) {
+                            // This is likely an ability implementation, import it
+                            context[key] = value
+                        }
                     }
                 }
             }
@@ -199,6 +212,19 @@ class FunkInterpreter {
                     val runtimeValue = moduleContext[item.name] ?: FunkNull
                     val contextName = item.alias ?: item.name
                     context[contextName] = runtimeValue
+                }
+
+                // Import ability implementations from the module
+                // Ability implementations have keys like "NumAdd_Int", "Eq_String", etc.
+                for ((key, value) in moduleContext) {
+                    if (key.contains("_") && !key.startsWith("__") && value is FunkRecord) {
+                        // Check if this looks like an ability implementation key
+                        val parts = key.split("_")
+                        if (parts.size >= 2 && !key.endsWith("_ability")) {
+                            // This is likely an ability implementation, import it
+                            context[key] = value
+                        }
+                    }
                 }
             }
         }
@@ -358,10 +384,23 @@ class FunkInterpreter {
                     // Desugar: replace @ placeholders in right side with leftValue
                     val desugaredRight = replaceAtPlaceholder(expr.right, leftValue, context)
                     evaluateExpression(desugaredRight, context)
-                } else {
+                } else if (expr.operator == "++") {
+                    // String concatenation is still special (not an ability yet)
                     val left = evaluateExpression(expr.left, context)
                     val right = evaluateExpression(expr.right, context)
                     evaluateBinaryOperation(left, expr.operator, right)
+                } else {
+                    // Desugar operator to ability method call
+                    // e.g., x + y becomes NumAdd.num_add { l = x, r = y }
+                    val desugared = desugarOperatorToAbilityCall(expr, context)
+                    if (desugared != null) {
+                        evaluateExpression(desugared, context)
+                    } else {
+                        // Fallback to old behavior for operators without abilities
+                        val left = evaluateExpression(expr.left, context)
+                        val right = evaluateExpression(expr.right, context)
+                        evaluateBinaryOperation(left, expr.operator, right)
+                    }
                 }
             }
             is UnaryOperation -> {
@@ -450,6 +489,12 @@ class FunkInterpreter {
                                                 is FunkNull -> "Null"
                                                 is FunkRecord -> "Record"
                                                 is FunkVariant -> "Variant"
+                                                is FunkList -> "List"
+                                                is FunkNonEmptyList -> "NonEmptyList"
+                                                is FunkNonEmptyList -> "NonEmptyList"
+                                                is FunkArrayList -> "ArrayList"
+                                                is FunkMap -> "Map"
+                                                is FunkSet -> "Set"
                                                 is SimpleFunkFunction -> "Function"
                                                 is NativeFunkFunction -> "NativeFunction"
                                                 else -> "Unknown"
@@ -465,6 +510,11 @@ class FunkInterpreter {
                                             is FunkNull -> "Null"
                                             is FunkRecord -> "Record"
                                             is FunkVariant -> "Variant"
+                                            is FunkList -> "List"
+                                            is FunkNonEmptyList -> "NonEmptyList"
+                                            is FunkArrayList -> "ArrayList"
+                                            is FunkMap -> "Map"
+                                            is FunkSet -> "Set"
                                             is SimpleFunkFunction -> "Function"
                                             is NativeFunkFunction -> "NativeFunction"
                                             else -> "Unknown"
@@ -476,18 +526,27 @@ class FunkInterpreter {
                                 val matchingImpl = context.entries.find { (key, value) ->
                                     if (value is FunkRecord && key.startsWith("${receiverName}_")) {
                                         val keyTypes = key.removePrefix("${receiverName}_").split("_")
-                                        typeArgs.size <= keyTypes.size && 
+                                        typeArgs.size <= keyTypes.size &&
                                         typeArgs.zip(keyTypes).all { (inputType, implType) -> inputType == implType }
                                     } else false
                                 }
-                                
-                                val (implKey, implementation) = matchingImpl 
-                                    ?: throw RuntimeException("No implementation found for ability $receiverName with input types $typeArgs")
-                                
-                                val implRecord = implementation as FunkRecord
-                                val operationFunction = implRecord.fields[expr.member]
-                                    ?: throw RuntimeException("Operation ${expr.member} not found in $receiverName implementation")
-                                
+
+                                // If no implementation found, try to derive one for Record/Variant types
+                                val operationFunction = if (matchingImpl != null) {
+                                    val (implKey, implementation) = matchingImpl
+                                    val implRecord = implementation as FunkRecord
+                                    implRecord.fields[expr.member]
+                                        ?: throw RuntimeException("Operation ${expr.member} not found in $receiverName implementation")
+                                } else {
+                                    // Try to automatically derive Eq or Inspect for Record/Variant/Collection types
+                                    val derived = deriveDerivedAbilityImplementation(receiverName, expr.member, typeArgs, arguments)
+                                    if (derived != null) {
+                                        derived
+                                    } else {
+                                        throw RuntimeException("No implementation found for ability $receiverName with input types $typeArgs (derivation not available for ability=$receiverName operation=$expr.member)")
+                                    }
+                                }
+
                                 // Call the operation function
                                 when (operationFunction) {
                                     is NativeFunkFunction -> operationFunction.call(listOf(arguments))
@@ -590,6 +649,11 @@ class FunkInterpreter {
                                             is FunkNull -> "Null"
                                             is FunkRecord -> "Record"
                                             is FunkVariant -> "Variant"
+                                            is FunkList -> "List"
+                                            is FunkNonEmptyList -> "NonEmptyList"
+                                            is FunkArrayList -> "ArrayList"
+                                            is FunkMap -> "Map"
+                                            is FunkSet -> "Set"
                                             is SimpleFunkFunction -> "Function"
                                             is NativeFunkFunction -> "NativeFunction"
                                             else -> "Unknown"
@@ -605,6 +669,11 @@ class FunkInterpreter {
                                         is FunkNull -> "Null"
                                         is FunkRecord -> "Record"
                                         is FunkVariant -> "Variant"
+                                        is FunkList -> "List"
+                                                is FunkNonEmptyList -> "NonEmptyList"
+                                        is FunkArrayList -> "ArrayList"
+                                        is FunkMap -> "Map"
+                                        is FunkSet -> "Set"
                                         is SimpleFunkFunction -> "Function"
                                         is NativeFunkFunction -> "NativeFunction"
                                         else -> "Unknown"
@@ -618,15 +687,24 @@ class FunkInterpreter {
                                 if (value is FunkRecord && key.startsWith("${effectName}_")) {
                                     val keyTypes = key.removePrefix("${effectName}_").split("_")
                                     // Check if the input types match the beginning of the implementation types
-                                    typeArgs.size <= keyTypes.size && 
+                                    typeArgs.size <= keyTypes.size &&
                                     typeArgs.zip(keyTypes).all { (inputType, implType) -> inputType == implType }
                                 } else false
                             }
-                            
-                            val (implKey, implementation) = matchingImpl 
-                                ?: throw RuntimeException("No implementation found for ability $effectName with input types $typeArgs")
-                            
-                            val implRecord = implementation as FunkRecord
+
+                            val implRecord = if (matchingImpl != null) {
+                                val (implKey, implementation) = matchingImpl
+                                implementation as FunkRecord
+                            } else {
+                                // Try to derive implementation for Record/Variant types
+                                val derivedOp = deriveDerivedAbilityImplementation(effectName, operationName, typeArgs, arguments)
+                                if (derivedOp != null) {
+                                    // Create a FunkRecord with the derived operation
+                                    FunkRecord(mapOf(operationName to derivedOp))
+                                } else {
+                                    throw RuntimeException("No implementation found for ability $effectName with input types $typeArgs")
+                                }
+                            }
                             
                             // Get the operation function from the implementation
                             val operationFunction = implRecord.fields[operationName]
@@ -1037,6 +1115,34 @@ class FunkInterpreter {
             "||" -> FunkBoolean(isTruthy(left) || isTruthy(right))
             else -> throw RuntimeException("Unknown binary operator: $operator")
         }
+    }
+
+    /**
+     * Desugar binary operators to ability method calls
+     * e.g., x + y becomes NumAdd.num_add { l = x, r = y }
+     * Returns null if operator doesn't map to an ability
+     */
+    private fun desugarOperatorToAbilityCall(expr: BinaryOperation, context: Map<String, FunkValue>): Expression? {
+        val (abilityName, methodName) = when (expr.operator) {
+            "+" -> Pair("NumAdd", "num_add")
+            "-" -> Pair("NumSub", "num_sub")
+            "*" -> Pair("NumMul", "num_mul")
+            "/" -> Pair("NumDiv", "num_div")
+            "==" -> Pair("Eq", "eq")
+            else -> return null  // Not an ability operator
+        }
+
+        // Create: AbilityName.methodName { l = left, r = right }
+        return FunctionCall(
+            MemberAccess(
+                Identifier(abilityName),
+                methodName
+            ),
+            RecordLiteral(listOf(
+                RecordFieldEntry("l", expr.left),
+                RecordFieldEntry("r", expr.right)
+            ))
+        )
     }
 
     /**
@@ -1798,10 +1904,13 @@ class FunkInterpreter {
     private fun registerNativeFunctions(context: MutableMap<String, FunkValue>) {
         // Use the centralized native functions registry
         NativeFunctions.registerAll(context)
-        
+
         // Register built-in constructors (always available without imports)
         registerBuiltinConstructors(context)
-        
+
+        // Register built-in abilities (NumAdd, NumSub, etc.)
+        registerBuiltInAbilities(context)
+
         // Load core stdlib modules that should always be available
         loadCoreStdLibModules(context)
         
@@ -1915,7 +2024,292 @@ class FunkInterpreter {
             }
         }
     }
-    
+
+    /**
+     * Register built-in abilities that are always available
+     * Also register implementations for built-in types (Int, Float, String, Boolean)
+     */
+    private fun registerBuiltInAbilities(context: MutableMap<String, FunkValue>) {
+        // Register ability declarations
+        context["NumAdd_ability"] = FunkRecord(mapOf("num_add" to FunkNull))
+        context["NumSub_ability"] = FunkRecord(mapOf("num_sub" to FunkNull))
+        context["NumMul_ability"] = FunkRecord(mapOf("num_mul" to FunkNull))
+        context["NumDiv_ability"] = FunkRecord(mapOf("num_div" to FunkNull))
+        context["Eq_ability"] = FunkRecord(mapOf("eq" to FunkNull))
+        context["Inspect_ability"] = FunkRecord(mapOf("to_str" to FunkNull))
+
+        // Register implementations for Int
+        context["NumAdd_Int"] = FunkRecord(mapOf(
+            "num_add" to context["__native_int_add"]!!
+        ))
+        context["NumSub_Int"] = FunkRecord(mapOf(
+            "num_sub" to context["__native_int_subtract"]!!
+        ))
+        context["NumMul_Int"] = FunkRecord(mapOf(
+            "num_mul" to context["__native_int_multiply"]!!
+        ))
+        context["NumDiv_Int"] = FunkRecord(mapOf(
+            "num_div" to context["__native_int_divide"]!!
+        ))
+        context["Eq_Int"] = FunkRecord(mapOf(
+            "eq" to context["__native_int_equals"]!!
+        ))
+        context["Inspect_Int"] = FunkRecord(mapOf(
+            "to_str" to context["__native_int_to_string"]!!
+        ))
+
+        // Register implementations for Float
+        context["NumAdd_Float"] = FunkRecord(mapOf(
+            "num_add" to context["__native_float_add"]!!
+        ))
+        context["NumSub_Float"] = FunkRecord(mapOf(
+            "num_sub" to context["__native_float_subtract"]!!
+        ))
+        context["NumMul_Float"] = FunkRecord(mapOf(
+            "num_mul" to context["__native_float_multiply"]!!
+        ))
+        context["NumDiv_Float"] = FunkRecord(mapOf(
+            "num_div" to context["__native_float_divide"]!!
+        ))
+        context["Eq_Float"] = FunkRecord(mapOf(
+            "eq" to context["__native_float_equals"]!!
+        ))
+        context["Inspect_Float"] = FunkRecord(mapOf(
+            "to_str" to context["__native_float_to_string"]!!
+        ))
+
+        // Register implementations for String
+        context["Eq_String"] = FunkRecord(mapOf(
+            "eq" to context["__native_string_equals"]!!
+        ))
+        context["Inspect_String"] = FunkRecord(mapOf(
+            "to_str" to NativeFunkFunction("to_str_string") { args ->
+                val record = args[0] as FunkRecord
+                record.fields["val"] as FunkString
+            }
+        ))
+
+        // Register implementations for Boolean
+        context["Eq_Boolean"] = FunkRecord(mapOf(
+            "eq" to context["__native_boolean_equals"]!!
+        ))
+        context["Inspect_Boolean"] = FunkRecord(mapOf(
+            "to_str" to NativeFunkFunction("to_str_boolean") { args ->
+                val record = args[0] as FunkRecord
+                val value = record.fields["val"] as FunkBoolean
+                FunkString(if (value.value) "true" else "false")
+            }
+        ))
+    }
+
+    /**
+     * Automatically derive Eq or Inspect implementation for composite types
+     * (Record, Variant, List, Array, Map, Set)
+     * Returns a function that implements the operation, or null if derivation is not possible
+     */
+    private fun deriveDerivedAbilityImplementation(
+        abilityName: String,
+        operationName: String,
+        typeArgs: List<String>,
+        arguments: FunkValue
+    ): FunkValue? {
+        // Derive for Record, Variant, and collection types
+        val derivableTypes = setOf("Record", "Variant", "List", "NonEmptyList", "ArrayList", "Map", "Set")
+        if (!typeArgs.any { it in derivableTypes }) {
+            return null
+        }
+
+        return when (abilityName) {
+            "Eq" -> when (operationName) {
+                "eq" -> NativeFunkFunction("derived_eq") { args ->
+                    val record = args[0] as FunkRecord
+                    val left = record.fields["l"]!!
+                    val right = record.fields["r"]!!
+                    FunkBoolean(deriveStructuralEquality(left, right))
+                }
+                else -> null
+            }
+            "Inspect" -> when (operationName) {
+                "to_str" -> NativeFunkFunction("derived_to_str") { args ->
+                    val record = args[0] as FunkRecord
+                    val value = record.fields["val"]!!
+                    FunkString(deriveStructuralInspect(value))
+                }
+                else -> null
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Derive structural equality for any two values
+     */
+    private fun deriveStructuralEquality(left: FunkValue, right: FunkValue): Boolean {
+        return when {
+            left is FunkInt && right is FunkInt -> left.value == right.value
+            left is FunkFloat && right is FunkFloat -> left.value == right.value
+            left is FunkString && right is FunkString -> left.value == right.value
+            left is FunkBoolean && right is FunkBoolean -> left.value == right.value
+            left is FunkNull && right is FunkNull -> true
+
+            // Structural equality for records
+            left is FunkRecord && right is FunkRecord -> {
+                if (left.fields.keys != right.fields.keys) {
+                    false
+                } else {
+                    left.fields.all { (key, leftValue) ->
+                        val rightValue = right.fields[key]
+                        rightValue != null && deriveStructuralEquality(leftValue, rightValue)
+                    }
+                }
+            }
+
+            // Structural equality for variants
+            left is FunkVariant && right is FunkVariant -> {
+                if (left.constructor != right.constructor) {
+                    false
+                } else {
+                    when {
+                        left.value == null && right.value == null -> true
+                        left.value != null && right.value != null ->
+                            deriveStructuralEquality(left.value, right.value)
+                        else -> false
+                    }
+                }
+            }
+
+            // Structural equality for lists
+            left is FunkList && right is FunkList -> {
+                if (left.elements.size != right.elements.size) {
+                    false
+                } else {
+                    left.elements.zip(right.elements).all { (l, r) ->
+                        deriveStructuralEquality(l, r)
+                    }
+                }
+            }
+
+            // Structural equality for non-empty lists
+            left is FunkNonEmptyList && right is FunkNonEmptyList -> {
+                if (left.elements.size != right.elements.size) {
+                    false
+                } else {
+                    left.elements.zip(right.elements).all { (l, r) ->
+                        deriveStructuralEquality(l, r)
+                    }
+                }
+            }
+
+            // Structural equality for arrays (ArrayList)
+            left is FunkArrayList && right is FunkArrayList -> {
+                if (left.elements.size != right.elements.size) {
+                    false
+                } else {
+                    left.elements.zip(right.elements).all { (l, r) ->
+                        deriveStructuralEquality(l, r)
+                    }
+                }
+            }
+
+            // Structural equality for maps
+            left is FunkMap && right is FunkMap -> {
+                if (left.entries.size != right.entries.size) {
+                    false
+                } else {
+                    left.entries.all { (key, leftValue) ->
+                        val rightValue = right.entries[key]
+                        rightValue != null && deriveStructuralEquality(leftValue, rightValue)
+                    }
+                }
+            }
+
+            // Structural equality for sets
+            left is FunkSet && right is FunkSet -> {
+                if (left.elements.size != right.elements.size) {
+                    false
+                } else {
+                    // Check if all elements in left are in right
+                    left.elements.all { leftElem ->
+                        right.elements.any { rightElem ->
+                            deriveStructuralEquality(leftElem, rightElem)
+                        }
+                    }
+                }
+            }
+
+            else -> false
+        }
+    }
+
+    /**
+     * Derive structural inspect (string representation) for any value
+     * Following Roc's Inspect.toStr style
+     */
+    private fun deriveStructuralInspect(value: FunkValue): String {
+        return when (value) {
+            is FunkInt -> value.value.toString()
+            is FunkFloat -> value.value.toString()
+            is FunkString -> "\"${value.value}\""
+            is FunkBoolean -> if (value.value) "true" else "false"
+            is FunkNull -> "null"
+
+            // Inspect for records
+            is FunkRecord -> {
+                val fields = value.fields.entries.joinToString(", ") { (key, fieldValue) ->
+                    "$key = ${deriveStructuralInspect(fieldValue)}"
+                }
+                "{ $fields }"
+            }
+
+            // Inspect for variants
+            is FunkVariant -> {
+                if (value.value == null) {
+                    value.constructor
+                } else {
+                    "${value.constructor} ${deriveStructuralInspect(value.value)}"
+                }
+            }
+
+            // Inspect for lists
+            is FunkList -> {
+                val elements = value.elements.joinToString(", ") { deriveStructuralInspect(it) }
+                "List ($elements)"
+            }
+
+            // Inspect for non-empty lists
+            is FunkNonEmptyList -> {
+                val elements = value.elements.joinToString(", ") { deriveStructuralInspect(it) }
+                "NonEmptyList ($elements)"
+            }
+
+            // Inspect for arrays (ArrayList)
+            is FunkArrayList -> {
+                val elements = value.elements.joinToString(", ") { deriveStructuralInspect(it) }
+                "[$elements]"
+            }
+
+            // Inspect for maps
+            is FunkMap -> {
+                val entries = value.entries.entries.joinToString(", ") { (key, mapValue) ->
+                    "${deriveStructuralInspect(key)}: ${deriveStructuralInspect(mapValue)}"
+                }
+                "Map {$entries}"
+            }
+
+            // Inspect for sets
+            is FunkSet -> {
+                val elements = value.elements.joinToString(", ") { deriveStructuralInspect(it) }
+                "Set {$elements}"
+            }
+
+            // Inspect for functions
+            is SimpleFunkFunction -> "<function>"
+            is NativeFunkFunction -> "<native function>"
+
+            else -> "<unknown>"
+        }
+    }
+
     /**
      * Load core stdlib modules that should always be available
      */

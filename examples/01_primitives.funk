@@ -1,0 +1,49 @@
+# Example: Working with primitive types
+# Shows int, float, string, and boolean operations
+
+use std::int
+use std::float
+use std::string
+use std::effects::log::{Log, Console}
+
+# Integer operations
+let age = 25
+let doubled = age * 2
+let is_adult = age >= 18
+
+# Float operations
+let pi = 3.14159
+let radius = 5.0
+let area = pi * radius * radius
+
+# String operations
+let greeting = "Hello"
+let name = "Funk"
+let message = greeting ++ ", " ++ name ++ "!"
+
+# Boolean operations
+let is_valid = true
+let can_proceed = is_valid && is_adult
+
+# Main function for execution
+let main = {} ->
+    perform Console in do
+        Log.println { msg = "=== Primitives Example ===" }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Integers:" }
+        Log.println { msg = "  age: " ++ int::to_string { val = age } }
+        Log.println { msg = "  doubled: " ++ int::to_string { val = doubled } }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Floats:" }
+        Log.println { msg = "  area: " ++ float::to_string { val = area } }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Strings:" }
+        Log.println { msg = "  " ++ message }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Booleans:" }
+        Log.println { msg = "  is_adult: " ++ (if is_adult then "true" else "false") }
+        Log.println { msg = "  can_proceed: " ++ (if can_proceed then "true" else "false") }

@@ -1,6 +1,11 @@
 # Boolean utility functions
 # This module provides utility functions for working with booleans
 # Note: The Boolean type and basic operations are now built-in
+# Built-in ability implementations (Eq, Inspect) are automatically available
+
+# Type conversions
+pub let to_string = { val: Boolean } ->
+    if val then "true" else "false"
 
 # Boolean logic operations
 pub let and = { l: Boolean, r: Boolean } ->

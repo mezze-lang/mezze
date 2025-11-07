@@ -1,0 +1,73 @@
+# Example: Pattern matching
+
+use std::int
+use std::effects::log::{Log, Console}
+
+# Match on variants (using concrete types)
+type IntOption = | IntSome { val: Int }, IntNone |
+
+let unwrap_or = { opt: IntOption, default: Int } ->
+    match opt is
+      IntSome { val } -> val
+      IntNone -> default
+
+let result1 = unwrap_or { opt = IntSome { val = 42 }, default = 0 }
+let result2 = unwrap_or { opt = IntNone, default = 0 }
+
+# Access record fields directly (record pattern matching not yet supported)
+let alice = { name = "Alice", age = 30 }
+let name = alice.name
+
+# Match on boolean with guards
+let classify_age = { age: Int } ->
+    if age < 13 then "child"
+    else if age < 20 then "teen"
+    else if age < 65 then "adult"
+    else "senior"
+
+let class1 = classify_age { age = 10 }
+let class2 = classify_age { age = 16 }
+let class3 = classify_age { age = 45 }
+
+# Nested pattern matching (using concrete types)
+type NestedResult = | NestedOk { val: IntOption }, NestedErr { err: String } |
+
+let unwrap_option = { opt: IntOption } ->
+    match opt is
+      IntSome { val } -> val
+      IntNone -> 0
+
+let process_result = { res: NestedResult } ->
+    match res is
+      NestedOk { val } -> unwrap_option { opt = val }
+      NestedErr { err } -> -1
+
+let nested1 = process_result { res = NestedOk { val = IntSome { val = 42 } } }
+let nested2 = process_result { res = NestedOk { val = IntNone } }
+let nested3 = process_result { res = NestedErr { err = "error" } }
+
+# Main function for execution
+let main = {} ->
+    perform Console in do
+        Log.println { msg = "=== Pattern Matching Example ===" }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Option unwrapping:" }
+        Log.println { msg = "  Some(42) unwrap_or 0 = " ++ int::to_string { val = result1 } }
+        Log.println { msg = "  None unwrap_or 0 = " ++ int::to_string { val = result2 } }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Record field access:" }
+        Log.println { msg = "  Name from record: " ++ name }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Age classification:" }
+        Log.println { msg = "  10 years: " ++ class1 }
+        Log.println { msg = "  16 years: " ++ class2 }
+        Log.println { msg = "  45 years: " ++ class3 }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Nested matching:" }
+        Log.println { msg = "  Ok(Some(42)): " ++ int::to_string { val = nested1 } }
+        Log.println { msg = "  Ok(None): " ++ int::to_string { val = nested2 } }
+        Log.println { msg = "  Err: " ++ int::to_string { val = nested3 } }

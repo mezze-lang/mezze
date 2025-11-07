@@ -1,29 +1,33 @@
 # String utility functions
 # This module provides utility functions for working with strings
 # Note: The String type and basic operations are now built-in
+# Built-in ability implementations (Eq, Display) are automatically available
 
 # String concatenation
 pub let concat = { l: String, r: String } ->
     __native_string_concat { l = l, r = r }
 
 # String utility functions
-pub let length = { value: String } ->
-    __native_string_length { s = value }
+pub let to_string = { val: String } ->
+    val
 
-pub let is_empty = { value: String } ->
-    length { value = value } == 0
+pub let length = { val: String } ->
+    __native_string_length { s = val }
 
-pub let to_upper = { value: String } ->
-    __native_string_to_upper { s = value }
+pub let is_empty = { val: String } ->
+    length { val = val } == 0
 
-pub let to_lower = { value: String } ->
-    __native_string_to_lower { s = value }
+pub let to_upper = { val: String } ->
+    __native_string_to_upper { s = val }
 
-pub let trim = { value: String } ->
-    __native_string_trim { s = value }
+pub let to_lower = { val: String } ->
+    __native_string_to_lower { s = val }
 
-pub let reverse = { value: String } ->
-    __native_string_reverse { s = value }
+pub let trim = { val: String } ->
+    __native_string_trim { s = val }
+
+pub let reverse = { val: String } ->
+    __native_string_reverse { s = val }
 
 # Additional string utilities
 pub let starts_with = { s: String, prefix: String } ->

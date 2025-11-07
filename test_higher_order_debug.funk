@@ -1,3 +1,0 @@
-let applyBinary = {f, x, y} -> f {x = x, y = y}
-let add = {x, y} -> x + y
-let result = applyBinary {f = add, x = 1, y = 2}

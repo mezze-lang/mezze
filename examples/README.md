@@ -1,113 +1,154 @@
-# Funk Language Examples
+# Funk Examples
 
-Welcome to the Funk language examples! This collection demonstrates the key features and capabilities of Funk through practical, runnable code examples.
+This directory contains comprehensive examples demonstrating all major features of the Funk programming language. Each example is self-contained and can be run independently.
 
-## 📁 Examples Organization
+## Running Examples
 
-### [01-basics](./01-basics/) - Language Fundamentals
-Learn the core concepts of Funk:
-- Variables and expressions
-- Basic data types
-- Simple functions
-- Comments and syntax
-
-### [02-pattern-matching](./02-pattern-matching/) - Pattern Matching
-Master Funk's powerful pattern matching:
-- Basic match expressions
-- Multiple patterns
-- Guard conditions
-- Exhaustiveness checking
-
-### [03-functions](./03-functions/) - Functions and Composition
-Explore functional programming in Funk:
-- Lambda expressions
-- Function composition
-- Partial application
-- Higher-order functions
-
-### [04-types](./04-types/) - Type System
-Understand Funk's type system:
-- Variant types
-- Record types
-- Type annotations
-- Type inference
-
-### [05-effects](./05-effects/) - Algebraic Effects
-Learn about Funk's effect system:
-- Effect definitions
-- Effect handlers
-- Effect composition
-- Built-in effects
-
-### [06-advanced](./06-advanced/) - Advanced Features
-Advanced patterns and techniques:
-- Complex data structures
-- Advanced pattern matching
-- Performance considerations
-- Integration patterns
-
-## 🚀 Running Examples
-
-To run any example:
+All examples have a `main` function with type `{} -> {}` that can be executed:
 
 ```bash
-# Check syntax and types
-funk-dev check examples/01-basics/hello-world.funk
+# Type check an example
+funk check examples/01_primitives.funk
 
-# Execute the example
-funk-dev exec examples/01-basics/hello-world.funk
+# Execute an example
+funk exec examples/01_primitives.funk
 ```
 
-## 🎯 Learning Path
+## Examples Overview
 
-**New to Funk?** Follow this recommended learning path:
+### Basic Types and Structures
 
-1. **Start with Basics** - `01-basics/` folder
-2. **Learn Pattern Matching** - `02-pattern-matching/` folder  
-3. **Understand Functions** - `03-functions/` folder
-4. **Master Types** - `04-types/` folder
-5. **Explore Effects** - `05-effects/` folder
-6. **Advanced Techniques** - `06-advanced/` folder
+**01_primitives.funk** - Primitive types
+- Integers, floats, strings, and booleans
+- Basic operations and conversions
+- Type safety demonstrations
 
-## 📚 Additional Resources
+**02_records_closed.funk** - Closed records
+- Fixed record structures
+- Field access and updates
+- Nested records
 
-- **[Language Guide](../docs/language-guide/)** - Comprehensive language documentation
-- **[Reference](../docs/reference/)** - Technical reference materials
-- **[Tutorials](../docs/tutorials/)** - Step-by-step tutorials
+**03_records_open.funk** - Open records
+- Polymorphic record functions
+- Row polymorphism
+- Structural subtyping
 
-## 🔍 Example Index
+**04_variants_closed.funk** - Closed variants
+- Algebraic data types
+- Pattern matching on variants
+- Result and Option types
 
-### Quick Start Examples
-- [`01-basics/hello-world.funk`](./01-basics/hello-world.funk) - Your first Funk program
-- [`02-pattern-matching/basic-match.funk`](./02-pattern-matching/basic-match.funk) - Simple pattern matching
-- [`03-functions/simple-function.funk`](./03-functions/simple-function.funk) - Basic function definition
+**05_variants_open.funk** - Open variants
+- Extensible variants
+- Wildcard patterns
+- Partial matching
 
-### Feature Demonstrations
-- [`02-pattern-matching/guards.funk`](./02-pattern-matching/guards.funk) - Guard conditions in patterns
-- [`02-pattern-matching/multiple-patterns.funk`](./02-pattern-matching/multiple-patterns.funk) - Multiple patterns with `|`
-- [`04-types/variants.funk`](./04-types/variants.funk) - Variant type definitions
-- [`05-effects/console-effect.funk`](./05-effects/console-effect.funk) - Console I/O with effects
+### Functions
 
-### Real-World Examples
-- [`06-advanced/calculator.funk`](./06-advanced/calculator.funk) - Expression calculator
-- [`06-advanced/state-machine.funk`](./06-advanced/state-machine.funk) - State machine implementation
+**06_functions.funk** - Functions and higher-order functions
+- Simple functions
+- Currying and partial application
+- Function composition
+- Higher-order functions
+- Recursion
 
-## 💡 Tips for Learning
+**07_pattern_matching.funk** - Pattern matching
+- Matching on variants
+- Matching on records
+- Nested patterns
+- Guards and conditionals
 
-1. **Read the code comments** - Each example includes detailed explanations
-2. **Try modifications** - Experiment with changing values and patterns
-3. **Check the output** - Run examples to see results
-4. **Explore variations** - Many examples include alternative approaches
-5. **Build incrementally** - Start simple and add complexity gradually
+### Advanced Features
 
-## 🛠️ Contributing Examples
+**08_abilities.funk** - Abilities (type classes)
+- Defining abilities
+- Implementing abilities for types
+- Generic functions with ability constraints
+- Multiple operations per ability
 
-Found a great use case? Want to add an example? 
+**09_effects_log.funk** - Log effect
+- Console logging
+- Different log levels (trace, debug, info, warn, error)
+- Effect handlers
 
-1. Choose the appropriate folder
-2. Create a descriptive `.funk` file
-3. Add comments explaining the concepts
-4. Update the folder's README.md
-5. Test your example works correctly
+**10_effects_filesystem.funk** - FileSystem effect
+- Reading and writing files
+- File existence checks
+- Memory-based filesystem for testing
 
-Happy coding with Funk! 🎉
+**11_effects_random.funk** - Random effect
+- Random number generation
+- Seeded randomness for reproducibility
+- Random boolean values
+- Random floats
+
+**12_collections_array.funk** - Array operations
+- Map, filter, fold
+- Array length and indexing
+- Functional array transformations
+
+## Key Concepts Demonstrated
+
+### Effect System
+All examples use the algebraic effects system:
+- **Log effect** - Console output with `perform Console`
+- **FileSystem effect** - File operations with `perform MemoryFS` or `perform LocalDisk`
+- **Random effect** - Random generation with `perform SeededRandom` or `perform SystemRandom`
+
+### Type System Features
+- **Closed types** - Fixed structure (records/variants)
+- **Open types** - Extensible structure with `...`
+- **Row polymorphism** - Functions accepting records with extra fields
+- **Type inference** - Automatic type deduction
+- **Generic types** - Parametric polymorphism with type variables
+
+### Functional Programming
+- **Immutability** - All values are immutable
+- **Pure functions** - Functions without side effects (unless using effects)
+- **Higher-order functions** - Functions as first-class values
+- **Pattern matching** - Destructuring and case analysis
+- **Recursion** - Primary iteration mechanism
+
+## Example Template
+
+Every example follows this structure:
+
+```funk
+# Import required modules
+use std::effects::log::{Log, Console}
+
+# Define functions and values
+let example_function = { x: Int } -> x + 1
+
+# Main function for execution (required for exec)
+let main = {} ->
+    perform Console in do
+        Log.println { msg = "Output here" }
+```
+
+## Next Steps
+
+After exploring these examples:
+1. Check out the [stdlib documentation](../stdlib/README.md) for available modules
+2. Read the [language guide](../docs/language-guide/) for detailed explanations
+3. Try modifying examples to experiment with features
+4. Write your own Funk programs!
+
+## Testing Examples
+
+All examples can be type-checked and executed:
+
+```bash
+# Check all examples
+for f in examples/*.funk; do
+    echo "Checking $f..."
+    funk check "$f" || exit 1
+done
+
+# Run all examples
+for f in examples/*.funk; do
+    echo "Running $f..."
+    funk exec "$f"
+    echo "---"
+done
+```

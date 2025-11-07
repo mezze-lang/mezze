@@ -385,6 +385,59 @@ data class FunkList(val elements: List<FunkValue>) : FunkValue() {
 }
 
 /**
+ * Built-in NonEmptyList value (guaranteed non-empty list)
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkNonEmptyList(val elements: List<FunkValue>) : FunkValue() {
+    init {
+        require(elements.isNotEmpty()) { "NonEmptyList must have at least one element" }
+    }
+
+    override fun getDisplayString(): String = "NonEmptyList (${elements.joinToString(", ") { it.getDisplayString() }})"
+
+    @ExportMessage
+    fun hasArrayElements(): Boolean = true
+
+    @ExportMessage
+    fun getArraySize(): Long = elements.size.toLong()
+
+    @ExportMessage
+    fun isArrayElementReadable(index: Long): Boolean = index >= 0 && index < elements.size
+
+    @ExportMessage
+    fun readArrayElement(index: Long): FunkValue {
+        if (index < 0 || index >= elements.size) {
+            throw FunkException("NonEmptyList index out of bounds: $index")
+        }
+        return elements[index.toInt()]
+    }
+
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(listOf("length", "head", "tail", "last"))
+    }
+
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean {
+        return member in listOf("length", "head", "tail", "last")
+    }
+
+    @ExportMessage
+    fun readMember(member: String): FunkValue {
+        return when (member) {
+            "length" -> FunkInt(elements.size.toLong())
+            "head" -> elements.first()
+            "tail" -> FunkList(elements.drop(1))
+            "last" -> elements.last()
+            else -> throw FunkException("Property '$member' not found in NonEmptyList")
+        }
+    }
+}
+
+/**
  * Built-in Map value (immutable, functional map)
  */
 @ExportLibrary(InteropLibrary::class)

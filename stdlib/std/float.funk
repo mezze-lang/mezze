@@ -1,6 +1,7 @@
 # Float utility functions
 # This module provides utility functions for working with floats
 # Note: The Float type and basic operations are now built-in
+# Built-in ability implementations (NumAdd, NumSub, NumMul, NumDiv, Eq, Inspect) are automatically available
 
 # Mathematical functions
 pub let abs = { x: Float } ->
@@ -28,6 +29,9 @@ pub let round = { x: Float } ->
     __native_float_round { x = x }
 
 # Type conversions
+pub let to_string = { val: Float } ->
+    __native_float_to_string { val = val }
+
 pub let from_int = { x: Int } ->
     __native_float_from_int { x = x }
 

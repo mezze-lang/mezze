@@ -1,0 +1,65 @@
+# Example: Functions and higher-order functions
+
+use std::int
+use std::effects::log::{Log, Console}
+
+# Simple functions
+let add = { x: Int, y: Int } -> x + y
+let multiply = { x: Int, y: Int } -> x * y
+
+# Function that returns a function (currying-style)
+let make_adder = { n: Int } ->
+    { x: Int } -> x + n
+
+let add_five = make_adder { n = 5 }
+let result1 = add_five { x = 10 }  # 15
+
+# Higher-order function: takes function as parameter
+let apply_twice = { f: { x: Int } -> Int, x: Int } ->
+    f { x = f { x = x } }
+
+let double = { x: Int } -> x * 2
+let result2 = apply_twice { f = double, x = 3 }  # 12
+
+# Function composition
+let compose = { f: { x: Int } -> Int, g: { x: Int } -> Int } ->
+    { x: Int } -> f { x = g { x = x } }
+
+let add_one = { x: Int } -> x + 1
+let times_two = { x: Int } -> x * 2
+let add_one_then_double = compose { f = times_two, g = add_one }
+
+let result3 = add_one_then_double { x = 5 }  # (5+1)*2 = 12
+
+# Recursive function
+let factorial = { n: Int } ->
+    if n <= 1 then 1
+    else n * factorial { n = n - 1 }
+
+let fact5 = factorial { n = 5 }  # 120
+
+# Main function for execution
+let main = {} ->
+    perform Console in do
+        Log.println { msg = "=== Functions Example ===" }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Basic operations:" }
+        Log.println { msg = "  add(3, 4) = " ++ int::to_string { val = add { x = 3, y = 4 } } }
+        Log.println { msg = "  multiply(3, 4) = " ++ int::to_string { val = multiply { x = 3, y = 4 } } }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Currying:" }
+        Log.println { msg = "  add_five(10) = " ++ int::to_string { val = result1 } }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Higher-order functions:" }
+        Log.println { msg = "  apply_twice(double, 3) = " ++ int::to_string { val = result2 } }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Function composition:" }
+        Log.println { msg = "  (add_one ∘ times_two)(5) = " ++ int::to_string { val = result3 } }
+        Log.println { msg = "" }
+
+        Log.println { msg = "Recursion:" }
+        Log.println { msg = "  factorial(5) = " ++ int::to_string { val = fact5 } }

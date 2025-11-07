@@ -37,10 +37,10 @@ object BuiltinAbilities {
     const val NUM_MOD = "NumMod"
     
     // Display ability
-    const val SHOW = "Show"
-    
+    const val DISPLAY = "Display"
+
     // All built-in abilities
-    val ALL = setOf(EQ, ORD, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, SHOW)
+    val ALL = setOf(EQ, ORD, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, DISPLAY)
     
     /**
      * Check if an ability name is a built-in ability
@@ -53,20 +53,20 @@ object BuiltinAbilities {
      */
     private val automaticImplementations = mapOf(
         // Primitive types
-        "Int" to setOf(EQ, ORD, SHOW, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD),
-        "Float" to setOf(EQ, ORD, SHOW, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
-        "String" to setOf(EQ, ORD, SHOW),
-        "Boolean" to setOf(EQ, ORD, SHOW),
-        "Nat" to setOf(EQ, ORD, SHOW, NUM_ADD, NUM_MUL, NUM_DIV, NUM_MOD),
-        "Frac" to setOf(EQ, ORD, SHOW, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
-        
+        "Int" to setOf(EQ, ORD, DISPLAY, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD),
+        "Float" to setOf(EQ, ORD, DISPLAY, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
+        "String" to setOf(EQ, ORD, DISPLAY),
+        "Boolean" to setOf(EQ, ORD, DISPLAY),
+        "Nat" to setOf(EQ, ORD, DISPLAY, NUM_ADD, NUM_MUL, NUM_DIV, NUM_MOD),
+        "Frac" to setOf(EQ, ORD, DISPLAY, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
+
         // Built-in core types (conditional implementations based on element types)
-        "Option" to setOf(EQ, ORD, SHOW), // if element type has these abilities
-        "Result" to setOf(EQ, ORD, SHOW), // if both error and value types have these abilities
-        "List" to setOf(EQ, ORD, SHOW),   // if element type has these abilities
-        "Map" to setOf(EQ, SHOW),         // if key and value types have these abilities
-        "Set" to setOf(EQ, SHOW),         // if element type has these abilities
-        "Ordering" to setOf(EQ, ORD, SHOW)
+        "Option" to setOf(EQ, ORD, DISPLAY), // if element type has these abilities
+        "Result" to setOf(EQ, ORD, DISPLAY), // if both error and value types have these abilities
+        "List" to setOf(EQ, ORD, DISPLAY),   // if element type has these abilities
+        "Map" to setOf(EQ, DISPLAY),         // if key and value types have these abilities
+        "Set" to setOf(EQ, DISPLAY),         // if element type has these abilities
+        "Ordering" to setOf(EQ, ORD, DISPLAY)
     )
     
     /**
@@ -265,8 +265,8 @@ object BuiltinAbilityDefinitions {
     /**
      * Display ability - provides string representation
      */
-    data class ShowAbility(
-        val toString: String = "to_string" // { val: 'a } -> String
+    data class DisplayAbility(
+        val display: String = "display" // { val: 'a } -> String
     )
     
     /**
@@ -285,7 +285,7 @@ object BuiltinAbilityDefinitions {
             BuiltinAbilities.NUM_MUL -> listOf(NumMulAbility().multiply)
             BuiltinAbilities.NUM_DIV -> listOf(NumDivAbility().divide)
             BuiltinAbilities.NUM_MOD -> listOf(NumModAbility().modulo)
-            BuiltinAbilities.SHOW -> listOf(ShowAbility().toString)
+            BuiltinAbilities.DISPLAY -> listOf(DisplayAbility().display)
             else -> emptyList()
         }
     }

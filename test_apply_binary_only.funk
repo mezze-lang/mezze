@@ -1,1 +1,0 @@
-let applyBinary = {f, x, y} -> f {x = x, y = y}

@@ -1,8 +1,0 @@
-# Hello, World! in Funk
-# This is your first Funk program!
-
-# Let bindings create variables
-let message = "Hello, World!"
-
-# The last expression is the program's result
-message

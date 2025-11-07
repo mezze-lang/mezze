@@ -8035,7 +8035,89 @@ class TypeChecker {
             else -> false // For now, treat complex types as non-concrete
         }
     }
-    
+
+    /**
+     * Built-in ability type registry
+     * These abilities are always available and their implementations come from stdlib
+     */
+    private object BuiltInAbilityRegistry {
+        private val abilities = mapOf(
+            "NumAdd" to mapOf(
+                "num_add" to { typeVar: com.funk.language.ast.FunkType.VarType ->
+                    com.funk.language.ast.FunkType.FunctionType(
+                        com.funk.language.ast.FunkType.RecordType(mapOf(
+                            "l" to typeVar,
+                            "r" to typeVar
+                        )),
+                        typeVar
+                    )
+                }
+            ),
+            "NumSub" to mapOf(
+                "num_sub" to { typeVar: com.funk.language.ast.FunkType.VarType ->
+                    com.funk.language.ast.FunkType.FunctionType(
+                        com.funk.language.ast.FunkType.RecordType(mapOf(
+                            "l" to typeVar,
+                            "r" to typeVar
+                        )),
+                        typeVar
+                    )
+                }
+            ),
+            "NumMul" to mapOf(
+                "num_mul" to { typeVar: com.funk.language.ast.FunkType.VarType ->
+                    com.funk.language.ast.FunkType.FunctionType(
+                        com.funk.language.ast.FunkType.RecordType(mapOf(
+                            "l" to typeVar,
+                            "r" to typeVar
+                        )),
+                        typeVar
+                    )
+                }
+            ),
+            "NumDiv" to mapOf(
+                "num_div" to { typeVar: com.funk.language.ast.FunkType.VarType ->
+                    com.funk.language.ast.FunkType.FunctionType(
+                        com.funk.language.ast.FunkType.RecordType(mapOf(
+                            "l" to typeVar,
+                            "r" to typeVar
+                        )),
+                        typeVar
+                    )
+                }
+            ),
+            "Eq" to mapOf(
+                "eq" to { typeVar: com.funk.language.ast.FunkType.VarType ->
+                    com.funk.language.ast.FunkType.FunctionType(
+                        com.funk.language.ast.FunkType.RecordType(mapOf(
+                            "l" to typeVar,
+                            "r" to typeVar
+                        )),
+                        com.funk.language.ast.FunkType.BooleanType
+                    )
+                }
+            ),
+            "Display" to mapOf(
+                "display" to { typeVar: com.funk.language.ast.FunkType.VarType ->
+                    com.funk.language.ast.FunkType.FunctionType(
+                        com.funk.language.ast.FunkType.RecordType(mapOf(
+                            "val" to typeVar
+                        )),
+                        com.funk.language.ast.FunkType.StringType
+                    )
+                }
+            )
+        )
+
+        fun getAbilityType(abilityName: String, methodName: String, typeVar: com.funk.language.ast.FunkType.VarType): com.funk.language.ast.FunkType? {
+            return abilities[abilityName]?.get(methodName)?.invoke(typeVar)
+        }
+
+        fun hasAbility(abilityName: String): Boolean {
+            return abilities.containsKey(abilityName)
+        }
+    }
+
     /**
      * Module type registry for qualified calls
      */
@@ -8072,7 +8154,7 @@ class TypeChecker {
                 ),
                 "to_string" to com.funk.language.ast.FunkType.FunctionType(
                     com.funk.language.ast.FunkType.RecordType(mapOf(
-                        "value" to com.funk.language.ast.FunkType.IntType
+                        "val" to com.funk.language.ast.FunkType.IntType
                     )),
                     com.funk.language.ast.FunkType.StringType
                 )
@@ -8105,6 +8187,12 @@ class TypeChecker {
                         "right" to com.funk.language.ast.FunkType.FloatType
                     )),
                     com.funk.language.ast.FunkType.FloatType
+                ),
+                "to_string" to com.funk.language.ast.FunkType.FunctionType(
+                    com.funk.language.ast.FunkType.RecordType(mapOf(
+                        "val" to com.funk.language.ast.FunkType.FloatType
+                    )),
+                    com.funk.language.ast.FunkType.StringType
                 )
             ),
             "string" to mapOf(
@@ -8117,9 +8205,23 @@ class TypeChecker {
                 ),
                 "length" to com.funk.language.ast.FunkType.FunctionType(
                     com.funk.language.ast.FunkType.RecordType(mapOf(
-                        "value" to com.funk.language.ast.FunkType.StringType
+                        "val" to com.funk.language.ast.FunkType.StringType
                     )),
                     com.funk.language.ast.FunkType.IntType
+                ),
+                "to_string" to com.funk.language.ast.FunkType.FunctionType(
+                    com.funk.language.ast.FunkType.RecordType(mapOf(
+                        "val" to com.funk.language.ast.FunkType.StringType
+                    )),
+                    com.funk.language.ast.FunkType.StringType
+                )
+            ),
+            "boolean" to mapOf(
+                "to_string" to com.funk.language.ast.FunkType.FunctionType(
+                    com.funk.language.ast.FunkType.RecordType(mapOf(
+                        "val" to com.funk.language.ast.FunkType.BooleanType
+                    )),
+                    com.funk.language.ast.FunkType.StringType
                 )
             )
         )
