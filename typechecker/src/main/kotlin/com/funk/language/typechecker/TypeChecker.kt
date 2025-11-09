@@ -2067,28 +2067,12 @@ class TypeChecker {
                             }
                             
                             if (missingFields.isNotEmpty()) {
-                                // Check if this is a validation error or partial application
-                                when {
-                                    // Parameter is closed record - missing fields are an error
-                                    paramType.isClosed -> {
-                                        throw TypeCheckError("Function expects closed record but missing required fields: ${missingFields.joinToString(", ")}", expr)
-                                    }
-                                    
-                                    // Parameter is open record - this could be partial application
-                                    paramType.isOpen -> {
-                                        // Partial application - return function type for remaining parameters
-                                        val remainingFields = expectedFields.filterKeys { it in missingFields }
-                                        val remainingParamType = com.funk.language.ast.FunkType.RecordType(remainingFields)
-                                        com.funk.language.ast.FunkType.FunctionType(remainingParamType, functionType.returnType, functionType.effects)
-                                    }
-                                    
-                                    else -> {
-                                        // Default case - treat as partial application
-                                        val remainingFields = expectedFields.filterKeys { it in missingFields }
-                                        val remainingParamType = com.funk.language.ast.FunkType.RecordType(remainingFields)
-                                        com.funk.language.ast.FunkType.FunctionType(remainingParamType, functionType.returnType, functionType.effects)
-                                    }
-                                }
+                                // Partial application - return function type for remaining parameters
+                                // This works for both closed and open records
+                                // CRITICAL: Preserve the rowVar (open/closed nature) from the original parameter type
+                                val remainingFields = expectedFields.filterKeys { it in missingFields }
+                                val remainingParamType = com.funk.language.ast.FunkType.RecordType(remainingFields, paramType.rowVar)
+                                com.funk.language.ast.FunkType.FunctionType(remainingParamType, functionType.returnType, functionType.effects)
                             } else {
                                 // All parameters provided - validate types and return result type
                                 val argumentRecord = expr.arguments as RecordLiteral

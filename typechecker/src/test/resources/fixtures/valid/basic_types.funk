@@ -2,6 +2,6 @@
 let x = 42        # expected: x : Int
 let y = 3.14      # expected: y : Float
 let name = "Alice" # expected: name : String
-let flag = true   # expected: flag : Boolean
+let flag = true   # expected: flag : Bool
 
 x + 10

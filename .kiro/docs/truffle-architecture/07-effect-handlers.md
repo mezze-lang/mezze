@@ -247,7 +247,7 @@ class RandomEffectHandler : SyncEffectHandler {
             }
             
             "nextBoolean" -> {
-                FunkBoolean(random.nextBoolean())
+                FunkBool(random.nextBoolean())
             }
             
             "shuffle" -> {

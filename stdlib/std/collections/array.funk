@@ -1,74 +1,79 @@
-# std/collections/array.funk - Array operations using proper syntax
+# std/collections/array.funk - Array operations
+# Note: Arrays (['a]) use ArrayList at runtime with native arraylist functions
 
-# Basic array operations
-pub let length: { xs: ['a] } -> Int = {xs} ->
+# Basic array operations (defined first for use by other functions)
+pub let length = {xs} ->
     __native_arraylist_length { xs = xs }
 
-pub let get: { xs: ['a], i: Int } -> 'a = {xs, i} ->
+pub let get = {xs, i} ->
     __native_arraylist_get { xs = xs, i = i }
 
-pub let set: { xs: ['a], i: Int, x: 'a } -> ['a] = {xs, i, x} ->
+pub let set = {xs, i, x} ->
     __native_arraylist_set { xs = xs, i = i, x = x }
 
-pub let add: { xs: ['a], x: 'a } -> ['a] = {xs, x} ->
+pub let add = {xs, x} ->
     __native_arraylist_add { xs = xs, x = x }
 
-pub let remove: { xs: ['a], i: Int } -> ['a] = {xs, i} ->
+pub let remove = {xs, i} ->
     __native_arraylist_remove { xs = xs, i = i }
 
-pub let concat: { xs: ['a], ys: ['a] } -> ['a] = {xs, ys} ->
+pub let concat = {xs, ys} ->
     __native_arraylist_concat { xs = xs, ys = ys }
 
-pub let is_empty: { xs: ['a] } -> Boolean = {xs} ->
+# Array construction (uses add and concat above)
+pub let of = {x, xs} ->
+    concat { xs = add { xs = [], x = x }, ys = xs }
+
+pub let is_empty = {xs} ->
     __native_arraylist_is_empty { xs = xs }
 
 # Higher-order functions
-pub let map: { xs: ['a], f: { x: 'a } -> 'b } -> ['b] = {xs, f} ->
+pub let map = {xs, f} ->
     __native_arraylist_map { xs = xs, f = f }
 
-pub let filter: { xs: ['a], p: { x: 'a } -> Boolean } -> ['a] = {xs, p} ->
+pub let filter = {xs, p} ->
     __native_arraylist_filter { xs = xs, p = p }
 
-pub let fold: { xs: ['a], init: 'b, f: { acc: 'b, x: 'a } -> 'b } -> 'b = {xs, init, f} ->
+pub let fold = {xs, init, f} ->
     __native_arraylist_fold { xs = xs, init = init, f = f }
 
-pub let reduce: { xs: ['a], f: { acc: 'a, x: 'a } -> 'a } -> 'a = {xs, f} ->
+pub let reduce = {xs, f} ->
     __native_arraylist_reduce { xs = xs, f = f }
 
 # Utility functions
-pub let find: { xs: ['a], p: { x: 'a } -> Boolean } -> Option 'a = {xs, p} ->
+pub let find = {xs, p} ->
     __native_arraylist_find { xs = xs, p = p }
 
-pub let contains: { xs: ['a], x: 'a } -> Boolean= {xs, x} ->
+pub let contains = {xs, x} ->
     __native_arraylist_contains { xs = xs, x = x }
 
-pub let index_of: { xs: ['a], x: 'a } -> (Option Int)= {xs, x} ->
+pub let index_of = {xs, x} ->
     __native_arraylist_index_of { xs = xs, x = x }
 
-pub let reverse: { xs: ['a] } -> ['a] =  {xs} ->
+pub let reverse = {xs} ->
     __native_arraylist_reverse { xs = xs }
 
-pub let sort: { xs: ['a] } -> ['a]= {xs} ->
+pub let sort = {xs} ->
     __native_arraylist_sort { xs = xs }
 
-pub let sort_by: { xs: ['a], cmp: { l: 'a, r: 'a } -> Int } -> ['a] = {xs, cmp} ->
+pub let sort_by = {xs, cmp} ->
     __native_arraylist_sort_by { xs = xs, cmp = cmp }
 
 # Slicing operations
-pub let slice: { xs: ['a], start: Int, end: Int } -> ['a] = {xs, start, end} ->
+pub let slice = {xs, start, end} ->
     __native_arraylist_slice { xs = xs, start = start, end = end }
 
-pub let take: { xs: ['a], n: Int } -> ['a] = {xs, n} ->
+pub let take = {xs, n} ->
     slice { xs = xs, start = 0, end = n }
 
-pub let drop: { xs: ['a], n: Int } -> ['a] = {xs, n} ->
+pub let drop = {xs, n} ->
     slice { xs = xs, start = n, end = length { xs = xs } }
 
-pub let head: { xs: ['a] } -> Option 'a = {xs} ->
+pub let head = {xs} ->
     if is_empty { xs = xs } then
         None
     else
         Some { val = get { xs = xs, i = 0 } }
 
-pub let tail: { xs: ['a] } -> ['a] = {xs} ->
+pub let tail = {xs} ->
     drop { xs = xs, n = 1 }

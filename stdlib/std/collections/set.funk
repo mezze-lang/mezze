@@ -13,7 +13,7 @@ pub let insert: { s: Set 'a, x: 'a } = { s, x } ->
 pub let remove: { s: Set 'a, x: 'a } -> Set 'a= { s, x } ->
     __native_set_remove { s = s, x = x }
 
-pub let contains: { s: Set 'a, x: 'a } -> Boolean= { s, x } ->
+pub let contains: { s: Set 'a, x: 'a } -> Bool= { s, x } ->
     __native_set_contains { s = s, x = x }
 
 pub let size = { s: Set 'a } ->
@@ -33,13 +33,13 @@ pub let difference: { s1: Set 'a, s2: Set 'a } -> Set 'a= {s1, s2} ->
     __native_set_difference { s1 = s1, s2 = s2 }
 
 # Set queries
-pub let is_subset: { s1: Set 'a, s2: Set 'a } -> Boolean= {s1, s2} ->
+pub let is_subset: { s1: Set 'a, s2: Set 'a } -> Bool= {s1, s2} ->
     __native_set_is_subset { s1 = s1, s2 = s2 }
 
-pub let is_superset: { s1: Set 'a, s2: Set 'a } -> Boolean= {s1, s2} ->
+pub let is_superset: { s1: Set 'a, s2: Set 'a } -> Bool= {s1, s2} ->
     is_subset { s1 = s2, s2 = s1 }
 
-pub let is_disjoint: { s1: Set 'a, s2: Set 'a } -> Boolean= {s1, s2} ->
+pub let is_disjoint: { s1: Set 'a, s2: Set 'a } -> Bool= {s1, s2} ->
     is_empty { s = intersection { s1 = s1, s2 = s2 } }
 
 # Conversion functions
@@ -50,7 +50,7 @@ pub let from_list: { xs: ['a] } -> Set 'a=  { xs } ->
     __native_set_from_list { xs = xs }
 
 # Higher-order functions
-pub let filter: { s: Set 'a, p: 'a -> Boolean } -> Set 'a= {s, p} ->
+pub let filter: { s: Set 'a, p: 'a -> Bool } -> Set 'a= {s, p} ->
     __native_set_filter { s = s, p = p }
 
 pub let map: { s: Set 'a, f: 'a -> 'b } -> Set 'b= {s,f} ->

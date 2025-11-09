@@ -1,0 +1,103 @@
+# Example: Function Composition and Chaining Patterns
+#
+# Demonstrates functional programming patterns for data transformation.
+# While Funk doesn't have a pipe operator (|>), these patterns achieve
+# similar functional data flow.
+
+use std::int
+use std::string
+use std::collections::array
+use std::effects::log::{Log, Console}
+
+# ============================================================================
+# Simple transformations
+# ============================================================================
+
+let add_ten = { x } -> x + 10
+let multiply_by_two = { x } -> x * 2
+let square = { x } -> x * x
+
+# ============================================================================
+# Example 1: Nested function composition
+# ============================================================================
+
+let example1_inner = add_ten { x = 5 }
+let example1_middle = multiply_by_two { x = example1_inner }
+let example1 = square { x = example1_middle }
+# Result: square(multiply_by_two(add_ten(5))) = 900
+
+# ============================================================================
+# Example 2: Generic compose function
+# ============================================================================
+
+let compose = { f, g } ->
+    { x } -> f { x = g { x = x } }
+
+let add_ten_then_double = compose { f = multiply_by_two, g = add_ten }
+let example2 = add_ten_then_double { x = 5 }
+# Result: (5 + 10) * 2 = 30
+
+# ============================================================================
+# Example 3: String transformation pipeline
+# ============================================================================
+
+let to_upper = { s } -> string::to_upper { s = s }
+let add_prefix = { s } -> ">>> " ++ s
+
+let example3_step1 = to_upper { s = "hello" }
+let example3 = add_prefix { s = example3_step1 }
+# Result: ">>> HELLO"
+
+# ============================================================================
+# Example 4: Array transformation pipeline
+# ============================================================================
+
+let double_fn = { x } -> x * 2
+let is_greater_than_10 = { x } -> x > 10
+let add_five_fn = { x } -> x + 5
+
+let input_array = [3, 5, 7, 9, 11]
+let doubled_array = array::map { xs = input_array, f = double_fn }
+let filtered_array = array::filter { xs = doubled_array, p = is_greater_than_10 }
+let example4 = array::map { xs = filtered_array, f = add_five_fn }
+# Input: [3, 5, 7, 9, 11]
+# After doubling: [6, 10, 14, 18, 22]
+# After filtering >10: [14, 18, 22]
+# After adding 5: [19, 23, 27]
+
+# ============================================================================
+# Main function
+# ============================================================================
+
+let main = {} -> do
+    Log.println { msg = "=== Function Composition Examples ===" }
+    Log.println { msg = "" }
+
+    Log.println { msg = "Example 1 - Nested composition:" }
+    Log.println { msg = "  square(multiply_by_two(add_ten(5))) = " ++
+        int::to_string { val = example1 } }
+    Log.println { msg = "" }
+
+    Log.println { msg = "Example 2 - Generic compose function:" }
+    Log.println { msg = "  compose(multiply_by_two, add_ten)(5) = " ++
+        int::to_string { val = example2 } }
+    Log.println { msg = "" }
+
+    Log.println { msg = "Example 3 - String transformation:" }
+    Log.println { msg = "  \"hello\" -> to_upper -> add_prefix = " ++ example3 }
+    Log.println { msg = "" }
+
+    Log.println { msg = "Example 4 - Array transformation:" }
+    Log.println { msg = "  [3,5,7,9,11] -> double -> filter>10 -> add5" }
+    Log.println { msg = "  Result length: " ++
+        int::to_string { val = array::length { xs = example4 } } ++ " elements" }
+    Log.println { msg = "" }
+
+    Log.println { msg = "Key patterns:" }
+    Log.println { msg = "  1. Use let-bindings for step-by-step transformations" }
+    Log.println { msg = "  2. Create compose functions for reusable combinations" }
+    Log.println { msg = "  3. Use array operations (map, filter) for collections" }
+    Log.println { msg = "" }
+    Log.println { msg = "These patterns achieve the same data flow as pipe operators!" }
+
+perform Console in main

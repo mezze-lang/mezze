@@ -327,7 +327,7 @@ class AsyncDatabaseHandler(private val dataSource: DataSource) : AsyncEffectHand
                                     is FunkInt -> statement.setInt(index + 1, value.value)
                                     is FunkString -> statement.setString(index + 1, value.value)
                                     is FunkFloat -> statement.setDouble(index + 1, value.value)
-                                    is FunkBoolean -> statement.setBoolean(index + 1, value.value)
+                                    is FunkBool -> statement.setBoolean(index + 1, value.value)
                                     is FunkNull -> statement.setNull(index + 1, Types.NULL)
                                 }
                             }
@@ -399,7 +399,7 @@ class AsyncDatabaseHandler(private val dataSource: DataSource) : AsyncEffectHand
                     Types.INTEGER, Types.BIGINT -> FunkInt(resultSet.getInt(i))
                     Types.DOUBLE, Types.FLOAT -> FunkFloat(resultSet.getDouble(i))
                     Types.VARCHAR, Types.CHAR -> FunkString(resultSet.getString(i) ?: "")
-                    Types.BOOLEAN -> FunkBoolean(resultSet.getBoolean(i))
+                    Types.BOOLEAN -> FunkBool(resultSet.getBoolean(i))
                     else -> FunkString(resultSet.getString(i) ?: "")
                 }
                 row[columnName] = value

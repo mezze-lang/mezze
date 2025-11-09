@@ -131,7 +131,7 @@ class FunkProgramRootNode(
                 is FunkInt -> result.value as Any
                 is FunkFloat -> result.value as Any
                 is FunkString -> result.value as Any
-                is FunkBoolean -> result.value as Any
+                is FunkBool -> result.value as Any
                 is FunkNull -> null as Any
                 else -> result.getDisplayString() as Any
             }

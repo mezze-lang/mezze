@@ -21,8 +21,8 @@ let mixedSum = half + fracTwo      # expected: mixedSum : Frac
 let mixedProduct = third * fracTwo # expected: mixedProduct : Frac
 
 # Comparisons
-let isLarger = half > quarter      # expected: isLarger : Boolean
-let isEqual = quarter == 1//4      # expected: isEqual : Boolean
+let isLarger = half > quarter      # expected: isLarger : Bool
+let isEqual = quarter == 1//4      # expected: isEqual : Bool
 
 # Function with fraction parameter
 let doubleFrac = { f: Frac } -> f * (2//1)    # expected: doubleFrac : { f: Frac } -> Frac

@@ -43,13 +43,13 @@ pub let uniform = { min: Float, max: Float } -> random_range { min = min, max = 
 pub let normal = { mean: Float, std_dev: Float } -> do
     let u1 = Random.random_float { }
     let u2 = Random.random_float { }
-    let z0 = core::sqrt { x = -2.0 * core::ln { x = u1 } } * trig::cos { value = 2.0 * trig::pi * u2 }
+    let z0 = core::sqrt { val = -2.0 * core::ln { val = u1 } } * trig::cos { val = 2.0 * trig::pi * u2 }
     mean + (std_dev * z0)
 
 # Exponential distribution
 pub let exponential = { rate: Float } -> do
     let u = Random.random_float { }
-    (-1.0 / rate) * core::ln { x = u }
+    (-1.0 / rate) * core::ln { val = u }
 
 # Usage examples:
 # 

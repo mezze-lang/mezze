@@ -7,106 +7,106 @@
 # Lists are immutable - all operations return new lists
 
 # Basic list operations
-pub let empty: {} -> List 'a = {} ->
+pub let empty = {} ->
     __native_list_empty {}
 
-pub let cons: { head: 'a, tail: List 'a } -> List 'a = { head, tail } ->
+pub let cons = { head, tail } ->
     __native_list_cons { head = head, tail = tail }
 
-pub let is_empty: { xs: List 'a } -> Boolean = { xs } ->
+pub let is_empty = { xs } ->
     __native_list_is_empty { xs = xs }
 
-pub let head: { xs: List 'a } -> 'a = { xs } ->
+pub let head = { xs } ->
     __native_list_head { xs = xs }
 
-pub let tail: { xs: List 'a } -> List 'a = { xs } ->
+pub let tail = { xs } ->
     __native_list_tail { xs = xs }
 
-pub let length: { xs: List 'a } -> Int = { xs } ->
+pub let length = { xs } ->
     __native_list_length { xs = xs }
 
 # List construction
-pub let singleton: { x: 'a } -> List 'a = { x } ->
+pub let singleton = { x } ->
     cons { head = x, tail = empty {} }
 
-pub let prepend: { x: 'a, xs: List 'a } -> List 'a = { x, xs } ->
+pub let prepend = { x, xs } ->
     cons { head = x, tail = xs }
 
-pub let append: { xs: List 'a, ys: List 'a } -> List 'a = { xs, ys } ->
+pub let append = { xs, ys } ->
     __native_list_append { xs = xs, ys = ys }
 
 # List access
-pub let get: { xs: List 'a, index: Int } -> 'a = { xs, index } ->
+pub let get = { xs, index } ->
     __native_list_get { xs = xs, index = index }
 
-pub let take: { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+pub let take = { xs, n } ->
     __native_list_take { xs = xs, n = n }
 
-pub let drop: { xs: List 'a, n: Int } -> List 'a = { xs, n } ->
+pub let drop = { xs, n } ->
     __native_list_drop { xs = xs, n = n }
 
 # Higher-order functions
-pub let map: { xs: List 'a, f: 'a -> 'b } -> List 'b = { xs, f } ->
+pub let map = { xs, f } ->
     __native_list_map { xs = xs, f = f }
 
-pub let filter: { xs: List 'a, p: 'a -> Boolean } -> List 'a = { xs, p } ->
+pub let filter = { xs, p } ->
     __native_list_filter { xs = xs, p = p }
 
-pub let fold_left: { xs: List 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc } -> 'acc = { xs, init, f } ->
+pub let fold_left = { xs, init, f } ->
     __native_list_fold_left { xs = xs, init = init, f = f }
 
-pub let fold_right: { xs: List 'a, init: 'acc, f: { x: 'a, acc: 'acc } -> 'acc } -> 'acc = { xs, init, f } ->
+pub let fold_right = { xs, init, f } ->
     __native_list_fold_right { xs = xs, init = init, f = f }
 
-pub let reduce: { xs: List 'a, f: { acc: 'a, x: 'a } -> 'a } -> 'a = { xs, f } ->
+pub let reduce = { xs, f } ->
     __native_list_reduce { xs = xs, f = f }
 
 # List predicates
-pub let any: { xs: List 'a, p: 'a -> Boolean } -> Boolean = { xs, p } ->
+pub let any = { xs, p } ->
     __native_list_any { xs = xs, p = p }
 
-pub let all: { xs: List 'a, p: 'a -> Boolean } -> Boolean = { xs, p } ->
+pub let all = { xs, p } ->
     __native_list_all { xs = xs, p = p }
 
-pub let contains: { xs: List 'a, x: 'a } -> Boolean = { xs, x } ->
+pub let contains = { xs, x } ->
     __native_list_contains { xs = xs, x = x }
 
 # List transformations
-pub let reverse: { xs: List 'a } -> List 'a = { xs } ->
+pub let reverse = { xs } ->
     __native_list_reverse { xs = xs }
 
-pub let concat: { xss: List (List 'a) } -> List 'a = { xss } ->
+pub let concat = { xss } ->
     __native_list_concat { xss = xss }
 
-pub let flat_map: { xs: List 'a, f: 'a -> List 'b } -> List 'b = { xs, f } ->
+pub let flat_map = { xs, f } ->
     concat { xss = map { xs = xs, f = f } }
 
-pub let zip: { xs: List 'a, ys: List 'b } -> List { fst: 'a, snd: 'b } = { xs, ys } ->
+pub let zip = { xs, ys } ->
     __native_list_zip { xs = xs, ys = ys }
 
-pub let unzip: { xs: List { fst: 'a, snd: 'b } } -> { fsts: List 'a, snds: List 'b } = { xs } ->
+pub let unzip = { xs } ->
     __native_list_unzip { xs = xs }
 
 # Conversion functions
-pub let to_array: { xs: List 'a } -> ['a] = { xs } ->
+pub let to_array = { xs } ->
     __native_list_to_array { xs = xs }
 
-pub let from_array: { xs: ['a] } -> List 'a = { xs } ->
+pub let from_array = { xs } ->
     __native_list_from_array { xs = xs }
 
 # List utilities
-pub let range: { start: Int, end: Int } -> List Int = { start, end } ->
+pub let range = { start, end } ->
     __native_list_range { start = start, end = end }
 
-pub let repeat: { x: 'a, n: Int } -> List 'a = { x, n } ->
+pub let repeat = { x, n } ->
     __native_list_repeat { x = x, n = n }
 
-pub let intersperse: { xs: List 'a, sep: 'a } -> List 'a = { xs, sep } ->
+pub let intersperse = { xs, sep } ->
     __native_list_intersperse { xs = xs, sep = sep }
 
 # Sorting
-pub let sort: { xs: List 'a } -> List 'a = { xs } ->
+pub let sort = { xs } ->
     __native_list_sort { xs = xs }
 
-pub let sort_by: { xs: List 'a, cmp: { l: 'a, r: 'a } -> Int } -> List 'a = { xs, cmp } ->
+pub let sort_by = { xs, cmp } ->
     __native_list_sort_by { xs = xs, cmp = cmp }

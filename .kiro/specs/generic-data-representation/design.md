@@ -476,7 +476,7 @@ class TypeRegistry {
         return when (value) {
             is FunkInt -> primitiveRepr("Int", "IntKind")
             is FunkString -> primitiveRepr("String", "StringKind")
-            is FunkBoolean -> primitiveRepr("Boolean", "BooleanKind")
+            is FunkBool -> primitiveRepr("Boolean", "BooleanKind")
             is FunkRecord -> {
                 // Look up the record type representation
                 val typeName = value.typeName ?: "AnonymousRecord"

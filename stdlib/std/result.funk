@@ -20,13 +20,13 @@ pub let get_or_else: { result: (Result 'a 'e), def: 'a } -> 'a =
         Err { error } -> def
 
 # Check if Result is successful
-pub let is_ok: { result: (Result 'a 'e) } -> Boolean =
+pub let is_ok: { result: (Result 'a 'e) } -> Bool =
     match result is
         Ok { val } -> true
         Err { error } -> false
 
 # Check if Result is an error
-pub let is_err: { result: (Result 'a 'e) } -> Boolean =
+pub let is_err: { result: (Result 'a 'e) } -> Bool =
     match result is
         Ok { val } -> false
         Err { error } -> true

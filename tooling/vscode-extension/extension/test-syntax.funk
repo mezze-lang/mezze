@@ -174,7 +174,7 @@ type ExtensibleEnum = | A, B, C, ... |
 # Multi-line comments can be
 # written like this
 
-# Boolean literals
+# Bool literals
 let truthy = true
 let falsy = false
 

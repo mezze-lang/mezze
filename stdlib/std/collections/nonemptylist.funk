@@ -6,7 +6,7 @@
 # Conceptually: type NonEmptyList 'a = NonEmpty { head: 'a, tail: List 'a }
 # Implementation uses native JVM List with invariant checking
 
-use std::collections::list::{List}
+# Note: List is a built-in type, no import needed
 
 # Basic non-empty list operations
 pub let singleton: { x: 'a } -> NonEmptyList 'a = { x } ->
@@ -61,20 +61,20 @@ pub let reduce: { xs: NonEmptyList 'a, f: { acc: 'a, x: 'a } -> 'a } -> 'a = { x
     __native_nel_reduce { xs = xs, f = f }
 
 # Predicates
-pub let any: { xs: NonEmptyList 'a, p: 'a -> Boolean } -> Boolean = { xs, p } ->
+pub let any: { xs: NonEmptyList 'a, p: 'a -> Bool } -> Bool = { xs, p } ->
     __native_nel_any { xs = xs, p = p }
 
-pub let all: { xs: NonEmptyList 'a, p: 'a -> Boolean } -> Boolean = { xs, p } ->
+pub let all: { xs: NonEmptyList 'a, p: 'a -> Bool } -> Bool = { xs, p } ->
     __native_nel_all { xs = xs, p = p }
 
-pub let contains: { xs: NonEmptyList 'a, x: 'a } -> Boolean = { xs, x } ->
+pub let contains: { xs: NonEmptyList 'a, x: 'a } -> Bool = { xs, x } ->
     __native_nel_contains { xs = xs, x = x }
 
 # Transformations
 pub let reverse: { xs: NonEmptyList 'a } -> NonEmptyList 'a = { xs } ->
     __native_nel_reverse { xs = xs }
 
-pub let zip: { xs: NonEmptyList 'a, ys: NonEmptyList 'b } -> NonEmptyList { fst: 'a, snd: 'b } = { xs, ys } ->
+pub let zip: { xs: NonEmptyList 'a, ys: NonEmptyList 'b } -> NonEmptyList ({ fst: 'a, snd: 'b }) = { xs, ys } ->
     __native_nel_zip { xs = xs, ys = ys }
 
 pub let intersperse: { xs: NonEmptyList 'a, sep: 'a } -> NonEmptyList 'a = { xs, sep } ->

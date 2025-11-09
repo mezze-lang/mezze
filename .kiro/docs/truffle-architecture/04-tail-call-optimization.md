@@ -36,7 +36,7 @@ private fun evaluateExpressionWithTailCallDetection(
     context: MutableMap<String, FunkValue>,
     currentFunction: SimpleFunkFunction
 ): FunkValue {
-    val inTailPosition = (context["__in_tail_position"] as? FunkBoolean)?.value ?: false
+    val inTailPosition = (context["__in_tail_position"] as? FunkBool)?.value ?: false
     
     return when (expr) {
         is FunctionCall -> {
@@ -68,13 +68,13 @@ private fun evaluateExpressionWithTailCallDetection(
             val localContext = context.toMutableMap()
             
             // Execute statements (not in tail position)
-            localContext["__in_tail_position"] = FunkBoolean(false)
+            localContext["__in_tail_position"] = FunkBool(false)
             for (stmt in expr.statements) {
                 executeStatement(stmt, localContext)
             }
             
             // Result expression is in tail position
-            localContext["__in_tail_position"] = FunkBoolean(true)
+            localContext["__in_tail_position"] = FunkBool(true)
             evaluateExpressionWithTailCallDetection(expr.result, localContext, currentFunction)
         }
         
@@ -122,7 +122,7 @@ private fun executeWithTailCallOptimization(
     // Tail call optimization loop - converts recursion to iteration
     while (true) {
         // Mark this context as being in tail position for optimization
-        currentContext["__in_tail_position"] = FunkBoolean(true)
+        currentContext["__in_tail_position"] = FunkBool(true)
         
         val result = evaluateExpressionWithTailCallDetection(
             currentFunction.body, 

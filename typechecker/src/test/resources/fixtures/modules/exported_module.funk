@@ -3,7 +3,7 @@
 
 pub let exported_int: Int = 42
 pub let exported_string: String = "hello"
-pub let exported_bool: Boolean = true
+pub let exported_bool: Bool = true
 
 pub let add_func: { x: Int, y: Int } -> Int = { x, y } -> x + y
 

@@ -644,7 +644,7 @@ object Main {
                 is com.funk.language.interpreter.FunkInt -> result.value
                 is com.funk.language.interpreter.FunkFloat -> result.value
                 is com.funk.language.interpreter.FunkString -> result.value
-                is com.funk.language.interpreter.FunkBoolean -> result.value
+                is com.funk.language.interpreter.FunkBool -> result.value
                 is com.funk.language.interpreter.FunkNull -> null
                 else -> result.getDisplayString()
             }
@@ -987,7 +987,7 @@ private fun prettyPrintResult(result: com.funk.language.interpreter.FunkValue): 
         is com.funk.language.interpreter.FunkInt -> result.value.toString()
         is com.funk.language.interpreter.FunkFloat -> result.value.toString()
         is com.funk.language.interpreter.FunkString -> "\"${result.value}\""
-        is com.funk.language.interpreter.FunkBoolean -> result.value.toString()
+        is com.funk.language.interpreter.FunkBool -> result.value.toString()
         is com.funk.language.interpreter.FunkNull -> "null"
         is com.funk.language.interpreter.FunkVariant -> {
             val value = result.value

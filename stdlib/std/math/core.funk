@@ -25,34 +25,34 @@ pub let pow_int : { base: Int, exp: Int } -> Int = { base, exp } ->
 pub let pow_nat : { base: Nat, exp: Nat } -> Nat = { base, exp } ->
     __native_nat_pow { base = base, exp = exp }
 
-pub let sqrt : { x: Float } -> Float = {x} ->
-    __native_float_sqrt { x = x }
+pub let sqrt : { val: Float } -> Float = {val} ->
+    __native_float_sqrt { val = val }
 
-pub let ln : { x: Float } -> Float = {x} ->
-    __native_float_ln { x = x }
+pub let ln : { val: Float } -> Float = {val} ->
+    __native_float_ln { val = val }
 
-pub let log10 : { x: Float } -> Float = {x} ->
-    __native_float_log10 { x = x }
+pub let log10 : { val: Float } -> Float = {val} ->
+    __native_float_log10 { val = val }
 
-pub let exp : { x: Float } -> Float = {x} ->
-    __native_float_exp { x = x }
+pub let exp : { val: Float } -> Float = {val} ->
+    __native_float_exp { val = val }
 
-pub let floor : { x: Float } -> Float = {x} ->
-    __native_float_floor { x = x }
+pub let floor : { val: Float } -> Float = {val} ->
+    __native_float_floor { val = val }
 
-pub let ceil : { x: Float } -> Float = {x} ->
-    __native_float_ceil { x = x }
+pub let ceil : { val: Float } -> Float = {val} ->
+    __native_float_ceil { val = val }
 
-pub let round : { x: Float } -> Float = {x} ->
-    __native_float_round { x = x }
+pub let round : { val: Float } -> Float = {val} ->
+    __native_float_round { val = val }
 
-pub let is_nan : { x: Float } -> Boolean = {x} ->
+pub let is_nan : { x: Float } -> Bool = {x} ->
     __native_float_is_nan { x = x }
 
-pub let is_infinite : { x: Float } -> Boolean = {x} ->
+pub let is_infinite : { x: Float } -> Bool = {x} ->
     __native_float_is_infinite { x = x }
 
-pub let is_finite : { x: Float } -> Boolean = {x} ->
+pub let is_finite : { x: Float } -> Bool = {x} ->
     __native_float_is_finite { x = x }
 
 pub let sign : { x: Float } -> Float = {x} ->

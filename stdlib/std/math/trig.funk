@@ -3,24 +3,24 @@
 use std::math::core
 
 # Basic trigonometric functions
-pub let sin = { value: Float } ->
-    __native_float_sin { value = value }
+pub let sin = { val: Float } ->
+    __native_float_sin { val = val }
 
-pub let cos = { value: Float } ->
-    __native_float_cos { value = value }
+pub let cos = { val: Float } ->
+    __native_float_cos { val = val }
 
-pub let tan = { value: Float } ->
-    __native_float_tan { value = value }
+pub let tan = { val: Float } ->
+    __native_float_tan { val = val }
 
 # Inverse trigonometric functions
-pub let asin = { value: Float } ->
-    __native_float_asin { value = value }
+pub let asin = { val: Float } ->
+    __native_float_asin { val = val }
 
-pub let acos = { value: Float } ->
-    __native_float_acos { value = value }
+pub let acos = { val: Float } ->
+    __native_float_acos { val = val }
 
-pub let atan = { value: Float } ->
-    __native_float_atan { value = value }
+pub let atan = { val: Float } ->
+    __native_float_atan { val = val }
 
 pub let atan2 = { y: Float, x: Float } ->
     __native_float_atan2 { y = y, x = x }
@@ -37,17 +37,17 @@ pub let radians_to_degrees = { radians: Float } ->
     radians * (180.0 / pi)
 
 # Additional trigonometric functions
-pub let tanh = { value: Float } -> do
-    let exp_pos = core::exp { x = value }
-    let exp_neg = core::exp { x = -value }
+pub let tanh = { val: Float } -> do
+    let exp_pos = core::exp { val = val }
+    let exp_neg = core::exp { val = -val }
     (exp_pos - exp_neg) / (exp_pos + exp_neg)
 
-pub let sinh = { value: Float } -> do
-    let exp_pos = core::exp { x = value }
-    let exp_neg = core::exp { x = -value }
+pub let sinh = { val: Float } -> do
+    let exp_pos = core::exp { val = val }
+    let exp_neg = core::exp { val = -val }
     (exp_pos - exp_neg) / 2.0
 
-pub let cosh = { value: Float } -> do
-    let exp_pos = core::exp { x = value }
-    let exp_neg = core::exp { x = -value }
+pub let cosh = { val: Float } -> do
+    let exp_pos = core::exp { val = val }
+    let exp_neg = core::exp { val = -val }
     (exp_pos + exp_neg) / 2.0

@@ -130,7 +130,7 @@ class FunkInterpreterRootNode(
                 is com.funk.language.interpreter.FunkInt -> result.value as Any
                 is com.funk.language.interpreter.FunkFloat -> result.value as Any
                 is com.funk.language.interpreter.FunkString -> result.value as Any
-                is com.funk.language.interpreter.FunkBoolean -> result.value as Any
+                is com.funk.language.interpreter.FunkBool -> result.value as Any
                 is com.funk.language.interpreter.FunkNull -> null as Any?
                 else -> result.toString() as Any
             } ?: "null"
@@ -158,7 +158,7 @@ class FunkTruffleRootNode(
                 is FunkInt -> result.value as Any
                 is FunkFloat -> result.value as Any
                 is FunkString -> result.value as Any
-                is FunkBoolean -> result.value as Any
+                is FunkBool -> result.value as Any
                 is FunkNull -> null as Any
                 else -> result.getDisplayString() as Any
             }
@@ -190,7 +190,7 @@ class FunkProgramRootNode(
                 is FunkInt -> result.value as Any
                 is FunkFloat -> result.value as Any
                 is FunkString -> result.value as Any
-                is FunkBoolean -> result.value as Any
+                is FunkBool -> result.value as Any
                 is FunkNull -> null as Any
                 else -> result.getDisplayString() as Any
             }

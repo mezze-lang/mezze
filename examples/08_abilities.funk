@@ -5,8 +5,8 @@ use std::int
 use std::effects::log::{Log, Console}
 
 # Define an ability for types that can be shown as strings
-ability Show T {
-    show: { val: T } -> String
+ability Show 'a {
+    show: { val: 'a } -> String
 }
 
 # Implement Show for Int
@@ -14,8 +14,8 @@ impl Show Int where {
     show = { val } -> int::to_string { val = val }
 }
 
-# Implement Show for Boolean
-impl Show Boolean where {
+# Implement Show for Bool
+impl Show Bool where {
     show = { val } -> if val then "true" else "false"
 }
 
@@ -28,10 +28,10 @@ let int_display = display { value = 42 }
 let bool_display = display { value = true }
 
 # Ability with multiple operations
-ability NumOps T {
-    add: { l: T, r: T } -> T,
-    multiply: { l: T, r: T } -> T,
-    zero: T
+ability NumOps'a {
+    add: { l:'a, r:'a } ->'a,
+    multiply: { l:'a, r:'a } ->'a,
+    zero:'a
 }
 
 # Generic function using NumOps

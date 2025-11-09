@@ -9,9 +9,9 @@ let total: Nat = 100               # expected: total : Nat
 let product = count * 2            # expected: product : Nat
 let quotient = total / 10          # expected: quotient : Nat
 
-# Comparisons return Boolean
-let hasItems = count > 0           # expected: hasItems : Boolean
-let isEqual = count == 42          # expected: isEqual : Boolean
+# Comparisons return Bool
+let hasItems = count > 0           # expected: hasItems : Bool
+let isEqual = count == 42          # expected: isEqual : Bool
 
 # Function parameters can constrain types
 let natFunction = { x: Nat } -> x + x          # Force x to be Nat

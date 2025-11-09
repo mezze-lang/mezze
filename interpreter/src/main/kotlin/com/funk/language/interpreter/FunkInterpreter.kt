@@ -366,7 +366,15 @@ class FunkInterpreter {
             is IntLiteral -> FunkInt(expr.value)
             is FloatLiteral -> FunkFloat(expr.value)
             is StringLiteral -> FunkString(expr.value)
-            is BooleanLiteral -> FunkBoolean(expr.value)
+            is BooleanLiteral -> FunkBool(expr.value)
+            is ArrayLiteral -> {
+                val elements = expr.elements.map { evaluateExpression(it, context) }
+                FunkArrayList(elements.toMutableList())
+            }
+            is ArrayListLiteral -> {
+                val elements = expr.elements.map { evaluateExpression(it, context) }
+                FunkArrayList(elements.toMutableList())
+            }
             is Identifier -> {
                 context[expr.name] ?: run {
                     // If it's an uppercase identifier, treat it as a variant constructor
@@ -484,7 +492,7 @@ class FunkInterpreter {
                                             when (arg) {
                                                 is FunkInt -> "Int"
                                                 is FunkString -> "String"
-                                                is FunkBoolean -> "Boolean"
+                                                is FunkBool -> "Bool"
                                                 is FunkFloat -> "Float"
                                                 is FunkNull -> "Null"
                                                 is FunkRecord -> "Record"
@@ -505,7 +513,7 @@ class FunkInterpreter {
                                         listOf(when (arguments) {
                                             is FunkInt -> "Int"
                                             is FunkString -> "String"
-                                            is FunkBoolean -> "Boolean"
+                                            is FunkBool -> "Bool"
                                             is FunkFloat -> "Float"
                                             is FunkNull -> "Null"
                                             is FunkRecord -> "Record"
@@ -644,7 +652,7 @@ class FunkInterpreter {
                                         when (arg) {
                                             is FunkInt -> "Int"
                                             is FunkString -> "String"
-                                            is FunkBoolean -> "Boolean"
+                                            is FunkBool -> "Bool"
                                             is FunkFloat -> "Float"
                                             is FunkNull -> "Null"
                                             is FunkRecord -> "Record"
@@ -664,7 +672,7 @@ class FunkInterpreter {
                                     listOf(when (arguments) {
                                         is FunkInt -> "Int"
                                         is FunkString -> "String"
-                                        is FunkBoolean -> "Boolean"
+                                        is FunkBool -> "Bool"
                                         is FunkFloat -> "Float"
                                         is FunkNull -> "Null"
                                         is FunkRecord -> "Record"
@@ -947,7 +955,7 @@ class FunkInterpreter {
                     val guardPassed = case.guard?.let { guard ->
                         val guardResult = evaluateExpression(guard, newContext)
                         when (guardResult) {
-                            is FunkBoolean -> guardResult.value
+                            is FunkBool -> guardResult.value
                             else -> throw RuntimeException("Guard condition must evaluate to Boolean, got ${guardResult::class.simpleName}")
                         }
                     } ?: true // No guard means it passes
@@ -1085,34 +1093,34 @@ class FunkInterpreter {
             }
             "==" -> {
                 // Built-in Eq ability implementation for all types
-                FunkBoolean(evaluateEquality(left, right))
+                FunkBool(evaluateEquality(left, right))
             }
             "!=" -> {
                 // Built-in Eq ability implementation (negated)
-                FunkBoolean(!evaluateEquality(left, right))
+                FunkBool(!evaluateEquality(left, right))
             }
             "<" -> when {
-                left is FunkInt && right is FunkInt -> FunkBoolean(left.value < right.value)
-                left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value < right.value)
+                left is FunkInt && right is FunkInt -> FunkBool(left.value < right.value)
+                left is FunkFloat && right is FunkFloat -> FunkBool(left.value < right.value)
                 else -> throw RuntimeException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
             ">" -> when {
-                left is FunkInt && right is FunkInt -> FunkBoolean(left.value > right.value)
-                left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value > right.value)
+                left is FunkInt && right is FunkInt -> FunkBool(left.value > right.value)
+                left is FunkFloat && right is FunkFloat -> FunkBool(left.value > right.value)
                 else -> throw RuntimeException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
             "<=" -> when {
-                left is FunkInt && right is FunkInt -> FunkBoolean(left.value <= right.value)
-                left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value <= right.value)
+                left is FunkInt && right is FunkInt -> FunkBool(left.value <= right.value)
+                left is FunkFloat && right is FunkFloat -> FunkBool(left.value <= right.value)
                 else -> throw RuntimeException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
             ">=" -> when {
-                left is FunkInt && right is FunkInt -> FunkBoolean(left.value >= right.value)
-                left is FunkFloat && right is FunkFloat -> FunkBoolean(left.value >= right.value)
+                left is FunkInt && right is FunkInt -> FunkBool(left.value >= right.value)
+                left is FunkFloat && right is FunkFloat -> FunkBool(left.value >= right.value)
                 else -> throw RuntimeException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
             }
-            "&&" -> FunkBoolean(isTruthy(left) && isTruthy(right))
-            "||" -> FunkBoolean(isTruthy(left) || isTruthy(right))
+            "&&" -> FunkBool(isTruthy(left) && isTruthy(right))
+            "||" -> FunkBool(isTruthy(left) || isTruthy(right))
             else -> throw RuntimeException("Unknown binary operator: $operator")
         }
     }
@@ -1297,7 +1305,7 @@ class FunkInterpreter {
             is FunkInt -> IntLiteral(value.value)
             is FunkFloat -> FloatLiteral(value.value)
             is FunkString -> StringLiteral(value.value)
-            is FunkBoolean -> BooleanLiteral(value.value)
+            is FunkBool -> BooleanLiteral(value.value)
             is FunkNull -> StringLiteral("null") // Create a placeholder since there's no NullLiteral object
             is FunkRecord -> {
                 // Convert record to RecordLiteral
@@ -1333,7 +1341,7 @@ class FunkInterpreter {
             left is FunkInt && right is FunkInt -> left.value == right.value
             left is FunkFloat && right is FunkFloat -> left.value == right.value
             left is FunkString && right is FunkString -> left.value == right.value
-            left is FunkBoolean && right is FunkBoolean -> left.value == right.value
+            left is FunkBool && right is FunkBool -> left.value == right.value
             left is FunkNull && right is FunkNull -> true
             
             // Built-in Eq implementations for built-in types
@@ -1374,7 +1382,7 @@ class FunkInterpreter {
                 throw RuntimeException("Cannot negate ${operand::class.simpleName}")
             }
         } else if (operator == "!") {
-            return FunkBoolean(!isTruthy(operand))
+            return FunkBool(!isTruthy(operand))
         } else {
             throw RuntimeException("Unknown unary operator: $operator")
         }
@@ -1513,7 +1521,7 @@ class FunkInterpreter {
      */
     private fun isTruthy(value: FunkValue): Boolean {
         return when (value) {
-            is FunkBoolean -> value.value
+            is FunkBool -> value.value
             is FunkNull -> false
             else -> true
         }
@@ -1902,6 +1910,9 @@ class FunkInterpreter {
      * Register native functions and load stdlib modules
      */
     private fun registerNativeFunctions(context: MutableMap<String, FunkValue>) {
+        // Store interpreter reference for native functions that need to call SimpleFunkFunction
+        context["__interpreter_instance"] = InterpreterReference(this)
+
         // Use the centralized native functions registry
         NativeFunctions.registerAll(context)
 
@@ -2089,14 +2100,14 @@ class FunkInterpreter {
             }
         ))
 
-        // Register implementations for Boolean
-        context["Eq_Boolean"] = FunkRecord(mapOf(
+        // Register implementations for Bool
+        context["Eq_Bool"] = FunkRecord(mapOf(
             "eq" to context["__native_boolean_equals"]!!
         ))
-        context["Inspect_Boolean"] = FunkRecord(mapOf(
-            "to_str" to NativeFunkFunction("to_str_boolean") { args ->
+        context["Inspect_Bool"] = FunkRecord(mapOf(
+            "to_str" to NativeFunkFunction("to_str_bool") { args ->
                 val record = args[0] as FunkRecord
-                val value = record.fields["val"] as FunkBoolean
+                val value = record.fields["val"] as FunkBool
                 FunkString(if (value.value) "true" else "false")
             }
         ))
@@ -2125,7 +2136,7 @@ class FunkInterpreter {
                     val record = args[0] as FunkRecord
                     val left = record.fields["l"]!!
                     val right = record.fields["r"]!!
-                    FunkBoolean(deriveStructuralEquality(left, right))
+                    FunkBool(deriveStructuralEquality(left, right))
                 }
                 else -> null
             }
@@ -2149,7 +2160,7 @@ class FunkInterpreter {
             left is FunkInt && right is FunkInt -> left.value == right.value
             left is FunkFloat && right is FunkFloat -> left.value == right.value
             left is FunkString && right is FunkString -> left.value == right.value
-            left is FunkBoolean && right is FunkBoolean -> left.value == right.value
+            left is FunkBool && right is FunkBool -> left.value == right.value
             left is FunkNull && right is FunkNull -> true
 
             // Structural equality for records
@@ -2250,7 +2261,7 @@ class FunkInterpreter {
             is FunkInt -> value.value.toString()
             is FunkFloat -> value.value.toString()
             is FunkString -> "\"${value.value}\""
-            is FunkBoolean -> if (value.value) "true" else "false"
+            is FunkBool -> if (value.value) "true" else "false"
             is FunkNull -> "null"
 
             // Inspect for records
@@ -2469,8 +2480,8 @@ class FunkInterpreter {
                         ?: throw RuntimeException("__native_string_equals not found")
                     eqFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
-                left is FunkBoolean && right is FunkBoolean -> {
-                    FunkBoolean(left.value == right.value)
+                left is FunkBool && right is FunkBool -> {
+                    FunkBool(left.value == right.value)
                 }
                 else -> throw RuntimeException("Unsupported types for (==): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -2565,16 +2576,16 @@ class FunkInterpreter {
                     val eqFn = context["__native_int_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_equals not found")
                     val result = eqFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
-                    FunkBoolean(!(result as FunkBoolean).value)
+                    FunkBool(!(result as FunkBool).value)
                 }
                 left is FunkString && right is FunkString -> {
                     val eqFn = context["__native_string_equals"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_equals not found")
                     val result = eqFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
-                    FunkBoolean(!(result as FunkBoolean).value)
+                    FunkBool(!(result as FunkBool).value)
                 }
-                left is FunkBoolean && right is FunkBoolean -> {
-                    FunkBoolean(left.value != right.value)
+                left is FunkBool && right is FunkBool -> {
+                    FunkBool(left.value != right.value)
                 }
                 else -> throw RuntimeException("Unsupported types for (!=): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -2596,13 +2607,13 @@ class FunkInterpreter {
                     val gtFn = context["__native_int_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_greater_than not found")
                     val result = gtFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
-                    FunkBoolean(!(result as FunkBoolean).value)
+                    FunkBool(!(result as FunkBool).value)
                 }
                 left is FunkString && right is FunkString -> {
                     val gtFn = context["__native_string_greater_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_greater_than not found")
                     val result = gtFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
-                    FunkBoolean(!(result as FunkBoolean).value)
+                    FunkBool(!(result as FunkBool).value)
                 }
                 else -> throw RuntimeException("Unsupported types for (<=): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -2624,13 +2635,13 @@ class FunkInterpreter {
                     val ltFn = context["__native_int_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_int_less_than not found")
                     val result = ltFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
-                    FunkBoolean(!(result as FunkBoolean).value)
+                    FunkBool(!(result as FunkBool).value)
                 }
                 left is FunkString && right is FunkString -> {
                     val ltFn = context["__native_string_less_than"] as? NativeFunkFunction
                         ?: throw RuntimeException("__native_string_less_than not found")
                     val result = ltFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
-                    FunkBoolean(!(result as FunkBoolean).value)
+                    FunkBool(!(result as FunkBool).value)
                 }
                 else -> throw RuntimeException("Unsupported types for (>=): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -2647,8 +2658,8 @@ class FunkInterpreter {
             val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (&&)")
             
             when {
-                left is FunkBoolean && right is FunkBoolean -> {
-                    FunkBoolean(left.value && right.value)
+                left is FunkBool && right is FunkBool -> {
+                    FunkBool(left.value && right.value)
                 }
                 else -> throw RuntimeException("Unsupported types for (&&): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -2665,8 +2676,8 @@ class FunkInterpreter {
             val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (||)")
             
             when {
-                left is FunkBoolean && right is FunkBoolean -> {
-                    FunkBoolean(left.value || right.value)
+                left is FunkBool && right is FunkBool -> {
+                    FunkBool(left.value || right.value)
                 }
                 else -> throw RuntimeException("Unsupported types for (||): ${left::class.simpleName}, ${right::class.simpleName}")
             }
@@ -2679,10 +2690,10 @@ class FunkInterpreter {
             }
             
             val record = args[0] as? FunkRecord ?: throw RuntimeException("boolAnd expects a record argument, got ${args[0]::class.simpleName}")
-            val a = record.fields["a"] as? FunkBoolean ?: throw RuntimeException("Missing 'a' argument for boolAnd")
-            val b = record.fields["b"] as? FunkBoolean ?: throw RuntimeException("Missing 'b' argument for boolAnd")
+            val a = record.fields["a"] as? FunkBool ?: throw RuntimeException("Missing 'a' argument for boolAnd")
+            val b = record.fields["b"] as? FunkBool ?: throw RuntimeException("Missing 'b' argument for boolAnd")
             
-            FunkBoolean(a.value && b.value)
+            FunkBool(a.value && b.value)
         }
         
         context["boolOr"] = NativeFunkFunction("boolOr") { args ->
@@ -2691,10 +2702,10 @@ class FunkInterpreter {
             }
             
             val record = args[0] as? FunkRecord ?: throw RuntimeException("boolOr expects a record argument, got ${args[0]::class.simpleName}")
-            val a = record.fields["a"] as? FunkBoolean ?: throw RuntimeException("Missing 'a' argument for boolOr")
-            val b = record.fields["b"] as? FunkBoolean ?: throw RuntimeException("Missing 'b' argument for boolOr")
+            val a = record.fields["a"] as? FunkBool ?: throw RuntimeException("Missing 'a' argument for boolOr")
+            val b = record.fields["b"] as? FunkBool ?: throw RuntimeException("Missing 'b' argument for boolOr")
             
-            FunkBoolean(a.value || b.value)
+            FunkBool(a.value || b.value)
         }
         
         context["boolNot"] = NativeFunkFunction("boolNot") { args ->
@@ -2703,9 +2714,9 @@ class FunkInterpreter {
             }
             
             val record = args[0] as? FunkRecord ?: throw RuntimeException("boolNot expects a record argument, got ${args[0]::class.simpleName}")
-            val value = record.fields["val"] as? FunkBoolean ?: throw RuntimeException("Missing 'val' argument for boolNot")
+            val value = record.fields["val"] as? FunkBool ?: throw RuntimeException("Missing 'val' argument for boolNot")
             
-            FunkBoolean(!value.value)
+            FunkBool(!value.value)
         }
         
         // Random functions
@@ -2786,7 +2797,7 @@ class FunkInterpreter {
         // Tail call optimization loop
         while (true) {
             // Mark this context as being in tail position for optimization
-            currentContext["__in_tail_position"] = FunkBoolean(true)
+            currentContext["__in_tail_position"] = FunkBool(true)
             
             val result = evaluateExpressionWithTailCallDetection(currentFunction.body, currentContext, currentFunction)
             
@@ -2833,7 +2844,7 @@ class FunkInterpreter {
         currentFunction: SimpleFunkFunction
     ): FunkValue {
         // Check if we're in tail position and this is a recursive call
-        val inTailPosition = (context["__in_tail_position"] as? FunkBoolean)?.value ?: false
+        val inTailPosition = (context["__in_tail_position"] as? FunkBool)?.value ?: false
         
         return when (expr) {
             is FunctionCall -> {
@@ -2875,13 +2886,13 @@ class FunkInterpreter {
                 val localContext = context.toMutableMap()
                 
                 // Execute statements (not in tail position)
-                localContext["__in_tail_position"] = FunkBoolean(false)
+                localContext["__in_tail_position"] = FunkBool(false)
                 for (stmt in expr.statements) {
                     executeStatement(stmt, localContext)
                 }
                 
                 // Result expression is in tail position
-                localContext["__in_tail_position"] = FunkBoolean(true)
+                localContext["__in_tail_position"] = FunkBool(true)
                 evaluateExpressionWithTailCallDetection(expr.result, localContext, currentFunction)
             }
             else -> {
@@ -2972,7 +2983,7 @@ class FunkInterpreter {
                         is FunkInt -> "Int"
                         is FunkString -> "String"
                         is FunkFloat -> "Float"
-                        is FunkBoolean -> "Boolean"
+                        is FunkBool -> "Boolean"
                         else -> "Unknown"
                     }
                 }.distinct()
@@ -2980,7 +2991,7 @@ class FunkInterpreter {
             is FunkInt -> listOf("Int")
             is FunkString -> listOf("String")
             is FunkFloat -> listOf("Float")
-            is FunkBoolean -> listOf("Boolean")
+            is FunkBool -> listOf("Boolean")
             else -> listOf("Unknown")
         }
     }
@@ -3057,7 +3068,7 @@ data class SimpleFunkFunction(
             is FunkInt -> "Int"
             is FunkFloat -> "Float"
             is FunkString -> "String"
-            is FunkBoolean -> "Boolean"
+            is FunkBool -> "Boolean"
             is FunkNull -> "Null"
             is FunkRecord -> "Record"
             is FunkVariant -> "Variant"

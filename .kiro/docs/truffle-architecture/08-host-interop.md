@@ -183,7 +183,7 @@ class FunkHostAccessHandler(private val context: FunkContext) : SyncEffectHandle
             String::class.java -> FunkString(result?.toString() ?: "")
             Int::class.java -> FunkInt((result as? Number)?.toInt() ?: 0)
             Double::class.java -> FunkFloat((result as? Number)?.toDouble() ?: 0.0)
-            Boolean::class.java -> FunkBoolean(result as? Boolean ?: false)
+            Boolean::class.java -> FunkBool(result as? Boolean ?: false)
             else -> {
                 // Return as HostObject for complex types
                 if (result != null) {
@@ -218,7 +218,7 @@ object HostInteropConverter {
             is FunkInt -> funkValue.value
             is FunkFloat -> funkValue.value
             is FunkString -> funkValue.value
-            is FunkBoolean -> funkValue.value
+            is FunkBool -> funkValue.value
             is FunkNull -> null
             is HostObjectWrapper -> funkValue.hostObject  // Unwrap host objects
             is FunkRecord -> {
@@ -248,7 +248,7 @@ object HostInteropConverter {
             is Double -> FunkFloat(hostValue)
             is Float -> FunkFloat(hostValue.toDouble())
             is String -> FunkString(hostValue)
-            is Boolean -> FunkBoolean(hostValue)
+            is Boolean -> FunkBool(hostValue)
             is Collection<*> -> {
                 // Convert to Funk list (as nested variants)
                 hostValue.foldRight(FunkVariant("Nil", null)) { item, acc ->

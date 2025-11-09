@@ -205,15 +205,15 @@ data class FunkString(val value: String) : FunkValue() {
 }
 
 /**
- * Boolean value
+ * Bool value
  */
 @ExportLibrary(InteropLibrary::class)
-data class FunkBoolean(val value: Boolean) : FunkValue() {
+data class FunkBool(val value: Boolean) : FunkValue() {
     override fun getDisplayString(): String = value.toString()
-    
+
     @ExportMessage
     fun isBoolean(): Boolean = true
-    
+
     @ExportMessage
     fun asBoolean(): Boolean = value
 }
@@ -378,7 +378,7 @@ data class FunkList(val elements: List<FunkValue>) : FunkValue() {
             "length" -> FunkInt(elements.size.toLong())
             "head" -> if (elements.isNotEmpty()) elements.first() else FunkNull
             "tail" -> if (elements.isNotEmpty()) FunkList(elements.drop(1)) else FunkList(emptyList())
-            "isEmpty" -> FunkBoolean(elements.isEmpty())
+            "isEmpty" -> FunkBool(elements.isEmpty())
             else -> throw FunkException("Property '$member' not found in List")
         }
     }
@@ -468,7 +468,7 @@ data class FunkMap(val entries: Map<FunkValue, FunkValue>) : FunkValue() {
             "size" -> FunkInt(entries.size.toLong())
             "keys" -> FunkList(entries.keys.toList())
             "values" -> FunkList(entries.values.toList())
-            "isEmpty" -> FunkBoolean(entries.isEmpty())
+            "isEmpty" -> FunkBool(entries.isEmpty())
             else -> throw FunkException("Property '$member' not found in Map")
         }
     }
@@ -498,7 +498,7 @@ data class FunkSet(val elements: Set<FunkValue>) : FunkValue() {
     fun readMember(member: String): Any {
         return when (member) {
             "size" -> FunkInt(elements.size.toLong())
-            "isEmpty" -> FunkBoolean(elements.isEmpty())
+            "isEmpty" -> FunkBool(elements.isEmpty())
             else -> throw FunkException("Property '$member' not found in Set")
         }
     }
@@ -788,7 +788,7 @@ data class NativeFunkFunction(
                 is String -> FunkString(arg)
                 is Long -> FunkInt(arg)
                 is Double -> FunkFloat(arg)
-                is Boolean -> FunkBoolean(arg)
+                is Boolean -> FunkBool(arg)
                 else -> throw FunkException("Unsupported argument type: ${arg?.javaClass}")
             }
         }
@@ -838,6 +838,14 @@ data class FunkSuspended(
             "Use 'perform' to handle these effects first."
         )
     }
+}
+
+/**
+ * Wrapper for FunkInterpreter to store in context
+ * This is NOT a FunkValue (intentionally) - it's just stored in the context Map
+ */
+class InterpreterReference(val interpreter: FunkInterpreter) : FunkValue() {
+    override fun getDisplayString(): String = "<interpreter-reference>"
 }
 
 

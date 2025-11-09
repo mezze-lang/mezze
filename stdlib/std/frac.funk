@@ -6,58 +6,58 @@
 # === ARITHMETIC OPERATIONS ===
 
 # Add two fractions
-let add = { left, right } -> __native_frac_add { left = left, right = right }
+pub let add = { left, right } -> __native_frac_add { left = left, right = right }
 
 # Subtract two fractions  
-let subtract = { left, right } -> __native_frac_subtract { left = left, right = right }
+pub let subtract = { left, right } -> __native_frac_subtract { left = left, right = right }
 
 # Multiply two fractions
-let multiply = { left, right } -> __native_frac_multiply { left = left, right = right }
+pub let multiply = { left, right } -> __native_frac_multiply { left = left, right = right }
 
 # Divide two fractions
-let divide = { left, right } -> __native_frac_divide { left = left, right = right }
+pub let divide = { left, right } -> __native_frac_divide { left = left, right = right }
 
 # === COMPARISON OPERATIONS ===
 
 # Check if two fractions are equal
-let equals = { left, right } -> __native_frac_equals { left = left, right = right }
+pub let equals = { left, right } -> __native_frac_equals { left = left, right = right }
 
 # Check if left fraction is less than right
-let less_than = { left, right } -> __native_frac_less_than { left = left, right = right }
+pub let less_than = { left, right } -> __native_frac_less_than { left = left, right = right }
 
 # Check if left fraction is greater than right
-let greater_than = { left, right } -> __native_frac_greater_than { left = left, right = right }
+pub let greater_than = { left, right } -> __native_frac_greater_than { left = left, right = right }
 
 # === CONVERSION OPERATIONS ===
 
 # Convert fraction to float
-let to_float = { frac } -> __native_frac_to_float { frac = frac }
+pub let to_float = { frac } -> __native_frac_to_float { frac = frac }
 
 # Convert fraction to string representation
-let to_string = { frac } -> __native_frac_to_string { frac = frac }
+pub let to_string = { frac } -> __native_frac_to_string { frac = frac }
 
 # Create fraction from two integers (numerator, denominator)
-let make = { numerator, denominator } -> __native_make_frac { numerator = numerator, denominator = denominator }
+pub let make = { numerator, denominator } -> __native_make_frac { numerator = numerator, denominator = denominator }
 
 # Convert integer to fraction
-let from_int = { int } -> __native_int_to_frac { int = int }
+pub let from_int = { int } -> __native_int_to_frac { int = int }
 
 # Convert natural number to fraction
-let from_nat = { nat } -> __native_nat_to_frac { nat = nat }
+pub let from_nat = { nat } -> __native_nat_to_frac { nat = nat }
 
 # === UTILITY OPERATIONS ===
 
 # Get numerator of fraction
-let numerator = { frac } -> __native_frac_numerator { frac = frac }
+pub let numerator = { frac } -> __native_frac_numerator { frac = frac }
 
 # Get denominator of fraction
-let denominator = { frac } -> __native_frac_denominator { frac = frac }
+pub let denominator = { frac } -> __native_frac_denominator { frac = frac }
 
 # Reduce fraction to lowest terms (fractions are automatically reduced, but this is explicit)
-let reduce = { frac } -> __native_reduce_frac { frac = frac }
+pub let reduce = { frac } -> __native_reduce_frac { frac = frac }
 
 # Get absolute value of fraction
-let abs = { frac } -> __native_abs_frac { frac = frac }
+pub let abs = { frac } -> __native_abs_frac { frac = frac }
 
 # Negate fraction
-let negate = { frac } -> __native_negate_frac { frac = frac }
+pub let negate = { frac } -> __native_negate_frac { frac = frac }

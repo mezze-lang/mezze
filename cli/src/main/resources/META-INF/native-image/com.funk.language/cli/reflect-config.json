@@ -60,7 +60,7 @@
     "allDeclaredFields": true
   },
   {
-    "name": "com.funk.language.interpreter.FunkBoolean",
+    "name": "com.funk.language.interpreter.FunkBool",
     "allDeclaredConstructors": true,
     "allPublicMethods": true,
     "allDeclaredMethods": true,

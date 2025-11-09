@@ -94,7 +94,7 @@ class PolyglotInteropHandler(private val context: FunkContext) : SyncEffectHandl
             "to_funk_string" -> handleToFunkString(arguments)
             "to_funk_int" -> handleToFunkInt(arguments)
             "to_funk_float" -> handleToFunkFloat(arguments)
-            "to_funk_boolean" -> handleToFunkBoolean(arguments)
+            "to_funk_boolean" -> handleToFunkBool(arguments)
             else -> throw FunkException("Unknown polyglot operation: $operation")
         }
     }
@@ -171,7 +171,7 @@ class PolyglotInteropHandler(private val context: FunkContext) : SyncEffectHandl
             is FunkInt -> funkValue.value
             is FunkFloat -> funkValue.value
             is FunkString -> funkValue.value
-            is FunkBoolean -> funkValue.value
+            is FunkBool -> funkValue.value
             is FunkNull -> null
             is PolyglotValueWrapper -> funkValue.value  // Unwrap polyglot values
             is FunkRecord -> {

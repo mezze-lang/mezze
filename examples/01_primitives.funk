@@ -21,7 +21,7 @@ let greeting = "Hello"
 let name = "Funk"
 let message = greeting ++ ", " ++ name ++ "!"
 
-# Boolean operations
+# Bool operations
 let is_valid = true
 let can_proceed = is_valid && is_adult
 
@@ -44,6 +44,6 @@ let main = {} ->
         Log.println { msg = "  " ++ message }
         Log.println { msg = "" }
 
-        Log.println { msg = "Booleans:" }
+        Log.println { msg = "Bools:" }
         Log.println { msg = "  is_adult: " ++ (if is_adult then "true" else "false") }
         Log.println { msg = "  can_proceed: " ++ (if can_proceed then "true" else "false") }
