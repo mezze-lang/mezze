@@ -14,10 +14,10 @@ fun prettyPrintType(type: FunkType): String {
 private fun collectTypeVariables(type: FunkType): Map<TypeVar, String> {
     val variables = mutableSetOf<TypeVar>()
     collectTypeVariablesRecursive(type, variables)
-    
+
     // Sort by name to ensure consistent ordering
     val sortedVars = variables.sortedBy { it.name }
-    
+
     // Assign names 'a, 'b, 'c, etc.
     return sortedVars.mapIndexed { index, typeVar ->
         val letter = ('a' + index).toString()
@@ -90,7 +90,7 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     is FunkType.IntType -> "Int"
     is FunkType.FloatType -> "Float"
     is FunkType.StringType -> "String"
-    is FunkType.BooleanType -> "Boolean"
+    is FunkType.BooleanType -> "Bool"
     is FunkType.NatType -> "Nat"
     is FunkType.FracType -> "Frac"
     is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
@@ -170,7 +170,7 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
  * Pretty printer for Funk types with type alias expansion support
  */
 fun prettyPrintTypeWithAliases(
-    type: FunkType, 
+    type: FunkType,
     typeAliases: Map<String, TypeAliasInfo> = emptyMap(),
     showExpansion: Boolean = false
 ): String {
@@ -199,10 +199,41 @@ fun prettyPrintTypeWithAliases(
 }
 
 /**
+ * Helper function to print a type with alias checking, using an existing type variable mapping
+ */
+private fun prettyPrintWithAliasCheck(
+    type: FunkType,
+    typeAliases: Map<String, TypeAliasInfo>,
+    showExpansion: Boolean,
+    typeVarMapping: Map<TypeVar, String>
+): String {
+    // First, check if this type matches any alias
+    val aliasMatch = findTypeAliasForType(type, typeAliases)
+
+    return if (aliasMatch != null) {
+        val aliasName = if (aliasMatch.typeArgs.isEmpty()) {
+            aliasMatch.aliasName
+        } else {
+            val typeArgsStr = aliasMatch.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
+            "${aliasMatch.aliasName} $typeArgsStr"
+        }
+
+        if (showExpansion) {
+            "$aliasName (= ${prettyPrintTypeWithMapping(type, typeVarMapping)})"
+        } else {
+            aliasName
+        }
+    } else {
+        // No direct alias match - recursively apply aliases to subcomponents
+        prettyPrintTypeWithAliasesRecursive(type, typeAliases, showExpansion, typeVarMapping)
+    }
+}
+
+/**
  * Recursively apply type aliases to subcomponents of a type
  */
 private fun prettyPrintTypeWithAliasesRecursive(
-    type: FunkType, 
+    type: FunkType,
     typeAliases: Map<String, TypeAliasInfo>,
     showExpansion: Boolean,
     typeVarMapping: Map<TypeVar, String>
@@ -210,13 +241,13 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is FunkType.IntType -> "Int"
     is FunkType.FloatType -> "Float"
     is FunkType.StringType -> "String"
-    is FunkType.BooleanType -> "Boolean"
+    is FunkType.BooleanType -> "Bool"
     is FunkType.NatType -> "Nat"
     is FunkType.FracType -> "Frac"
     is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
-            "$name: ${prettyPrintTypeWithAliases(fieldType, typeAliases, showExpansion)}"
+            "$name: ${prettyPrintWithAliasCheck(fieldType, typeAliases, showExpansion, typeVarMapping)}"
         }
         if (type.isOpen) {
             "{ $fields, ... }"
@@ -228,8 +259,8 @@ private fun prettyPrintTypeWithAliasesRecursive(
         val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
             when (dataType) {
                 null -> name
-                is FunkType.RecordType -> "$name ${prettyPrintTypeWithAliases(dataType, typeAliases, showExpansion)}"
-                else -> "$name(${prettyPrintTypeWithAliases(dataType, typeAliases, showExpansion)})"
+                is FunkType.RecordType -> "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping)}"
+                else -> "$name(${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping)})"
             }
         }
         if (type.isOpen) {
@@ -238,21 +269,21 @@ private fun prettyPrintTypeWithAliasesRecursive(
             "| $constructors |"
         }
     }
-    is FunkType.ArrayListType -> "[${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}]"
-    is FunkType.ArrayType -> "[${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}]"
-    is FunkType.OptionType -> "Option ${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}"
-    is FunkType.ResultType -> "Result ${prettyPrintTypeWithAliases(type.errorType, typeAliases, showExpansion)} ${prettyPrintTypeWithAliases(type.valueType, typeAliases, showExpansion)}"
-    is FunkType.ListType -> "List ${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}"
-    is FunkType.MapType -> "Map ${prettyPrintTypeWithAliases(type.keyType, typeAliases, showExpansion)} ${prettyPrintTypeWithAliases(type.valueType, typeAliases, showExpansion)}"
-    is FunkType.SetType -> "Set ${prettyPrintTypeWithAliases(type.elementType, typeAliases, showExpansion)}"
+    is FunkType.ArrayListType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}]"
+    is FunkType.ArrayType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}]"
+    is FunkType.OptionType -> "Option ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
+    is FunkType.ResultType -> "Result ${prettyPrintWithAliasCheck(type.errorType, typeAliases, showExpansion, typeVarMapping)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)}"
+    is FunkType.ListType -> "List ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
+    is FunkType.MapType -> "Map ${prettyPrintWithAliasCheck(type.keyType, typeAliases, showExpansion, typeVarMapping)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)}"
+    is FunkType.SetType -> "Set ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
     is FunkType.FunctionType -> {
         // Build parameter type string
-        val paramTypeStr = prettyPrintTypeWithAliases(type.paramType, typeAliases, showExpansion)
+        val paramTypeStr = prettyPrintWithAliasCheck(type.paramType, typeAliases, showExpansion, typeVarMapping)
 
         // Add ability constraints after parameter type but before arrow
         val abilityConstraints = if (type.abilityConstraints.isNotEmpty()) {
             " with " + type.abilityConstraints.joinToString(", ") { constraint ->
-                val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintTypeWithAliases(it, typeAliases, showExpansion) }
+                val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
                 if (typeArgs.isNotEmpty()) {
                     "${constraint.abilityName} $typeArgs"
                 } else {
@@ -264,7 +295,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
 
         // Build return type string
-        val returnTypeStr = prettyPrintTypeWithAliases(type.returnType, typeAliases, showExpansion)
+        val returnTypeStr = prettyPrintWithAliasCheck(type.returnType, typeAliases, showExpansion, typeVarMapping)
 
         // Add effects
         val effects = if (type.effects != null && type.effects.effects.isNotEmpty()) {
@@ -279,7 +310,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
     }
     is FunkType.SuspendedType -> {
         // Suspended types print as: valueType <effects>
-        val valueTypeStr = prettyPrintTypeWithAliases(type.valueType, typeAliases, showExpansion)
+        val valueTypeStr = prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)
         val effectList = type.effects.effects.sorted().joinToString(", ")
         "$valueTypeStr <$effectList>"
     }
@@ -571,7 +602,7 @@ fun getBuiltinTypeName(type: FunkType): String? {
         is FunkType.IntType -> "Int"
         is FunkType.FloatType -> "Float"
         is FunkType.StringType -> "String"
-        is FunkType.BooleanType -> "Boolean"
+        is FunkType.BooleanType -> "Bool"
         is FunkType.NatType -> "Nat"
         is FunkType.FracType -> "Frac"
         is FunkType.OrderingType -> "Ordering"

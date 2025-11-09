@@ -1,0 +1,25 @@
+# Open Record Type Inference Tests
+
+# Basic open record inference
+let inferredOpen = {x = 42, y = "hello", ...}
+# expected: inferredOpen : { x: Int, y: String, ... }
+
+# DISABLED: Cannot add new fields to open records - this should fail type checking
+# let updateResult = {...inferredOpen, z = true}
+# let processOpen = {record} -> {...record, processed = true}
+
+# Open record inference with spread
+let testOpen = {name = "test", value = 123, ...}
+# expected: testOpen : { name: String, value: Int, ... }
+
+# DISABLED: Cannot add new fields to open records - this should fail type checking
+# let mixedFunc = {closed, open} -> {...open, fromClosed = closed.name}
+# let closedInput = {name = "Alice", age = 30}
+# let openInput = {kind = "user", active = true, ...}
+# let mixedResult = mixedFunc {closed = closedInput, open = openInput}
+
+# Simple nested inference
+let simpleNested = {data = {count = 5, active = false}, meta = {version = 1, timestamp = 0}, ...}
+# expected: simpleNested : { data: { count: Int, active: Bool }, meta: { version: Int, timestamp: Int }, ... }
+
+simpleNested

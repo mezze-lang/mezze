@@ -1530,18 +1530,47 @@ private fun extractTypeVariables(type: FunkType): Set<TypeVar> {
 fun normalizeTypeVariables(type: FunkType): FunkType {
     val typeVarsInOrder = mutableListOf<TypeVar>()
     collectTypeVariablesInOrder(type, typeVarsInOrder)
-    
-    // CRITICAL FIX: Group type variables by identity to preserve constraint relationships
-    // Only type variables that are the same object should get the same normalized name
-    val uniqueTypeVars = typeVarsInOrder.distinct()
-    
+
+    // CRITICAL FIX: Use identity-based distinct to preserve independence of type variables
+    // TypeVar is a data class, so .distinct() uses structural equality (name + level)
+    // This would incorrectly merge independent type variables with the same name!
+    // Instead, we track by object identity using a map
+    val seenIdentities = mutableMapOf<Int, TypeVar>()  // identity -> first occurrence
+    val uniqueTypeVars = mutableListOf<TypeVar>()
+
+    for (typeVar in typeVarsInOrder) {
+        val identity = System.identityHashCode(typeVar)
+        if (!seenIdentities.containsKey(identity)) {
+            seenIdentities[identity] = typeVar
+            uniqueTypeVars.add(typeVar)
+        }
+    }
+
     // Create mapping from old type variables to new normalized names
-    val mapping = mutableMapOf<TypeVar, TypeVar>()
+    // Use a custom map that compares by identity, not structural equality
+    val mapping = object : MutableMap<TypeVar, TypeVar> by mutableMapOf() {
+        private val identityMap = mutableMapOf<Int, TypeVar>()
+
+        override fun get(key: TypeVar): TypeVar? {
+            return identityMap[System.identityHashCode(key)]
+        }
+
+        override fun put(key: TypeVar, value: TypeVar): TypeVar? {
+            val identity = System.identityHashCode(key)
+            return identityMap.put(identity, value)
+        }
+
+        override fun containsKey(key: TypeVar): Boolean {
+            return identityMap.containsKey(System.identityHashCode(key))
+        }
+    }
+
     uniqueTypeVars.forEachIndexed { index, typeVar ->
         val normalizedName = "'${('a' + index)}"
-        mapping[typeVar] = TypeVar(normalizedName, typeVar.level)
+        val newTypeVar = TypeVar(normalizedName, typeVar.level)
+        mapping[typeVar] = newTypeVar
     }
-    
+
     return substituteTypeVariables(type, mapping)
 }
 

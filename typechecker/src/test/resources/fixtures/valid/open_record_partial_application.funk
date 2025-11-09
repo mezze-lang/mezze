@@ -1,0 +1,14 @@
+# Open record partial application tests
+
+# Open record accepts extra fields
+let process: { x: Int, y: Int, ... } -> Int = { x, y } -> x + y  # expected: process : { x: Int, y: Int, ... } -> Int
+let process_x = process { x = 5 }                                  # expected: process_x : { y: Int, ... } -> Int
+let result1 = process_x { y = 10, z = "ignored" }                  # expected: result1 : Int
+
+# Open record preserves open nature through multiple partial applications
+let combine: { a: Int, b: Int, c: Int, ... } -> Int = { a, b, c } -> a + b + c  # expected: combine : { a: Int, b: Int, c: Int, ... } -> Int
+let with_a = combine { a = 1 }                                                     # expected: with_a : { b: Int, c: Int, ... } -> Int
+let with_ab = with_a { b = 2 }                                                     # expected: with_ab : { c: Int, ... } -> Int
+let result2 = with_ab { c = 3, extra = "ignored" }                                 # expected: result2 : Int
+
+result1
