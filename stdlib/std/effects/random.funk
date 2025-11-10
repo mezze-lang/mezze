@@ -12,7 +12,7 @@ pub effect Random {
 }
 
 # Seeded random implementation with deterministic behavior
-impl Random for SeededRandom { seed: Int } where {
+pub impl Random for SeededRandom { seed: Int } where {
     random_float = { } -> __native_seeded_random_float { seed = seed },
     random_int = { min, max } -> __native_seeded_random_int { seed = seed, min = min, max = max },
     random_nat = { max } -> __native_seeded_random_nat { seed = seed, max = max },
@@ -20,36 +20,36 @@ impl Random for SeededRandom { seed: Int } where {
 }
 
 # Convenience functions that use the Random effect
-pub let random_float = { } -> Random.random_float { }
+pub let random_float: {} -> Float <Random> = {} -> Random.random_float {}
 
-pub let random_int = { min: Int, max: Int } -> Random.random_int { min = min, max = max }
+pub let random_int: { min: Int, max: Int } -> Int <Random> = { min, max } -> Random.random_int { min = min, max = max }
 
-pub let random_nat = { max: Nat } -> Random.random_nat { max = max }
+pub let random_nat: { max: Nat } -> Nat <Random> = { max } -> Random.random_nat { max = max }
 
-pub let random_boolean = { probability: Float } -> do
-    let rand = Random.random_float { }
+pub let random_boolean: { probability: Float } -> Bool <Random> = { probability } -> do
+    let rand = Random.random_float {}
     rand < probability
 
-pub let random_range = { min: Float, max: Float } -> do
-    let rand = Random.random_float { }
+pub let random_range: { min: Float, max: Float } -> Float <Random> = { min, max } -> do
+    let rand = Random.random_float {}
     min + (rand * (max - min))
 
-pub let seed_random = { seed: Int } -> Random.seed { seed = seed }
+pub let seed_random: { seed: Int } -> {} <Random> = { seed } -> Random.seed { seed = seed }
 
 # Distribution functions using the Random effect
-pub let uniform = { min: Float, max: Float } -> random_range { min = min, max = max }
+pub let uniform: { min: Float, max: Float } -> Float <Random> = { min, max } -> random_range { min = min, max = max }
 
 # Normal distribution using Box-Muller transform
-pub let normal = { mean: Float, std_dev: Float } -> do
+pub let normal: { mean: Float, std_dev: Float } -> Float <Random> = { mean, std_dev } -> do
     let u1 = Random.random_float { }
     let u2 = Random.random_float { }
-    let z0 = core::sqrt { val = -2.0 * core::ln { val = u1 } } * trig::cos { val = 2.0 * trig::pi * u2 }
+    let z0 = core::sqrt { n = -2.0 * core::ln { n = u1 } } * trig::cos { n = 2.0 * trig::pi * u2 }
     mean + (std_dev * z0)
 
 # Exponential distribution
-pub let exponential = { rate: Float } -> do
+pub let exponential: { rate: Float } -> Float <Random> = { rate } -> do
     let u = Random.random_float { }
-    (-1.0 / rate) * core::ln { val = u }
+    (-1.0 / rate) * core::ln { n = u }
 
 # Usage examples:
 # 

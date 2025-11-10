@@ -149,7 +149,8 @@ enum class ErrorType {
     UNKNOWN_CONSTRUCTOR,
     MISSING_HANDLER,
     CIRCULAR_REFERENCE,
-    CONSTRAINT_VIOLATION
+    CONSTRAINT_VIOLATION,
+    MISSING_ABILITY_IMPL
 }
 
 /**
@@ -186,7 +187,8 @@ class TypeChecker {
     
     // Simple constraint collection for basic unification
     private val constraints = mutableListOf<Pair<com.funk.language.ast.FunkType, com.funk.language.ast.FunkType>>()
-    
+    private var inferenceDepth = 0
+
     // Constraint-based type inference
     private val constraintSolver = ConstraintSolver()
     
@@ -318,6 +320,7 @@ class TypeChecker {
             }
         }
 
+
         val enhancedItems = transformedProgram.items.map { item ->
             when (item) {
                 is LetBinding -> {
@@ -332,7 +335,13 @@ class TypeChecker {
                         // For recursive functions, create a placeholder and add to context first
                         val placeholderType = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
                         context[item.variableName] = placeholderType
-                        
+
+                        if (System.getProperty("funk.typecheck.debug") == "true") {
+                            println("\n=== RECURSIVE FUNCTION: ${item.variableName} ===")
+                            println("Added placeholder to context")
+                            println("Context keys: ${context.keys}")
+                        }
+
                         try {
                             val inferredType = item.typeAnnotation?.let { annotation ->
                                 val declaredType = convertTypeAnnotation(annotation)
@@ -386,6 +395,11 @@ class TypeChecker {
                         } ?: inferTypeWithUnification(item.expression)
                     }
 
+        // CRITICAL FIX: Check for free variables BEFORE normalizing
+        // normalizeTypeVariables creates new TypeVar objects, which disconnects them
+        // from the substitutions that were computed during inference
+        val freeVarsBeforeNormalization = getFreeTypeVariables(finalType)
+
         // Normalize type variables for consistent naming ('a, 'b, etc.)
         val normalizedType = com.funk.language.ast.normalizeTypeVariables(finalType)
 
@@ -397,7 +411,8 @@ class TypeChecker {
         }
 
                     // Check if this should be a polymorphic binding (let-polymorphism)
-                    val freeVars = getFreeTypeVariables(cleanedType)
+                    // Use the free variables check from BEFORE normalization
+                    val freeVars = freeVarsBeforeNormalization
 
                     // DEBUG: Track what's about to be added
                     if (System.getProperty("funk.typecheck.debug") == "true") {
@@ -673,6 +688,10 @@ class TypeChecker {
     }
 
     private fun inferTypeWithUnificationAndSubstitutions(expr: Expression, expectedType: com.funk.language.ast.FunkType?): Pair<com.funk.language.ast.FunkType, Map<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>> {
+        inferenceDepth++
+
+        // CRITICAL FIX: Save existing constraints to avoid nested calls interfering
+        val savedConstraints = constraints.toList()
         // Clear constraints for this inference
         constraints.clear()
 
@@ -686,8 +705,13 @@ class TypeChecker {
         // Solve constraints and apply substitutions to the inferred type
         val substitutions = solveConstraints()
 
+        // CRITICAL FIX: Restore saved constraints
+        constraints.clear()
+        constraints.addAll(savedConstraints)
+
+        inferenceDepth--
+
         if (System.getProperty("funk.typecheck.debug") == "true") {
-            // // println("🔍 SUBSTITUTIONS BEFORE APPLYING:")
             println("   inferredType = ${prettyPrintType(inferredType)}")
             println("   substitutions = ${substitutions.map { (k, v) -> "${k} -> ${prettyPrintType(v)}" }}")
         }
@@ -741,7 +765,7 @@ class TypeChecker {
      * Apply substitutions to a type
      */
     private fun applySubstitutionToType(
-        type: com.funk.language.ast.FunkType, 
+        type: com.funk.language.ast.FunkType,
         substitutions: Map<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>
     ): com.funk.language.ast.FunkType {
         return when (type) {
@@ -786,11 +810,14 @@ class TypeChecker {
                 val constraintList = constraints.map { (left, right) ->
                     Constraint.Equality(left, right)
                 }
-                
+
                 // Use constraint solver and capture substitutions
                 val substitutions = constraintSolver.solve(constraintList)
                 constraints.clear()
-                return substitutions.mapping
+                // CRITICAL FIX: Make a deep copy of the mapping to avoid it being cleared
+                val result = HashMap<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>()
+                substitutions.mapping.forEach { (k, v) -> result[k] = v }
+                return result
             } catch (e: TypeCheckError) {
                 // Re-throw type check errors
                 throw e
@@ -801,6 +828,7 @@ class TypeChecker {
                 // For other exceptions, be more permissive but log the issue
                 if (System.getProperty("funk.typecheck.debug") == "true") {
                     println("Warning: Constraint solving failed with exception: ${e.message}")
+                    e.printStackTrace()
                 }
                 return emptyMap()
             }
@@ -1057,12 +1085,20 @@ class TypeChecker {
                 expr.cases.any { case -> containsRecursiveReference(case.expression, varName) }
             }
             is DoExpression -> {
-                expr.statements.any { stmt -> 
+                expr.statements.any { stmt ->
                     when (stmt) {
                         is ExpressionStatement -> containsRecursiveReference(stmt.expression, varName)
                         is LetStatement -> containsRecursiveReference(stmt.expression, varName)
                     }
                 } || containsRecursiveReference(expr.result, varName)
+            }
+            is RecordLiteral -> {
+                expr.entries.any { entry ->
+                    when (entry) {
+                        is RecordFieldEntry -> entry.value?.let { containsRecursiveReference(it, varName) } ?: false
+                        is RecordSpreadEntry -> containsRecursiveReference(entry.expression, varName)
+                    }
+                }
             }
             else -> false
         }
@@ -1653,7 +1689,6 @@ class TypeChecker {
      * Basic type inference for expressions - this is a simplified stub
      */
     private fun inferBasicType(expr: Expression): com.funk.language.ast.FunkType {
-        // Debug output removed
         return when (expr) {
             is IntLiteral -> com.funk.language.ast.FunkType.IntType
             is FloatLiteral -> com.funk.language.ast.FunkType.FloatType
@@ -1766,9 +1801,10 @@ class TypeChecker {
                 // Then look up in regular context
                 val lookupResult = context[expr.name]
                 if (System.getProperty("funk.typecheck.debug") == "true") {
-                    val trackedNames = listOf("simple_int", "simple_func", "inferred_int", "inferred_func")
+                    val trackedNames = listOf("simple_int", "simple_func", "inferred_int", "inferred_func", "repeat", "concat", "main_func", "helper")
                     if (expr.name in trackedNames) {
-                        println("  -> Returning from context: ${lookupResult?.let { prettyPrintType(it) } ?: "null"}")
+                        println("  IDENTIFIER LOOKUP: ${expr.name} -> ${lookupResult?.let { prettyPrintType(it) } ?: "NOT FOUND"}")
+                        println("    Context keys: ${context.keys.filter { it in trackedNames }}")
                     }
                 }
 
@@ -1779,40 +1815,17 @@ class TypeChecker {
                         val constructors = mapOf(expr.name to null)
                         com.funk.language.ast.FunkType.VariantType(constructors, null) // null = closed
                     } else {
-                        // Check if this is a clearly undefined variable (not in any scope)
-                        // Be more strict about undefined function names
-                        if (expr.name.length == 1 && expr.name.matches(Regex("[z]"))) {
-                            // Only throw for 'z' specifically (common in test cases) to be very conservative
-                            throw TypeCheckError("Undefined variable: ${expr.name}", expr)
-                        } else if (expr.name.contains("Concat") || expr.name.contains("concat") || expr.name.contains("array")) {
-                            // Debug: Check if this is actually in the context
-                            if (System.getProperty("funk.typecheck.debug") == "true") {
-                                // println("DEBUG: Looking for ${expr.name}, context has: ${context.keys.take(10)}")
-                                // println("DEBUG: Context size: ${context.size}")
-                                println("DEBUG: Array functions in context: ${context.keys.filter { it.contains("array") }}")
-                            }
-                            // Throw for function names that look like they should be defined (array-related)
-                            throw TypeCheckError("Undefined variable: ${expr.name} - ArrayListType operations not available", expr)
-                        } else {
-                            // Create a fresh type variable for other cases
-                            // This handles both circular references and complex inference gracefully
-                            val freshType = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
-                            context[expr.name] = freshType
-                            freshType
-                        }
+                        // Strict checking: if identifier is not in scope, throw an error
+                        // This prevents silent creation of type variables for undefined names
+                        throw TypeCheckError("Undefined variable or function: ${expr.name}", expr)
                     }
                 }
             }
             is FunctionCall -> {
-                // Debug output for string concatenation
-                // if (expr.function is Identifier && (expr.function as Identifier).name == "(++)")  {
-                //     // println("DEBUG: inferBasicType - FunctionCall with (++)")
-                // }
-
                 // Check if this is an effect call (function is a member access like Log.log)
                 if (expr.function is MemberAccess) {
                     val memberAccess = expr.function as MemberAccess
-                    
+
                     // CRITICAL VALIDATION: Check if this is a direct handler call (not allowed)
                     validateEffectHandlerUsage(memberAccess)
                     val effectName = when (memberAccess.receiver) {
@@ -1883,13 +1896,16 @@ class TypeChecker {
                         variantType
                     } else {
                         lookupVariable(identifierName) ?: run {
-                            // Not found anywhere - create a fresh type variable
-                            if (System.getProperty("funk.typecheck.debug") == "true") {
-                                println("Warning: Undefined variable: $identifierName - creating fresh type variable")
+                            // Fallback: if it starts with uppercase, treat as variant constructor
+                            if (identifierName.first().isUpperCase()) {
+                                val constructors = mapOf(identifierName to null)
+                                com.funk.language.ast.FunkType.VariantType(constructors, null)
+                            } else {
+                                throw TypeCheckError(
+                                    "Undefined variable or function: $identifierName",
+                                    expr.function
+                                )
                             }
-                            val freshType = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
-                            context[identifierName] = freshType
-                            freshType
                         }
                     }
                 } else {
@@ -2124,8 +2140,10 @@ class TypeChecker {
                                     constraints.add(Pair(varType, concreteType))
                                 }
 
-                                // Solve constraints to get substitutions
-                                val allSubstitutions = solveConstraints()
+                                // CRITICAL FIX: Don't solve constraints here - let the outer inference call handle it
+                                // Otherwise we clear constraints that the outer call needs!
+                                val allSubstitutions = emptyMap<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>()
+                                // val allSubstitutions = solveConstraints()
 
                                 // Apply substitutions to remaining fields
                                 val remainingFields = expectedFields.filterKeys { it in missingFields }
@@ -2173,10 +2191,15 @@ class TypeChecker {
                                         } else {
                                             // Use bidirectional inference with expected type
                                             val providedType = inferBasicTypeWithExpected(entryValue, expectedType)
-                                            
-                                            // CRITICAL FIX: Always add constraints for type variables to enable unification
-                                            // Generate constraints for all type mismatches to enable proper unification
-                                            if (providedType != expectedType) {
+
+                                            // CRITICAL FIX: Always add constraints when type variables are involved
+                                            // Even if providedType == expectedType, we need the constraint to propagate
+                                            // type information back to lambda parameters
+                                            val needsConstraint = providedType != expectedType ||
+                                                                 providedType is com.funk.language.ast.FunkType.VarType ||
+                                                                 expectedType is com.funk.language.ast.FunkType.VarType
+
+                                            if (needsConstraint) {
                                                 constraints.add(Pair(providedType, expectedType))
                                             }
 
@@ -2228,15 +2251,41 @@ class TypeChecker {
                                     constraints.add(Pair(varType, concreteType))
                                 }
 
-                                // Solve all constraints and apply to return type
-                                val allSubstitutions = solveConstraints()
+                                // CRITICAL FIX: Don't solve constraints here - let the outer inference call handle it
+                                val allSubstitutions = emptyMap<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>()
+                                // val allSubstitutions = solveConstraints()
                                 val returnType = applySubstitutionToType(functionType.returnType, allSubstitutions)
-                                
+
+                                // ABILITY METHOD CALL VALIDATION:
+                                // If this is an ability method call (e.g., Show.show {val = true}),
+                                // check that an implementation exists for the concrete types
+                                if (expr.function is MemberAccess) {
+                                    val memberAccess = expr.function as MemberAccess
+                                    if (memberAccess.receiver is Identifier) {
+                                        val receiverName = (memberAccess.receiver as Identifier).name
+                                        val abilityKey = "${receiverName}_ability"
+
+                                        if (context.containsKey(abilityKey)) {
+                                            // This is an ability method call - validate implementation exists
+                                            // Apply substitutions to argument type to get concrete types
+                                            val substitutedArgumentType = applySubstitutionToType(argumentType, allSubstitutions)
+
+                                            validateAbilityImplementationExists(
+                                                receiverName,
+                                                memberAccess.member,
+                                                substitutedArgumentType,
+                                                allSubstitutions,
+                                                expr
+                                            )
+                                        }
+                                    }
+                                }
+
                                 // Debug output for string concatenation
                                 // if (expr.function is Identifier && (expr.function as Identifier).name == "(++)") {
                                 //     // println("DEBUG: Function call (++) - returnType: $returnType")
                                 // }
-                                
+
                                 returnType
                             }
                         } else {
@@ -2560,7 +2609,18 @@ class TypeChecker {
                 com.funk.language.ast.FunkType.RecordType(fields, rowVar)
             }
             is MemberAccess -> {
-                // Check if this is a qualified call first
+                // Check if this is an ability method access first (e.g., Show.show)
+                if (expr.receiver is Identifier) {
+                    val receiverName = (expr.receiver as Identifier).name
+                    val abilityKey = "${receiverName}_ability"
+
+                    // Check if this receiver is an ability declaration
+                    if (context.containsKey(abilityKey)) {
+                        return handleAbilityMethodCall(expr, receiverName)
+                    }
+                }
+
+                // Check if this is a qualified call (e.g., module::function)
                 if (isQualifiedCall(expr)) {
                     return handleQualifiedCall(expr)
                 }
@@ -2822,8 +2882,9 @@ class TypeChecker {
                         constraints.add(Pair(leftType, com.funk.language.ast.FunkType.StringType))
                         constraints.add(Pair(rightType, com.funk.language.ast.FunkType.StringType))
                         
-                        // Immediately solve constraints to ensure string types are propagated
-                        val substitutions = solveConstraints()
+                        // CRITICAL FIX: Don't solve constraints here - let the outer inference call handle it
+                        val substitutions = emptyMap<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>()
+                        // val substitutions = solveConstraints()
                         if (substitutions.isNotEmpty()) {
                             // Apply substitutions to update type variables
                             for ((typeVar, type) in substitutions) {
@@ -2975,12 +3036,12 @@ class TypeChecker {
                 val scopeLevel = com.funk.language.ast.TypeVar.enterScope()
                 val previousLambdaContext = currentLambdaContext
                 currentLambdaContext = expr
-                
+
                 // Variables to store heuristic results
                 var heuristicParamType: com.funk.language.ast.FunkType? = null
                 var heuristicReturnType: com.funk.language.ast.FunkType? = null
                 var heuristicEffectRow: com.funk.language.ast.FunkType.EffectRow? = null
-                
+
                 // Create parameter type with type variables for untyped parameters
                 val paramType = when (val params = expr.parameters) {
                     is UntypedParameters -> {
@@ -2990,9 +3051,6 @@ class TypeChecker {
                         val paramTypes = params.names.associate { name ->
                             // Create a fresh type variable with a unique identity
                             val freshVar = com.funk.language.ast.TypeVar.fresh()
-                            if (System.getProperty("funk.typecheck.debug") == "true") {
-                                println("🔍 Creating fresh TypeVar for param '$name': ${freshVar.name} (level=${freshVar.level}, identity=${System.identityHashCode(freshVar)})")
-                            }
                             name to com.funk.language.ast.FunkType.VarType(freshVar)
                         }
 
@@ -3381,21 +3439,25 @@ class TypeChecker {
                 // Set context for effect call handling within do blocks
                 val previousDoContext = currentDoContext
                 currentDoContext = expr
-                
-                // Save the current context to restore it later
-                val savedContext = context.toMap()
-                
+
+                // CRITICAL FIX: Only save/restore context if NOT in a lambda body
+                // Within a lambda, do expressions should be transparent to allow proper
+                // type variable unification across let bindings and the result expression
+                val shouldRestoreContext = currentLambdaContext == null
+                val savedContext = if (shouldRestoreContext) context.toMap() else null
+
                 try {
                     // CRITICAL FIX: DoExpression must collect effects and return effectful computation type
                     val collectedEffects = mutableSetOf<String>()
-                
+
                 // Process statements to add variables to context and collect effects
                 for (statement in expr.statements) {
                     when (statement) {
                         is LetStatement -> {
-                            // CRITICAL FIX: Use inferTypeWithUnification to solve constraints for let bindings
-                            // This ensures polymorphic function instantiation works correctly
-                            val actualType = inferTypeWithUnification(statement.expression)
+                            // Use inferBasicType (not inferTypeWithUnification) to allow constraints
+                            // to accumulate across the entire do expression. Constraint solving
+                            // happens at the lambda/function level, not within individual let bindings.
+                            val actualType = inferBasicType(statement.expression)
                             context[statement.variableName] = actualType
                             // Collect effects from the let statement expression
                             collectEffectsFromExpression(statement.expression, collectedEffects)
@@ -3407,7 +3469,7 @@ class TypeChecker {
                         }
                     }
                 }
-                
+
                 // Get the type of the final expression and collect its effects
                 val resultType = inferBasicType(expr.result)
                 collectEffectsFromExpression(expr.result, collectedEffects)
@@ -3431,12 +3493,14 @@ class TypeChecker {
                         resultType
                     }
                 }
-                
+
                 finalType
                 } finally {
-                    // Restore previous context and do context
-                    context.clear()
-                    context.putAll(savedContext)
+                    // Only restore context if we saved it (i.e., not in a lambda body)
+                    if (shouldRestoreContext && savedContext != null) {
+                        context.clear()
+                        context.putAll(savedContext)
+                    }
                     currentDoContext = previousDoContext
                 }
             }
@@ -4977,26 +5041,36 @@ class TypeChecker {
         val constraints = mutableListOf<com.funk.language.ast.FunkType.FunctionAbilityConstraint>()
 
         if (System.getProperty("funk.debug.constraints") == "true") {
-            // println("DEBUG: analyzeForAbilityConstraints called with body=$body, paramTypes=$paramTypes")
+            println("DEBUG: analyzeForAbilityConstraints called with body=$body, paramTypes=$paramTypes")
+        }
+
+        // Build a map of let-bound variables to track dependencies on parameters
+        // This allows us to know that "sum" depends on parameters when analyzing "sum > diff"
+        val letBindingDependencies = buildLetBindingDependencies(body, paramTypes.keys)
+
+        if (System.getProperty("funk.debug.constraints") == "true") {
+            println("DEBUG: letBindingDependencies=$letBindingDependencies")
         }
 
         // Find operations requiring ability constraints in the body
         findOperationsRequiringAbilities(body) { operatorName, leftExpr, rightExpr ->
             if (System.getProperty("funk.debug.constraints") == "true") {
-                // println("DEBUG: Found operation: $operatorName, left=$leftExpr, right=$rightExpr")
+                println("DEBUG: Found operation: $operatorName, left=$leftExpr, right=$rightExpr")
             }
 
             // Check if this involves parameters (making it polymorphic)
-            val involvesParams = involvesParameters(leftExpr, paramTypes.keys) || involvesParameters(rightExpr, paramTypes.keys)
+            // Now also considers let-bound variables that depend on parameters
+            val involvesParams = involvesParameters(leftExpr, paramTypes.keys, letBindingDependencies) ||
+                                involvesParameters(rightExpr, paramTypes.keys, letBindingDependencies)
             if (System.getProperty("funk.debug.constraints") == "true") {
-                // println("DEBUG: involvesParams=$involvesParams")
+                println("DEBUG: involvesParams=$involvesParams for $operatorName")
             }
 
             if (involvesParams) {
                 // Get the type variable for the constraint - only for parameters actually involved
-                val typeVar = getTypeVariableForConstraint(leftExpr, rightExpr, paramTypes)
+                val typeVar = getTypeVariableForConstraint(leftExpr, rightExpr, paramTypes, letBindingDependencies)
                 if (System.getProperty("funk.debug.constraints") == "true") {
-                    // println("DEBUG: typeVar=$typeVar")
+                    println("DEBUG: typeVar=$typeVar for $operatorName operation")
                 }
 
                 if (typeVar != null) {
@@ -5024,8 +5098,35 @@ class TypeChecker {
                         constraints.add(constraint)
 
                         if (System.getProperty("funk.debug.constraints") == "true") {
-                            // println("DEBUG: Added constraint: $constraint")
+                            println("DEBUG: Added constraint: $constraint")
                         }
+                    }
+                } else {
+                    if (System.getProperty("funk.debug.constraints") == "true") {
+                        println("DEBUG: typeVar is null for $operatorName, skipping constraint")
+                    }
+                }
+            }
+        }
+
+        // Find ability method calls in the body
+        findAbilityMethodCalls(body) { abilityName, methodArgs ->
+            // Check if the arguments involve parameters
+            val involvesParams = involvesParameters(methodArgs, paramTypes.keys, letBindingDependencies)
+
+            if (involvesParams) {
+                // Extract type arguments from the arguments expression
+                val typeArgs = extractTypeArgumentsFromAbilityCall(methodArgs, paramTypes)
+
+                if (typeArgs.isNotEmpty()) {
+                    val constraint = com.funk.language.ast.FunkType.FunctionAbilityConstraint(
+                        abilityName,
+                        typeArgs
+                    )
+                    constraints.add(constraint)
+
+                    if (System.getProperty("funk.debug.constraints") == "true") {
+                        println("DEBUG: Added ability method constraint: $constraint")
                     }
                 }
             }
@@ -5110,18 +5211,75 @@ class TypeChecker {
     }
     
     /**
+     * Build a map of let-bound variables to the parameters they depend on
+     */
+    private fun buildLetBindingDependencies(expr: Expression, paramNames: Set<String>): Map<String, Set<String>> {
+        val dependencies = mutableMapOf<String, Set<String>>()
+
+        fun collectDependencies(e: Expression): Set<String> {
+            return when (e) {
+                is Identifier -> if (e.name in paramNames) setOf(e.name) else dependencies[e.name] ?: emptySet()
+                is BinaryOperation -> collectDependencies(e.left) + collectDependencies(e.right)
+                is FunctionCall -> collectDependencies(e.function) + collectDependencies(e.arguments)
+                is RecordLiteral -> {
+                    e.getFieldEntries().flatMap { field -> field.value?.let { collectDependencies(it) } ?: emptySet() }.toSet() +
+                    e.getSpreadEntries().flatMap { collectDependencies(it.expression) }.toSet()
+                }
+                is MemberAccess -> collectDependencies(e.receiver)
+                is IfExpression -> {
+                    collectDependencies(e.condition) + collectDependencies(e.thenBranch) +
+                    (e.elseBranch?.let { collectDependencies(it) } ?: emptySet())
+                }
+                is LambdaExpression -> collectDependencies(e.body)
+                is DoExpression -> {
+                    // Process let statements in order, building up dependencies
+                    for (stmt in e.statements) {
+                        when (stmt) {
+                            is LetStatement -> {
+                                val deps = collectDependencies(stmt.expression)
+                                dependencies[stmt.variableName] = deps
+                            }
+                            is ExpressionStatement -> collectDependencies(stmt.expression)
+                        }
+                    }
+                    collectDependencies(e.result)
+                }
+                else -> emptySet()
+            }
+        }
+
+        collectDependencies(expr)
+        return dependencies
+    }
+
+    /**
      * Check if an expression involves any of the given parameters
      */
-    private fun involvesParameters(expr: Expression, paramNames: Set<String>): Boolean {
+    private fun involvesParameters(expr: Expression, paramNames: Set<String>, letBindingDependencies: Map<String, Set<String>> = emptyMap()): Boolean {
         return when (expr) {
-            is Identifier -> expr.name in paramNames
-            is BinaryOperation -> involvesParameters(expr.left, paramNames) || involvesParameters(expr.right, paramNames)
-            is FunctionCall -> involvesParameters(expr.function, paramNames) || involvesParameters(expr.arguments, paramNames)
-            is RecordLiteral -> {
-                expr.getFieldEntries().any { field -> field.value?.let { involvesParameters(it, paramNames) } ?: false } ||
-                expr.getSpreadEntries().any { involvesParameters(it.expression, paramNames) }
+            is Identifier -> {
+                // Check if it's a direct parameter
+                if (expr.name in paramNames) {
+                    return true
+                }
+                // Check if it's a let-bound variable that depends on parameters
+                val deps = letBindingDependencies[expr.name]
+                if (deps != null && deps.isNotEmpty()) {
+                    return true
+                }
+                // Fallback: check if it's a type variable in context (for cases outside do-blocks)
+                val contextType = context[expr.name]
+                contextType is com.funk.language.ast.FunkType.VarType
             }
-            is MemberAccess -> involvesParameters(expr.receiver, paramNames)
+            is BinaryOperation -> involvesParameters(expr.left, paramNames, letBindingDependencies) ||
+                                involvesParameters(expr.right, paramNames, letBindingDependencies)
+            is FunctionCall -> involvesParameters(expr.function, paramNames, letBindingDependencies) ||
+                              involvesParameters(expr.arguments, paramNames, letBindingDependencies)
+            is RecordLiteral -> {
+                expr.getFieldEntries().any { field -> field.value?.let { involvesParameters(it, paramNames, letBindingDependencies) } ?: false } ||
+                expr.getSpreadEntries().any { involvesParameters(it.expression, paramNames, letBindingDependencies) }
+            }
+            is MemberAccess -> involvesParameters(expr.receiver, paramNames, letBindingDependencies)
             // Add other cases as needed
             else -> false
         }
@@ -5131,50 +5289,185 @@ class TypeChecker {
      * Get the type variable that should be used for the ability constraint
      * ONLY returns a type variable if it's actually involved in the operation
      */
-    private fun getTypeVariableForConstraint(leftExpr: Expression, rightExpr: Expression, paramTypes: Map<String, com.funk.language.ast.FunkType>): com.funk.language.ast.FunkType.VarType? {
+    private fun getTypeVariableForConstraint(
+        leftExpr: Expression,
+        rightExpr: Expression,
+        paramTypes: Map<String, com.funk.language.ast.FunkType>,
+        letBindingDependencies: Map<String, Set<String>> = emptyMap()
+    ): com.funk.language.ast.FunkType.VarType? {
         // Try to get type variable from left operand first
-        val leftVar = getTypeVariableFromExpression(leftExpr, paramTypes)
+        val leftVar = getTypeVariableFromExpression(leftExpr, paramTypes, letBindingDependencies)
         if (leftVar != null) return leftVar
 
         // Then try right operand
-        val rightVar = getTypeVariableFromExpression(rightExpr, paramTypes)
+        val rightVar = getTypeVariableFromExpression(rightExpr, paramTypes, letBindingDependencies)
         if (rightVar != null) return rightVar
 
         // CRITICAL FIX: Do NOT return arbitrary type variables
         // Only add constraints for parameters that are ACTUALLY USED in the operation
         return null
     }
-    
+
     /**
      * Get type variable from an expression if it involves a parameter
      * This recursively searches through complex expressions to find parameters
      */
-    private fun getTypeVariableFromExpression(expr: Expression, paramTypes: Map<String, com.funk.language.ast.FunkType>): com.funk.language.ast.FunkType.VarType? {
+    private fun getTypeVariableFromExpression(
+        expr: Expression,
+        paramTypes: Map<String, com.funk.language.ast.FunkType>,
+        letBindingDependencies: Map<String, Set<String>> = emptyMap()
+    ): com.funk.language.ast.FunkType.VarType? {
         return when (expr) {
             is Identifier -> {
+                // First check paramTypes (original function parameters)
                 val paramType = paramTypes[expr.name]
-                if (paramType is com.funk.language.ast.FunkType.VarType) paramType else null
+                if (paramType is com.funk.language.ast.FunkType.VarType) {
+                    return paramType
+                }
+                // Check if this is a let-bound variable that depends on parameters
+                val deps = letBindingDependencies[expr.name]
+                if (deps != null && deps.isNotEmpty()) {
+                    // Return the type variable of the first parameter this depends on
+                    // (they should all be unified to the same type anyway)
+                    val firstParam = deps.firstOrNull()
+                    if (firstParam != null) {
+                        val paramType = paramTypes[firstParam]
+                        if (paramType is com.funk.language.ast.FunkType.VarType) {
+                            return paramType
+                        }
+                    }
+                }
+                // Fallback: check context (for cases outside do-blocks)
+                val contextType = context[expr.name]
+                if (contextType is com.funk.language.ast.FunkType.VarType) contextType else null
             }
             is BinaryOperation -> {
                 // Recursively check both operands
-                getTypeVariableFromExpression(expr.left, paramTypes)
-                    ?: getTypeVariableFromExpression(expr.right, paramTypes)
+                getTypeVariableFromExpression(expr.left, paramTypes, letBindingDependencies)
+                    ?: getTypeVariableFromExpression(expr.right, paramTypes, letBindingDependencies)
             }
             is FunctionCall -> {
                 // Check arguments for parameters
-                getTypeVariableFromExpression(expr.arguments, paramTypes)
+                getTypeVariableFromExpression(expr.arguments, paramTypes, letBindingDependencies)
             }
             is RecordLiteral -> {
                 // Check record fields for parameters
                 expr.getFieldEntries().firstNotNullOfOrNull { field ->
-                    field.value?.let { getTypeVariableFromExpression(it, paramTypes) }
+                    field.value?.let { getTypeVariableFromExpression(it, paramTypes, letBindingDependencies) }
                 }
             }
             is MemberAccess -> {
                 // Check receiver for parameters
-                getTypeVariableFromExpression(expr.receiver, paramTypes)
+                getTypeVariableFromExpression(expr.receiver, paramTypes, letBindingDependencies)
             }
             else -> null
+        }
+    }
+
+    /**
+     * Find ability method calls in an expression (e.g., Show.show {val = x})
+     */
+    private fun findAbilityMethodCalls(expr: Expression, callback: (String, Expression) -> Unit) {
+        when (expr) {
+            is FunctionCall -> {
+                // Check if this is an ability method call like Show.show {val = x}
+                if (expr.function is MemberAccess) {
+                    val memberAccess = expr.function as MemberAccess
+                    if (memberAccess.receiver is Identifier) {
+                        val receiverName = (memberAccess.receiver as Identifier).name
+                        val abilityKey = "${receiverName}_ability"
+
+                        // Check if this is an ability
+                        if (context.containsKey(abilityKey)) {
+                            callback(receiverName, expr.arguments)
+                        }
+                    }
+                }
+                // Recursively check function and arguments
+                findAbilityMethodCalls(expr.function, callback)
+                findAbilityMethodCalls(expr.arguments, callback)
+            }
+            is LambdaExpression -> {
+                findAbilityMethodCalls(expr.body, callback)
+            }
+            is MatchExpression -> {
+                findAbilityMethodCalls(expr.expression, callback)
+                expr.cases.forEach { case ->
+                    findAbilityMethodCalls(case.expression, callback)
+                    case.guard?.let { findAbilityMethodCalls(it, callback) }
+                }
+            }
+            is IfExpression -> {
+                findAbilityMethodCalls(expr.condition, callback)
+                findAbilityMethodCalls(expr.thenBranch, callback)
+                expr.elseBranch?.let { findAbilityMethodCalls(it, callback) }
+            }
+            is RecordLiteral -> {
+                expr.getFieldEntries().forEach { field ->
+                    field.value?.let { findAbilityMethodCalls(it, callback) }
+                }
+                expr.getSpreadEntries().forEach { spread ->
+                    findAbilityMethodCalls(spread.expression, callback)
+                }
+            }
+            is DoExpression -> {
+                expr.statements.forEach { stmt ->
+                    when (stmt) {
+                        is LetStatement -> findAbilityMethodCalls(stmt.expression, callback)
+                        is ExpressionStatement -> findAbilityMethodCalls(stmt.expression, callback)
+                    }
+                }
+                findAbilityMethodCalls(expr.result, callback)
+            }
+            is BinaryOperation -> {
+                findAbilityMethodCalls(expr.left, callback)
+                findAbilityMethodCalls(expr.right, callback)
+            }
+            is MemberAccess -> {
+                findAbilityMethodCalls(expr.receiver, callback)
+            }
+            else -> {
+                // No ability calls in other expression types
+            }
+        }
+    }
+
+    /**
+     * Extract type arguments from an ability method call's arguments
+     * Returns a list of type arguments for the ability constraint
+     */
+    private fun extractTypeArgumentsFromAbilityCall(
+        argsExpr: Expression,
+        paramTypes: Map<String, com.funk.language.ast.FunkType>
+    ): List<com.funk.language.ast.FunkType> {
+        // For a call like Show.show {val = x}, extract the type of x
+        return when (argsExpr) {
+            is RecordLiteral -> {
+                // Extract types from record fields
+                argsExpr.getFieldEntries().mapNotNull { field ->
+                    field.value?.let { fieldValue ->
+                        // If the field value is a parameter, get its type
+                        when (fieldValue) {
+                            is Identifier -> {
+                                paramTypes[fieldValue.name] ?: context[fieldValue.name]
+                            }
+                            else -> {
+                                // Try to infer the type
+                                try {
+                                    inferBasicType(fieldValue)
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            is Identifier -> {
+                // Single identifier argument
+                listOfNotNull(paramTypes[argsExpr.name] ?: context[argsExpr.name])
+            }
+            else -> emptyList()
         }
     }
 
@@ -6935,7 +7228,7 @@ class TypeChecker {
         return when (type) {
             is com.funk.language.ast.FunkType.IntType -> "Int"
             is com.funk.language.ast.FunkType.StringType -> "String"
-            is com.funk.language.ast.FunkType.BooleanType -> "Boolean"
+            is com.funk.language.ast.FunkType.BooleanType -> "Bool"  // FIXED: Use "Bool" not "Boolean" to match impl names
             is com.funk.language.ast.FunkType.FloatType -> "Float"
             is com.funk.language.ast.FunkType.NatType -> "Nat"
             is com.funk.language.ast.FunkType.FracType -> "Frac"
@@ -6965,29 +7258,17 @@ class TypeChecker {
         if (hasPolymorphicTypes) {
             // For polymorphic types, use the ability declaration instead of a concrete implementation
             val abilityDeclaration = context["${abilityName}_ability"] as? com.funk.language.ast.FunkType.RecordType
-                ?: run {
-                    // Instead of throwing, create a fresh record type
-                    if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("Warning: Ability declaration $abilityName not found - creating fresh record type")
-                    }
-                    com.funk.language.ast.FunkType.RecordType(mapOf(operationName to com.funk.language.ast.FunkType.FunctionType(
-                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh()),
-                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
-                    )))
-                }
-            
+                ?: throw TypeCheckError(
+                    "Ability '$abilityName' is not defined",
+                    null as SourceLocation?
+                )
+
             val operationType = abilityDeclaration.fields[operationName] as? com.funk.language.ast.FunkType.FunctionType
-                ?: run {
-                    // Instead of throwing, create a fresh function type
-                    if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("Warning: Operation $operationName not found in $abilityName declaration - creating fresh function type")
-                    }
-                    com.funk.language.ast.FunkType.FunctionType(
-                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh()),
-                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
-                    )
-                }
-            
+                ?: throw TypeCheckError(
+                    "Operation '$operationName' not found in ability '$abilityName'",
+                    null as SourceLocation?
+                )
+
             return operationType.returnType
         } else {
             // For concrete types, find matching implementation
@@ -6995,29 +7276,21 @@ class TypeChecker {
             val implementation = findMatchingAbilityImplementation(abilityName, typeArgs)
                 ?: findBestMatchingMultiParameterImplementation(abilityName, typeArgs)
                 ?: run {
-                    // Instead of throwing, create a fresh record type with the operation
-                    if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("Warning: No implementation found for ability $abilityName with types $typeArgs - creating fresh record type")
-                    }
-                    com.funk.language.ast.FunkType.RecordType(mapOf(operationName to com.funk.language.ast.FunkType.FunctionType(
-                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh()),
-                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
-                    )))
-                }
-            
-            // Get operation type from implementation
-            val operationType = implementation.fields[operationName] as? com.funk.language.ast.FunkType.FunctionType
-                ?: run {
-                    // Instead of throwing, create a fresh function type
-                    if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("Warning: Operation $operationName not found in $abilityName implementation - creating fresh function type")
-                    }
-                    com.funk.language.ast.FunkType.FunctionType(
-                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh()),
-                        com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
+                    // STRICT CHECKING: Throw error when no implementation found for concrete types
+                    val typeArgsStr = typeArgs.joinToString(", ")
+                    throw TypeCheckError(
+                        "No implementation found for ability '$abilityName' with type(s): $typeArgsStr",
+                        null as SourceLocation?
                     )
                 }
-            
+
+            // Get operation type from implementation
+            val operationType = implementation.fields[operationName] as? com.funk.language.ast.FunkType.FunctionType
+                ?: throw TypeCheckError(
+                    "Operation '$operationName' not found in implementation of '$abilityName'",
+                    null as SourceLocation?
+                )
+
             return operationType.returnType
         }
     }
@@ -7685,19 +7958,19 @@ class TypeChecker {
                     // Re-fetch the module with updated exports
                     val updatedModule = resolver.resolveModule(modulePath)
 
-                    // Import all public exports with qualified names only
-                    // To use unqualified names, user must use selective imports: use module::{Name}
+                    // Import all public exports with both qualified and unqualified names
                     val prefix = useDecl.alias ?: path.segments.last()
                     for ((name, export) in updatedModule.exports) {
+                        // Add qualified name (e.g., int::add)
                         val qualifiedName = "$prefix::$name"
                         context[qualifiedName] = export.funkType
-                        importedValues[qualifiedName] = export.funkType // Track as imported
-                    }
+                        importedValues[qualifiedName] = export.funkType
 
-                    // Note: Unqualified access is NOT added for module imports
-                    // User must use either:
-                    // - Qualified access: log::Log.info
-                    // - Selective import: use std::effects::log::{Log}
+                        // Also add unqualified name (e.g., add) for convenience
+                        // This allows both `add {l = 1, r = 2}` and `int::add {l = 1, r = 2}`
+                        context[name] = export.funkType
+                        importedValues[name] = export.funkType
+                    }
             }
             
             is SelectivePath -> {
@@ -8488,12 +8761,133 @@ class TypeChecker {
             }
         }
 
-        // If not found in registry or modules, return a fresh type variable to avoid infinite recursion
-        // This prevents the circular call back to inferBasicType with the same MemberAccess
-        if (System.getProperty("funk.typecheck.debug") == "true") {
-            // println("DEBUG: No concrete type found for $moduleName::$functionName, returning fresh type variable")
+        // If not found in registry or modules, throw an error
+        throw TypeCheckError(
+            "Qualified name '$moduleName::$functionName' not found. Did you mean to import a module, or define an ability or effect?",
+            null as SourceLocation?
+        )
+    }
+
+    /**
+     * Handle ability method calls like Show.show {val = x}
+     *
+     * Algorithm:
+     * 1. Look up ability declaration to get method signature
+     * 2. Get the method's type signature from the ability
+     * 3. Return the method signature (as a function type that can be called)
+     *
+     * Note: The actual checking of whether an implementation exists happens
+     * when this function type is applied to arguments in FunctionCall handling.
+     */
+    private fun handleAbilityMethodCall(expr: MemberAccess, abilityName: String): com.funk.language.ast.FunkType {
+        val abilityKey = "${abilityName}_ability"
+        val abilityType = context[abilityKey]
+
+        if (abilityType !is com.funk.language.ast.FunkType.RecordType) {
+            throw TypeCheckError(
+                "Ability '$abilityName' is not properly registered",
+                expr,
+                ErrorType.GENERAL
+            )
         }
-        return com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar.fresh())
+
+        // Look up the method in the ability's operations
+        val methodName = expr.member
+        val methodType = abilityType.fields[methodName]
+
+        if (methodType == null) {
+            throw TypeCheckError(
+                "Method '$methodName' not found in ability '$abilityName'",
+                expr,
+                ErrorType.MISSING_FIELD,
+                mapOf("ability" to abilityName, "method" to methodName)
+            )
+        }
+
+        // The method type is a function type like {val: 'a} -> String
+        // We return this function type so it can be called
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("DEBUG handleAbilityMethodCall: $abilityName.$methodName has type ${prettyPrintType(methodType)}")
+        }
+
+        return methodType
+    }
+
+    /**
+     * Validate that an ability implementation exists for concrete types.
+     * This enforces the user's requirement: "Show Bool, it should not apply if it can't find show bool"
+     *
+     * Called after type substitution to check if impl exists for the concrete types.
+     */
+    private fun validateAbilityImplementationExists(
+        abilityName: String,
+        methodName: String,
+        argumentType: com.funk.language.ast.FunkType,
+        substitutions: Map<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>,
+        expr: Expression
+    ) {
+        // Extract concrete types from the argument after substitution
+        val concreteTypes = extractConcreteTypesFromArgument(argumentType, substitutions)
+
+        // If all types are concrete (no type variables), check if implementation exists
+        if (concreteTypes.all { !it.contains("'") }) {
+            // Build implementation key: "Show_Bool" for impl Show Bool
+            val implKey = "${abilityName}_${concreteTypes.joinToString("_")}"
+
+            if (!context.containsKey(implKey)) {
+                // Implementation not found - this is an error
+                val typeList = if (concreteTypes.size == 1) {
+                    concreteTypes[0]
+                } else {
+                    concreteTypes.joinToString(", ")
+                }
+
+                throw TypeCheckError(
+                    "No implementation found for ability '$abilityName' with type(s) [$typeList]. " +
+                    "You need to define: impl $abilityName $typeList where { ... }",
+                    expr,
+                    ErrorType.MISSING_ABILITY_IMPL,
+                    mapOf(
+                        "ability" to abilityName,
+                        "types" to concreteTypes,
+                        "method" to methodName
+                    )
+                )
+            }
+
+            if (System.getProperty("funk.typecheck.debug") == "true") {
+                println("DEBUG validateAbilityImplementationExists: Found implementation $implKey")
+            }
+        } else {
+            // Types are still polymorphic - we'll add ability constraints instead
+            // This is handled by the ability constraint collection system
+            if (System.getProperty("funk.typecheck.debug") == "true") {
+                println("DEBUG validateAbilityImplementationExists: Types still polymorphic: $concreteTypes")
+            }
+        }
+    }
+
+    /**
+     * Extract concrete type names from an argument type after applying substitutions.
+     * Returns type names like ["Bool"], ["Int"], or ["String", "Int"] for multi-parameter abilities.
+     */
+    private fun extractConcreteTypesFromArgument(
+        argumentType: com.funk.language.ast.FunkType,
+        substitutions: Map<com.funk.language.ast.TypeVar, com.funk.language.ast.FunkType>
+    ): List<String> {
+        return when (argumentType) {
+            is com.funk.language.ast.FunkType.RecordType -> {
+                // Extract unique concrete types from record fields
+                argumentType.fields.values
+                    .map { applySubstitutionToType(it, substitutions) }
+                    .map { getTypeName(it) }
+                    .distinct()
+            }
+            else -> {
+                // Single type argument
+                listOf(getTypeName(applySubstitutionToType(argumentType, substitutions)))
+            }
+        }
     }
 
 }

@@ -30,7 +30,7 @@ pub effect Time {
 }
 
 # System time implementation using system clock
-impl Time for SystemTime where {
+pub impl Time for SystemTime where {
     now = { } -> __native_time_now { },
     now_nanos = { } -> __native_time_now_nanos { },
     sleep = { millis } -> __native_time_sleep { millis = millis },
@@ -46,7 +46,7 @@ impl Time for SystemTime where {
 }
 
 # Mock time implementation for testing (controllable time)
-impl Time for MockTime { fixed_time: Int } where {
+pub impl Time for MockTime { fixed_time: Int } where {
     now = { } -> fixed_time,
     now_nanos = { } -> fixed_time * 1000000,
     sleep = { millis } -> {},
@@ -62,13 +62,13 @@ impl Time for MockTime { fixed_time: Int } where {
 }
 
 # Convenience functions
-pub let now = { } -> Time.now { }
-pub let sleep = { millis: Int } -> Time.sleep { millis = millis }
-pub let current_timestamp = { } -> Time.now { }
-pub let current_date = { } -> do
-    let year = Time.current_year { }
-    let month = Time.current_month { }
-    let day = Time.current_day { }
+pub let now: {} -> Int <Time> = {} -> Time.now {}
+pub let sleep: { millis: Int } -> {} <Time> = { millis } -> Time.sleep { millis = millis }
+pub let current_timestamp: {} -> Int <Time> = {} -> Time.now {}
+pub let current_date: {} -> { year: Int, month: Int, day: Int } <Time> = {} -> do
+    let year = Time.current_year {}
+    let month = Time.current_month {}
+    let day = Time.current_day {}
     { year = year, month = month, day = day }
 
 # Usage examples:

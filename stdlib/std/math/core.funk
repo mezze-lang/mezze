@@ -6,8 +6,8 @@ pub let pi = 3.141592653589793
 pub let e = 2.718281828459045
 
 # Polymorphic mathematical functions
-pub let abs : { x: 'a } -> 'a with Ord 'a = {x} ->
-    if x < 0 then -x else x
+pub let abs : { n: 'a } -> 'a with Ord 'a = {n} ->
+    if n < 0 then -n else n
 
 pub let min : { l: 'a, r: 'a } -> 'a with Ord 'a = {l, r} ->
     if l < r then l else r
@@ -25,38 +25,38 @@ pub let pow_int : { base: Int, exp: Int } -> Int = { base, exp } ->
 pub let pow_nat : { base: Nat, exp: Nat } -> Nat = { base, exp } ->
     __native_nat_pow { base = base, exp = exp }
 
-pub let sqrt : { val: Float } -> Float = {val} ->
-    __native_float_sqrt { val = val }
+pub let sqrt : { n: Float } -> Float = {n} ->
+    __native_float_sqrt { n = n }
 
-pub let ln : { val: Float } -> Float = {val} ->
-    __native_float_ln { val = val }
+pub let ln : { n: Float } -> Float = {n} ->
+    __native_float_ln { n = n }
 
-pub let log10 : { val: Float } -> Float = {val} ->
-    __native_float_log10 { val = val }
+pub let log10 : { n: Float } -> Float = {n} ->
+    __native_float_log10 { n = n }
 
-pub let exp : { val: Float } -> Float = {val} ->
-    __native_float_exp { val = val }
+pub let exp : { n: Float } -> Float = {n} ->
+    __native_float_exp { n = n }
 
-pub let floor : { val: Float } -> Float = {val} ->
-    __native_float_floor { val = val }
+pub let floor : { n: Float } -> Float = {n} ->
+    __native_float_floor { n = n }
 
-pub let ceil : { val: Float } -> Float = {val} ->
-    __native_float_ceil { val = val }
+pub let ceil : { n: Float } -> Float = {n} ->
+    __native_float_ceil { n = n }
 
-pub let round : { val: Float } -> Float = {val} ->
-    __native_float_round { val = val }
+pub let round : { n: Float } -> Float = {n} ->
+    __native_float_round { n = n }
 
-pub let is_nan : { x: Float } -> Bool = {x} ->
-    __native_float_is_nan { x = x }
+pub let is_nan : { n: Float } -> Bool = {n} ->
+    __native_float_is_nan { n = n }
 
-pub let is_infinite : { x: Float } -> Bool = {x} ->
-    __native_float_is_infinite { x = x }
+pub let is_infinite : { n: Float } -> Bool = {n} ->
+    __native_float_is_infinite { n = n }
 
-pub let is_finite : { x: Float } -> Bool = {x} ->
-    __native_float_is_finite { x = x }
+pub let is_finite : { n: Float } -> Bool = {n} ->
+    __native_float_is_finite { n = n }
 
-pub let sign : { x: Float } -> Float = {x} ->
-    __native_float_sign { x = x }
+pub let sign : { n: Float } -> Float = {n} ->
+    __native_float_sign { n = n }
 
-pub let sign_int : { x: Int } -> Int = {x} ->
-    __native_int_sign { x = x }
+pub let sign_int : { n: Int } -> Int = {n} ->
+    __native_int_sign { n = n }

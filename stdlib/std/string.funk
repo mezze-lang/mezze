@@ -8,26 +8,26 @@ pub let concat = { l: String, r: String } ->
     __native_string_concat { l = l, r = r }
 
 # String utility functions
-pub let to_string = { val: String } ->
-    val
+pub let to_string = { s: String } ->
+    s
 
-pub let length = { val: String } ->
-    __native_string_length { s = val }
+pub let length = { s: String } ->
+    __native_string_length { s = s }
 
-pub let is_empty = { val: String } ->
-    length { val = val } == 0
+pub let is_empty = { s: String } ->
+    length { s = s } == 0
 
-pub let to_upper = { val: String } ->
-    __native_string_to_upper { s = val }
+pub let to_upper = { s: String } ->
+    __native_string_to_upper { s = s }
 
-pub let to_lower = { val: String } ->
-    __native_string_to_lower { s = val }
+pub let to_lower = { s: String } ->
+    __native_string_to_lower { s = s }
 
-pub let trim = { val: String } ->
-    __native_string_trim { s = val }
+pub let trim = { s: String } ->
+    __native_string_trim { s = s }
 
-pub let reverse = { val: String } ->
-    __native_string_reverse { s = val }
+pub let reverse = { s: String } ->
+    __native_string_reverse { s = s }
 
 # Additional string utilities
 pub let starts_with = { s: String, prefix: String } ->

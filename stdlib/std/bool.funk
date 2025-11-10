@@ -4,8 +4,8 @@
 # Built-in ability implementations (Eq, Inspect) are automatically available
 
 # Type conversions
-pub let to_string = { val: Bool } ->
-    if val then "true" else "false"
+pub let to_string = { b: Bool } ->
+    if b then "true" else "false"
 
 # Bool logic operations
 pub let and = { l: Bool, r: Bool } ->
@@ -14,17 +14,17 @@ pub let and = { l: Bool, r: Bool } ->
 pub let or = { l: Bool, r: Bool } ->
     if l then true else r
 
-pub let not = { x: Bool } ->
-    if x then false else true
+pub let not = { b: Bool } ->
+    if b then false else true
 
 pub let xor = { l: Bool, r: Bool } ->
-    (l && not { x = r }) || (not { x = l } && r)
+    (l && not { b = r }) || (not { b = l } && r)
 
 pub let implies = { l: Bool, r: Bool } ->
-    not { x = l } || r
+    not { b = l } || r
 
 pub let iff = { l: Bool, r: Bool } ->
-    (l && r) || (not { x = l } && not { x = r })
+    (l && r) || (not { b = l } && not { b = r })
 
 # Additional bool utilities
 # TODO: Array pattern matching [head, ...tail] not yet supported in parser

@@ -3,24 +3,24 @@
 use std::math::core
 
 # Basic trigonometric functions
-pub let sin = { val: Float } ->
-    __native_float_sin { val = val }
+pub let sin = { n: Float } ->
+    __native_float_sin { n = n }
 
-pub let cos = { val: Float } ->
-    __native_float_cos { val = val }
+pub let cos = { n: Float } ->
+    __native_float_cos { n = n }
 
-pub let tan = { val: Float } ->
-    __native_float_tan { val = val }
+pub let tan = { n: Float } ->
+    __native_float_tan { n = n }
 
 # Inverse trigonometric functions
-pub let asin = { val: Float } ->
-    __native_float_asin { val = val }
+pub let asin = { n: Float } ->
+    __native_float_asin { n = n }
 
-pub let acos = { val: Float } ->
-    __native_float_acos { val = val }
+pub let acos = { n: Float } ->
+    __native_float_acos { n = n }
 
-pub let atan = { val: Float } ->
-    __native_float_atan { val = val }
+pub let atan = { n: Float } ->
+    __native_float_atan { n = n }
 
 pub let atan2 = { y: Float, x: Float } ->
     __native_float_atan2 { y = y, x = x }
@@ -37,17 +37,17 @@ pub let radians_to_degrees = { radians: Float } ->
     radians * (180.0 / pi)
 
 # Additional trigonometric functions
-pub let tanh = { val: Float } -> do
-    let exp_pos = core::exp { val = val }
-    let exp_neg = core::exp { val = -val }
+pub let tanh = { n: Float } -> do
+    let exp_pos = core::exp { n = n }
+    let exp_neg = core::exp { n = -n }
     (exp_pos - exp_neg) / (exp_pos + exp_neg)
 
-pub let sinh = { val: Float } -> do
-    let exp_pos = core::exp { val = val }
-    let exp_neg = core::exp { val = -val }
+pub let sinh = { n: Float } -> do
+    let exp_pos = core::exp { n = n }
+    let exp_neg = core::exp { n = -n }
     (exp_pos - exp_neg) / 2.0
 
-pub let cosh = { val: Float } -> do
-    let exp_pos = core::exp { val = val }
-    let exp_neg = core::exp { val = -val }
+pub let cosh = { n: Float } -> do
+    let exp_pos = core::exp { n = n }
+    let exp_neg = core::exp { n = -n }
     (exp_pos + exp_neg) / 2.0

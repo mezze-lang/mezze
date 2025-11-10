@@ -30,7 +30,7 @@ pub effect Environment {
 }
 
 # System environment implementation
-impl Environment for SystemEnvironment where {
+pub impl Environment for SystemEnvironment where {
     get_env = { name } -> __native_env_get { name = name },
     set_env = { name, value } -> __native_env_set { name = name, value = value },
     get_all_env = { } -> __native_env_get_all { },
@@ -45,7 +45,7 @@ impl Environment for SystemEnvironment where {
 }
 
 # Mock environment for testing
-impl Environment for MockEnvironment {
+pub impl Environment for MockEnvironment {
     env_vars: [String],
     current_directory: String,
     mock_os: String
@@ -64,12 +64,12 @@ impl Environment for MockEnvironment {
 }
 
 # Convenience functions
-pub let get_env = { name: String } -> Environment.get_env { name = name }
-pub let current_dir = { } -> Environment.current_dir { }
-pub let os_info = { } -> do
-    let name = Environment.os_name { }
-    let version = Environment.os_version { }
-    let architecture = Environment.arch { }
+pub let get_env: { name: String } -> (Option String) <Environment> = { name } -> Environment.get_env { name = name }
+pub let current_dir: {} -> String <Environment> = {} -> Environment.current_dir {}
+pub let os_info: {} -> { name: String, version: String, arch: String } <Environment> = {} -> do
+    let name = Environment.os_name {}
+    let version = Environment.os_version {}
+    let architecture = Environment.arch {}
     { name = name, version = version, arch = architecture }
 
 # Usage examples:

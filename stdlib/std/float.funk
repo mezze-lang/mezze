@@ -5,14 +5,14 @@
 # Note: Mathematical functions like abs, min, max, pow, sqrt, floor, ceil, round are in std::math::core
 
 # Type conversions
-pub let to_string = { val: Float } ->
-    __native_float_to_string { val = val }
+pub let to_string = { n: Float } ->
+    __native_float_to_string { n = n }
 
-pub let from_int = { val: Int } ->
-    __native_float_from_int { val = val }
+pub let from_int = { n: Int } ->
+    __native_float_from_int { n = n }
 
-pub let from_nat = { val: Nat } ->
-    __native_float_from_nat { val = val }
+pub let from_nat = { n: Nat } ->
+    __native_float_from_nat { n = n }
 
 pub let from_string = { s: String } ->
     __native_float_from_string { s = s }
