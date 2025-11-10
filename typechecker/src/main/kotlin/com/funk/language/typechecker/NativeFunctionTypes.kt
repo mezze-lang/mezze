@@ -1998,9 +1998,31 @@ object NativeFunctionTypes {
         // EFFECTS: FILESYSTEM (LocalDisk)
         // ============================================================================
 
+        // Helper to create common filesystem error variants
+        val fileNotFoundError = mapOf("FileNotFound" to FunkType.RecordType(mapOf("path" to FunkType.StringType)))
+        val permissionDeniedError = mapOf("PermissionDenied" to FunkType.RecordType(mapOf(
+            "path" to FunkType.StringType,
+            "operation" to FunkType.StringType
+        )))
+        val ioError = mapOf("IOError" to FunkType.RecordType(mapOf(
+            "path" to FunkType.StringType,
+            "message" to FunkType.StringType
+        )))
+        val diskFullError = mapOf("DiskFull" to FunkType.RecordType(mapOf(
+            "path" to FunkType.StringType,
+            "bytes_needed" to FunkType.IntType
+        )))
+        val directoryNotEmptyError = mapOf("DirectoryNotEmpty" to FunkType.RecordType(mapOf("path" to FunkType.StringType)))
+        val alreadyExistsError = mapOf("AlreadyExists" to FunkType.RecordType(mapOf("path" to FunkType.StringType)))
+        val invalidPathError = mapOf("InvalidPath" to FunkType.RecordType(mapOf("path" to FunkType.StringType)))
+        val notADirectoryError = mapOf("NotADirectory" to FunkType.RecordType(mapOf("path" to FunkType.StringType)))
+
         context["__native_fs_read_file"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.StringType
+            FunkType.ResultType(
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError),
+                FunkType.StringType
+            )
         )
 
         context["__native_fs_write_file"] = FunkType.FunctionType(
@@ -2008,32 +2030,50 @@ object NativeFunctionTypes {
                 "path" to FunkType.StringType,
                 "content" to FunkType.StringType
             )),
-            unitType
+            FunkType.ResultType(
+                FunkType.VariantType(permissionDeniedError + ioError + diskFullError),
+                unitType
+            )
         )
 
         context["__native_fs_exists"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.BooleanType
+            FunkType.ResultType(
+                FunkType.VariantType(permissionDeniedError + ioError),
+                FunkType.BooleanType
+            )
         )
 
         context["__native_fs_delete"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            unitType
+            FunkType.ResultType(
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + directoryNotEmptyError + ioError),
+                unitType
+            )
         )
 
         context["__native_fs_list_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ListType(FunkType.StringType)
+            FunkType.ResultType(
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError),
+                FunkType.ListType(FunkType.StringType)
+            )
         )
 
         context["__native_fs_create_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            unitType
+            FunkType.ResultType(
+                FunkType.VariantType(alreadyExistsError + permissionDeniedError + invalidPathError + ioError),
+                unitType
+            )
         )
 
         context["__native_fs_file_size"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.IntType
+            FunkType.ResultType(
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError),
+                FunkType.IntType
+            )
         )
 
         // ============================================================================
@@ -2042,7 +2082,10 @@ object NativeFunctionTypes {
 
         context["__native_memfs_read_file"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.StringType
+            FunkType.ResultType(
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError),
+                FunkType.StringType
+            )
         )
 
         context["__native_memfs_write_file"] = FunkType.FunctionType(
@@ -2050,32 +2093,50 @@ object NativeFunctionTypes {
                 "path" to FunkType.StringType,
                 "content" to FunkType.StringType
             )),
-            unitType
+            FunkType.ResultType(
+                FunkType.VariantType(permissionDeniedError + ioError + diskFullError),
+                unitType
+            )
         )
 
         context["__native_memfs_exists"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.BooleanType
+            FunkType.ResultType(
+                FunkType.VariantType(permissionDeniedError + ioError),
+                FunkType.BooleanType
+            )
         )
 
         context["__native_memfs_delete"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            unitType
+            FunkType.ResultType(
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + directoryNotEmptyError + ioError),
+                unitType
+            )
         )
 
         context["__native_memfs_list_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ListType(FunkType.StringType)
+            FunkType.ResultType(
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError),
+                FunkType.ListType(FunkType.StringType)
+            )
         )
 
         context["__native_memfs_create_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            unitType
+            FunkType.ResultType(
+                FunkType.VariantType(alreadyExistsError + permissionDeniedError + invalidPathError + ioError),
+                unitType
+            )
         )
 
         context["__native_memfs_file_size"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.IntType
+            FunkType.ResultType(
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError),
+                FunkType.IntType
+            )
         )
 
         // ============================================================================

@@ -1,5 +1,5 @@
-# Result utility functions
-# Note: Result type is now built-in to the language
+# std/result.funk - Result type utility functions
+# Note: Result type (Ok/Err) is built-in to the language
 
 # Map a function over the success value
 pub let map: { result: (Result 'a 'e), f: 'a -> 'b } -> (Result 'b 'e) = { result, f } ->
