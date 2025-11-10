@@ -1952,5 +1952,142 @@ object NativeFunctionTypes {
             )),
             setType
         )
+
+        // ============================================================================
+        // EFFECTS: CONSOLE AND LOGGING
+        // ============================================================================
+
+        val unitType = FunkType.RecordType(emptyMap())
+
+        context["__native_console_print"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("msg" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_console_println"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("msg" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_log_info"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("msg" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_log_warn"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("msg" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_log_error"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("msg" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_log_debug"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("msg" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_log_trace"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("msg" to FunkType.StringType)),
+            unitType
+        )
+
+        // ============================================================================
+        // EFFECTS: FILESYSTEM (LocalDisk)
+        // ============================================================================
+
+        context["__native_fs_read_file"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            FunkType.StringType
+        )
+
+        context["__native_fs_write_file"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "path" to FunkType.StringType,
+                "content" to FunkType.StringType
+            )),
+            unitType
+        )
+
+        context["__native_fs_exists"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            FunkType.BooleanType
+        )
+
+        context["__native_fs_delete"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_fs_list_directory"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            FunkType.ListType(FunkType.StringType)
+        )
+
+        context["__native_fs_create_directory"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_fs_file_size"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            FunkType.IntType
+        )
+
+        // ============================================================================
+        // EFFECTS: FILESYSTEM (MemoryFS)
+        // ============================================================================
+
+        context["__native_memfs_read_file"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            FunkType.StringType
+        )
+
+        context["__native_memfs_write_file"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "path" to FunkType.StringType,
+                "content" to FunkType.StringType
+            )),
+            unitType
+        )
+
+        context["__native_memfs_exists"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            FunkType.BooleanType
+        )
+
+        context["__native_memfs_delete"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_memfs_list_directory"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            FunkType.ListType(FunkType.StringType)
+        )
+
+        context["__native_memfs_create_directory"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            unitType
+        )
+
+        context["__native_memfs_file_size"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("path" to FunkType.StringType)),
+            FunkType.IntType
+        )
+
+        // ============================================================================
+        // EFFECTS: ENVIRONMENT
+        // ============================================================================
+
+        context["__native_mock_env_get"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "env_vars" to FunkType.MapType(FunkType.StringType, FunkType.StringType),
+                "name" to FunkType.StringType
+            )),
+            FunkType.OptionType(FunkType.StringType)
+        )
     }
 }
