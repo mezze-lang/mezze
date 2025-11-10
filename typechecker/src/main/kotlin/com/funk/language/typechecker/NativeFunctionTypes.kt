@@ -382,22 +382,22 @@ object NativeFunctionTypes {
         )
 
         context["__native_float_sqrt"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("val" to FunkType.FloatType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FloatType)),
             FunkType.FloatType
         )
 
         context["__native_float_floor"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("val" to FunkType.FloatType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FloatType)),
             FunkType.FloatType
         )
 
         context["__native_float_ceil"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("val" to FunkType.FloatType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FloatType)),
             FunkType.FloatType
         )
 
         context["__native_float_round"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("val" to FunkType.FloatType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FloatType)),
             FunkType.FloatType
         )
 
