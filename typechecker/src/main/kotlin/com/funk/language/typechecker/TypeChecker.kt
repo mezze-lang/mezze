@@ -7958,7 +7958,8 @@ class TypeChecker {
                     // Re-fetch the module with updated exports
                     val updatedModule = resolver.resolveModule(modulePath)
 
-                    // Import all public exports with both qualified and unqualified names
+                    // Import all public exports with ONLY qualified names
+                    // For unqualified access, use selective import: use module::{item}
                     val prefix = useDecl.alias ?: path.segments.last()
                     for ((name, export) in updatedModule.exports) {
                         // Add qualified name (e.g., int::add)
@@ -7966,10 +7967,8 @@ class TypeChecker {
                         context[qualifiedName] = export.funkType
                         importedValues[qualifiedName] = export.funkType
 
-                        // Also add unqualified name (e.g., add) for convenience
-                        // This allows both `add {l = 1, r = 2}` and `int::add {l = 1, r = 2}`
-                        context[name] = export.funkType
-                        importedValues[name] = export.funkType
+                        // Do NOT add unqualified names - only qualified access is allowed
+                        // for `use module::path` syntax
                     }
             }
             
