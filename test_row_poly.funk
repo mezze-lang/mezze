@@ -1,0 +1,17 @@
+# Test row polymorphism with open variants
+
+let make_color = { x } ->
+  if x == 1 then Red
+  else if x == 2 then Blue  
+  else Green
+
+let make_shape = { x } ->
+  if x == 1 then Circle
+  else Square
+
+# This should merge Red, Blue, Green with Circle, Square
+let merge_variants = { x, y } ->
+  match make_color { x = x } is
+    Red -> Red
+    Blue -> Blue
+    Green -> make_shape { x = y }

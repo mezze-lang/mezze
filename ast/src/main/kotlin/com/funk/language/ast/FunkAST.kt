@@ -1584,6 +1584,13 @@ private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<T
             // Collect parameters first (left side), then return type (right side)
             collectTypeVariablesInOrder(type.paramType, collector)
             collectTypeVariablesInOrder(type.returnType, collector)
+            // CRITICAL FIX: Also collect type variables from ability constraints
+            // This ensures constraint type variables get the same normalized names as param/return types
+            type.abilityConstraints.forEach { constraint ->
+                constraint.typeArgs.forEach { arg ->
+                    collectTypeVariablesInOrder(arg, collector)
+                }
+            }
             type.effects?.let { /* Effect collection if needed */ }
         }
         is FunkType.RecordType -> {
@@ -1707,7 +1714,15 @@ private fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVa
         is FunkType.FunctionType -> {
             val newParamType = substituteTypeVariables(type.paramType, mapping)
             val newReturnType = substituteTypeVariables(type.returnType, mapping)
-            FunkType.FunctionType(newParamType, newReturnType, type.effects, type.abilityConstraints)
+            // CRITICAL FIX: Also substitute type variables in ability constraints
+            // This ensures constraint type variables are normalized along with param/return types
+            val newAbilityConstraints = type.abilityConstraints.map { constraint ->
+                FunkType.FunctionAbilityConstraint(
+                    constraint.abilityName,
+                    constraint.typeArgs.map { arg -> substituteTypeVariables(arg, mapping) }
+                )
+            }
+            FunkType.FunctionType(newParamType, newReturnType, type.effects, newAbilityConstraints)
         }
         is FunkType.RecordType -> {
             val newFields = type.fields.mapValues { (_, fieldType) ->
