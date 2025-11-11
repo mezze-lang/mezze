@@ -1102,6 +1102,13 @@ class TypeChecker {
                 // Track constraints for all field types
                 type.fields.values.forEach { fieldType -> trackAbilityConstraintForType(fieldType, abilityName) }
             }
+            is com.funk.language.ast.FunkType.VariantType -> {
+                // CRITICAL FIX: For variant types, recursively track constraints on constructor data types
+                // This handles cases like Option 'a where 'a needs Ord, not the variant itself
+                type.constructors.values.forEach { constructorDataType ->
+                    constructorDataType?.let { trackAbilityConstraintForType(it, abilityName) }
+                }
+            }
             else -> {
                 // CRITICAL FIX: For concrete types, immediately check if they have the required ability
                 // This catches cases like String + String where String doesn't have NumAdd
@@ -1136,6 +1143,35 @@ class TypeChecker {
         abilityNames: Set<String>,
         typeVar: com.funk.language.ast.TypeVar
     ) {
+        // CRITICAL FIX: For composite types (VariantType, RecordType), recursively validate inner types
+        // instead of trying to validate that the composite type itself has the ability
+        when (type) {
+            is com.funk.language.ast.FunkType.RecordType -> {
+                // Recursively validate all field types
+                type.fields.values.forEach { fieldType ->
+                    validateAbilityConstraintsForType(fieldType, abilityNames, typeVar)
+                }
+                return
+            }
+            is com.funk.language.ast.FunkType.VariantType -> {
+                // Recursively validate all constructor data types
+                type.constructors.values.forEach { constructorDataType ->
+                    constructorDataType?.let {
+                        validateAbilityConstraintsForType(it, abilityNames, typeVar)
+                    }
+                }
+                return
+            }
+            is com.funk.language.ast.FunkType.VarType -> {
+                // Type variable - constraints are already tracked, nothing to validate here
+                return
+            }
+            else -> {
+                // Fall through to validate primitive types below
+            }
+        }
+
+        // For concrete primitive types, validate that they have the required abilities
         for (abilityName in abilityNames) {
             val hasAbility = when (type) {
                 is com.funk.language.ast.FunkType.IntType ->

@@ -13,22 +13,22 @@ import kotlin.test.assertFalse
 import java.io.File
 import java.nio.file.Paths
 
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TypeCheckerComprehensiveTest {
-    
+
     private val parser = FunkParser()
-    private val typeChecker = TypeChecker()
-    
+
     private fun getFixturesPath(): String {
-        return this::class.java.classLoader.getResource("fixtures")?.path 
+        return this::class.java.classLoader.getResource("fixtures")?.path
             ?: throw IllegalStateException("Fixtures directory not found")
     }
-    
+
     private fun loadFunkFile(path: String): String {
         return File(path).readText()
     }
-    
+
     private fun parseAndTypeCheck(source: String): com.funk.language.ast.Program {
+        // CRITICAL FIX: Create fresh TypeChecker for each test to avoid state leakage
+        val typeChecker = TypeChecker()
         val program = parser.parse(source)
         return typeChecker.typeCheck(program)
     }
@@ -153,7 +153,10 @@ class TypeCheckerComprehensiveTest {
                             assertTrue(objFieldType is com.funk.language.ast.FunkType.RecordType)
                             val objRecordType = objFieldType as com.funk.language.ast.FunkType.RecordType
                             val nameFieldType = objRecordType.fields["name"]
-                            assertEquals(com.funk.language.ast.FunkType.StringType, nameFieldType)
+                            // FIXED: getName is polymorphic - the name field type is a type variable, not String
+                            // The function is inferred as { obj: { name: 'a } } -> 'a, which is correct
+                            assertTrue(nameFieldType is com.funk.language.ast.FunkType.VarType,
+                                "Expected name field to be a type variable for polymorphic function")
                         }
                         
                         "record_update_inference" -> {
