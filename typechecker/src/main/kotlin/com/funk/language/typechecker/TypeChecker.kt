@@ -1109,6 +1109,11 @@ class TypeChecker {
                     constructorDataType?.let { trackAbilityConstraintForType(it, abilityName) }
                 }
             }
+            is com.funk.language.ast.FunkType.ListType -> {
+                // CRITICAL FIX: For list types, recursively track constraints on element type
+                // This handles cases like List 'a where 'a needs Eq, not the List itself
+                trackAbilityConstraintForType(type.elementType, abilityName)
+            }
             else -> {
                 // CRITICAL FIX: For concrete types, immediately check if they have the required ability
                 // This catches cases like String + String where String doesn't have NumAdd
@@ -1143,7 +1148,7 @@ class TypeChecker {
         abilityNames: Set<String>,
         typeVar: com.funk.language.ast.TypeVar
     ) {
-        // CRITICAL FIX: For composite types (VariantType, RecordType), recursively validate inner types
+        // CRITICAL FIX: For composite types (VariantType, RecordType, ListType), recursively validate inner types
         // instead of trying to validate that the composite type itself has the ability
         when (type) {
             is com.funk.language.ast.FunkType.RecordType -> {
@@ -1160,6 +1165,11 @@ class TypeChecker {
                         validateAbilityConstraintsForType(it, abilityNames, typeVar)
                     }
                 }
+                return
+            }
+            is com.funk.language.ast.FunkType.ListType -> {
+                // Recursively validate element type
+                validateAbilityConstraintsForType(type.elementType, abilityNames, typeVar)
                 return
             }
             is com.funk.language.ast.FunkType.VarType -> {
