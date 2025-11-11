@@ -1185,17 +1185,17 @@ class TypeChecker {
         for (abilityName in abilityNames) {
             val hasAbility = when (type) {
                 is com.funk.language.ast.FunkType.IntType ->
-                    abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "Show", "Inspect")
+                    abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "Inspect")
                 is com.funk.language.ast.FunkType.FracType ->
-                    abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "Show", "Inspect")
+                    abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "Inspect")
                 is com.funk.language.ast.FunkType.NatType ->
-                    abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "Show", "Inspect")
+                    abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "Inspect")
                 is com.funk.language.ast.FunkType.FloatType ->
-                    abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "Show", "Inspect")
+                    abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "Inspect")
                 is com.funk.language.ast.FunkType.BooleanType ->
-                    abilityName in setOf("Eq", "LogicalAnd", "LogicalOr", "LogicalNot", "Show", "Inspect")
+                    abilityName in setOf("Eq", "LogicalAnd", "LogicalOr", "LogicalNot", "Inspect")
                 is com.funk.language.ast.FunkType.StringType ->
-                    abilityName in setOf("Eq", "Ord", "StringConcat", "Show", "Inspect")
+                    abilityName in setOf("Eq", "Ord", "StringConcat", "Inspect")
                 else -> false
             }
 
@@ -2184,7 +2184,7 @@ class TypeChecker {
                             }
                         }
                         
-                        // Check if this is an ability call (e.g., Show.show, Eq.equals)
+                        // Check if this is an ability call (e.g., Inspect.to_str, Eq.equals)
                         val abilityType = context["${effectName}_ability"]
                         if (abilityType is com.funk.language.ast.FunkType.RecordType) {
                             val argType = inferBasicType(expr.arguments)
@@ -2572,7 +2572,7 @@ class TypeChecker {
                                 val returnType = applySubstitutionToType(functionType.returnType, allSubstitutions)
 
                                 // ABILITY METHOD CALL VALIDATION:
-                                // If this is an ability method call (e.g., Show.show {val = true}),
+                                // If this is an ability method call (e.g., Inspect.to_str {val = true}),
                                 // check that an implementation exists for the concrete types
                                 if (expr.function is MemberAccess) {
                                     val memberAccess = expr.function as MemberAccess
@@ -3059,7 +3059,7 @@ class TypeChecker {
                 com.funk.language.ast.FunkType.RecordType(fields, rowVar)
             }
             is MemberAccess -> {
-                // Check if this is an ability method access first (e.g., Show.show)
+                // Check if this is an ability method access first (e.g., Inspect.to_str)
                 if (expr.receiver is Identifier) {
                     val receiverName = (expr.receiver as Identifier).name
                     val abilityKey = "${receiverName}_ability"
@@ -5931,12 +5931,12 @@ class TypeChecker {
     }
 
     /**
-     * Find ability method calls in an expression (e.g., Show.show {val = x})
+     * Find ability method calls in an expression (e.g., Inspect.to_str {val = x})
      */
     private fun findAbilityMethodCalls(expr: Expression, callback: (String, Expression) -> Unit) {
         when (expr) {
             is FunctionCall -> {
-                // Check if this is an ability method call like Show.show {val = x}
+                // Check if this is an ability method call like Inspect.to_str {val = x}
                 if (expr.function is MemberAccess) {
                     val memberAccess = expr.function as MemberAccess
                     if (memberAccess.receiver is Identifier) {
@@ -6006,7 +6006,7 @@ class TypeChecker {
         argsExpr: Expression,
         paramTypes: Map<String, com.funk.language.ast.FunkType>
     ): List<com.funk.language.ast.FunkType> {
-        // For a call like Show.show {val = x}, extract the type of x
+        // For a call like Inspect.to_str {val = x}, extract the type of x
         return when (argsExpr) {
             is RecordLiteral -> {
                 // Extract types from record fields
@@ -9305,6 +9305,19 @@ class TypeChecker {
         val moduleName = receiver.name
         val functionName = expr.member
 
+        // Check if this is a built-in ability call (e.g., Inspect::to_str)
+        if (BuiltinAbilities.isBuiltin(moduleName)) {
+            // Check if the ability has this method
+            val typeVar = com.funk.language.ast.FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+            val abilityMethodType = BuiltInAbilityRegistry.getAbilityType(moduleName, functionName, typeVar)
+            if (abilityMethodType != null) {
+                if (System.getProperty("funk.typecheck.debug") == "true") {
+                    // println("DEBUG: Found built-in ability type for $moduleName::$functionName: $abilityMethodType")
+                }
+                return abilityMethodType
+            }
+        }
+
         // Get concrete type from module registry
         val concreteType = ModuleTypeRegistry.getConcreteType(moduleName, functionName)
         if (concreteType != null) {
@@ -9348,7 +9361,7 @@ class TypeChecker {
     }
 
     /**
-     * Handle ability method calls like Show.show {val = x}
+     * Handle ability method calls like Inspect.to_str {val = x}
      *
      * Algorithm:
      * 1. Look up ability declaration to get method signature
@@ -9394,7 +9407,7 @@ class TypeChecker {
 
     /**
      * Validate that an ability implementation exists for concrete types.
-     * This enforces the user's requirement: "Show Bool, it should not apply if it can't find show bool"
+     * This enforces the user's requirement: "Inspect Bool, it should not apply if it can't find to_str bool"
      *
      * Called after type substitution to check if impl exists for the concrete types.
      */
@@ -9410,7 +9423,7 @@ class TypeChecker {
 
         // If all types are concrete (no type variables), check if implementation exists
         if (concreteTypes.all { !it.contains("'") }) {
-            // Build implementation key: "Show_Bool" for impl Show Bool
+            // Build implementation key: "Inspect_Bool" for impl Inspect Bool
             val implKey = "${abilityName}_${concreteTypes.joinToString("_")}"
 
             if (!context.containsKey(implKey)) {

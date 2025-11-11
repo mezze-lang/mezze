@@ -658,7 +658,7 @@ private fun effectRowsMatch(
 /**
  * Print a list of display ability constraints in a readable format
  */
-fun printConstraints(constraints: List<DisplayAbilityConstraint>): String {
+fun printConstraints(constraints: List<InspectAbilityConstraint>): String {
     if (constraints.isEmpty()) return ""
     
     // Group constraints by type parameter
@@ -673,7 +673,7 @@ fun printConstraints(constraints: List<DisplayAbilityConstraint>): String {
 /**
  * Print a type with its constraints
  */
-fun printTypeWithConstraints(type: FunkType, constraints: List<DisplayAbilityConstraint>): String {
+fun printTypeWithConstraints(type: FunkType, constraints: List<InspectAbilityConstraint>): String {
     val typeStr = prettyPrintType(type)
     val constraintStr = printConstraints(constraints)
     
@@ -687,7 +687,7 @@ fun printTypeWithConstraints(type: FunkType, constraints: List<DisplayAbilityCon
 /**
  * Print a function type with its constraints
  */
-fun printFunctionTypeWithConstraints(type: FunkType.FunctionType, constraints: List<DisplayAbilityConstraint>): String {
+fun printFunctionTypeWithConstraints(type: FunkType.FunctionType, constraints: List<InspectAbilityConstraint>): String {
     return printTypeWithConstraints(type, constraints)
 }
 
