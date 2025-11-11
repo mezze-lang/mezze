@@ -1,0 +1,73 @@
+# Test match expressions with ability constraints and type unification
+
+# Basic match with arithmetic - polymorphic parameters
+let addOrSub = {flag, x, y} -> match flag is
+  True -> x + y
+  False -> x - y                                                # expected: addOrSub : { flag: Bool, x: 'a, y: 'a } with NumAdd 'a, NumSub 'a -> 'a
+
+# Match with three operations
+let threeOps = {mode, a, b, c} -> match mode is
+  Add -> a + b + c
+  Sub -> a - b - c
+  Mul -> a * b * c                                              # expected: threeOps : { mode: | Add, Sub, Mul |, a: 'a, b: 'a, c: 'a } with NumAdd 'a, NumSub 'a, NumMul 'a -> 'a
+
+# Variant pattern with data - polymorphic field
+let addFromVariant = {pair, x} -> match pair is
+  Pair {a} -> a + x                                             # expected: addFromVariant : { pair: | Pair { a: 'a } |, x: 'a } with NumAdd 'a -> 'a
+
+# Multiple variant fields - all polymorphic
+let addPairFields = {pair} -> match pair is
+  Pair {a, b} -> a + b                                          # expected: addPairFields : { pair: | Pair { a: 'a, b: 'a } | } with NumAdd 'a -> 'a
+
+# Variant with data unifies with external params
+let tripleAdd = {triple, x, y} -> match triple is
+  Triple {z} -> x + y + z                                       # expected: tripleAdd : { triple: | Triple { z: 'a } |, x: 'a, y: 'a } with NumAdd 'a -> 'a
+
+# Multiple match branches with different operations
+let mathOp = {color, x, y} -> match color is
+  Red -> x + y
+  Green -> x - y
+  Blue -> x * y                                                 # expected: mathOp : { color: | Red, Green, Blue |, x: 'a, y: 'a } with NumAdd 'a, NumSub 'a, NumMul 'a -> 'a
+
+# Variant field + record field access + params all unified
+let complexUnify = {color, p, x, y} -> match color is
+  Red {z} -> x + y + z
+  Green -> p.t - x - y
+  Blue -> x * y                                                 # expected: complexUnify : { color: | Red { z: 'a }, Green, Blue |, p: { t: 'a }, x: 'a, y: 'a } with NumAdd 'a, NumSub 'a, NumMul 'a -> 'a
+
+# Multiple variant patterns with operations
+let pairOp = {op, pair1, pair2} -> match op is
+  AddPairs -> match pair1 is
+    Pair {a, b} -> match pair2 is
+      Pair {c, d} -> a + b + c + d
+      _ -> 0
+    _ -> 0
+  MulPairs -> match pair1 is
+    Pair {a, b} -> match pair2 is
+      Pair {c, d} -> a * b * c * d
+      _ -> 1
+    _ -> 1                                                      # expected: pairOp : { op: | AddPairs, MulPairs |, pair1: | Pair { a: Int, b: Int }, ... |, pair2: | Pair { c: Int, d: Int }, ... | } -> Int
+
+# Comparison operations generate Ord constraint
+let compare = {x, y} -> match True is
+  True -> x < y
+  False -> x > y                                                # expected: compare : { x: 'a, y: 'a } with Ord 'a -> Bool
+
+# Mixed numeric and comparison operations
+let mathAndCompare = {mode, x, y} -> match mode is
+  Compute -> x + y
+  Compare -> match x < y is
+    True -> x
+    False -> y                                                  # expected: mathAndCompare : { mode: | Compute, Compare |, x: 'a, y: 'a } with NumAdd 'a, Ord 'a -> 'a
+
+# Wildcard with operations
+let withWildcard = {opt, x, y} -> match opt is
+  Some -> x + y
+  _ -> x - y                                                    # expected: withWildcard : { opt: | Some, ... |, x: 'a, y: 'a } with NumAdd 'a, NumSub 'a -> 'a
+
+# Guard with operations
+let guardedOp = {val, x, y} -> match val is
+  Some {v} if v > 0 -> x + y
+  _ -> x - y                                                    # expected: guardedOp : { val: | Some { v: Int }, ... |, x: 'a, y: 'a } with NumAdd 'a, NumSub 'a -> 'a
+
+addOrSub {flag = True, x = 5, y = 3}

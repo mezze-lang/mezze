@@ -1,0 +1,13 @@
+# Test that Inspect ability is properly validated
+# These tests should fail type checking
+
+# Cannot inspect a function type
+let inspectFunction = {f} -> Inspect.to_str {val = f}     # ERROR: Functions don't have Inspect
+
+# Cannot inspect a record without type info
+let inspectUnknownRecord = {r} -> Inspect.to_str {val = r}  # ERROR: Records don't have Inspect (unless fields do)
+
+# Cannot inspect a variant without type info
+let inspectUnknownVariant = {v} -> Inspect.to_str {val = v}  # ERROR: Variants don't have Inspect directly
+
+let main = {} -> {}

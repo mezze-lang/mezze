@@ -1,0 +1,63 @@
+# Test row polymorphism with variant types
+
+# Basic open variant with wildcard
+let handleColor1 = {c} -> match c is
+  Red -> 1
+  Blue -> 2
+  _ -> 0                                                        # expected: handleColor1 : { c: | Red, Blue, ... | } -> Int
+
+# Open variant inferred from pattern
+let handleColor2 = {c} -> match c is
+  Red -> "red"
+  Green -> "green"
+  _ -> "other"                                                  # expected: handleColor2 : { c: | Red, Green, ... | } -> String
+
+# Closed variant (all constructors covered)
+let handleColor3 = {c} -> match c is
+  Red -> 1
+  Green -> 2
+  Blue -> 3                                                     # expected: handleColor3 : { c: | Red, Green, Blue | } -> Int
+
+# Open variant with data
+let handleShape = {s} -> match s is
+  Circle {radius} -> radius
+  Square {side} -> side
+  _ -> 0                                                        # expected: handleShape : { s: | Circle { radius: Int }, Square { side: Int }, ... | } -> 'a
+
+# Multiple open variants in same function
+let compareColors = {c1, c2} -> match c1 is
+  Red -> match c2 is
+    Red -> True
+    _ -> False
+  _ -> False                                                    # expected: compareColors : { c1: | Red, ... |, c2: | Red, ... | } -> | True |
+
+# Open variant with polymorphic field
+let getField = {v} -> match v is
+  Some {val} -> val
+  _ -> 0                                                        # expected: getField : { v: | Some { val: Int }, ... | } -> Int
+
+# Nested open variants
+let processNested = {outer} -> match outer is
+  Wrapper {inner} -> match inner is
+    Value {x} -> x
+    _ -> 0
+  _ -> 0                                                        # expected: processNested : { outer: | Wrapper { inner: 'a }, ... | } -> 'b
+
+# Open variant with multiple fields
+let handlePair = {p} -> match p is
+  Pair {x, y} -> x
+  _ -> 0                                                        # expected: handlePair : { p: | Pair { x: Int, y: 'a }, ... | } -> Int
+
+# Row extension with wildcard
+let extendColors = {c} -> match c is
+  Red -> "primary"
+  Blue -> "primary"
+  Yellow -> "primary"
+  _ -> "other"                                                  # expected: extendColors : { c: | Red, Blue, Yellow, ... | } -> String
+
+# Open variant allows future extension
+let handleFuture = {v} -> match v is
+  Known -> 1
+  _ -> 0                                                        # expected: handleFuture : { v: | Known, ... | } -> Int
+
+handleFuture {v = Known}

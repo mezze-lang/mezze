@@ -1,0 +1,60 @@
+# Test type variable unification across match branches with constraints
+
+# Simple parameter unification
+let unifySimple = {x, y} -> match True is
+  True -> x + y
+  False -> x - y                                                # expected: unifySimple : { x: 'a, y: 'a } with NumAdd 'a, NumSub 'a -> 'a
+
+# Unify variant field with parameters
+let unifyVariantParam = {v, x} -> match v is
+  Val {a} -> a + x                                              # expected: unifyVariantParam : { v: | Val { a: 'a } |, x: 'a } with NumAdd 'a -> 'a
+
+# Unify multiple variant fields together
+let unifyMultiField = {v1, v2} -> match v1 is
+  A {x} -> match v2 is
+    B {y} -> x + y                                              # expected: unifyMultiField : { v1: | A { x: 'a } |, v2: | B { y: 'a } | } with NumAdd 'a -> 'a
+
+# Unify with record field
+let unifyRecord = {r, x} -> r.field + x                         # expected: unifyRecord : { r: { field: 'a }, x: 'a } with NumAdd 'a -> 'a
+
+# Unify across nested matches
+let unifyNested = {outer, x} -> match outer is
+  Outer {inner} -> match inner is
+    Inner {val} -> val + x                                      # expected: unifyNested : { outer: | Outer { inner: 'a } |, x: 'b } with NumAdd 'b -> 'b
+
+# All parameters unified through chain
+let unifyChain = {a, b, c, d} -> match True is
+  True -> a + b
+  False -> c + d                                                # expected: unifyChain : { a: 'a, b: 'a, c: 'a, d: 'a } with NumAdd 'a -> 'a
+
+# Variant field + record field + params unified
+let unifyAll = {v, r, x, y} -> match v is
+  Val {z} -> z + r.field + x + y                                # expected: unifyAll : { v: | Val { z: 'a } |, r: { field: 'a }, x: 'a, y: 'a } with NumAdd 'a -> 'a
+
+# Multiple operations same variables
+let multiOp = {x, y} -> match True is
+  True -> x + y - x * y                                         # expected: multiOp : { x: 'a, y: 'a } with NumSub 'a, NumAdd 'a, NumMul 'a -> 'a
+
+# Transitive unification through operations
+let transitive = {a, b, c} -> match True is
+  True -> a + b
+  False -> b + c                                                # expected: transitive : { a: 'a, b: 'a, c: 'a } with NumAdd 'a -> 'a
+
+# Unify with comparison result
+let unifyCompare = {x, y, z} -> match x < y is
+  True -> z
+  False -> x                                                    # expected: unifyCompare : { x: 'a, y: 'a, z: 'a } with Ord 'a -> 'a
+
+# Deep nesting with unification
+let deepNest = {v} -> match v is
+  A {b} -> match b is
+    B {c} -> match c is
+      C {d} -> d + 1                                            # expected: deepNest : { v: | A { b: 'a } | } -> Int
+
+# Constraint preserved across branches
+let preserveConstraint = {mode, x, y, z} -> match mode is
+  One -> x + y
+  Two -> y + z
+  Three -> x + z                                                # expected: preserveConstraint : { mode: | One, Two, Three |, x: 'a, y: 'a, z: 'a } with NumAdd 'a -> 'a
+
+preserveConstraint {mode = One, x = 1, y = 2, z = 3}

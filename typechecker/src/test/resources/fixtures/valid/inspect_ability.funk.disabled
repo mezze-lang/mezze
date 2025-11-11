@@ -1,0 +1,58 @@
+# Test Inspect ability for built-in types
+# Inspect is available for all primitive types
+
+# Inspect with Int
+let inspectInt = {x} -> Inspect.to_str {val = x}                      # expected: inspectInt : { x: Int } -> String
+
+# Inspect with Bool
+let inspectBool = {b} -> Inspect.to_str {val = b}                     # expected: inspectBool : { b: Bool } -> String
+
+# Inspect with String
+let inspectString = {s} -> Inspect.to_str {val = s}                   # expected: inspectString : { s: String } -> String
+
+# Inspect with Float
+let inspectFloat = {f} -> Inspect.to_str {val = f}                    # expected: inspectFloat : { f: Float } -> String
+
+# Inspect with Nat
+let inspectNat = {n} -> Inspect.to_str {val = n}                      # expected: inspectNat : { n: Nat } -> String
+
+# Inspect with Frac
+let inspectFrac = {fr} -> Inspect.to_str {val = fr}                   # expected: inspectFrac : { fr: Frac } -> String
+
+# Polymorphic inspect - should constrain type variable
+let polyInspect = {x} -> Inspect.to_str {val = x}                     # expected: polyInspect : { x: 'a } with Inspect 'a -> String
+
+# Using inspect in a match expression
+let inspectMatch = {opt} -> match opt is
+  Some {val} -> Inspect.to_str {val = val}
+  None -> "none"                                                        # expected: inspectMatch : { opt: | Some { val: 'a }, None | } with Inspect 'a -> String
+
+# Inspect with conditional
+let inspectCond = {flag, x, y} ->
+  if flag then Inspect.to_str {val = x}
+  else Inspect.to_str {val = y}                                       # expected: inspectCond : { flag: Bool, x: 'a, y: 'a } with Inspect 'a -> String
+
+# Inspect in combination with other abilities
+let inspectAndAdd = {x, y} ->
+  Inspect.to_str {val = x + y}                                        # expected: inspectAndAdd : { x: 'a, y: 'a } with NumAdd 'a, Inspect 'a -> String
+
+# Inspect with record field access
+let inspectField = {r} -> Inspect.to_str {val = r.value}              # expected: inspectField : { r: { value: 'a } } with Inspect 'a -> String
+
+# Inspect with pattern matching on variants with data
+let inspectVariantData = {v} -> match v is
+  Value {x} -> Inspect.to_str {val = x}
+  Empty -> "empty"                                                      # expected: inspectVariantData : { v: | Value { x: 'a }, Empty | } with Inspect 'a -> String
+
+# Multiple inspect calls with same type variable
+let multiInspect = {a, b, c} ->
+  Inspect.to_str {val = a} ++
+  Inspect.to_str {val = b} ++
+  Inspect.to_str {val = c}                                            # expected: multiInspect : { a: 'a, b: 'a, c: 'a } with Inspect 'a -> String
+
+# Inspect with list elements (assuming list type exists)
+let inspectListHead = {lst} -> match lst is
+  Cons {head, tail} -> Inspect.to_str {val = head}
+  Nil -> "empty"                                                        # expected: inspectListHead : { lst: | Cons { head: 'a, tail: 'b }, Nil | } with Inspect 'a -> String
+
+inspectInt {x = 42}

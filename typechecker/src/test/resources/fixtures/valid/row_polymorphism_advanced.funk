@@ -1,0 +1,60 @@
+# Advanced row polymorphism test cases
+
+# Open variant with record field access
+let accessField = {v} -> match v is
+  Record {data} -> data.x
+  _ -> 0                                                        # expected: accessField : { v: | Record { data: { x: Int } }, ... | } -> Int
+
+# Polymorphic row with multiple wildcards
+let multiWild = {v1, v2} -> match v1 is
+  A -> match v2 is
+    B -> 1
+    _ -> 2
+  _ -> 3                                                        # expected: multiWild : { v1: | A, ... |, v2: | B, ... | } -> Int
+
+# Row polymorphism with nested records
+let nestedAccess = {v} -> match v is
+  Outer {inner} -> inner.field
+  _ -> 0                                                        # expected: nestedAccess : { v: | Outer { inner: { field: Int } }, ... | } -> Int
+
+# Open variant with list of variants
+let processList = {items} -> match items is
+  Cons {head, tail} -> match head is
+    Some -> 1
+    _ -> 0
+  _ -> 0                                                        # expected: processList : { items: | Cons { head: 'a, tail: 'b }, ... | } -> Int
+
+# Row extension with return polymorphism
+let returnVariant = {v} -> match v is
+  Input {x} -> Output {y = x}
+  _ -> Default                                                  # expected: returnVariant : { v: | Input { x: 'a }, ... | } -> | Output |
+
+# Multiple constructors with same field names
+let sameFields = {v} -> match v is
+  Circle {radius} -> radius
+  Sphere {radius} -> radius
+  _ -> 0                                                        # expected: sameFields : { v: | Circle { radius: Int }, Sphere { radius: Int }, ... | } -> 'a
+
+# Open variant with string operations
+let concatVariant = {v, suffix} -> match v is
+  Text {str} -> str ++ suffix
+  _ -> suffix                                                   # expected: concatVariant : { v: | Text { str: String }, ... |, suffix: String } -> String
+
+# Row polymorphism with boolean operations
+let boolVariant = {v} -> match v is
+  Flag {b} -> b && True
+  _ -> False                                                    # expected: boolVariant : { v: | Flag { b: Bool }, ... | } -> Bool
+
+# Chained variant pattern matching
+let chain = {v} -> match v is
+  First {next} -> match next is
+    Second {val} -> val
+    _ -> 0
+  _ -> 0                                                        # expected: chain : { v: | First { next: 'a }, ... | } -> 'b
+
+# Open variant returning open variant
+let transform = {input} -> match input is
+  Alpha {x} -> Beta {y = x}
+  _ -> Gamma                                                    # expected: transform : { input: | Alpha { x: 'a }, ... | } -> | Beta |
+
+transform {input = Alpha {x = 42}}

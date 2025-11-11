@@ -1,0 +1,76 @@
+# Test mixing open and closed variants in different contexts
+
+# Closed variant parameter, open variant return
+let wrapColor = {c} -> match c is
+  Red -> Wrapped {val = 1}
+  Green -> Wrapped {val = 2}
+  Blue -> Default
+  _ -> Other                                                    # expected: wrapColor : { c: | Red, Green, Blue, ... | } -> | Wrapped |
+
+# Open variant parameter, closed variant return
+let unwrapSafely = {w} -> match w is
+  Wrapped {val} -> Some {val = val}
+  _ -> None                                                     # expected: unwrapSafely : { w: | Wrapped { val: 'a }, ... | } -> | Some |
+
+# Both closed
+let boolToResult = {b} -> match b is
+  True -> Ok
+  False -> Err                                                  # expected: boolToResult : { b: Bool } -> | Ok |
+
+# Both open
+let partialMatch = {x, y} -> match x is
+  Some {a} -> match y is
+    Some {b} -> a + b
+    _ -> a
+  _ -> 0                                                        # expected: partialMatch : { x: | Some { a: Int }, ... |, y: | Some { b: Int }, ... | } -> Int
+
+# Closed input, multiple open outputs
+let branch = {choice} -> match choice is
+  Left -> Alpha
+  Right -> Beta
+  _ -> Gamma                                                    # expected: branch : { choice: | Left, Right, ... | } -> | Alpha |
+
+# Function that closes over open variant
+let handleWithDefault = {opt} -> match opt is
+  Some {x} -> x
+  None -> 42
+  _ -> 0                                                        # expected: handleWithDefault : { opt: | Some { x: Int }, None, ... | } -> Int
+
+# Closed variant with polymorphic operations
+let closedMath = {op, x, y} -> match op is
+  Add -> x + y
+  Mul -> x * y                                                  # expected: closedMath : { op: | Add, Mul |, x: 'a, y: 'a } with NumAdd 'a, NumMul 'a -> 'a
+
+# Open variant with polymorphic operations
+let openMath = {op, x, y} -> match op is
+  Add -> x + y
+  _ -> x * y                                                    # expected: openMath : { op: | Add, ... |, x: 'a, y: 'a } with NumAdd 'a, NumMul 'a -> 'a
+
+# Mixed: closed in one branch, open in another
+let complexBranch = {mode, v1, v2} -> match mode is
+  UseFirst -> match v1 is
+    A -> 1
+    B -> 2
+  UseSecond -> match v2 is
+    X {val} -> val
+    _ -> 0                                                      # expected: complexBranch : { mode: | UseFirst, UseSecond |, v1: | A, B |, v2: | X { val: Int }, ... | } -> Int
+
+# Closed variant in nested pattern
+let nestedClosed = {outer} -> match outer is
+  Container {inner} -> match inner is
+    Red -> 1
+    Blue -> 2                                                   # expected: nestedClosed : { outer: | Container { inner: 'a } | } -> Int
+
+# Exhaustive pattern creates closed, but returns open
+let exhaustiveInput = {x} -> match x is
+  A -> Result {val = 1}
+  B -> Result {val = 2}
+  C -> Other
+  _ -> Unknown                                                  # expected: exhaustiveInput : { x: | A, B, C, ... | } -> | Result |
+
+# Polymorphic closed variant with constraints
+let closedCompare = {cmp, x, y} -> match cmp is
+  Less -> x < y
+  Equal -> x == y                                               # expected: closedCompare : { cmp: | Less, Equal |, x: 'a, y: 'a } with Ord 'a, Eq 'a -> Bool
+
+closedCompare {cmp = Less, x = 5, y = 10}

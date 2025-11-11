@@ -1,0 +1,71 @@
+# Test closed variants with exhaustive pattern matching (no wildcards)
+
+# Simple exhaustive match - closed variant
+let handleBool = {b} -> match b is
+  True -> 1
+  False -> 0                                                    # expected: handleBool : { b: Bool } -> Int
+
+# Three constructors exhaustive
+let handleTrafficLight = {light} -> match light is
+  Red -> "stop"
+  Yellow -> "caution"
+  Green -> "go"                                                 # expected: handleTrafficLight : { light: | Red, Yellow, Green | } -> String
+
+# Exhaustive with data fields - closed
+let handleOption = {opt} -> match opt is
+  Some {val} -> val
+  None -> 0                                                     # expected: handleOption : { opt: | Some { val: Int }, None | } -> Int
+
+# Exhaustive match with operations - closed variant
+let compute = {op, x, y} -> match op is
+  Add -> x + y
+  Sub -> x - y
+  Mul -> x * y
+  Div -> x / y                                                  # expected: compute : { op: | Add, Sub, Mul, Div |, x: 'a, y: 'a } with NumAdd 'a, NumSub 'a, NumMul 'a, NumDiv 'a -> 'a
+
+# Binary choice exhaustive - polymorphic
+let either = {choice, left, right} -> match choice is
+  Left -> left
+  Right -> right                                                # expected: either : { choice: | Left, Right |, left: 'a, right: 'a } -> 'a
+
+# Exhaustive with nested data
+let handleResult = {res} -> match res is
+  Ok {value} -> value
+  Err {error} -> 0                                              # expected: handleResult : { res: Result 'unknown 'a } -> Int
+
+# Multiple fields exhaustive
+let handlePair = {p} -> match p is
+  Pair {fst, snd} -> fst + snd                                  # expected: handlePair : { p: | Pair { fst: 'a, snd: 'a } | } with NumAdd 'a -> 'a
+
+# Closed variant with comparison
+let compareMode = {mode, x, y} -> match mode is
+  Less -> x < y
+  Greater -> x > y
+  Equal -> x == y                                               # expected: compareMode : { mode: | Less, Greater, Equal |, x: 'a, y: 'a } with Ord 'a, Eq 'a -> Bool
+
+# Exhaustive nested match - both closed
+let nested = {outer, inner} -> match outer is
+  A -> match inner is
+    X -> 1
+    Y -> 2
+  B -> match inner is
+    X -> 3
+    Y -> 4
+  C -> 5                                                        # expected: nested : { outer: | A, B, C |, inner: | X, Y | } -> Int
+
+# Single constructor (trivial closed variant)
+let handleUnit = {u} -> match u is
+  Unit -> 42                                                    # expected: handleUnit : { u: | Unit | } -> Int
+
+# Exhaustive with all polymorphic fields
+let swapPair = {p} -> match p is
+  Pair {a, b} -> Pair {a = b, b = a}                            # expected: swapPair : { p: | Pair { a: 'a, b: 'b } | } -> | Pair |
+
+# Closed variant returning closed variant
+let transform = {input} -> match input is
+  Red -> Blue
+  Green -> Yellow
+  Blue -> Red
+  Yellow -> Green                                               # expected: transform : { input: | Red, Green, Blue, Yellow | } -> | Blue |
+
+transform {input = Red}
