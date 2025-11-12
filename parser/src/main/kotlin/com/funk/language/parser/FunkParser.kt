@@ -1,0 +1,3207 @@
+package com.funk.language.parser
+
+import com.funk.language.ast.*
+
+/**
+ * Funk language parser using parser combinators.
+ *
+ * This parser explicitly handles the ambiguity between:
+ * - Lambda expressions: {x} -> body
+ * - Record literals: {x} or {x = value}
+ *
+ * By using explicit lookahead for the arrow token.
+ */
+class FunkParser {
+
+    fun parse(source: String, desugar: Boolean = true): Program {
+        val lexer = Lexer(source)
+        val tokens = lexer.tokenize()
+        val stream = TokenStream(tokens)
+
+        return when (val result = programParser(stream)) {
+            is ParseResult.Success -> if (desugar) desugarProgram(result.value) else result.value
+            is ParseResult.Failure -> throw ParseException(result.message, result.position)
+        }
+    }
+
+    // Desugar pipe operators in the entire program
+    private fun desugarProgram(program: Program): Program {
+        return Program(program.items.map { desugarProgramItem(it) })
+    }
+
+    private fun desugarProgramItem(item: ProgramItem): ProgramItem {
+        return when (item) {
+            is LetBinding -> item.copy(expression = desugarExpression(item.expression))
+            is TopLevelExpression -> item.copy(expression = desugarExpression(item.expression))
+            is ImplDeclaration -> item.copy(operations = item.operations.map { op ->
+                op.copy(implementation = desugarExpression(op.implementation))
+            })
+            else -> item // TypeDeclaration, EffectDeclaration, AbilityDeclaration, UseDeclaration, etc.
+        }
+    }
+
+    private fun desugarExpression(expr: Expression): Expression {
+        return when (expr) {
+            is BinaryOperation -> {
+                if (expr.operator == "|>") {
+                    // Desugar pipe: left |> right becomes right with @ replaced by left
+                    val desugaredLeft = desugarExpression(expr.left)
+                    val desugaredRight = desugarExpression(expr.right)
+                    desugarPipe(desugaredLeft, desugaredRight)
+                } else {
+                    expr.copy(
+                        left = desugarExpression(expr.left),
+                        right = desugarExpression(expr.right)
+                    )
+                }
+            }
+            is FunctionCall -> expr.copy(
+                function = desugarExpression(expr.function),
+                arguments = desugarExpression(expr.arguments)
+            )
+            is RecordLiteral -> expr.copy(
+                entries = expr.entries.map { entry ->
+                    when (entry) {
+                        is RecordFieldEntry -> entry.copy(
+                            value = entry.value?.let { desugarExpression(it) }
+                        )
+                        is RecordSpreadEntry -> entry.copy(
+                            expression = desugarExpression(entry.expression)
+                        )
+                    }
+                }
+            )
+            is UnaryOperation -> expr.copy(operand = desugarExpression(expr.operand))
+            is IfExpression -> expr.copy(
+                condition = desugarExpression(expr.condition),
+                thenBranch = desugarExpression(expr.thenBranch),
+                elseBranch = desugarExpression(expr.elseBranch)
+            )
+            is LambdaExpression -> expr.copy(body = desugarExpression(expr.body))
+            is MatchExpression -> expr.copy(
+                expression = desugarExpression(expr.expression),
+                cases = expr.cases.map { case ->
+                    case.copy(expression = desugarExpression(case.expression))
+                }
+            )
+            is DoExpression -> expr.copy(
+                statements = expr.statements.map { desugarStatement(it) },
+                result = desugarExpression(expr.result)
+            )
+            is ArrayLiteral -> expr.copy(
+                elements = expr.elements.map { desugarExpression(it) }
+            )
+            is PerformExpression -> expr.copy(
+                expression = desugarExpression(expr.expression)
+            )
+            is RecordUpdateExpression -> expr.copy(
+                baseRecord = desugarExpression(expr.baseRecord),
+                updates = expr.updates.map { update ->
+                    update.copy(value = desugarExpression(update.value))
+                }
+            )
+            else -> expr // Literals, identifiers, etc.
+        }
+    }
+
+    private fun desugarStatement(stmt: Statement): Statement {
+        return when (stmt) {
+            is ExpressionStatement -> ExpressionStatement(desugarExpression(stmt.expression))
+            is LetStatement -> LetStatement(stmt.variableName, stmt.typeAnnotation, desugarExpression(stmt.expression))
+        }
+    }
+
+    // ===== TOP LEVEL =====
+
+    private val programParser: Parser<Program> = { stream ->
+        // Skip leading newlines
+        var currentStream = skipNewlines(stream)
+        val items = mutableListOf<ProgramItem>()
+        var failure: ParseResult.Failure? = null
+
+        // Parse top-level items, skipping newlines between them
+        while (currentStream.current()?.type != TokenType.EOF && failure == null) {
+            when (val result = topLevelItem(currentStream)) {
+                is ParseResult.Success -> {
+                    items.add(result.value)
+                    currentStream = skipNewlines(result.remaining)
+                }
+                is ParseResult.Failure -> {
+                    failure = ParseResult.Failure(result.message, result.position)
+                }
+            }
+        }
+
+        failure ?: ParseResult.Success(Program(items), currentStream)
+    }
+
+    // Declaration parsers (defined later to avoid forward reference)
+    private lateinit var effectDeclaration: Parser<ProgramItem>
+    private lateinit var implDeclaration: Parser<ProgramItem>
+    private lateinit var implAbilityDeclaration: Parser<ProgramItem>
+    private lateinit var abilityDeclaration: Parser<ProgramItem>
+    private lateinit var typeDeclaration: Parser<ProgramItem>
+    private lateinit var useDeclaration: Parser<ProgramItem>
+    private lateinit var letDeclaration: Parser<ProgramItem>
+    private lateinit var topLevelExpression: Parser<ProgramItem>
+    private lateinit var topLevelItem: Parser<ProgramItem>
+
+    // ===== LET BINDING (defined before init block) =====
+
+    private fun parseLetBinding(stream: TokenStream): ParseResult<ProgramItem> {
+        return parseLetBindingWithVisibility(stream, Visibility.PRIVATE)
+    }
+
+    private fun parseLetBindingWithVisibility(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+        // Parse: let <name> : <type> = <expression>
+        //    or: let <name> = <expression>
+        val letToken = tok(TokenType.LET)(stream)
+        return when (letToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(letToken.remaining)
+                val ident = identifierParser(stream1)
+
+                when (ident) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(ident.remaining)
+
+                        // Check for optional type annotation
+                        val colonToken = tok(TokenType.COLON)(stream2)
+                        val (typeAnnotation, streamAfterType) = when (colonToken) {
+                            is ParseResult.Success -> {
+                                // Has type annotation
+                                val stream3 = skipNewlines(colonToken.remaining)
+                                val typeAnn = typeAnnotationParser(stream3)
+                                when (typeAnn) {
+                                    is ParseResult.Success -> Pair(typeAnn.value, typeAnn.remaining)
+                                    is ParseResult.Failure -> return typeAnn  // Type annotation parse failed
+                                }
+                            }
+                            is ParseResult.Failure -> {
+                                // No type annotation
+                                Pair(null, stream2)
+                            }
+                        }
+
+                        val stream4 = skipNewlines(streamAfterType)
+                        val assign = tok(TokenType.ASSIGN)(stream4)
+
+                        when (assign) {
+                            is ParseResult.Success -> {
+                                val stream5 = skipNewlines(assign.remaining)
+                                val expr = expression(stream5)
+
+                                when (expr) {
+                                    is ParseResult.Success -> ParseResult.Success(
+                                        LetBinding(
+                                            ident.value.text,
+                                            visibility,
+                                            typeAnnotation,
+                                            null, // inferredType filled by typechecker
+                                            expr.value
+                                        ),
+                                        expr.remaining
+                                    )
+                                    is ParseResult.Failure -> expr
+                                }
+                            }
+                            is ParseResult.Failure -> assign
+                        }
+                    }
+                    is ParseResult.Failure -> ident
+                }
+            }
+            is ParseResult.Failure -> letToken
+        }
+    }
+
+    // ===== CONSTRAINED LAMBDA =====
+    // Parse: { params } -> ReturnType with Constraint1 'a, Constraint2 'b = { params } -> body
+    private fun parseConstrainedLambda(stream: TokenStream): ParseResult<ProgramItem> {
+        // Only try if we see a { (record type parameter)
+        if (stream.current()?.type != TokenType.LBRACE) {
+            return ParseResult.Failure("Not a constrained lambda", stream.getSourcePosition())
+        }
+
+        // Try to parse function type annotation
+        val typeAnn = functionTypeAnnotation(stream)
+        if (typeAnn is ParseResult.Failure) {
+            return typeAnn
+        }
+
+        val stream1 = skipNewlines((typeAnn as ParseResult.Success).remaining)
+        val typeAnnotation = typeAnn.value
+
+        // Check if it's actually a function type
+        if (typeAnnotation !is FunctionTypeAnnotation) {
+            return ParseResult.Failure("Expected function type annotation", stream.getSourcePosition())
+        }
+
+        // Check if it has ability constraints (from the 'with' keyword)
+        // The functionTypeAnnotation parser already parsed these
+        if (typeAnnotation.abilityConstraints.isEmpty()) {
+            // No constraints, not what we're looking for
+            return ParseResult.Failure("No ability constraints", stream.getSourcePosition())
+        }
+
+        // Expect '='
+        val assignToken = tok(TokenType.ASSIGN)(stream1)
+        when (assignToken) {
+            is ParseResult.Failure -> return assignToken
+            is ParseResult.Success -> {
+                val stream2 = skipNewlines(assignToken.remaining)
+
+                // Parse the lambda expression
+                val lambda = expression(stream2)
+                when (lambda) {
+                    is ParseResult.Failure -> return lambda
+                    is ParseResult.Success -> {
+                        // Check that it's actually a lambda
+                        val lambdaExpr = lambda.value
+                        if (lambdaExpr !is LambdaExpression) {
+                            return ParseResult.Failure("Expected lambda expression", stream2.getSourcePosition())
+                        }
+
+                        // Create lambda with ability constraints attached
+                        val constrainedLambda = lambdaExpr.copy(
+                            returnType = typeAnnotation.returnType,
+                            abilityConstraints = typeAnnotation.abilityConstraints
+                        )
+
+                        return ParseResult.Success(
+                            TopLevelExpression(constrainedLambda),
+                            lambda.remaining
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== EFFECT DECLARATION =====
+
+    private fun parseEffectDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+        // Parse: effect Name { op1: Type1 -> Type2, op2: Type3 -> Type4 }
+        val effectToken = tok(TokenType.EFFECT)(stream)
+        return when (effectToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(effectToken.remaining)
+                val name = identifierParser(stream1)
+
+                when (name) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(name.remaining)
+                        val lbrace = tok(TokenType.LBRACE)(stream2)
+
+                        when (lbrace) {
+                            is ParseResult.Success -> {
+                                val stream3 = skipNewlines(lbrace.remaining)
+                                // Parse operations separated by newlines or commas (both supported)
+                                val operations = mutableListOf<EffectOperation>()
+                                var currentStream = stream3
+
+                                while (true) {
+                                    when (val op = effectOperationParser(currentStream)) {
+                                        is ParseResult.Success -> {
+                                            operations.add(op.value)
+                                            currentStream = skipNewlines(op.remaining)
+
+                                            // Optionally consume a comma
+                                            when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                is ParseResult.Success -> {
+                                                    currentStream = skipNewlines(comma.remaining)
+                                                }
+                                                is ParseResult.Failure -> {
+                                                    // No comma, that's fine - continue to next operation or end
+                                                }
+                                            }
+                                        }
+                                        is ParseResult.Failure -> break
+                                    }
+                                }
+
+                                val stream4 = skipNewlines(currentStream)
+                                val rbrace = tok(TokenType.RBRACE)(stream4)
+
+                                when (rbrace) {
+                                    is ParseResult.Success -> {
+                                        ParseResult.Success(
+                                            EffectDeclaration(
+                                                name.value.text,
+                                                visibility,
+                                                operations
+                                            ),
+                                            rbrace.remaining
+                                        )
+                                    }
+                                    is ParseResult.Failure -> rbrace
+                                }
+                            }
+                            is ParseResult.Failure -> lbrace
+                        }
+                    }
+                    is ParseResult.Failure -> name
+                }
+            }
+            is ParseResult.Failure -> effectToken
+        }
+    }
+
+    private val effectOperationParser: Parser<EffectOperation> = { stream ->
+        // Parse: operationName: ParamType -> ReturnType
+        val name = identifierParser(stream)
+        when (name) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(name.remaining)
+                val colon = tok(TokenType.COLON)(stream1)
+
+                when (colon) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(colon.remaining)
+                        // Parse ParamType -> ReturnType as a function type
+                        val functionType = functionTypeAnnotation(stream2)
+
+                        when (functionType) {
+                            is ParseResult.Success -> {
+                                // Extract param and return types from function type
+                                val funcType = functionType.value as? FunctionTypeAnnotation
+                                if (funcType != null) {
+                                    val effectList = funcType.effects?.effects ?: emptyList()
+                                    ParseResult.Success(
+                                        EffectOperation(
+                                            name.value.text,
+                                            funcType.paramType,
+                                            funcType.returnType,
+                                            effectList
+                                        ),
+                                        functionType.remaining
+                                    )
+                                } else {
+                                    ParseResult.Failure("Expected function type for effect operation", stream2.getSourcePosition())
+                                }
+                            }
+                            is ParseResult.Failure -> functionType
+                        }
+                    }
+                    is ParseResult.Failure -> colon
+                }
+            }
+            is ParseResult.Failure -> name
+        }
+    }
+
+    // ===== TYPE DECLARATIONS =====
+
+    private fun parseTypeDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+        val typeToken = tok(TokenType.TYPE)(stream)
+        return when (typeToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(typeToken.remaining)
+                val name = identifierParser(stream1)
+
+                when (name) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(name.remaining)
+
+                        // Parse optional type parameters: 'a 'b
+                        val typeParams = mutableListOf<String>()
+                        var currentStream = stream2
+                        while (true) {
+                            val typeVar = currentStream.current()
+                            if (typeVar?.type == TokenType.IDENTIFIER && typeVar.text.startsWith("'")) {
+                                typeParams.add(typeVar.text)
+                                currentStream = currentStream.advance()
+                                currentStream = skipNewlines(currentStream)
+                            } else {
+                                break
+                            }
+                        }
+
+                        val stream3 = skipNewlines(currentStream)
+                        val assign = tok(TokenType.ASSIGN)(stream3)
+
+                        when (assign) {
+                            is ParseResult.Success -> {
+                                val stream4 = skipNewlines(assign.remaining)
+                                val typeDef = typeDefinitionParser(stream4)
+
+                                when (typeDef) {
+                                    is ParseResult.Success -> ParseResult.Success(
+                                        TypeDeclaration(
+                                            name = name.value.text,
+                                            visibility = visibility,
+                                            typeParams = typeParams,
+                                            definition = typeDef.value,
+                                            inferredType = null
+                                        ),
+                                        typeDef.remaining
+                                    )
+                                    is ParseResult.Failure -> typeDef
+                                }
+                            }
+                            is ParseResult.Failure -> assign
+                        }
+                    }
+                    is ParseResult.Failure -> name
+                }
+            }
+            is ParseResult.Failure -> typeToken
+        }
+    }
+
+    private val typeDefinitionParser: Parser<TypeDefinition> = { stream ->
+        // Try variant type first (| ... |), then record type
+        val variantResult = variantTypeParser(stream)
+        when (variantResult) {
+            is ParseResult.Success -> variantResult
+            is ParseResult.Failure -> {
+                // Try record type
+                recordTypeParser(stream)
+            }
+        }
+    }
+
+    private val variantTypeParser: Parser<TypeDefinition> = { stream ->
+        val pipe1 = tok(TokenType.PIPE)(stream)
+        when (pipe1) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(pipe1.remaining)
+
+                // Check for empty variant type: | |
+                val pipe2Check = tok(TokenType.PIPE)(stream1)
+                if (pipe2Check is ParseResult.Success) {
+                    // Empty variant type
+                    ParseResult.Success(
+                        VariantDefinition(emptyList(), false),
+                        pipe2Check.remaining
+                    )
+                } else {
+                    // Non-empty variant: parse constructors
+                    val constructors = sepByWithNewlines(
+                        variantConstructorParser,
+                        tok(TokenType.COMMA)
+                    )(stream1)
+
+                    when (constructors) {
+                        is ParseResult.Success -> {
+                            val stream2 = skipNewlines(constructors.remaining)
+
+                            // Check for open variant syntax: , ...
+                            var isOpen = false
+                            var streamAfterEllipsis = stream2
+
+                            val commaCheck = tok(TokenType.COMMA)(stream2)
+                            if (commaCheck is ParseResult.Success) {
+                                val streamAfterComma = skipNewlines(commaCheck.remaining)
+                                val ellipsisCheck = tok(TokenType.ELLIPSIS)(streamAfterComma)
+                                if (ellipsisCheck is ParseResult.Success) {
+                                    isOpen = true
+                                    streamAfterEllipsis = skipNewlines(ellipsisCheck.remaining)
+                                }
+                            }
+
+                            val pipe2 = tok(TokenType.PIPE)(streamAfterEllipsis)
+
+                            when (pipe2) {
+                                is ParseResult.Success -> ParseResult.Success(
+                                    VariantDefinition(constructors.value, isOpen),
+                                    pipe2.remaining
+                                )
+                                is ParseResult.Failure -> pipe2
+                            }
+                        }
+                        is ParseResult.Failure -> constructors
+                    }
+                }
+            }
+            is ParseResult.Failure -> pipe1
+        }
+    }
+
+    private val variantConstructorParser: Parser<VariantConstructorDef> = { stream ->
+        val name = identifierParser(stream)
+        when (name) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(name.remaining)
+                // Check for optional record type
+                val recordType = recordTypeAnnotationParser(stream1)
+
+                when (recordType) {
+                    is ParseResult.Success -> ParseResult.Success(
+                        VariantConstructorDef(name.value.text, recordType.value),
+                        recordType.remaining
+                    )
+                    is ParseResult.Failure -> ParseResult.Success(
+                        VariantConstructorDef(name.value.text, null),
+                        stream1
+                    )
+                }
+            }
+            is ParseResult.Failure -> name
+        }
+    }
+
+    private val recordTypeParser: Parser<TypeDefinition> = { stream ->
+        val recordType = recordTypeAnnotationParser(stream)
+        when (recordType) {
+            is ParseResult.Success -> {
+                val recordTypeAnn = recordType.value as RecordTypeAnnotation
+                val fields = recordTypeAnn.entries.map { entry ->
+                    RecordFieldDef(entry.name, entry.type)
+                }
+                ParseResult.Success(
+                    RecordDefinition(fields),
+                    recordType.remaining
+                )
+            }
+            is ParseResult.Failure -> recordType
+        }
+    }
+
+    // ===== IMPL DECLARATIONS =====
+
+    private fun parseImplDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
+        val implToken = tok(TokenType.IMPL)(stream)
+        return when (implToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(implToken.remaining)
+                val effectName = identifierParser(stream1)
+
+                when (effectName) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(effectName.remaining)
+                        val forToken = tok(TokenType.FOR)(stream2)
+
+                        when (forToken) {
+                            is ParseResult.Success -> {
+                                val stream3 = skipNewlines(forToken.remaining)
+                                val performerName = identifierParser(stream3)
+
+                                when (performerName) {
+                                    is ParseResult.Success -> {
+                                        val stream4 = skipNewlines(performerName.remaining)
+
+                                        // Parse optional performer params: { seed: Int }
+                                        val performerParamsResult = performerParamsParser(stream4)
+                                        val (performerParams, streamAfterParams) = when (performerParamsResult) {
+                                            is ParseResult.Success -> Pair(performerParamsResult.value, performerParamsResult.remaining)
+                                            is ParseResult.Failure -> Pair(emptyList(), stream4)
+                                        }
+
+                                        val stream5 = skipNewlines(streamAfterParams)
+                                        val whereToken = tok(TokenType.WHERE)(stream5)
+
+                                        when (whereToken) {
+                                            is ParseResult.Success -> {
+                                                val stream6 = skipNewlines(whereToken.remaining)
+                                                val lbrace = tok(TokenType.LBRACE)(stream6)
+
+                                                when (lbrace) {
+                                                    is ParseResult.Success -> {
+                                                        val stream7 = skipNewlines(lbrace.remaining)
+                                                        // Parse operations separated by newlines or commas (both supported)
+                                                        val operations = mutableListOf<PerformerOperation>()
+                                                        var currentStream = stream7
+
+                                                        while (true) {
+                                                            when (val op = performerOperationParser(currentStream)) {
+                                                                is ParseResult.Success -> {
+                                                                    operations.add(op.value)
+                                                                    currentStream = skipNewlines(op.remaining)
+
+                                                                    // Optionally consume a comma
+                                                                    when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                                        is ParseResult.Success -> {
+                                                                            currentStream = skipNewlines(comma.remaining)
+                                                                        }
+                                                                        is ParseResult.Failure -> {
+                                                                            // No comma, that's fine - continue to next operation or end
+                                                                        }
+                                                                    }
+                                                                }
+                                                                is ParseResult.Failure -> break
+                                                            }
+                                                        }
+
+                                                        val stream8 = skipNewlines(currentStream)
+                                                        val rbrace = tok(TokenType.RBRACE)(stream8)
+
+                                                        when (rbrace) {
+                                                            is ParseResult.Success -> {
+                                                                ParseResult.Success(
+                                                                    ImplDeclaration(
+                                                                        effectName = effectName.value.text,
+                                                                        performerName = performerName.value.text,
+                                                                        performerParams = performerParams,
+                                                                        operations = operations,
+                                                                        inferredType = null
+                                                                    ),
+                                                                    rbrace.remaining
+                                                                )
+                                                            }
+                                                            is ParseResult.Failure -> rbrace
+                                                        }
+                                                    }
+                                                    is ParseResult.Failure -> lbrace
+                                                }
+                                            }
+                                            is ParseResult.Failure -> whereToken
+                                        }
+                                    }
+                                    is ParseResult.Failure -> performerName
+                                }
+                            }
+                            is ParseResult.Failure -> forToken
+                        }
+                    }
+                    is ParseResult.Failure -> effectName
+                }
+            }
+            is ParseResult.Failure -> implToken
+        }
+    }
+
+    private val performerParamsParser: Parser<List<PerformerParameter>> = { stream ->
+        val lbrace = tok(TokenType.LBRACE)(stream)
+        when (lbrace) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(lbrace.remaining)
+                val params = sepByWithNewlines(
+                    performerParamParser,
+                    tok(TokenType.COMMA)
+                )(stream1)
+
+                when (params) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(params.remaining)
+                        val rbrace = tok(TokenType.RBRACE)(stream2)
+
+                        when (rbrace) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                params.value,
+                                rbrace.remaining
+                            )
+                            is ParseResult.Failure -> rbrace
+                        }
+                    }
+                    is ParseResult.Failure -> params
+                }
+            }
+            is ParseResult.Failure -> lbrace
+        }
+    }
+
+    private val performerParamParser: Parser<PerformerParameter> = { stream ->
+        val name = identifierParser(stream)
+        when (name) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(name.remaining)
+                val colon = tok(TokenType.COLON)(stream1)
+
+                when (colon) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(colon.remaining)
+                        val typeAnn = typeAnnotationParser(stream2)
+
+                        when (typeAnn) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                PerformerParameter(name.value.text, typeAnn.value),
+                                typeAnn.remaining
+                            )
+                            is ParseResult.Failure -> typeAnn
+                        }
+                    }
+                    is ParseResult.Failure -> colon
+                }
+            }
+            is ParseResult.Failure -> name
+        }
+    }
+
+    private val performerOperationParser: Parser<PerformerOperation> = { stream ->
+        val name = identifierParser(stream)
+        when (name) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(name.remaining)
+                val colon = tok(TokenType.COLON)(stream1)
+
+                when (colon) {
+                    is ParseResult.Success -> {
+                        // Parse the full function type: {param: Type} -> ReturnType
+                        val stream2 = skipNewlines(colon.remaining)
+                        val functionType = typeAnnotationParser(stream2)
+
+                        when (functionType) {
+                            is ParseResult.Success -> {
+                                // Extract param and return types from the function type
+                                val (paramType, returnType) = when (val ft = functionType.value) {
+                                    is FunctionTypeAnnotation -> Pair(ft.paramType, ft.returnType)
+                                    else -> {
+                                        // If it's not a function type, treat it as param type with Unit return
+                                        Pair(ft, IdentifierTypeAnnotation("Unit"))
+                                    }
+                                }
+
+                                val stream3 = skipNewlines(functionType.remaining)
+                                // TODO: Parse optional effect row
+                                val assign = tok(TokenType.ASSIGN)(stream3)
+
+                                when (assign) {
+                                    is ParseResult.Success -> {
+                                        val stream4 = skipNewlines(assign.remaining)
+                                        val impl = expression(stream4)
+
+                                        when (impl) {
+                                            is ParseResult.Success -> ParseResult.Success(
+                                                PerformerOperation(
+                                                    name = name.value.text,
+                                                    paramType = paramType,
+                                                    returnType = returnType,
+                                                    implementation = impl.value,
+                                                    effects = null
+                                                ),
+                                                impl.remaining
+                                            )
+                                            is ParseResult.Failure -> impl
+                                        }
+                                    }
+                                    is ParseResult.Failure -> assign
+                                }
+                            }
+                            is ParseResult.Failure -> functionType
+                        }
+                    }
+                    is ParseResult.Failure -> {
+                        // No colon - try parsing without type annotation: name = expr
+                        val assign = tok(TokenType.ASSIGN)(stream1)
+                        when (assign) {
+                            is ParseResult.Success -> {
+                                val stream2 = skipNewlines(assign.remaining)
+                                val impl = expression(stream2)
+
+                                when (impl) {
+                                    is ParseResult.Success -> {
+                                        // Use placeholder types - will be inferred by typechecker
+                                        val placeholderParamType = RecordTypeAnnotation(emptyList(), null)
+                                        val placeholderReturnType = RecordTypeAnnotation(emptyList(), null)
+
+                                        ParseResult.Success(
+                                            PerformerOperation(
+                                                name = name.value.text,
+                                                paramType = placeholderParamType,
+                                                returnType = placeholderReturnType,
+                                                implementation = impl.value,
+                                                effects = null
+                                            ),
+                                            impl.remaining
+                                        )
+                                    }
+                                    is ParseResult.Failure -> impl
+                                }
+                            }
+                            is ParseResult.Failure -> colon // Return the original colon failure
+                        }
+                    }
+                }
+            }
+            is ParseResult.Failure -> name
+        }
+    }
+
+    // ===== ABILITY DECLARATION =====
+
+    private fun parseAbilityDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+        // Parse: ability Encoder 'a where { operations }
+        val abilityToken = tok(TokenType.ABILITY)(stream)
+        return when (abilityToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(abilityToken.remaining)
+                val name = identifierParser(stream1)
+
+                when (name) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(name.remaining)
+
+                        // Parse type parameters: 'a 'b
+                        val typeParams = mutableListOf<String>()
+                        var currentStream = stream2
+                        while (true) {
+                            val typeVar = currentStream.current()
+                            if (typeVar?.type == TokenType.IDENTIFIER && typeVar.text.startsWith("'")) {
+                                typeParams.add(typeVar.text)
+                                currentStream = currentStream.advance()
+                                currentStream = skipNewlines(currentStream)
+                            } else {
+                                break
+                            }
+                        }
+
+                        // Parse optional 'with' clause for dependencies
+                        val dependencies = mutableListOf<AbilityDependency>()
+                        val stream3 = skipNewlines(currentStream)
+                        val withToken = tok(TokenType.WITH)(stream3)
+                        val streamAfterWith = when (withToken) {
+                            is ParseResult.Success -> {
+                                // Parse dependencies separated by commas
+                                val stream4 = skipNewlines(withToken.remaining)
+                                var depStream = stream4
+                                var parseFailed = false
+
+                                while (!parseFailed) {
+                                    // Parse: AbilityName TypeArg1 TypeArg2 ...
+                                    val abilityName = identifierParser(depStream)
+                                    when (abilityName) {
+                                        is ParseResult.Success -> {
+                                            val typeArgs = mutableListOf<TypeAnnotation>()
+                                            var typeStream = skipNewlines(abilityName.remaining)
+
+                                            // Parse type arguments until we hit comma or 'where'
+                                            while (true) {
+                                                val next = typeStream.current()
+                                                if (next?.type == TokenType.COMMA || next?.type == TokenType.WHERE) {
+                                                    break
+                                                }
+
+                                                val typeArg = primaryTypeAnnotation(typeStream)
+                                                when (typeArg) {
+                                                    is ParseResult.Success -> {
+                                                        typeArgs.add(typeArg.value)
+                                                        typeStream = skipNewlines(typeArg.remaining)
+                                                    }
+                                                    is ParseResult.Failure -> break
+                                                }
+                                            }
+
+                                            dependencies.add(AbilityDependency(abilityName.value.text, typeArgs))
+
+                                            // Check for comma (more dependencies) or 'where'
+                                            val commaToken = tok(TokenType.COMMA)(typeStream)
+                                            depStream = when (commaToken) {
+                                                is ParseResult.Success -> skipNewlines(commaToken.remaining)
+                                                is ParseResult.Failure -> {
+                                                    parseFailed = true
+                                                    typeStream
+                                                }
+                                            }
+                                        }
+                                        is ParseResult.Failure -> {
+                                            parseFailed = true
+                                            depStream
+                                        }
+                                    }
+                                }
+                                depStream
+                            }
+                            is ParseResult.Failure -> stream3
+                        }
+
+                        val streamBeforeWhere = skipNewlines(streamAfterWith)
+                        val whereToken = tok(TokenType.WHERE)(streamBeforeWhere)
+
+                        when (whereToken) {
+                            is ParseResult.Success -> {
+                                val stream4 = skipNewlines(whereToken.remaining)
+                                val lbrace = tok(TokenType.LBRACE)(stream4)
+
+                                when (lbrace) {
+                                    is ParseResult.Success -> {
+                                        val stream5 = skipNewlines(lbrace.remaining)
+
+                                        // Parse operations (separated by newlines, not commas)
+                                        val operations = manyWithNewlines(abilityOperationParser)(stream5)
+
+                                        when (operations) {
+                                            is ParseResult.Success -> {
+                                                val stream6 = skipNewlines(operations.remaining)
+                                                val rbrace = tok(TokenType.RBRACE)(stream6)
+
+                                                when (rbrace) {
+                                                    is ParseResult.Success -> ParseResult.Success(
+                                                        AbilityDeclaration(
+                                                            name.value.text,
+                                                            visibility,
+                                                            typeParams,
+                                                            emptyList(),  // constraints (for function ability constraints)
+                                                            dependencies,  // dependencies from 'with' clause
+                                                            operations.value
+                                                        ),
+                                                        rbrace.remaining
+                                                    )
+                                                    is ParseResult.Failure -> rbrace
+                                                }
+                                            }
+                                            is ParseResult.Failure -> operations
+                                        }
+                                    }
+                                    is ParseResult.Failure -> lbrace
+                                }
+                            }
+                            is ParseResult.Failure -> whereToken
+                        }
+                    }
+                    is ParseResult.Failure -> name
+                }
+            }
+            is ParseResult.Failure -> abilityToken
+        }
+    }
+
+    private val abilityOperationParser: Parser<AbilityOperation> = { stream ->
+        // Parse: operationName : ParamType -> ReturnType
+        val name = identifierParser(stream)
+        when (name) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(name.remaining)
+                val colon = tok(TokenType.COLON)(stream1)
+
+                when (colon) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(colon.remaining)
+                        val functionType = functionTypeAnnotation(stream2)
+
+                        when (functionType) {
+                            is ParseResult.Success -> {
+                                val funcType = functionType.value as? FunctionTypeAnnotation
+                                if (funcType != null) {
+                                    ParseResult.Success(
+                                        AbilityOperation(
+                                            name.value.text,
+                                            funcType.paramType,
+                                            funcType.returnType
+                                        ),
+                                        functionType.remaining
+                                    )
+                                } else {
+                                    ParseResult.Failure("Expected function type for ability operation", stream2.getSourcePosition())
+                                }
+                            }
+                            is ParseResult.Failure -> functionType
+                        }
+                    }
+                    is ParseResult.Failure -> colon
+                }
+            }
+            is ParseResult.Failure -> name
+        }
+    }
+
+    // ===== IMPL ABILITY DECLARATION =====
+
+    private fun parseImplAbilityDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
+        // Parse: impl Encoder Int where { operations }
+        val implToken = tok(TokenType.IMPL)(stream)
+        return when (implToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(implToken.remaining)
+                val abilityName = identifierParser(stream1)
+
+                when (abilityName) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(abilityName.remaining)
+
+                        // Parse target types (one or more)
+                        // Use simpleTypeArgument to avoid type applications consuming multiple types
+                        val targetTypes = mutableListOf<TypeAnnotation>()
+                        var currentStream = stream2
+
+                        // Parse first type
+                        val firstType = simpleTypeArgument(currentStream)
+                        when (firstType) {
+                            is ParseResult.Success -> {
+                                targetTypes.add(firstType.value)
+                                currentStream = skipNewlines(firstType.remaining)
+
+                                // Parse additional types until we hit 'where' keyword
+                                while (true) {
+                                    // Check if next token is 'where' - if so, we're done with types
+                                    val nextToken = currentStream.current()
+                                    if (nextToken?.type == TokenType.WHERE) {
+                                        break
+                                    }
+
+                                    // Try to parse another type
+                                    val nextType = simpleTypeArgument(currentStream)
+                                    when (nextType) {
+                                        is ParseResult.Success -> {
+                                            targetTypes.add(nextType.value)
+                                            currentStream = skipNewlines(nextType.remaining)
+                                        }
+                                        is ParseResult.Failure -> break
+                                    }
+                                }
+
+                                val stream3 = skipNewlines(currentStream)
+                                val whereToken = tok(TokenType.WHERE)(stream3)
+
+                                when (whereToken) {
+                                    is ParseResult.Success -> {
+                                        val stream4 = skipNewlines(whereToken.remaining)
+                                        val lbrace = tok(TokenType.LBRACE)(stream4)
+
+                                        when (lbrace) {
+                                            is ParseResult.Success -> {
+                                                val stream5 = skipNewlines(lbrace.remaining)
+
+                                                // Parse operations (separated by newlines, not commas)
+                                                val operations = manyWithNewlines(implAbilityOperationParser)(stream5)
+
+                                                when (operations) {
+                                                    is ParseResult.Success -> {
+                                                        val stream6 = skipNewlines(operations.remaining)
+                                                        val rbrace = tok(TokenType.RBRACE)(stream6)
+
+                                                        when (rbrace) {
+                                                            is ParseResult.Success -> ParseResult.Success(
+                                                                ImplAbilityDeclaration(
+                                                                    abilityName.value.text,
+                                                                    targetTypes,
+                                                                    operations.value
+                                                                ),
+                                                                rbrace.remaining
+                                                            )
+                                                            is ParseResult.Failure -> rbrace
+                                                        }
+                                                    }
+                                                    is ParseResult.Failure -> operations
+                                                }
+                                            }
+                                            is ParseResult.Failure -> lbrace
+                                        }
+                                    }
+                                    is ParseResult.Failure -> whereToken
+                                }
+                            }
+                            is ParseResult.Failure -> firstType
+                        }
+                    }
+                    is ParseResult.Failure -> abilityName
+                }
+            }
+            is ParseResult.Failure -> implToken
+        }
+    }
+
+    private val implAbilityOperationParser: Parser<ImplAbilityOperation> = { stream ->
+        // Parse: operationName : ParamType -> ReturnType = implementation
+        val name = identifierParser(stream)
+        when (name) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(name.remaining)
+                val colon = tok(TokenType.COLON)(stream1)
+
+                when (colon) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(colon.remaining)
+                        val functionType = functionTypeAnnotation(stream2)
+
+                        when (functionType) {
+                            is ParseResult.Success -> {
+                                val funcType = functionType.value as? FunctionTypeAnnotation
+                                if (funcType != null) {
+                                    val stream3 = skipNewlines(functionType.remaining)
+                                    val assign = tok(TokenType.ASSIGN)(stream3)
+
+                                    when (assign) {
+                                        is ParseResult.Success -> {
+                                            val stream4 = skipNewlines(assign.remaining)
+                                            val impl = expression(stream4)
+
+                                            when (impl) {
+                                                is ParseResult.Success -> ParseResult.Success(
+                                                    ImplAbilityOperation(
+                                                        name.value.text,
+                                                        funcType.paramType,
+                                                        funcType.returnType,
+                                                        impl.value
+                                                    ),
+                                                    impl.remaining
+                                                )
+                                                is ParseResult.Failure -> impl
+                                            }
+                                        }
+                                        is ParseResult.Failure -> assign
+                                    }
+                                } else {
+                                    ParseResult.Failure("Expected function type for ability operation", stream2.getSourcePosition())
+                                }
+                            }
+                            is ParseResult.Failure -> functionType
+                        }
+                    }
+                    is ParseResult.Failure -> colon
+                }
+            }
+            is ParseResult.Failure -> name
+        }
+    }
+
+    // ===== USE DECLARATION =====
+
+    private fun parseUseDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+        // Parse: use std::math::basic
+        //   or:  use std::math::{trig, random}
+        //   or:  use std::math::basic as m
+        val useToken = tok(TokenType.USE)(stream)
+        return when (useToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(useToken.remaining)
+
+                // Parse the path segments separated by ::
+                val pathSegments = mutableListOf<String>()
+                var currentStream = stream1
+
+                // Parse first segment (required)
+                val firstSegment = identifierParser(currentStream)
+                when (firstSegment) {
+                    is ParseResult.Success -> {
+                        pathSegments.add(firstSegment.value.text)
+                        currentStream = firstSegment.remaining
+
+                        // Parse remaining segments (segment ::segment ::segment)
+                        @Suppress("ControlFlowWithEmptyBody")
+                        while (true) {
+                            val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
+                            when (doubleColon) {
+                                is ParseResult.Success -> {
+                                    val nextStream = skipNewlines(doubleColon.remaining)
+
+                                    // Check if this is a selective import { ... }
+                                    val lbrace = tok(TokenType.LBRACE)(nextStream)
+                                    if (lbrace is ParseResult.Success) {
+                                        // Selective import: parse {item1, item2, ...}
+                                        val stream2 = skipNewlines(lbrace.remaining)
+                                        val items = sepByWithNewlines(
+                                            importItemParser,
+                                            tok(TokenType.COMMA)
+                                        )(stream2)
+
+                                        return when (items) {
+                                            is ParseResult.Success -> {
+                                                val stream3 = skipNewlines(items.remaining)
+                                                val rbrace = tok(TokenType.RBRACE)(stream3)
+
+                                                when (rbrace) {
+                                                    is ParseResult.Success -> {
+                                                        val path = SelectivePath(pathSegments, items.value)
+                                                        ParseResult.Success(
+                                                            if (visibility == Visibility.PUBLIC) {
+                                                                PubUseDeclaration(path, null)
+                                                            } else {
+                                                                UseDeclaration(path, null)
+                                                            },
+                                                            rbrace.remaining
+                                                        )
+                                                    }
+                                                    is ParseResult.Failure -> rbrace
+                                                }
+                                            }
+                                            is ParseResult.Failure -> items
+                                        }
+                                    }
+
+                                    // Not selective import, parse next segment
+                                    val nextSegment = identifierParser(nextStream)
+                                    when (nextSegment) {
+                                        is ParseResult.Success -> {
+                                            pathSegments.add(nextSegment.value.text)
+                                            currentStream = nextSegment.remaining
+                                            // Continue loop
+                                        }
+                                        is ParseResult.Failure -> return nextSegment
+                                    }
+                                }
+                                is ParseResult.Failure -> {
+                                    // No more ::, check for optional alias
+                                    val streamAfterPath = skipNewlines(currentStream)
+                                    val asKeyword = keyword("as", TokenType.IDENTIFIER)(streamAfterPath)
+
+                                    val alias = when (asKeyword) {
+                                        is ParseResult.Success -> {
+                                            val stream2 = skipNewlines(asKeyword.remaining)
+                                            val aliasName = identifierParser(stream2)
+                                            when (aliasName) {
+                                                is ParseResult.Success -> {
+                                                    currentStream = aliasName.remaining
+                                                    aliasName.value.text
+                                                }
+                                                is ParseResult.Failure -> return aliasName
+                                            }
+                                        }
+                                        is ParseResult.Failure -> null
+                                    }
+
+                                    // Create the module path
+                                    val path = ModulePath(pathSegments)
+                                    return ParseResult.Success(
+                                        if (visibility == Visibility.PUBLIC) {
+                                            PubUseDeclaration(path, alias)
+                                        } else {
+                                            UseDeclaration(path, alias)
+                                        },
+                                        currentStream
+                                    )
+                                }
+                            }
+                        }
+
+                        @Suppress("UNREACHABLE_CODE")
+                        ParseResult.Failure("Unexpected error in use declaration", stream.getSourcePosition())
+                    }
+                    is ParseResult.Failure -> firstSegment
+                }
+            }
+            is ParseResult.Failure -> useToken
+        }
+    }
+
+    private val importItemParser: Parser<ImportItem> = { stream ->
+        // Parse: name or name as alias
+        val name = identifierParser(stream)
+        when (name) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(name.remaining)
+                val asKeyword = keyword("as", TokenType.IDENTIFIER)(stream1)
+
+                when (asKeyword) {
+                    is ParseResult.Success -> {
+                        // Has alias
+                        val stream2 = skipNewlines(asKeyword.remaining)
+                        val aliasName = identifierParser(stream2)
+
+                        when (aliasName) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                ImportItem(name.value.text, aliasName.value.text),
+                                aliasName.remaining
+                            )
+                            is ParseResult.Failure -> aliasName
+                        }
+                    }
+                    is ParseResult.Failure -> {
+                        // No alias
+                        ParseResult.Success(
+                            ImportItem(name.value.text, null),
+                            stream1
+                        )
+                    }
+                }
+            }
+            is ParseResult.Failure -> name
+        }
+    }
+
+    init {
+        // Initialize parsers after all properties are available
+        effectDeclaration = { stream -> parseEffectDeclaration(stream, Visibility.PRIVATE) }
+        implDeclaration = { stream -> parseImplDeclaration(stream) }
+        implAbilityDeclaration = { stream -> parseImplAbilityDeclaration(stream) }
+        abilityDeclaration = { stream -> parseAbilityDeclaration(stream, Visibility.PRIVATE) }
+        typeDeclaration = { stream -> parseTypeDeclaration(stream, Visibility.PRIVATE) }
+        useDeclaration = { stream -> parseUseDeclaration(stream, Visibility.PRIVATE) }
+        letDeclaration = { stream -> parseLetBinding(stream) }  // Lambda wrapper
+        topLevelExpression = { stream -> Parsers.map(expression) { TopLevelExpression(it) }(stream) }
+
+        // Initialize topLevelItem AFTER all other parsers are initialized
+        topLevelItem = { stream ->
+            // Check for optional 'pub' modifier
+            val pubToken = tok(TokenType.PUB)(stream)
+            val (visibility, streamAfterPub) = when (pubToken) {
+                is ParseResult.Success -> Pair(Visibility.PUBLIC, pubToken.remaining)
+                is ParseResult.Failure -> Pair(Visibility.PRIVATE, stream)
+            }
+
+            // Parse the actual declaration with visibility
+            val streamAfterPubSkipNl = skipNewlines(streamAfterPub)
+            val declResult = Parsers.oneOf(
+                { s -> parseEffectDeclaration(s, visibility) },
+                { s -> parseTypeDeclaration(s, visibility) },
+                { s -> parseAbilityDeclaration(s, visibility) },
+                { s -> parseImplAbilityDeclaration(s) },  // Try ability impl first
+                { s -> parseImplDeclaration(s) },          // Then effect impl
+                { s -> parseUseDeclaration(s, visibility) },
+                { s -> parseLetBindingWithVisibility(s, visibility) },
+                { s -> parseConstrainedLambda(s) },  // Try constrained lambda before general expression
+                topLevelExpression
+            )(streamAfterPubSkipNl)
+
+            declResult
+        }
+    }
+
+    // ===== HELPERS =====
+
+    private fun skipNewlines(stream: TokenStream): TokenStream {
+        var current = stream
+        while (current.current()?.type == TokenType.NEWLINE) {
+            current = current.advance()
+        }
+        return current
+    }
+
+    private val newlineParser: Parser<Unit> = Parsers.map(
+        Parsers.many1(Parsers.token({ it.type == TokenType.NEWLINE }, "newline"))
+    ) { Unit }
+
+    private fun tok(type: TokenType): Parser<Token> =
+        Parsers.token({ it.type == type }, type.name)
+
+    private fun keyword(word: String, type: TokenType): Parser<Token> =
+        Parsers.token({ it.type == type && it.text == word }, word)
+
+    // ===== CRITICAL: Lambda vs Record Disambiguation =====
+
+    /**
+     * This is the key to solving the ambiguity!
+     *
+     * We explicitly check for ARROW after RBRACE to distinguish:
+     * - {x} -> body  (lambda)
+     * - {x}          (record literal with punning)
+     */
+    private val lambdaOrRecordExpression: Parser<Expression> = { stream ->
+        if (stream.current()?.type != TokenType.LBRACE) {
+            ParseResult.Failure("Expected LBRACE", stream.getSourcePosition())
+        } else {
+            // Look ahead to find the matching RBRACE and check if there's an ARROW after it
+            val hasArrowAfterBrace = lookAheadForArrowAfterBrace(stream)
+
+            if (hasArrowAfterBrace) {
+                // It's a lambda!
+                lambdaExpression(stream)
+            } else {
+                // It's a record literal
+                recordLiteral(stream)
+            }
+        }
+    }
+
+    /**
+     * Lookahead function to check if there's an arrow after the closing brace.
+     * This is the explicit disambiguation mechanism.
+     */
+    private fun lookAheadForArrowAfterBrace(stream: TokenStream): Boolean {
+        var pos = stream.position
+        val tokens = stream.tokens
+
+        if (pos >= tokens.size || tokens[pos].type != TokenType.LBRACE) return false
+        pos++  // Skip LBRACE
+
+        var braceDepth = 1
+
+        // Find matching RBRACE
+        while (pos < tokens.size && braceDepth > 0) {
+            when (tokens[pos].type) {
+                TokenType.LBRACE -> braceDepth++
+                TokenType.RBRACE -> braceDepth--
+                TokenType.EOF -> return false
+                else -> {}
+            }
+            pos++
+        }
+
+        // Now pos is after RBRACE, check if next non-newline token is ARROW
+        while (pos < tokens.size && tokens[pos].type == TokenType.NEWLINE) {
+            pos++
+        }
+
+        val result = pos < tokens.size && tokens[pos].type == TokenType.ARROW
+        // Debug logging
+        if (System.getProperty("parser.debug") == "true") {
+            println("[lookAheadForArrowAfterBrace] Looking at position ${stream.position}, found arrow: $result")
+        }
+        return result
+    }
+
+    // ===== LAMBDA EXPRESSION =====
+
+    private val lambdaExpression: Parser<Expression> = { stream ->
+        // Parse {params} -> body
+        val lbrace = tok(TokenType.LBRACE)(stream)
+        if (lbrace is ParseResult.Failure) {
+            lbrace
+        } else {
+            val stream1 = skipNewlines((lbrace as ParseResult.Success).remaining)
+
+            // Parse parameters - could be typed or untyped
+            val paramsResult = lambdaParameters(stream1)
+
+            when (paramsResult) {
+                is ParseResult.Success -> {
+                    val stream2 = skipNewlines(paramsResult.remaining)
+                    val rbrace = tok(TokenType.RBRACE)(stream2)
+
+                    when (rbrace) {
+                        is ParseResult.Success -> {
+                            val stream3 = skipNewlines((rbrace as ParseResult.Success).remaining)
+                            val arrow = tok(TokenType.ARROW)(stream3)
+
+                            when (arrow) {
+                                is ParseResult.Success -> {
+                                    val stream4 = skipNewlines((arrow as ParseResult.Success).remaining)
+                                    val body = expression(stream4)
+
+                                    when (body) {
+                                        is ParseResult.Success -> ParseResult.Success(
+                                            LambdaExpression(paramsResult.value, (body as ParseResult.Success).value),
+                                            body.remaining
+                                        )
+                                        is ParseResult.Failure -> body
+                                    }
+                                }
+                                is ParseResult.Failure -> arrow
+                            }
+                        }
+                        is ParseResult.Failure -> rbrace
+                    }
+                }
+                is ParseResult.Failure -> paramsResult
+            }
+        }
+    }
+
+    private val lambdaParameters: Parser<LambdaParameters> = { stream ->
+        // Try typed parameters first (they have colons)
+        val typedResult = typedLambdaParams(stream)
+        when (typedResult) {
+            is ParseResult.Success -> typedResult
+            is ParseResult.Failure -> untypedLambdaParams(stream)
+        }
+    }
+
+    private val typedLambdaParams: Parser<LambdaParameters> = { stream ->
+        // {x: Int, y: String} - must have at least one typed parameter with colon
+        val entries = Parsers.sepBy(recordTypeEntryParser, tok(TokenType.COMMA))(stream)
+        when (entries) {
+            is ParseResult.Success -> {
+                val entryList = (entries as ParseResult.Success).value
+                if (entryList.isEmpty()) {
+                    // No typed parameters found, fail so we can try untyped
+                    ParseResult.Failure("Expected typed parameters", stream.getSourcePosition())
+                } else {
+                    val recordType = RecordTypeAnnotation(entryList, null)
+                    ParseResult.Success(TypedParameters(recordType), entries.remaining)
+                }
+            }
+            is ParseResult.Failure -> entries
+        }
+    }
+
+    private val untypedLambdaParams: Parser<LambdaParameters> = { stream ->
+        // {x, y} or {}
+        val params = Parsers.sepBy(identifierParser, tok(TokenType.COMMA))(stream)
+        when (params) {
+            is ParseResult.Success -> {
+                val names = (params as ParseResult.Success).value.map { it.text }
+                ParseResult.Success(UntypedParameters(names, false), params.remaining)
+            }
+            is ParseResult.Failure -> params
+        }
+    }
+
+    // ===== RECORD LITERAL =====
+
+    private val recordLiteral: Parser<Expression> = { stream ->
+        // {x = 1, y = 2} or {x, y} (punning) or {...rest} or {x = 1, ...} (anonymous open record)
+        // Supports multiline with newlines between entries
+        val lbrace = tok(TokenType.LBRACE)(stream)
+        when (lbrace) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines((lbrace as ParseResult.Success).remaining)
+
+                // Use custom sepBy that skips newlines after commas
+                val entries = sepByWithNewlines(
+                    recordLiteralEntryParser,
+                    tok(TokenType.COMMA)
+                )(stream1)
+
+                when (entries) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines((entries as ParseResult.Success).remaining)
+
+                        // Check for trailing ellipsis to mark as open record: {x = 1, ...}
+                        var isOpen = false
+                        var streamAfterEllipsis = stream2
+
+                        val commaCheck = tok(TokenType.COMMA)(stream2)
+                        if (commaCheck is ParseResult.Success) {
+                            val streamAfterComma = skipNewlines(commaCheck.remaining)
+                            val ellipsisCheck = tok(TokenType.ELLIPSIS)(streamAfterComma)
+                            if (ellipsisCheck is ParseResult.Success) {
+                                isOpen = true
+                                streamAfterEllipsis = skipNewlines(ellipsisCheck.remaining)
+                            }
+                        }
+
+                        val rbrace = tok(TokenType.RBRACE)(streamAfterEllipsis)
+
+                        when (rbrace) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                RecordLiteral(entries.value, if (isOpen) "..." else null), // Set restField if open
+                                (rbrace as ParseResult.Success).remaining
+                            )
+                            is ParseResult.Failure -> rbrace
+                        }
+                    }
+                    is ParseResult.Failure -> entries
+                }
+            }
+            is ParseResult.Failure -> lbrace
+        }
+    }
+
+    // Custom sepBy that skips newlines after separators
+    private fun <T, S> sepByWithNewlines(parser: Parser<T>, separator: Parser<S>): Parser<List<T>> = { stream ->
+        when (val first = parser(stream)) {
+            is ParseResult.Success -> {
+                val results = mutableListOf(first.value)
+                var currentStream = first.remaining
+
+                while (true) {
+                    // Try to match separator
+                    when (val sep = separator(currentStream)) {
+                        is ParseResult.Success -> {
+                            // Skip newlines after separator
+                            val afterSep = skipNewlines(sep.remaining)
+                            // Try to match next item
+                            when (val next = parser(afterSep)) {
+                                is ParseResult.Success -> {
+                                    results.add(next.value)
+                                    currentStream = next.remaining
+                                }
+                                is ParseResult.Failure -> break // No more items
+                            }
+                        }
+                        is ParseResult.Failure -> break // No separator, done
+                    }
+                }
+
+                ParseResult.Success(results, currentStream)
+            }
+            is ParseResult.Failure -> ParseResult.Success(emptyList(), stream)
+        }
+    }
+
+    /**
+     * Parse many items separated by newlines (no explicit separator required)
+     * Used for ability operations and similar constructs
+     */
+    private fun <T> manyWithNewlines(parser: Parser<T>): Parser<List<T>> = { stream ->
+        val results = mutableListOf<T>()
+        var currentStream = skipNewlines(stream)
+        var lastPosition = currentStream.position
+
+        while (true) {
+            when (val item = parser(currentStream)) {
+                is ParseResult.Success -> {
+                    results.add(item.value)
+                    currentStream = skipNewlines(item.remaining)
+
+                    // Safety check: ensure we're making progress
+                    if (currentStream.position <= lastPosition) {
+                        break // No progress, avoid infinite loop
+                    }
+                    lastPosition = currentStream.position
+                }
+                is ParseResult.Failure -> break
+            }
+        }
+
+        ParseResult.Success(results, currentStream)
+    }
+
+    private val recordLiteralEntryParser: Parser<RecordLiteralEntry> = { stream ->
+        // ... (spread), x = value, or x (punning)
+        val current = stream.current()
+
+        if (current?.type == TokenType.ELLIPSIS) {
+            // Spread syntax
+            val ellipsis = tok(TokenType.ELLIPSIS)(stream)
+            when (ellipsis) {
+                is ParseResult.Success -> {
+                    val expr = expression((ellipsis as ParseResult.Success).remaining)
+                    when (expr) {
+                        is ParseResult.Success -> ParseResult.Success(
+                            RecordSpreadEntry((expr as ParseResult.Success).value),
+                            expr.remaining
+                        )
+                        is ParseResult.Failure -> expr
+                    }
+                }
+                is ParseResult.Failure -> ellipsis
+            }
+        } else {
+            // x = value or x (punning)
+            val ident = identifierParser(stream)
+            when (ident) {
+                is ParseResult.Success -> {
+                    val stream1 = (ident as ParseResult.Success).remaining
+
+                    // Check for ASSIGN
+                    val assign = tok(TokenType.ASSIGN)(stream1)
+                    when (assign) {
+                        is ParseResult.Success -> {
+                            // x = value
+                            val expr = expression((assign as ParseResult.Success).remaining)
+                            when (expr) {
+                                is ParseResult.Success -> ParseResult.Success(
+                                    RecordFieldEntry(ident.value.text, (expr as ParseResult.Success).value),
+                                    expr.remaining
+                                )
+                                is ParseResult.Failure -> expr
+                            }
+                        }
+                        is ParseResult.Failure -> {
+                            // Punning: x means {x} with value = null
+                            ParseResult.Success(
+                                RecordFieldEntry(ident.value.text, null),
+                                stream1
+                            )
+                        }
+                    }
+                }
+                is ParseResult.Failure -> ident
+            }
+        }
+    }
+
+    // ===== ARRAY LITERAL =====
+
+    private val arrayLiteral: Parser<Expression> = { stream ->
+        // Parse: [element1, element2, ...]
+        // Also supports spread: [1, ...rest, 3]
+        val lbracket = tok(TokenType.LBRACKET)(stream)
+        when (lbracket) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(lbracket.remaining)
+
+                // Check for empty array []
+                val rbracket = tok(TokenType.RBRACKET)(stream1)
+                if (rbracket is ParseResult.Success) {
+                    ParseResult.Success(
+                        ArrayLiteral(emptyList()),
+                        rbracket.remaining
+                    )
+                } else {
+                    // Parse elements separated by commas
+                    val elements = sepByWithNewlines(
+                        arrayElementParser,
+                        tok(TokenType.COMMA)
+                    )(stream1)
+
+                    when (elements) {
+                        is ParseResult.Success -> {
+                            val stream2 = skipNewlines(elements.remaining)
+                            val rbracket2 = tok(TokenType.RBRACKET)(stream2)
+
+                            when (rbracket2) {
+                                is ParseResult.Success -> ParseResult.Success(
+                                    ArrayLiteral(elements.value),
+                                    rbracket2.remaining
+                                )
+                                is ParseResult.Failure -> rbracket2
+                            }
+                        }
+                        is ParseResult.Failure -> elements
+                    }
+                }
+            }
+            is ParseResult.Failure -> lbracket
+        }
+    }
+
+    private val arrayElementParser: Parser<Expression> = { stream ->
+        // Check for spread operator ...
+        val ellipsis = tok(TokenType.ELLIPSIS)(stream)
+        if (ellipsis is ParseResult.Success) {
+            // Spread element: ...rest
+            val expr = expression(ellipsis.remaining)
+            when (expr) {
+                is ParseResult.Success -> ParseResult.Success(
+                    UnaryOperation("...", expr.value),
+                    expr.remaining
+                )
+                is ParseResult.Failure -> expr
+            }
+        } else {
+            // Normal element
+            expression(stream)
+        }
+    }
+
+    // ===== PRIMARY EXPRESSION =====
+
+    private val primaryExpression: Parser<Expression> = { stream ->
+        Parsers.oneOf(
+            performExpression,
+            doExpression,
+            matchExpression,
+            ifExpression,
+            literalExpression,
+            atPlaceholderExpression,  // @ placeholder for pipe operator
+            identifierExpression,
+            arrayLiteral,
+            lambdaOrRecordExpression,  // <-- THIS IS THE KEY!
+            parenExpression
+        )(stream)
+    }
+
+    // ===== IF EXPRESSION =====
+
+    private val ifExpression: Parser<Expression> = { stream ->
+        // Parse: if <condition> then <thenBranch> else <elseBranch>
+        val ifToken = tok(TokenType.IF)(stream)
+        when (ifToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(ifToken.remaining)
+                val condition = expression(stream1)
+
+                when (condition) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(condition.remaining)
+                        val thenToken = tok(TokenType.THEN)(stream2)
+
+                        when (thenToken) {
+                            is ParseResult.Success -> {
+                                val stream3 = skipNewlines(thenToken.remaining)
+                                val thenBranch = expression(stream3)
+
+                                when (thenBranch) {
+                                    is ParseResult.Success -> {
+                                        val stream4 = skipNewlines(thenBranch.remaining)
+                                        val elseToken = tok(TokenType.ELSE)(stream4)
+
+                                        when (elseToken) {
+                                            is ParseResult.Success -> {
+                                                val stream5 = skipNewlines(elseToken.remaining)
+                                                val elseBranch = expression(stream5)
+
+                                                when (elseBranch) {
+                                                    is ParseResult.Success -> ParseResult.Success(
+                                                        IfExpression(
+                                                            condition.value,
+                                                            thenBranch.value,
+                                                            elseBranch.value
+                                                        ),
+                                                        elseBranch.remaining
+                                                    )
+                                                    is ParseResult.Failure -> elseBranch
+                                                }
+                                            }
+                                            is ParseResult.Failure -> elseToken
+                                        }
+                                    }
+                                    is ParseResult.Failure -> thenBranch
+                                }
+                            }
+                            is ParseResult.Failure -> thenToken
+                        }
+                    }
+                    is ParseResult.Failure -> condition
+                }
+            }
+            is ParseResult.Failure -> ifToken
+        }
+    }
+
+    // ===== PERFORM EXPRESSION =====
+
+    private val performExpression: Parser<Expression> = { stream ->
+        // Parse two forms:
+        // 1. perform operation {args} - simple effect call
+        // 2. perform Handler1, Handler2 in expression - perform with handlers
+        val performToken = tok(TokenType.PERFORM)(stream)
+        when (performToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(performToken.remaining)
+
+                // Parse first identifier
+                val firstId = identifierParser(stream1)
+                when (firstId) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(firstId.remaining)
+
+                        // Try to parse optional parameters for first handler
+                        val firstParamsResult = recordLiteral(stream2)
+                        val (firstParams, stream3) = when (firstParamsResult) {
+                            is ParseResult.Success -> Pair(firstParamsResult.value as RecordLiteral, firstParamsResult.remaining)
+                            is ParseResult.Failure -> Pair(null, stream2)
+                        }
+
+                        val streamAfterParams = skipNewlines(stream3)
+                        val nextToken = streamAfterParams.current()
+
+                        if (nextToken?.type == TokenType.COMMA || nextToken?.type == TokenType.IN) {
+                            // Form 2: perform Handler1, Handler2 in expression
+                            val handlers = mutableListOf<PerformHandler>()
+                            handlers.add(PerformHandler(firstId.value.text, firstParams))
+                            var currentStream = streamAfterParams
+
+                            // Parse remaining handlers if there are commas
+                            var errorResult: ParseResult.Failure? = null
+                            while (errorResult == null) {
+                                val commaToken = tok(TokenType.COMMA)(currentStream)
+                                when (commaToken) {
+                                    is ParseResult.Success -> {
+                                        val stream3 = skipNewlines(commaToken.remaining)
+                                        val handlerName = identifierParser(stream3)
+                                        when (handlerName) {
+                                            is ParseResult.Success -> {
+                                                val stream4 = skipNewlines(handlerName.remaining)
+
+                                                // Check for optional params
+                                                val paramsResult = recordLiteral(stream4)
+                                                val (params, stream5) = when (paramsResult) {
+                                                    is ParseResult.Success -> Pair(paramsResult.value as RecordLiteral, paramsResult.remaining)
+                                                    is ParseResult.Failure -> Pair(null, stream4)
+                                                }
+
+                                                handlers.add(PerformHandler(handlerName.value.text, params))
+                                                currentStream = skipNewlines(stream5)
+                                            }
+                                            is ParseResult.Failure -> errorResult = handlerName
+                                        }
+                                    }
+                                    is ParseResult.Failure -> break
+                                }
+                            }
+
+                            if (errorResult != null) {
+                                errorResult
+                            } else {
+                                // Parse 'in' keyword
+                                val inToken = tok(TokenType.IN)(currentStream)
+                                when (inToken) {
+                                    is ParseResult.Success -> {
+                                        val stream6 = skipNewlines(inToken.remaining)
+                                        val expr = expression(stream6)
+                                        when (expr) {
+                                            is ParseResult.Success -> ParseResult.Success(
+                                                PerformExpression(expr.value, handlers),
+                                                expr.remaining
+                                            )
+                                            is ParseResult.Failure -> expr
+                                        }
+                                    }
+                                    is ParseResult.Failure -> inToken
+                                }
+                            }
+                        } else {
+                            // Form 1: perform operation {args} - simple effect call
+                            val argsResult = recordLiteral(stream2)
+                            when (argsResult) {
+                                is ParseResult.Success -> ParseResult.Success(
+                                    EffectCallExpression("", firstId.value.text, argsResult.value as RecordLiteral),
+                                    argsResult.remaining
+                                )
+                                is ParseResult.Failure -> argsResult
+                            }
+                        }
+                    }
+                    is ParseResult.Failure -> firstId
+                }
+            }
+            is ParseResult.Failure -> performToken
+        }
+    }
+
+    // ===== DO EXPRESSION =====
+
+    private val doExpression: Parser<Expression> = { stream ->
+        // Parse: do <statement>* <result-expression>
+        val doToken = tok(TokenType.DO)(stream)
+        when (doToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(doToken.remaining)
+
+                // Parse statements (let statements and expression statements) and final result expression
+                val statements = mutableListOf<Statement>()
+                var currentStream = stream1
+                var finalResult: Pair<Expression, TokenStream>? = null
+
+                // Track the column of the first token in the do block to determine scope
+                val doBlockColumn = stream1.current()?.column
+
+                // Parse statements until we find the final result expression
+                while (finalResult == null) {
+                    // Check if we've left the do block scope (token at lower indentation)
+                    val currentToken = currentStream.current()
+                    if (currentToken != null && doBlockColumn != null && currentToken.column < doBlockColumn && currentToken.type != TokenType.EOF) {
+                        break
+                    }
+
+                    // Try to parse a let statement
+                    val letToken = tok(TokenType.LET)(currentStream)
+                    if (letToken is ParseResult.Success) {
+                        // Parse let statement
+                        val stream2 = skipNewlines(letToken.remaining)
+                        val ident = identifierParser(stream2)
+
+                        when (ident) {
+                            is ParseResult.Success -> {
+                                val stream3 = skipNewlines(ident.remaining)
+
+                                // Optional type annotation
+                                val colonToken = tok(TokenType.COLON)(stream3)
+                                val (typeAnnotation, streamAfterType) = when (colonToken) {
+                                    is ParseResult.Success -> {
+                                        val stream4 = skipNewlines(colonToken.remaining)
+                                        val typeAnn = typeAnnotationParser(stream4)
+                                        when (typeAnn) {
+                                            is ParseResult.Success -> Pair(typeAnn.value, typeAnn.remaining)
+                                            is ParseResult.Failure -> break
+                                        }
+                                    }
+                                    is ParseResult.Failure -> Pair(null, stream3)
+                                }
+
+                                val stream5 = skipNewlines(streamAfterType)
+                                val assign = tok(TokenType.ASSIGN)(stream5)
+
+                                when (assign) {
+                                    is ParseResult.Success -> {
+                                        val stream6 = skipNewlines(assign.remaining)
+                                        val expr = expression(stream6)
+
+                                        when (expr) {
+                                            is ParseResult.Success -> {
+                                                statements.add(
+                                                    LetStatement(
+                                                        ident.value.text,
+                                                        typeAnnotation,
+                                                        expr.value
+                                                    )
+                                                )
+                                                currentStream = skipNewlines(expr.remaining)
+                                            }
+                                            is ParseResult.Failure -> break
+                                        }
+                                    }
+                                    is ParseResult.Failure -> break
+                                }
+                            }
+                            is ParseResult.Failure -> break
+                        }
+                    } else {
+                        // Not a let statement, try to parse an expression
+                        val expr = expression(currentStream)
+                        when (expr) {
+                            is ParseResult.Success -> {
+                                val streamAfterExpr = skipNewlines(expr.remaining)
+
+                                // Check if there's more content in this do block after this expression
+                                // If the next token is within the do block scope (higher column), it's a statement
+                                // Otherwise, this expression is the final result
+                                val nextToken = streamAfterExpr.current()
+                                if (nextToken != null && nextToken.type != TokenType.EOF && doBlockColumn != null && nextToken.column >= doBlockColumn) {
+                                    // Next token is still inside the do block, so current expression is a statement
+                                    statements.add(ExpressionStatement(expr.value))
+                                    currentStream = streamAfterExpr
+                                } else {
+                                    // Next token is outside do block or at EOF, this is the final result
+                                    finalResult = Pair(expr.value, streamAfterExpr)
+                                }
+                            }
+                            is ParseResult.Failure -> {
+                                // Can't parse an expression, we're done
+                                break
+                            }
+                        }
+                    }
+                }
+
+                // Use the final result expression we found
+                if (finalResult != null) {
+                    ParseResult.Success(
+                        DoExpression(statements, finalResult.first),
+                        finalResult.second
+                    )
+                } else {
+                    ParseResult.Failure("Expected result expression in do block", currentStream.getSourcePosition())
+                }
+            }
+            is ParseResult.Failure -> {
+                doToken
+            }
+        }
+    }
+
+    // ===== MATCH EXPRESSION =====
+
+    private val matchExpression: Parser<Expression> = { stream ->
+        // Parse: match <expr> is <case1> <case2> ...
+        val matchToken = tok(TokenType.MATCH)(stream)
+        when (matchToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(matchToken.remaining)
+                val expr = expression(stream1)
+
+                when (expr) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(expr.remaining)
+                        val isToken = tok(TokenType.IS)(stream2)
+
+                        when (isToken) {
+                            is ParseResult.Success -> {
+                                val stream3 = skipNewlines(isToken.remaining)
+
+                                // Track the column of the first match case to determine scope
+                                val firstCaseColumn = stream3.current()?.column
+
+                                // Parse match cases (at least one required)
+                                val firstCase = matchCase(stream3)
+
+                                when (firstCase) {
+                                    is ParseResult.Success -> {
+                                        val cases = mutableListOf(firstCase.value)
+                                        var currentStream = skipNewlines(firstCase.remaining)
+
+                                        // Parse additional cases while they're at the same or greater indentation
+                                        while (true) {
+                                            val currentToken = currentStream.current()
+
+                                            // Stop if:
+                                            // 1. We've reached EOF, or
+                                            // 2. The token is dedented below the first case column
+                                            if (currentToken == null ||
+                                                currentToken.type == TokenType.EOF ||
+                                                (firstCaseColumn != null && currentToken.column < firstCaseColumn)) {
+                                                break
+                                            }
+
+                                            // Try to parse another case
+                                            val nextCase = matchCase(currentStream)
+                                            when (nextCase) {
+                                                is ParseResult.Success -> {
+                                                    cases.add(nextCase.value)
+                                                    currentStream = skipNewlines(nextCase.remaining)
+                                                }
+                                                is ParseResult.Failure -> {
+                                                    // Can't parse another case, we're done
+                                                    break
+                                                }
+                                            }
+                                        }
+
+                                        ParseResult.Success(
+                                            MatchExpression(
+                                                expr.value,
+                                                cases
+                                            ),
+                                            currentStream
+                                        )
+                                    }
+                                    is ParseResult.Failure -> firstCase
+                                }
+                            }
+                            is ParseResult.Failure -> isToken
+                        }
+                    }
+                    is ParseResult.Failure -> expr
+                }
+            }
+            is ParseResult.Failure -> matchToken
+        }
+    }
+
+    private val matchCase: Parser<MatchCase> = { stream ->
+        // Parse: <pattern> [| <pattern>]* [if <guard>] -> <expression>
+        // Skip leading newlines before pattern
+        val stream1 = skipNewlines(stream)
+        val firstPattern = patternParser(stream1)
+
+        when (firstPattern) {
+            is ParseResult.Success -> {
+                // Parse additional patterns separated by |
+                val patterns = mutableListOf(firstPattern.value)
+                var currentStream = skipNewlines(firstPattern.remaining)
+
+                // Keep parsing | pattern
+                while (currentStream.current()?.type == TokenType.PIPE) {
+                    val afterPipe = skipNewlines(currentStream.advance())
+                    val nextPattern = patternParser(afterPipe)
+
+                    when (nextPattern) {
+                        is ParseResult.Success -> {
+                            patterns.add(nextPattern.value)
+                            currentStream = skipNewlines(nextPattern.remaining)
+                        }
+                        is ParseResult.Failure -> {
+                            // Stop parsing patterns, break out
+                            break
+                        }
+                    }
+                }
+
+                val stream2 = currentStream
+
+                // Check for optional guard: if <expression>
+                val ifToken = keyword("if", TokenType.IF)(stream2)
+
+                when (ifToken) {
+                    is ParseResult.Success -> {
+                        // Parse guard expression
+                        val stream3 = skipNewlines(ifToken.remaining)
+                        val guardExp = expression(stream3)
+
+                        when (guardExp) {
+                            is ParseResult.Success -> {
+                                // Have guard, now parse -> and result expression
+                                val streamBeforeArrow = skipNewlines(guardExp.remaining)
+                                val arrow = tok(TokenType.ARROW)(streamBeforeArrow)
+
+                                when (arrow) {
+                                    is ParseResult.Success -> {
+                                        val stream4 = skipNewlines(arrow.remaining)
+                                        val expr = expression(stream4)
+
+                                        when (expr) {
+                                            is ParseResult.Success -> ParseResult.Success(
+                                                MatchCase(
+                                                    patterns,
+                                                    guardExp.value,  // Guard expression
+                                                    expr.value
+                                                ),
+                                                expr.remaining
+                                            )
+                                            is ParseResult.Failure -> expr
+                                        }
+                                    }
+                                    is ParseResult.Failure -> arrow
+                                }
+                            }
+                            is ParseResult.Failure -> guardExp
+                        }
+                    }
+                    is ParseResult.Failure -> {
+                        // No guard, parse directly -> result
+                        val streamBeforeArrow = skipNewlines(stream2)
+                        val arrow = tok(TokenType.ARROW)(streamBeforeArrow)
+
+                        when (arrow) {
+                            is ParseResult.Success -> {
+                                val stream3 = skipNewlines(arrow.remaining)
+                                val expr = expression(stream3)
+
+                                when (expr) {
+                                    is ParseResult.Success -> ParseResult.Success(
+                                        MatchCase(
+                                            patterns,
+                                            null,  // No guard
+                                            expr.value
+                                        ),
+                                        expr.remaining
+                                    )
+                                    is ParseResult.Failure -> expr
+                                }
+                            }
+                            is ParseResult.Failure -> arrow
+                        }
+                    }
+                }
+            }
+            is ParseResult.Failure -> firstPattern
+        }
+    }
+
+    // ===== PATTERN PARSING =====
+
+    private val patternParser: Parser<Pattern> = { stream ->
+        Parsers.oneOf(
+            wildcardPattern,
+            constructorPattern,
+            variablePattern
+        )(stream)
+    }
+
+    private val wildcardPattern: Parser<Pattern> = { stream ->
+        val placeholder = tok(TokenType.PLACEHOLDER)(stream)
+        when (placeholder) {
+            is ParseResult.Success -> ParseResult.Success(WildcardPattern(), placeholder.remaining)
+            is ParseResult.Failure -> placeholder
+        }
+    }
+
+    private val variablePattern: Parser<Pattern> = { stream ->
+        val ident = identifierParser(stream)
+        when (ident) {
+            is ParseResult.Success -> {
+                // Check if next token is LBRACE - if so, it's a constructor pattern
+                val next = ident.remaining.current()
+                if (next?.type == TokenType.LBRACE) {
+                    ParseResult.Failure("Constructor pattern, not variable", stream.getSourcePosition())
+                } else {
+                    ParseResult.Success(VariablePattern(ident.value.text), ident.remaining)
+                }
+            }
+            is ParseResult.Failure -> ident
+        }
+    }
+
+    private val constructorPattern: Parser<Pattern> = { stream ->
+        // Parse: Constructor { field1 = pattern1, field2 = pattern2 }
+        // or: Constructor variableName (shorthand for single-field constructors)
+        // or: Constructor (no pattern)
+        val ident = identifierParser(stream)
+        when (ident) {
+            is ParseResult.Success -> {
+                // Check if constructor name starts with uppercase (convention)
+                val isConstructor = ident.value.text.firstOrNull()?.isUpperCase() == true
+
+                if (!isConstructor) {
+                    ParseResult.Failure("Expected constructor (uppercase)", stream.getSourcePosition())
+                } else {
+                    val stream1 = ident.remaining
+                    val next = stream1.current()
+
+                    when {
+                        next?.type == TokenType.LBRACE -> {
+                            // Has record pattern: Some {value = x}
+                            val recordPat = recordPatternParser(stream1)
+                            when (recordPat) {
+                                is ParseResult.Success -> ParseResult.Success(
+                                    ConstructorPattern(ident.value.text, recordPat.value),
+                                    recordPat.remaining
+                                )
+                                is ParseResult.Failure -> recordPat
+                            }
+                        }
+                        next?.type == TokenType.IDENTIFIER -> {
+                            // Shorthand pattern: Some x (means Some {value = x})
+                            val varPat = identifierParser(stream1)
+                            when (varPat) {
+                                is ParseResult.Success -> ParseResult.Success(
+                                    ConstructorPattern(
+                                        ident.value.text,
+                                        RecordPattern(listOf(
+                                            RecordPatternEntry("value", VariablePattern(varPat.value.text))
+                                        ))
+                                    ),
+                                    varPat.remaining
+                                )
+                                is ParseResult.Failure -> varPat
+                            }
+                        }
+                        else -> {
+                            // No pattern: None
+                            ParseResult.Success(
+                                ConstructorPattern(ident.value.text, null),
+                                stream1
+                            )
+                        }
+                    }
+                }
+            }
+            is ParseResult.Failure -> ident
+        }
+    }
+
+    private val recordPatternParser: Parser<RecordPattern> = { stream ->
+        // Parse: { field1 = pattern1, field2, ... }
+        val lbrace = tok(TokenType.LBRACE)(stream)
+        when (lbrace) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(lbrace.remaining)
+                val entries = sepByWithNewlines(
+                    recordPatternEntryParser,
+                    tok(TokenType.COMMA)
+                )(stream1)
+
+                when (entries) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(entries.remaining)
+                        val rbrace = tok(TokenType.RBRACE)(stream2)
+
+                        when (rbrace) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                RecordPattern(entries.value),
+                                rbrace.remaining
+                            )
+                            is ParseResult.Failure -> rbrace
+                        }
+                    }
+                    is ParseResult.Failure -> entries
+                }
+            }
+            is ParseResult.Failure -> lbrace
+        }
+    }
+
+    private val recordPatternEntryParser: Parser<RecordPatternEntry> = { stream ->
+        // Parse: field = pattern or field (punning)
+        val ident = identifierParser(stream)
+        when (ident) {
+            is ParseResult.Success -> {
+                val stream1 = ident.remaining
+                val assign = tok(TokenType.ASSIGN)(stream1)
+
+                when (assign) {
+                    is ParseResult.Success -> {
+                        // field = pattern
+                        val pattern = patternParser(assign.remaining)
+                        when (pattern) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                RecordPatternEntry(ident.value.text, pattern.value),
+                                pattern.remaining
+                            )
+                            is ParseResult.Failure -> pattern
+                        }
+                    }
+                    is ParseResult.Failure -> {
+                        // Punning: field
+                        ParseResult.Success(
+                            RecordPatternEntry(ident.value.text, null),
+                            stream1
+                        )
+                    }
+                }
+            }
+            is ParseResult.Failure -> ident
+        }
+    }
+
+    // Expression with operator precedence
+    private val expression: Parser<Expression> = { stream ->
+        logicalOrExpression(stream)
+    }
+
+    // Logical OR operator: ||
+    private val logicalOrExpression: Parser<Expression> = { stream ->
+        var result: ParseResult<Expression> = logicalAndExpression(stream)
+
+        while (result is ParseResult.Success) {
+            val currentStream = (result as ParseResult.Success).remaining
+            val op = currentStream.current()
+
+            if (op?.type == TokenType.OR) {
+                val opStream = currentStream.advance()
+                val right = logicalAndExpression(opStream)
+                result = when (right) {
+                    is ParseResult.Success -> ParseResult.Success(
+                        BinaryOperation(
+                            result.value,
+                            op.text,
+                            right.value
+                        ),
+                        right.remaining
+                    )
+                    is ParseResult.Failure -> result // Keep left side on error
+                }
+            } else {
+                break
+            }
+        }
+        result
+    }
+
+    // Logical AND operator: &&
+    private val logicalAndExpression: Parser<Expression> = { stream ->
+        var result: ParseResult<Expression> = pipeExpression(stream)
+
+        while (result is ParseResult.Success) {
+            val currentStream = (result as ParseResult.Success).remaining
+            val op = currentStream.current()
+
+            if (op?.type == TokenType.AND) {
+                val opStream = currentStream.advance()
+                val right = pipeExpression(opStream)
+                result = when (right) {
+                    is ParseResult.Success -> ParseResult.Success(
+                        BinaryOperation(
+                            result.value,
+                            op.text,
+                            right.value
+                        ),
+                        right.remaining
+                    )
+                    is ParseResult.Failure -> result // Keep left side on error
+                }
+            } else {
+                break
+            }
+        }
+        result
+    }
+
+    // Desugar pipe operator by replacing @ placeholders with the piped value
+    // Transforms: value |> func {x = @} into func {x = value}
+    private fun desugarPipe(pipeValue: Expression, target: Expression): Expression {
+        return when (target) {
+            // @ is parsed as Identifier("@") - replace with piped value
+            is Identifier -> if (target.name == "@") pipeValue else target
+
+            // Recurse into function calls
+            is FunctionCall -> target.copy(
+                function = desugarPipe(pipeValue, target.function),
+                arguments = desugarPipe(pipeValue, target.arguments)
+            )
+
+            // Recurse into record literals (this is where @ typically appears)
+            is RecordLiteral -> target.copy(
+                entries = target.entries.map { entry ->
+                    when (entry) {
+                        is RecordFieldEntry -> entry.copy(
+                            value = entry.value?.let { desugarPipe(pipeValue, it) }
+                        )
+                        is RecordSpreadEntry -> entry.copy(
+                            expression = desugarPipe(pipeValue, entry.expression)
+                        )
+                    }
+                }
+            )
+
+            // Recurse into binary operations (for nested expressions)
+            is BinaryOperation -> target.copy(
+                left = desugarPipe(pipeValue, target.left),
+                right = desugarPipe(pipeValue, target.right)
+            )
+
+            // Recurse into unary operations
+            is UnaryOperation -> target.copy(
+                operand = desugarPipe(pipeValue, target.operand)
+            )
+
+            // Recurse into conditional expressions
+            is IfExpression -> target.copy(
+                condition = desugarPipe(pipeValue, target.condition),
+                thenBranch = desugarPipe(pipeValue, target.thenBranch),
+                elseBranch = desugarPipe(pipeValue, target.elseBranch)
+            )
+
+            // Recurse into lambda expressions
+            is LambdaExpression -> target.copy(
+                body = desugarPipe(pipeValue, target.body)
+            )
+
+            // Recurse into match expressions
+            is MatchExpression -> target.copy(
+                expression = desugarPipe(pipeValue, target.expression),
+                cases = target.cases.map { matchCase ->
+                    matchCase.copy(
+                        guard = matchCase.guard?.let { desugarPipe(pipeValue, it) },
+                        expression = desugarPipe(pipeValue, matchCase.expression)
+                    )
+                }
+            )
+
+            // Recurse into do expressions
+            is DoExpression -> target.copy(
+                statements = target.statements.map { stmt ->
+                    when (stmt) {
+                        is LetStatement -> stmt.copy(
+                            expression = desugarPipe(pipeValue, stmt.expression)
+                        )
+                        is ExpressionStatement -> stmt.copy(
+                            expression = desugarPipe(pipeValue, stmt.expression)
+                        )
+                    }
+                },
+                result = desugarPipe(pipeValue, target.result)
+            )
+
+            // Recurse into array literals
+            is ArrayLiteral -> target.copy(
+                elements = target.elements.map { desugarPipe(pipeValue, it) }
+            )
+
+            // Recurse into perform expressions
+            is PerformExpression -> target.copy(
+                expression = desugarPipe(pipeValue, target.expression)
+            )
+
+            // Literals, identifiers, etc. don't contain placeholders
+            else -> target
+        }
+    }
+
+    // Pipe operator: |>
+    // Low precedence, left-associative operator for function composition
+    // Syntax: value |> function {param = @} where @ is replaced with value
+    private val pipeExpression: Parser<Expression> = { stream ->
+        var result: ParseResult<Expression> = comparisonExpression(stream)
+
+        while (result is ParseResult.Success) {
+            val currentStream = (result as ParseResult.Success).remaining
+            val op = currentStream.current()
+
+            if (op?.type == TokenType.PIPE_OP) {
+                val opStream = currentStream.advance()
+                val right = comparisonExpression(opStream)
+                result = when (right) {
+                    is ParseResult.Success -> {
+                        // Keep pipe operator in AST - will be desugared later
+                        ParseResult.Success(
+                            BinaryOperation(result.value, "|>", right.value),
+                            right.remaining
+                        )
+                    }
+                    is ParseResult.Failure -> result // Keep left side on error
+                }
+            } else {
+                break
+            }
+        }
+        result
+    }
+
+    // Comparison operators: ==, !=, <, >, <=, >=
+    private val comparisonExpression: Parser<Expression> = { stream ->
+        var result: ParseResult<Expression> = additiveExpression(stream)
+
+        while (result is ParseResult.Success) {
+            val currentStream = (result as ParseResult.Success).remaining
+            val op = currentStream.current()
+
+            if (op?.type == TokenType.EQ || op?.type == TokenType.NEQ ||
+                op?.type == TokenType.LT || op?.type == TokenType.GT ||
+                op?.type == TokenType.LTE || op?.type == TokenType.GTE) {
+                val opStream = currentStream.advance()
+                val right = additiveExpression(opStream)
+                result = when (right) {
+                    is ParseResult.Success -> ParseResult.Success(
+                        BinaryOperation(
+                            result.value,
+                            op.text,
+                            right.value
+                        ),
+                        right.remaining
+                    )
+                    is ParseResult.Failure -> result // Keep left side on error
+                }
+            } else {
+                break
+            }
+        }
+        result
+    }
+
+    // Additive operators: +, -, ++
+    private val additiveExpression: Parser<Expression> = { stream ->
+        var result: ParseResult<Expression> = multiplicativeExpression(stream)
+
+        while (result is ParseResult.Success) {
+            val currentStream = (result as ParseResult.Success).remaining
+            val op = currentStream.current()
+
+            if (op?.type == TokenType.PLUS || op?.type == TokenType.MINUS || op?.type == TokenType.PLUSPLUS) {
+                val opStream = currentStream.advance()
+                val right = multiplicativeExpression(opStream)
+                result = when (right) {
+                    is ParseResult.Success -> ParseResult.Success(
+                        BinaryOperation(
+                            result.value,
+                            op.text,
+                            right.value
+                        ),
+                        right.remaining
+                    )
+                    is ParseResult.Failure -> result // Keep left side on error
+                }
+            } else {
+                break
+            }
+        }
+        result
+    }
+
+    // Multiplicative operators: *, /, %
+    private val multiplicativeExpression: Parser<Expression> = { stream ->
+        var result: ParseResult<Expression> = unaryExpression(stream)
+
+        while (result is ParseResult.Success) {
+            val currentStream = (result as ParseResult.Success).remaining
+            val op = currentStream.current()
+
+            if (op?.type == TokenType.STAR || op?.type == TokenType.SLASH || op?.type == TokenType.PERCENT) {
+                val opStream = currentStream.advance()
+                val right = unaryExpression(opStream)
+                result = when (right) {
+                    is ParseResult.Success -> ParseResult.Success(
+                        BinaryOperation(
+                            result.value,
+                            op.text,
+                            right.value
+                        ),
+                        right.remaining
+                    )
+                    is ParseResult.Failure -> result // Keep left side on error
+                }
+            } else {
+                break
+            }
+        }
+        result
+    }
+
+    // Unary operators: -, !
+    private val unaryExpression: Parser<Expression> = { stream ->
+        val token = stream.current()
+
+        if (token?.type == TokenType.MINUS || token?.type == TokenType.NOT) {
+            val opStream = stream.advance()
+            val operand = unaryExpression(opStream) // Right-associative: -(-5) is valid
+            when (operand) {
+                is ParseResult.Success -> ParseResult.Success(
+                    UnaryOperation(token.text, operand.value),
+                    operand.remaining
+                )
+                is ParseResult.Failure -> operand
+            }
+        } else {
+            // No unary operator, parse postfix
+            postfixExpression(stream)
+        }
+    }
+
+    // Postfix expressions: function calls and member access
+    // Handles: f {x = 1}, obj.field, f {x = 1}.field, etc.
+    private val postfixExpression: Parser<Expression> = { stream ->
+        var result: ParseResult<Expression> = primaryExpression(stream)
+
+        while (result is ParseResult.Success) {
+            val currentStream = (result as ParseResult.Success).remaining
+            val token = currentStream.current()
+
+            when (token?.type) {
+                TokenType.LBRACE -> {
+                    // Function call: f {x = 1}
+                    // Check if this is a record literal (arguments) not a lambda
+                    if (!lookAheadForArrowAfterBrace(currentStream)) {
+                        val args = recordLiteral(currentStream)
+                        result = when (args) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                FunctionCall(
+                                    result.value,
+                                    args.value
+                                ),
+                                args.remaining
+                            )
+                            is ParseResult.Failure -> break  // Not a function call
+                        }
+                    } else {
+                        break  // It's a lambda, not a function call
+                    }
+                }
+                TokenType.DOT -> {
+                    // Member access: obj.field
+                    val dotStream = currentStream.advance()
+                    val member = identifierParser(dotStream)
+                    result = when (member) {
+                        is ParseResult.Success -> ParseResult.Success(
+                            MemberAccess(
+                                result.value,
+                                member.value.text
+                            ),
+                            member.remaining
+                        )
+                        is ParseResult.Failure -> break  // Not a member access
+                    }
+                }
+                else -> break  // No more postfix operators
+            }
+        }
+
+        result
+    }
+
+    // ===== BASIC PARSERS =====
+
+    private val identifierParser: Parser<Token> = tok(TokenType.IDENTIFIER)
+
+    // @ placeholder for pipe operator
+    private val atPlaceholderExpression: Parser<Expression> = { stream ->
+        val token = tok(TokenType.AT)(stream)
+        when (token) {
+            is ParseResult.Success -> ParseResult.Success(
+                Identifier("@"),  // Parse @ as identifier for now, desugar later
+                token.remaining
+            )
+            is ParseResult.Failure -> token
+        }
+    }
+
+    private val identifierExpression: Parser<Expression> = { stream ->
+        // Parse qualified names: module::function or just function
+        val first = identifierParser(stream)
+        when (first) {
+            is ParseResult.Success -> {
+                var name = first.value.text
+                var currentStream = first.remaining
+                var failed: ParseResult.Failure? = null
+
+                // Check for :: to build qualified name
+                while (failed == null) {
+                    val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
+                    if (doubleColon is ParseResult.Success) {
+                        val next = identifierParser(doubleColon.remaining)
+                        when (next) {
+                            is ParseResult.Success -> {
+                                name += "::" + next.value.text
+                                currentStream = next.remaining
+                            }
+                            is ParseResult.Failure -> failed = next
+                        }
+                    } else {
+                        break
+                    }
+                }
+
+                failed ?: ParseResult.Success(Identifier(name), currentStream)
+            }
+            is ParseResult.Failure -> first
+        }
+    }
+
+    private val literalExpression: Parser<Expression> = { stream ->
+        val token = stream.current()
+        when (token?.type) {
+            TokenType.INTEGER -> ParseResult.Success(
+                IntLiteral(token.text.toLong()),
+                stream.advance()
+            )
+            TokenType.FLOAT -> ParseResult.Success(
+                FloatLiteral(token.text.toDouble()),
+                stream.advance()
+            )
+            TokenType.FRACTION -> {
+                // Parse fraction like "1//2" into numerator and denominator
+                val parts = token.text.split("//")
+                if (parts.size == 2) {
+                    ParseResult.Success(
+                        FractionLiteral(parts[0].toLong(), parts[1].toLong()),
+                        stream.advance()
+                    )
+                } else {
+                    ParseResult.Failure("Invalid fraction literal: ${token.text}", stream.getSourcePosition())
+                }
+            }
+            TokenType.STRING -> ParseResult.Success(
+                StringLiteral(token.text.removeSurrounding("\"")),
+                stream.advance()
+            )
+            TokenType.BOOLEAN -> ParseResult.Success(
+                BooleanLiteral(token.text == "true"),
+                stream.advance()
+            )
+            else -> ParseResult.Failure("Expected literal", stream.getSourcePosition())
+        }
+    }
+
+    private val parenExpression: Parser<Expression> = { stream ->
+        Parsers.between(
+            tok(TokenType.LPAREN),
+            expression,
+            tok(TokenType.RPAREN)
+        )(stream)
+    }
+
+    private val recordTypeEntryParser: Parser<RecordTypeEntry> = { stream ->
+        val ident = identifierParser(stream)
+        when (ident) {
+            is ParseResult.Success -> {
+                val colon = tok(TokenType.COLON)((ident as ParseResult.Success).remaining)
+                when (colon) {
+                    is ParseResult.Success -> {
+                        val typeAnnotation = typeAnnotationParser((colon as ParseResult.Success).remaining)
+                        when (typeAnnotation) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                RecordTypeEntry(ident.value.text, (typeAnnotation as ParseResult.Success).value),
+                                typeAnnotation.remaining
+                            )
+                            is ParseResult.Failure -> typeAnnotation
+                        }
+                    }
+                    is ParseResult.Failure -> colon
+                }
+            }
+            is ParseResult.Failure -> ident
+        }
+    }
+
+    // ===== TYPE ANNOTATION PARSING =====
+
+    private val typeAnnotationParser: Parser<TypeAnnotation> = { stream ->
+        // Parse function types: T1 -> T2 -> T3
+        functionTypeAnnotation(stream)
+    }
+
+    private val functionTypeAnnotation: Parser<TypeAnnotation> = { stream ->
+        // Parse: paramType -> returnType <effects> or just primaryType
+        var result: ParseResult<TypeAnnotation> = primaryTypeAnnotation(stream)
+
+        while (result is ParseResult.Success) {
+            val currentStream = result.remaining
+            val arrow = currentStream.current()
+
+            if (arrow?.type == TokenType.ARROW) {
+                val arrowStream = currentStream.advance()
+                val returnType = primaryTypeAnnotation(arrowStream)
+
+                result = when (returnType) {
+                    is ParseResult.Success -> {
+                        // Check for effect row: <> or <EffectName> or <Effect1, Effect2>
+                        val streamAfterReturn = skipNewlines(returnType.remaining)
+                        val ltToken = streamAfterReturn.current()
+
+                        val (effects, finalStream) = if (ltToken?.type == TokenType.LT) {
+                            // Parse effect row
+                            val afterLt = streamAfterReturn.advance()
+                            val gtToken = afterLt.current()
+
+                            if (gtToken?.type == TokenType.GT) {
+                                // Empty effect row <>
+                                Pair(emptyList<String>(), afterLt.advance())
+                            } else {
+                                // Has effect names <Effect1, Effect2>
+                                val effectNames = mutableListOf<String>()
+                                var current = skipNewlines(afterLt)
+
+                                // Parse comma-separated effect names
+                                while (current.current()?.type == TokenType.IDENTIFIER) {
+                                    effectNames.add(current.current()!!.text)
+                                    current = skipNewlines(current.advance())
+
+                                    // Check for comma
+                                    if (current.current()?.type == TokenType.COMMA) {
+                                        current = skipNewlines(current.advance())
+                                    } else {
+                                        break
+                                    }
+                                }
+
+                                // Expect closing >
+                                if (current.current()?.type == TokenType.GT) {
+                                    Pair(effectNames, current.advance())
+                                } else {
+                                    Pair(emptyList<String>(), returnType.remaining)  // No closing >, keep original
+                                }
+                            }
+                        } else {
+                            Pair(emptyList<String>(), returnType.remaining)
+                        }
+
+                        // Parse optional ability constraints with 'with' keyword
+                        var streamAfterWith = finalStream
+                        val abilityConstraints = mutableListOf<FunctionAbilityConstraint>()
+
+                        // Check for 'with' keyword
+                        val streamBeforeWith = skipNewlines(finalStream)
+                        if (streamBeforeWith.current()?.type == TokenType.WITH) {
+                            // Skip the 'with' keyword
+                            var currentStream = skipNewlines(streamBeforeWith.advance())
+
+                            // Parse ability constraints: AbilityName TypeArg1 TypeArg2...
+                            while (currentStream.current()?.type == TokenType.IDENTIFIER) {
+                                val abilityNameToken = currentStream.current()!!
+                                val abilityName = abilityNameToken.text
+                                currentStream = skipNewlines(currentStream.advance())
+
+                                // Parse type arguments (space-separated types)
+                                // Try to parse as many type arguments as possible
+                                val typeArgs = mutableListOf<TypeAnnotation>()
+                                while (true) {
+                                    // Try to parse a primary type annotation (identifier, record, etc.)
+                                    val typeResult = primaryTypeAnnotation(currentStream)
+                                    when (typeResult) {
+                                        is ParseResult.Success -> {
+                                            typeArgs.add(typeResult.value)
+                                            currentStream = skipNewlines(typeResult.remaining)
+
+                                            // Check if next token could be another type argument
+                                            // Stop if we see =, comma, or WITH (another constraint)
+                                            val nextToken = currentStream.current()
+                                            if (nextToken?.type == TokenType.ASSIGN ||
+                                                nextToken?.type == TokenType.COMMA ||
+                                                nextToken?.type == TokenType.WITH ||
+                                                nextToken == null) {
+                                                break
+                                            }
+                                            // Otherwise, continue trying to parse more type args
+                                        }
+                                        is ParseResult.Failure -> break  // No more type args
+                                    }
+                                }
+
+                                abilityConstraints.add(FunctionAbilityConstraint(abilityName, typeArgs))
+
+                                // Check for comma (more constraints) - if not, we're done
+                                if (currentStream.current()?.type == TokenType.COMMA) {
+                                    currentStream = skipNewlines(currentStream.advance())
+                                } else {
+                                    break
+                                }
+                            }
+
+                            streamAfterWith = currentStream
+                        }
+
+                        ParseResult.Success(
+                            FunctionTypeAnnotation(
+                                result.value,
+                                returnType.value,
+                                if (effects.isNotEmpty()) EffectRowAnnotation(effects) else null,
+                                abilityConstraints
+                            ),
+                            streamAfterWith
+                        )
+                    }
+                    is ParseResult.Failure -> break
+                }
+            } else {
+                break
+            }
+        }
+
+        result
+    }
+
+    private val arrayTypeAnnotation: Parser<TypeAnnotation> = { stream ->
+        // Parse: [ElementType]
+        val lbracket = tok(TokenType.LBRACKET)(stream)
+        when (lbracket) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(lbracket.remaining)
+                val elementType = typeAnnotationParser(stream1)
+                when (elementType) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(elementType.remaining)
+                        val rbracket = tok(TokenType.RBRACKET)(stream2)
+                        when (rbracket) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                ArrayTypeAnnotation(elementType.value),
+                                rbracket.remaining
+                            )
+                            is ParseResult.Failure -> rbracket
+                        }
+                    }
+                    is ParseResult.Failure -> elementType
+                }
+            }
+            is ParseResult.Failure -> lbracket
+        }
+    }
+
+    private val primaryTypeAnnotation: Parser<TypeAnnotation> = { stream ->
+        Parsers.oneOf(
+            arrayTypeAnnotation,
+            parenTypeAnnotation,
+            recordTypeAnnotationParser,
+            typeApplicationAnnotation,
+            identifierTypeAnnotation
+        )(stream)
+    }
+
+    private val parenTypeAnnotation: Parser<TypeAnnotation> = { stream ->
+        // Parse: (Type)
+        val lparen = tok(TokenType.LPAREN)(stream)
+        when (lparen) {
+            is ParseResult.Success -> {
+                val typeAnn = typeAnnotationParser(lparen.remaining)
+                when (typeAnn) {
+                    is ParseResult.Success -> {
+                        val rparen = tok(TokenType.RPAREN)(typeAnn.remaining)
+                        when (rparen) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                typeAnn.value,
+                                rparen.remaining
+                            )
+                            is ParseResult.Failure -> rparen
+                        }
+                    }
+                    is ParseResult.Failure -> typeAnn
+                }
+            }
+            is ParseResult.Failure -> lparen
+        }
+    }
+
+    private val recordTypeAnnotationParser: Parser<TypeAnnotation> = { stream ->
+        // Parse: {field1: Type1, field2: Type2} or {field1: Type1, ...}
+        val lbrace = tok(TokenType.LBRACE)(stream)
+        when (lbrace) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(lbrace.remaining)
+                val entries = sepByWithNewlines(
+                    recordTypeEntryParser,
+                    tok(TokenType.COMMA)
+                )(stream1)
+
+                when (entries) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(entries.remaining)
+
+                        // Check for optional comma before ellipsis
+                        val afterComma = if (stream2.current()?.type == TokenType.COMMA) {
+                            skipNewlines(stream2.advance())
+                        } else {
+                            stream2
+                        }
+
+                        // Check for ellipsis (open record marker: ...)
+                        val restField = if (afterComma.current()?.type == TokenType.ELLIPSIS) {
+                            "..."  // Marker for open record
+                        } else {
+                            null  // Closed record
+                        }
+
+                        val stream3 = if (restField != null) {
+                            skipNewlines(afterComma.advance())  // Skip the ellipsis token
+                        } else {
+                            afterComma
+                        }
+
+                        val rbrace = tok(TokenType.RBRACE)(stream3)
+
+                        when (rbrace) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                RecordTypeAnnotation(entries.value, restField),
+                                rbrace.remaining
+                            )
+                            is ParseResult.Failure -> rbrace
+                        }
+                    }
+                    is ParseResult.Failure -> entries
+                }
+            }
+            is ParseResult.Failure -> lbrace
+        }
+    }
+
+    private val variantTypeAnnotationParser: Parser<TypeAnnotation> = { stream ->
+        // Parse: | Constructor1 { field: Type }, Constructor2, ... |
+        val pipe1 = tok(TokenType.PIPE)(stream)
+        when (pipe1) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(pipe1.remaining)
+
+                // Parse constructors separated by commas
+                val constructors = mutableListOf<VariantTypeConstructor>()
+                var currentStream = stream1
+                var error: ParseResult.Failure? = null
+
+                while (currentStream.current()?.type == TokenType.IDENTIFIER && error == null) {
+                    val constructorName = identifierParser(currentStream)
+                    when (constructorName) {
+                        is ParseResult.Success -> {
+                            val stream2 = skipNewlines(constructorName.remaining)
+
+                            // Check for optional data type (record type)
+                            if (stream2.current()?.type == TokenType.LBRACE) {
+                                val recordType = recordTypeAnnotationParser(stream2)
+                                when (recordType) {
+                                    is ParseResult.Success -> {
+                                        constructors.add(VariantTypeConstructor(constructorName.value.text, recordType.value))
+                                        currentStream = skipNewlines(recordType.remaining)
+                                    }
+                                    is ParseResult.Failure -> {
+                                        error = recordType
+                                    }
+                                }
+                            } else {
+                                constructors.add(VariantTypeConstructor(constructorName.value.text, null))
+                                currentStream = skipNewlines(stream2)
+                            }
+
+                            // Check for comma (more constructors) only if no error
+                            if (error == null) {
+                                if (currentStream.current()?.type == TokenType.COMMA) {
+                                    currentStream = skipNewlines(currentStream.advance())
+                                } else {
+                                    break
+                                }
+                            }
+                        }
+                        is ParseResult.Failure -> {
+                            error = constructorName
+                        }
+                    }
+                }
+
+                // Return error if encountered during parsing
+                if (error != null) {
+                    error
+                } else {
+                    // Expect closing pipe
+                    val pipe2 = tok(TokenType.PIPE)(currentStream)
+                    when (pipe2) {
+                        is ParseResult.Success -> ParseResult.Success(
+                            VariantTypeAnnotation(constructors),
+                            pipe2.remaining
+                        )
+                        is ParseResult.Failure -> pipe2
+                    }
+                }
+            }
+            is ParseResult.Failure -> pipe1
+        }
+    }
+
+    private val simpleTypeArgument: Parser<TypeAnnotation> = { stream ->
+        // Parse simple type arguments (identifiers, parens, variants, arrays, records, not type applications)
+        Parsers.oneOf(
+            variantTypeAnnotationParser,
+            arrayTypeAnnotation,
+            parenTypeAnnotation,
+            recordTypeAnnotationParser,
+            identifierTypeAnnotation
+        )(stream)
+    }
+
+    private val typeApplicationAnnotation: Parser<TypeAnnotation> = { stream ->
+        // Parse: Constructor Arg1 Arg2 ... (e.g., Option Int, List String)
+        // Try to parse identifier followed by type arguments
+        val ident = identifierParser(stream)
+        when (ident) {
+            is ParseResult.Success -> {
+                // Check if this identifier is capitalized (type constructor)
+                if (ident.value.text[0].isUpperCase()) {
+                    // Try to parse type arguments
+                    val args = mutableListOf<TypeAnnotation>()
+                    var currentStream = ident.remaining
+
+                    while (true) {
+                        // Try to parse a type argument (but not another constructor application)
+                        val argResult = simpleTypeArgument(currentStream)
+                        when (argResult) {
+                            is ParseResult.Success -> {
+                                args.add(argResult.value)
+                                currentStream = argResult.remaining
+                            }
+                            is ParseResult.Failure -> break
+                        }
+                    }
+
+                    if (args.isNotEmpty()) {
+                        ParseResult.Success(
+                            TypeApplicationAnnotation(ident.value.text, args),
+                            currentStream
+                        )
+                    } else {
+                        // No args, just an identifier type
+                        ParseResult.Success(
+                            IdentifierTypeAnnotation(ident.value.text),
+                            ident.remaining
+                        )
+                    }
+                } else {
+                    // Lowercase identifier, just a type variable or simple type
+                    ParseResult.Success(
+                        IdentifierTypeAnnotation(ident.value.text),
+                        ident.remaining
+                    )
+                }
+            }
+            is ParseResult.Failure -> ident
+        }
+    }
+
+    private val identifierTypeAnnotation: Parser<TypeAnnotation> = { stream ->
+        val ident = identifierParser(stream)
+        when (ident) {
+            is ParseResult.Success -> ParseResult.Success(
+                IdentifierTypeAnnotation(ident.value.text),
+                ident.remaining
+            )
+            is ParseResult.Failure -> ident
+        }
+    }
+}
+
+class ParseException(message: String, position: Int) : Exception("Parse error at position $position: $message")
