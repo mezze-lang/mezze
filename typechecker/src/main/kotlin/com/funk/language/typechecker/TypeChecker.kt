@@ -1003,15 +1003,20 @@ class TypeChecker {
                         }
                     } else {
                         // CRITICAL FIX: When unifying two type variables, merge their constraints
-                        // This ensures constraints propagate correctly during unification
+                        // EXCEPT for Inspect which is universally available and doesn't constrain types
+                        // This prevents multiInspect from incorrectly unifying {a: 'a, b: 'b, c: 'c} to {a: 'a, b: 'a, c: 'a}
                         val t1Constraints = typeVarAbilityConstraints[t1.variable]
                         val t2Constraints = typeVarAbilityConstraints[t2.variable]
                         if (t1Constraints != null && t2Constraints != null) {
-                            // Merge: t2 gets all constraints from both
-                            t2Constraints.addAll(t1Constraints)
+                            // Merge: t2 gets all constraints from both, but filter out Inspect
+                            val constraintsToAdd = t1Constraints.filter { it != "Inspect" }
+                            t2Constraints.addAll(constraintsToAdd)
                         } else if (t1Constraints != null) {
-                            // Copy t1's constraints to t2
-                            typeVarAbilityConstraints[t2.variable] = t1Constraints.toMutableSet()
+                            // Copy t1's constraints to t2, but filter out Inspect
+                            val filteredConstraints = t1Constraints.filter { it != "Inspect" }.toMutableSet()
+                            if (filteredConstraints.isNotEmpty()) {
+                                typeVarAbilityConstraints[t2.variable] = filteredConstraints
+                            }
                         }
                     }
                     substitutions[t1.variable] = t2
@@ -1034,15 +1039,20 @@ class TypeChecker {
                         }
                     } else {
                         // CRITICAL FIX: When unifying two type variables, merge their constraints
-                        // This ensures constraints propagate correctly during unification
+                        // EXCEPT for Inspect which is universally available and doesn't constrain types
+                        // This prevents multiInspect from incorrectly unifying {a: 'a, b: 'b, c: 'c} to {a: 'a, b: 'a, c: 'a}
                         val t1Constraints = typeVarAbilityConstraints[t1.variable]
                         val t2Constraints = typeVarAbilityConstraints[t2.variable]
                         if (t1Constraints != null && t2Constraints != null) {
-                            // Merge: t1 gets all constraints from both
-                            t1Constraints.addAll(t2Constraints)
+                            // Merge: t1 gets all constraints from both, but filter out Inspect
+                            val constraintsToAdd = t2Constraints.filter { it != "Inspect" }
+                            t1Constraints.addAll(constraintsToAdd)
                         } else if (t2Constraints != null) {
-                            // Copy t2's constraints to t1
-                            typeVarAbilityConstraints[t1.variable] = t2Constraints.toMutableSet()
+                            // Copy t2's constraints to t1, but filter out Inspect
+                            val filteredConstraints = t2Constraints.filter { it != "Inspect" }.toMutableSet()
+                            if (filteredConstraints.isNotEmpty()) {
+                                typeVarAbilityConstraints[t1.variable] = filteredConstraints
+                            }
                         }
                     }
                     substitutions[t2.variable] = t1
@@ -1148,13 +1158,19 @@ class TypeChecker {
         abilityNames: Set<String>,
         typeVar: com.funk.language.ast.TypeVar
     ) {
+        // CRITICAL FIX: Filter out Inspect ability - it's universally available and doesn't constrain types
+        val nonInspectAbilities = abilityNames.filter { it != "Inspect" }.toSet()
+        if (nonInspectAbilities.isEmpty()) {
+            return  // No actual constraints to validate
+        }
+
         // CRITICAL FIX: For composite types (VariantType, RecordType, ListType), recursively validate inner types
         // instead of trying to validate that the composite type itself has the ability
         when (type) {
             is com.funk.language.ast.FunkType.RecordType -> {
                 // Recursively validate all field types
                 type.fields.values.forEach { fieldType ->
-                    validateAbilityConstraintsForType(fieldType, abilityNames, typeVar)
+                    validateAbilityConstraintsForType(fieldType, nonInspectAbilities, typeVar)
                 }
                 return
             }
@@ -1162,14 +1178,14 @@ class TypeChecker {
                 // Recursively validate all constructor data types
                 type.constructors.values.forEach { constructorDataType ->
                     constructorDataType?.let {
-                        validateAbilityConstraintsForType(it, abilityNames, typeVar)
+                        validateAbilityConstraintsForType(it, nonInspectAbilities, typeVar)
                     }
                 }
                 return
             }
             is com.funk.language.ast.FunkType.ListType -> {
                 // Recursively validate element type
-                validateAbilityConstraintsForType(type.elementType, abilityNames, typeVar)
+                validateAbilityConstraintsForType(type.elementType, nonInspectAbilities, typeVar)
                 return
             }
             is com.funk.language.ast.FunkType.VarType -> {
@@ -1182,7 +1198,7 @@ class TypeChecker {
         }
 
         // For concrete primitive types, validate that they have the required abilities
-        for (abilityName in abilityNames) {
+        for (abilityName in nonInspectAbilities) {
             val hasAbility = when (type) {
                 is com.funk.language.ast.FunkType.IntType ->
                     abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "Inspect")
@@ -2769,17 +2785,10 @@ class TypeChecker {
                                      patternConstructors.all { it in booleanConstructors }
 
                 // First, try to infer the variant type from the match patterns
-                println("🔍 STEP 1-PRE: About to call inferVariantTypeFromPatterns with ${expr.cases.size} cases")
-                expr.cases.forEachIndexed { i, case ->
-                    println("  Case $i: ${case.patterns.size} patterns: ${case.patterns.map { it::class.simpleName }}")
-                }
                 val inferredVariantType = inferVariantTypeFromPatterns(expr.cases)
-                println("🔍 STEP 1: MATCH INFER - inferVariantTypeFromPatterns returned:")
-                println("     ${inferredVariantType?.let { prettyPrintType(it) + " rowVar=" + it.rowVar }}")
 
                 // Get the matched expression's type
                 val preliminaryMatchedType = inferBasicType(expr.expression)
-                println("🔍 STEP 2: MATCH PRELIM - matched expression type: ${prettyPrintType(preliminaryMatchedType)}")
 
                 // Use the inferred variant type to constrain the matched expression if needed
                 val matchedType = if (isBooleanMatch) {
@@ -2799,15 +2808,11 @@ class TypeChecker {
                         // CRITICAL FIX: Preserve open variant status from context
                         // If the parameter already has an open variant type in context, keep it open
                         val existingType = context[matchedExpr.name]
-                        println("🔍 STEP 3a: MATCH CONTEXT UPDATE for ${matchedExpr.name}:")
-                        println("     existing    = ${existingType?.let { prettyPrintType(it) + " rowVar=" + (it as? com.funk.language.ast.FunkType.VariantType)?.rowVar }}")
-                        println("     inferred    = ${prettyPrintType(inferredVariantType)} rowVar=${inferredVariantType.rowVar}")
 
                         val typeToUse = if (existingType is com.funk.language.ast.FunkType.VariantType &&
                                            existingType.rowVar != null &&
                                            inferredVariantType.rowVar == null) {
                             // Existing type is open, but inferred is closed - keep it open
-                            println("     PRESERVING existing rowVar!")
                             com.funk.language.ast.FunkType.VariantType(
                                 inferredVariantType.constructors,
                                 existingType.rowVar  // Preserve the open rowVar
@@ -2816,7 +2821,6 @@ class TypeChecker {
                             inferredVariantType
                         }
 
-                        println("     typeToUse   = ${prettyPrintType(typeToUse)} rowVar=${(typeToUse as? com.funk.language.ast.FunkType.VariantType)?.rowVar}")
                         context[matchedExpr.name] = typeToUse
                     }
                     inferredVariantType
@@ -3745,7 +3749,6 @@ class TypeChecker {
                 // Now we have the substitutions and can apply them to parameter types
 
                 // Apply substitutions to context
-                println("🔍 STEP 3b: LAMBDA SUBST - Applying ${substitutions.size} substitutions to context")
                 for ((name, varType) in context.toMap()) {
                     val oldType = varType
                     val newType = applySubstitutionToType(varType, substitutions)
@@ -3757,7 +3760,6 @@ class TypeChecker {
                                        newType is com.funk.language.ast.FunkType.VariantType &&
                                        newType.rowVar == null) {
                         // Old type is open, but substitution closed it - keep it open
-                        println("     $name: PRESERVING rowVar from old type!")
                         com.funk.language.ast.FunkType.VariantType(
                             newType.constructors,
                             oldType.rowVar  // Preserve the open rowVar
@@ -3768,8 +3770,6 @@ class TypeChecker {
 
                     context[name] = typeToUse
                     if (oldType != typeToUse && (name == "v1" || name == "v2")) {
-                        println("     $name: ${prettyPrintType(oldType)} rowVar=${(oldType as? com.funk.language.ast.FunkType.VariantType)?.rowVar}")
-                        println("       ->  ${prettyPrintType(typeToUse)} rowVar=${(typeToUse as? com.funk.language.ast.FunkType.VariantType)?.rowVar}")
                     }
                 }
 
@@ -3809,7 +3809,6 @@ class TypeChecker {
 
                 // CRITICAL FIX: Reconstruct parameter type from context to ensure type variable consistency
                 // The context has the correct, unified type variables after body inference
-                println("🔍 STEP 4: LAMBDA FINALIZE - Building final parameter type")
                 val finalParamType = if (paramType is com.funk.language.ast.FunkType.RecordType) {
                     val updatedFields = paramType.fields.keys.associateWith { name ->
                         // IMPORTANT: Prefer context over resolvedDirectConstraints to preserve type variable instances
@@ -3819,11 +3818,6 @@ class TypeChecker {
                         val constraintType = resolvedDirectConstraints[name]
                         val originalType = paramType.fields[name]!!
                         val chosenType = contextType ?: constraintType ?: originalType
-                        println("🔍   FINALIZE $name:")
-                        println("     context     = ${contextType?.let { prettyPrintType(it) + " rowVar=" + (it as? com.funk.language.ast.FunkType.VariantType)?.rowVar }}")
-                        println("     constraint  = ${constraintType?.let { prettyPrintType(it) + " rowVar=" + (it as? com.funk.language.ast.FunkType.VariantType)?.rowVar }}")
-                        println("     original    = ${prettyPrintType(originalType)} rowVar=" + (originalType as? com.funk.language.ast.FunkType.VariantType)?.rowVar)
-                        println("     CHOSEN      = ${prettyPrintType(chosenType)} rowVar=${(chosenType as? com.funk.language.ast.FunkType.VariantType)?.rowVar}")
                         chosenType
                     }
                     com.funk.language.ast.FunkType.RecordType(updatedFields, paramType.rowVar)
@@ -5610,6 +5604,11 @@ class TypeChecker {
 
         // Find ability method calls in the body
         findAbilityMethodCalls(body) { abilityName, methodArgs ->
+            // Skip Inspect ability - it's universally available for all types
+            if (abilityName == "Inspect") {
+                return@findAbilityMethodCalls
+            }
+
             // Check if the arguments involve parameters
             val involvesParams = involvesParameters(methodArgs, paramTypes.keys, letBindingDependencies)
 
@@ -6266,37 +6265,29 @@ class TypeChecker {
         val usedConstructors = mutableSetOf<String>()
         var hasWildcard = false
 
-        println("🔍 inferVariantTypeFromPatterns: ${cases.size} cases")
         // Collect all constructor names from patterns and check for wildcards
         for (case in cases) {
-            println("  Case with ${case.patterns.size} patterns")
             for (pattern in case.patterns) {
                 when (pattern) {
                     is ConstructorPattern -> {
-                        println("    Found constructor: ${pattern.constructor}")
                         usedConstructors.add(pattern.constructor)
                     }
                     is WildcardPattern -> {
                         // Wildcard makes the variant open
-                        println("    Found wildcard")
                         hasWildcard = true
                     }
                     is VariablePattern -> {
                         // Variable pattern doesn't give us constructor information
-                        println("    Found variable pattern")
                     }
                     is RecordPattern -> {
                         // Pure record pattern without constructor - not a variant
-                        println("    Found record pattern - returning null")
                         return null
                     }
                 }
             }
         }
 
-        println("  Collected constructors: $usedConstructors, hasWildcard: $hasWildcard")
         if (usedConstructors.isEmpty()) {
-            println("  No constructors found - returning null")
             return null
         }
 
@@ -7630,7 +7621,6 @@ class TypeChecker {
                     )
                 } else {
                     // Debug mode: just warn and continue
-                    println("Warning: $errorMessage")
                 }
             }
         }
@@ -7829,12 +7819,34 @@ class TypeChecker {
         operationName: String,
         argumentType: com.funk.language.ast.FunkType
     ): com.funk.language.ast.FunkType {
+        // CRITICAL FIX: Inspect is universally available for all types
+        // Skip polymorphic type variable creation to prevent exponential blowup
+        // Since Inspect is always available, we can directly return the concrete return type
+        if (abilityName == "Inspect") {
+            // Look up the ability declaration to get the operation's return type
+            val abilityDeclaration = context["${abilityName}_ability"] as? com.funk.language.ast.FunkType.RecordType
+                ?: throw TypeCheckError(
+                    "Ability '$abilityName' is not defined",
+                    null as SourceLocation?
+                )
+
+            val operationType = abilityDeclaration.fields[operationName] as? com.funk.language.ast.FunkType.FunctionType
+                ?: throw TypeCheckError(
+                    "Operation '$operationName' not found in ability '$abilityName'",
+                    null as SourceLocation?
+                )
+
+            // Return the concrete return type directly without involving type variables
+            // This prevents constraint solving for Inspect which causes exponential blowup
+            return operationType.returnType
+        }
+
         // Extract type arguments from the argument
         val typeArgs = extractTypeArgumentsFromArgument(argumentType)
-        
+
         // Check if we have polymorphic types (type variables)
         val hasPolymorphicTypes = typeArgs.any { it.startsWith("'") || it == "Unknown" }
-        
+
         if (hasPolymorphicTypes) {
             // For polymorphic types, use the ability declaration instead of a concrete implementation
             val abilityDeclaration = context["${abilityName}_ability"] as? com.funk.language.ast.FunkType.RecordType
@@ -8025,7 +8037,6 @@ class TypeChecker {
                     )
                 } else {
                     // Debug mode: just warn and continue
-                    println("Warning: $errorMessage")
                 }
             }
         }
@@ -8339,7 +8350,6 @@ class TypeChecker {
                 )
             } else {
                 // Debug mode: just warn and continue
-                println("Warning: $errorMessage")
             }
         }
         
