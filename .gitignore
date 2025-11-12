@@ -50,7 +50,6 @@ devenv.local.nix
 # pre-commit
 .pre-commit-config.yaml
 *.class
-com/
 
 # tests
 interpreter/result.txt
