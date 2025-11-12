@@ -2191,11 +2191,12 @@ class TypeChecker {
                                         )
                                     }
                                 } else {
-                                    // Instead of throwing, add constraint and continue
-                                    if (System.getProperty("funk.typecheck.debug") == "true") {
-                                        println("Warning: Effect call ${effectName}.${operationName} expects ${prettyPrintType(operationType.paramType)} but got ${prettyPrintType(argType)} - adding constraint")
-                                    }
-                                    constraints.add(Pair(argType, operationType.paramType))
+                                    // Type mismatch in effect operation call - throw an error
+                                    throw TypeCheckError(
+                                        "Type mismatch in effect operation ${effectName}.${operationName}: " +
+                                        "expected ${prettyPrintType(operationType.paramType)} but got ${prettyPrintType(argType)}",
+                                        expr
+                                    )
                                 }
                             }
                         }
