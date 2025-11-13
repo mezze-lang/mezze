@@ -88,7 +88,7 @@ class ComprehensiveEffectInterpreterTest {
             }
             
             # Direct effect calls with multiple handlers
-            perform Console, MathRandom in do
+            perform MathRandom, Console in do
               Log.print {msg = "Generating random number"}
               let num = Random.nextInt {min = 1, max = 10}
               Log.print {msg = "Generated: " ++ intToString {val = num}}
@@ -383,7 +383,7 @@ class ComprehensiveEffectInterpreterTest {
             }
             
             # Direct multiple effect calls
-            perform Console, DebugConsole in do
+            perform DebugConsole, Console in do
               Log.print {msg = "This is from Log effect"}
               Debug.log {msg = "This is from Debug effect"}
               "Mapping test complete"

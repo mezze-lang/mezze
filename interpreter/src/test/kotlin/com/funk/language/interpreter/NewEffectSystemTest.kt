@@ -112,7 +112,7 @@ class NewEffectSystemTest {
             
             let myFunction : {msg: String} -> {} <Log> = {msg} -> Log.info {msg = msg}
             
-            perform ConsoleLogger, Terminal in myFunction {msg = "Hello"}
+            perform Terminal, ConsoleLogger in myFunction {msg = "Hello"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -151,7 +151,7 @@ class NewEffectSystemTest {
                 "App result for " ++ name
             }
             
-            perform MyApp, ConsoleLogger, Terminal in App.run {name = "TestApp"}
+            perform Terminal, ConsoleLogger, MyApp in App.run {name = "TestApp"}
         """.trimIndent()
 
         val program = parser.parse(source)

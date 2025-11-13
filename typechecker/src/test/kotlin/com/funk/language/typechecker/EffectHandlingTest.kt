@@ -140,7 +140,7 @@ class EffectHandlingTest {
               value
 
             let onlyLogHandled = perform Console in multiEffectFunc {x = 42}
-            let bothHandled = perform Console, SystemRandom in multiEffectFunc {x = 42}
+            let bothHandled = perform SystemRandom, Console in multiEffectFunc {x = 42}
         """.trimIndent()
 
         val ast = parser.parse(source)
@@ -191,7 +191,7 @@ class EffectHandlingTest {
               Log.print {msg = "end"}
               value
 
-            let handledResult = perform Console, SystemRandom in multiEffectFunc {x = 42}
+            let handledResult = perform SystemRandom, Console in multiEffectFunc {x = 42}
         """.trimIndent()
 
         val ast = parser.parse(source)
@@ -231,7 +231,7 @@ class EffectHandlingTest {
               Log.print {msg = "start"}
               Random.nextInt {max = x}
 
-            let partiallyHandled = perform Console, SystemRandom in multiEffectFunc {x = 42}
+            let partiallyHandled = perform SystemRandom, Console in multiEffectFunc {x = 42}
         """.trimIndent()
 
         val ast = parser.parse(source)
@@ -356,7 +356,7 @@ class EffectHandlingTest {
               Log.print {msg = "end"}
               value2
 
-            let handledFunc = {x} -> perform Console, SystemRandom in composedFunc {x = x}
+            let handledFunc = {x} -> perform SystemRandom, Console in composedFunc {x = x}
         """.trimIndent()
 
         val ast = parser.parse(source)

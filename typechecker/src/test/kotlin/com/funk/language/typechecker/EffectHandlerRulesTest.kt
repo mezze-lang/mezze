@@ -210,7 +210,7 @@ class EffectHandlerRulesTest {
 
             let logMessage = { text } -> Log.info { msg = text }
 
-            perform HttpClient in (perform DiskFS in (perform CompositeLogger in logMessage { text = "test" }))
+            perform HttpClient, DiskFS, CompositeLogger in logMessage { text = "test" }
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -309,7 +309,7 @@ class EffectHandlerRulesTest {
 
             let logMessage = { text } -> Log.info { msg = text }
 
-            perform BasicLogger, EnhancedLogger in logMessage { text = "test" }
+            perform EnhancedLogger, BasicLogger in logMessage { text = "test" }
         """.trimIndent()
 
         val program = parser.parse(source)

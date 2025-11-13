@@ -141,13 +141,13 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
             
             impl Log for ConsoleLogger where {
-              log : {message: String} -> Unit = {message} -> unit
+              log : {message: String} -> {} = {message} -> {}
             }
             
             let fetchData: {table: String} -> String <Database, Log> = {table} ->
               Database.query {sql = "SELECT * FROM " ++ table}
             
-            perform MockDB, ConsoleLogger in fetchData {table = "users"}
+            perform ConsoleLogger, MockDB in fetchData {table = "users"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -186,7 +186,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
             
             impl Log for MockLogger where {
-              log : {message: String} -> Unit = {message} -> {}
+              log : {message: String} -> {} = {message} -> {}
             }
             
             impl SecureDatabase for MockSecureDB where {
@@ -197,7 +197,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
                   "unauthorized"
             }
             
-            perform MockSecureDB, MockDB, MockAuth, MockLogger in 
+            perform MockLogger, MockAuth, MockDB, MockSecureDB in
               SecureDatabase.secureQuery {sql = "SELECT * FROM users", token = "valid"}
         """.trimIndent()
 
@@ -225,7 +225,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
             
             impl Log for MockLogger where {
-              log : {message: String} -> Unit = {message} -> {}
+              log : {message: String} -> {} = {message} -> {}
             }
             
             perform MockLogger in do

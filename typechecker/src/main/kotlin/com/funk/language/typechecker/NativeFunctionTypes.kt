@@ -233,7 +233,7 @@ object NativeFunctionTypes {
         
         // Core functions from abilities.funk
         context["not"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("val" to FunkType.BooleanType)),
+            FunkType.RecordType(mapOf("b" to FunkType.BooleanType)),
             FunkType.BooleanType
         )
         

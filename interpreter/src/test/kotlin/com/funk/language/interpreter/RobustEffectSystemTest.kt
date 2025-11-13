@@ -130,7 +130,7 @@ class RobustEffectSystemTest {
               info : {msg: String} -> {} = {msg} -> {}
             }
             
-            perform Terminal, SimpleLogger in Log.info {msg = "Processing test"}
+            perform SimpleLogger, Terminal in Log.info {msg = "Processing test"}
         """.trimIndent()
 
         val program = parser.parse(source)

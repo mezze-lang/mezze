@@ -184,7 +184,7 @@ class RuntimeEffectValidationTest {
               value
             
             # Handle all effects
-            let result = perform Console, SystemRandom in multiEffectFunc {x = 10}
+            let result = perform SystemRandom, Console in multiEffectFunc {x = 10}
         """.trimIndent()
 
         val ast = parser.parse(source)

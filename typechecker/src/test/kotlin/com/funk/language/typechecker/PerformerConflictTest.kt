@@ -19,7 +19,7 @@ class PerformerConflictTest {
 
     @Test
     fun `test performer conflict - right to left consumption should fail`() {
-        // This should FAIL: EnhancedLogger expects to handle Log, but BasicLogger (rightmost) already consumed it
+        // This should FAIL: BasicLogger (rightmost) expects to handle Log, but EnhancedLogger (leftmost) already consumed it
         val source = """
             effect Log {
               info : {msg: String} -> {}
@@ -33,7 +33,7 @@ class PerformerConflictTest {
               info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] " ++ msg}
             }
 
-            perform EnhancedLogger, BasicLogger in Log.info {msg = "Test"}
+            perform BasicLogger, EnhancedLogger in Log.info {msg = "Test"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -64,7 +64,7 @@ class PerformerConflictTest {
               save : {data: String} -> {} = {data} -> native_print {msg = "[DB] " ++ data}
             }
             
-            perform Logger, DbHandler in do
+            perform DbHandler, Logger in do
               Log.info {msg = "Starting"}
               Database.save {data = "test"}
         """.trimIndent()
@@ -116,7 +116,7 @@ class PerformerConflictTest {
               save : {data: String} -> {} = {data} -> native_print {msg = "[DB] " ++ data}
             }
             
-            perform Logger, DbHandler in do
+            perform DbHandler, Logger in do
               Log.info {msg = "Starting"}
               Database.save {data = "test"}
         """.trimIndent()

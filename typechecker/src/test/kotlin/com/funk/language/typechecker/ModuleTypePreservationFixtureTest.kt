@@ -169,7 +169,7 @@ class ModuleTypePreservationFixtureTest {
         utilsModule.writeText("""
             pub let max_int: Int = 2147483647
             pub let min_int: Int = -2147483648
-            pub let is_positive: { n: Int } -> Boolean = { n } -> n > 0
+            pub let is_positive: { n: Int } -> Bool = { n } -> n > 0
             pub let abs: { n: Int } -> Int = { n } -> if n < 0 then -n else n
         """.trimIndent())
 

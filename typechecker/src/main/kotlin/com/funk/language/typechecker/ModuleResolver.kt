@@ -398,7 +398,13 @@ class ModuleResolver(
                         val funkType = fromContext ?: fromAnnotation ?: fromInferred ?: FunkType.VarType(TypeVar.fresh())
 
                         // DEBUG key items (only for specific debugging)
-                        if (System.getProperty("funk.typecheck.debug") == "true" && item.variableName == "info") {
+                        if (System.getProperty("funk.typecheck.debug") == "true" && item.variableName == "not") {
+                            println("\n=== extractExports DEBUG for 'not' ===")
+                            println("Variable name: ${item.variableName}")
+                            println("fromContext: $fromContext")
+                            println("fromAnnotation: $fromAnnotation")
+                            println("fromInferred: $fromInferred")
+                            println("Final funkType: $funkType")
                         }
 
                         exports[item.variableName] = ExportedItem(

@@ -141,7 +141,7 @@ class PerformerValidationTest {
               info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] " ++ msg}
             }
             
-            perform ConsoleLogger, Terminal in Log.info {msg = "Test"}
+            perform Terminal, ConsoleLogger in Log.info {msg = "Test"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -193,7 +193,7 @@ class PerformerValidationTest {
               info : {msg: String} -> {} = {msg} -> {}
             }
             
-            perform PostgresDB {host = "localhost", port = 5432}, FileLogger {path = "db.log"} in Database.query {sql = "SELECT 1"}
+            perform FileLogger {path = "db.log"}, PostgresDB {host = "localhost", port = 5432} in Database.query {sql = "SELECT 1"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -225,10 +225,10 @@ class PerformerValidationTest {
             
             let outerFunction : {} -> {} <Log> = {} -> Log.info {msg = "outer"}
             
-            let innerFunction : {} -> {} <Log> = {} -> 
-              perform ConsoleLogger, Terminal in Log.info {msg = "inner"}
-            
-            perform ConsoleLogger, Terminal in do
+            let innerFunction : {} -> {} <Log> = {} ->
+              perform Terminal, ConsoleLogger in Log.info {msg = "inner"}
+
+            perform Terminal, ConsoleLogger in do
               outerFunction {}
               innerFunction {}
         """.trimIndent()

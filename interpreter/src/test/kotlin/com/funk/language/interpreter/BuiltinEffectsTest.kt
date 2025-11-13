@@ -108,7 +108,7 @@ class BuiltinEffectsTest {
                 num
             
             # Execute with both handlers
-            let result = perform NativeConsole, NativeRandom in randomGreeting {name = "Test"}
+            let result = perform NativeRandom, NativeConsole in randomGreeting {name = "Test"}
             
             result
         """.trimIndent()
