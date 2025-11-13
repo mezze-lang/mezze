@@ -44,31 +44,6 @@ class NewEffectSystemTest {
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type
     }
 
-    @Test
-    fun testSameEffectPerformerReuse() {
-        // Test that a performer can delegate to another performer that's available in context
-        val source = """
-            effect Log {
-              info : {msg: String} -> {}
-            }
-            
-            impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " ++ msg}
-            }
-            
-            impl Log for EnhancedLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] " ++ msg}
-            }
-            
-            perform EnhancedLogger in Log.info {msg = "Test"}
-        """.trimIndent()
-
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
-
-        assertTrue(result is FunkRecord)
-    }
 
     @Test
     fun testParameterizedPerformer() {

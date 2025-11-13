@@ -61,33 +61,6 @@ class PerformerValidationTest {
     }
 
     @Test
-    fun testSameEffectPerformerReuseAllowed() {
-        val source = """
-            effect Log {
-              info : {msg: String} -> {}
-            }
-            
-            impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " ++ msg}
-            }
-            
-            # This should work - same effect reuse
-            impl Log for EnhancedLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] " ++ msg}
-            }
-            
-            perform EnhancedLogger in Log.info {msg = "Test"}
-        """.trimIndent()
-
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
-
-        assertTrue(result is FunkRecord)
-        assertEquals(0, (result as FunkRecord).fields.size) // Unit type
-    }
-
-    @Test
     fun testCrossEffectPerformerReuseNotAllowed() {
         val source = """
             effect Console {
@@ -180,19 +153,21 @@ class PerformerValidationTest {
             effect Database {
               query : {sql: String} -> String
             }
-            
+
             effect Log {
               info : {msg: String} -> {}
             }
-            
+
             impl Database for PostgresDB {host: String, port: Int} where {
-              query : {sql: String} -> String = {sql} -> host ++ ":" ++ intToString {val = port} ++ " -> " ++ sql
+              query : {sql: String} -> String <Log> = {sql} -> do
+                Log.info {msg = "Executing query on " ++ host ++ ":" ++ intToString {val = port}}
+                host ++ ":" ++ intToString {val = port} ++ " -> " ++ sql
             }
-            
+
             impl Log for FileLogger {path: String} where {
               info : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             perform FileLogger {path = "db.log"}, PostgresDB {host = "localhost", port = 5432} in Database.query {sql = "SELECT 1"}
         """.trimIndent()
 
@@ -241,33 +216,4 @@ class PerformerValidationTest {
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type
     }
 
-    @Test
-    fun testPerformerChaining() {
-        val source = """
-            effect Log {
-              info : {msg: String} -> {}
-            }
-            
-            impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[BASIC] " ++ msg}
-            }
-            
-            impl Log for PrefixLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[PREFIX] " ++ msg}
-            }
-            
-            impl Log for TimestampLogger where {
-              info : {msg: String} -> {} = {msg} -> PrefixLogger.info {msg = "[2024-01-01] " ++ msg}
-            }
-            
-            perform TimestampLogger in Log.info {msg = "Hello"}
-        """.trimIndent()
-
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
-
-        assertTrue(result is FunkRecord)
-        assertEquals(0, (result as FunkRecord).fields.size) // Unit type
-    }
 }

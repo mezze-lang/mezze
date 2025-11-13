@@ -56,81 +56,25 @@ class RobustEffectSystemTest {
     }
 
     @Test
-    fun testSameEffectPerformerReuse() {
-        val source = """
-            effect Log {
-              info : {msg: String} -> {}
-            }
-            
-            impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " ++ msg}
-            }
-            
-            impl Log for EnhancedLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] " ++ msg}
-            }
-            
-            perform EnhancedLogger in Log.info {msg = "Test"}
-        """.trimIndent()
-
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
-
-        assertTrue(result is FunkRecord)
-        assertEquals(0, (result as FunkRecord).fields.size) // Unit type
-    }
-
-    @Test
-    fun testPerformerChaining() {
-        val source = """
-            effect Log {
-              info : {msg: String} -> {}
-            }
-            
-            impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[BASIC] " ++ msg}
-            }
-            
-            impl Log for PrefixLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[PREFIX] " ++ msg}
-            }
-            
-            impl Log for TimestampLogger where {
-              info : {msg: String} -> {} = {msg} -> PrefixLogger.info {msg = "[2024-01-01] " ++ msg}
-            }
-            
-            perform TimestampLogger in Log.info {msg = "Hello"}
-        """.trimIndent()
-
-        val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
-
-        assertTrue(result is FunkRecord)
-        assertEquals(0, (result as FunkRecord).fields.size) // Unit type
-    }
-
-    @Test
     fun testMultipleEffectTypes() {
         val source = """
             effect Console {
               print : {msg: String} -> {}
             }
-            
+
             effect Log {
               info : {msg: String} -> {}
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             impl Log for SimpleLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: String} -> {} <Console> = {msg} -> Console.print {msg = "[LOG] " ++ msg}
             }
-            
-            perform SimpleLogger, Terminal in Log.info {msg = "Processing test"}
+
+            perform Terminal, SimpleLogger in Log.info {msg = "Processing test"}
         """.trimIndent()
 
         val program = parser.parse(source)
