@@ -145,6 +145,35 @@ class AbilityValidationTest {
         assertNotNull(typedProgram, "Ability with dependencies should pass")
     }
 
+    @Test
+    fun `test ability with generic types`() {
+        val source = """
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            impl Show (List Int) where {
+              show: {val: List Int} -> String = {val} -> "list"
+            }
+
+            impl Show (Option String) where {
+              show: {val: Option String} -> String = {val} -> match val is
+                Some {val} -> val
+                None -> "none"
+            }
+
+            let displayList = {value} -> Show.show {val = value}
+            let displayOpt = {value} -> Show.show {val = value}
+
+            displayList {value = [1, 2, 3]}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program)
+
+        assertNotNull(typedProgram, "Ability with generic types (List, Option) should pass")
+    }
+
     // ========== FAILING TESTS ==========
 
     @Test

@@ -8,7 +8,7 @@ pub effect Environment {
     set_env: { name: String, value: String } -> {},
     
     # Get all environment variables
-    get_all_env: {} -> [String],
+    get_all_env: {} -> [{ key: String, value: String }],
     
     # Get current working directory
     current_dir: {} -> String,
@@ -46,7 +46,7 @@ pub impl Environment for SystemEnvironment where {
 
 # Mock environment for testing
 pub impl Environment for MockEnvironment {
-    env_vars: [String],
+    env_vars: [{ key: String, value: String }],
     current_directory: String,
     mock_os: String
 } where {
