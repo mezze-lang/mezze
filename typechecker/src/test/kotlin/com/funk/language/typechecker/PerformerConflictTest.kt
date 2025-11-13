@@ -24,23 +24,24 @@ class PerformerConflictTest {
             effect Log {
               info : {msg: String} -> {}
             }
-            
+
             impl Log for BasicLogger where {
               info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " ++ msg}
             }
-            
+
             impl Log for EnhancedLogger where {
               info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] " ++ msg}
             }
-            
+
             perform EnhancedLogger, BasicLogger in Log.info {msg = "Test"}
         """.trimIndent()
 
         val program = parser.parse(source)
-        
-        // Our permissive type checker handles performer conflicts gracefully
-        val typedProgram = typeChecker.typeCheck(program)
-        assertNotNull(typedProgram)
+
+        // This should now correctly fail: we can't apply two handlers to the same single effect usage
+        assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(program)
+        }
     }
 
     @Test

@@ -906,31 +906,46 @@ class FunkParser {
                                 when (lbrace) {
                                     is ParseResult.Success -> {
                                         val stream5 = skipNewlines(lbrace.remaining)
+                                        // Parse operations separated by newlines or commas (both supported)
+                                        val operations = mutableListOf<AbilityOperation>()
+                                        var currentStream = stream5
 
-                                        // Parse operations (separated by newlines, not commas)
-                                        val operations = manyWithNewlines(abilityOperationParser)(stream5)
+                                        while (true) {
+                                            when (val op = abilityOperationParser(currentStream)) {
+                                                is ParseResult.Success -> {
+                                                    operations.add(op.value)
+                                                    currentStream = skipNewlines(op.remaining)
 
-                                        when (operations) {
-                                            is ParseResult.Success -> {
-                                                val stream6 = skipNewlines(operations.remaining)
-                                                val rbrace = tok(TokenType.RBRACE)(stream6)
-
-                                                when (rbrace) {
-                                                    is ParseResult.Success -> ParseResult.Success(
-                                                        AbilityDeclaration(
-                                                            name.value.text,
-                                                            visibility,
-                                                            typeParams,
-                                                            emptyList(),  // constraints (for function ability constraints)
-                                                            dependencies,  // dependencies from 'with' clause
-                                                            operations.value
-                                                        ),
-                                                        rbrace.remaining
-                                                    )
-                                                    is ParseResult.Failure -> rbrace
+                                                    // Optionally consume a comma
+                                                    when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                        is ParseResult.Success -> {
+                                                            currentStream = skipNewlines(comma.remaining)
+                                                        }
+                                                        is ParseResult.Failure -> {
+                                                            // No comma, that's fine - continue to next operation or end
+                                                        }
+                                                    }
                                                 }
+                                                is ParseResult.Failure -> break
                                             }
-                                            is ParseResult.Failure -> operations
+                                        }
+
+                                        val stream6 = skipNewlines(currentStream)
+                                        val rbrace = tok(TokenType.RBRACE)(stream6)
+
+                                        when (rbrace) {
+                                            is ParseResult.Success -> ParseResult.Success(
+                                                AbilityDeclaration(
+                                                    name.value.text,
+                                                    visibility,
+                                                    typeParams,
+                                                    emptyList(),  // constraints (for function ability constraints)
+                                                    dependencies,  // dependencies from 'with' clause
+                                                    operations
+                                                ),
+                                                rbrace.remaining
+                                            )
+                                            is ParseResult.Failure -> rbrace
                                         }
                                     }
                                     is ParseResult.Failure -> lbrace
@@ -1042,27 +1057,43 @@ class FunkParser {
                                             is ParseResult.Success -> {
                                                 val stream5 = skipNewlines(lbrace.remaining)
 
-                                                // Parse operations (separated by newlines, not commas)
-                                                val operations = manyWithNewlines(implAbilityOperationParser)(stream5)
+                                                // Parse operations separated by newlines or commas (both supported)
+                                                val operations = mutableListOf<ImplAbilityOperation>()
+                                                var currentStream = stream5
 
-                                                when (operations) {
-                                                    is ParseResult.Success -> {
-                                                        val stream6 = skipNewlines(operations.remaining)
-                                                        val rbrace = tok(TokenType.RBRACE)(stream6)
+                                                while (true) {
+                                                    when (val op = implAbilityOperationParser(currentStream)) {
+                                                        is ParseResult.Success -> {
+                                                            operations.add(op.value)
+                                                            currentStream = skipNewlines(op.remaining)
 
-                                                        when (rbrace) {
-                                                            is ParseResult.Success -> ParseResult.Success(
-                                                                ImplAbilityDeclaration(
-                                                                    abilityName.value.text,
-                                                                    targetTypes,
-                                                                    operations.value
-                                                                ),
-                                                                rbrace.remaining
-                                                            )
-                                                            is ParseResult.Failure -> rbrace
+                                                            // Optionally consume a comma
+                                                            when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                                is ParseResult.Success -> {
+                                                                    currentStream = skipNewlines(comma.remaining)
+                                                                }
+                                                                is ParseResult.Failure -> {
+                                                                    // No comma, that's fine - continue to next operation or end
+                                                                }
+                                                            }
                                                         }
+                                                        is ParseResult.Failure -> break
                                                     }
-                                                    is ParseResult.Failure -> operations
+                                                }
+
+                                                val stream6 = skipNewlines(currentStream)
+                                                val rbrace = tok(TokenType.RBRACE)(stream6)
+
+                                                when (rbrace) {
+                                                    is ParseResult.Success -> ParseResult.Success(
+                                                        ImplAbilityDeclaration(
+                                                            abilityName.value.text,
+                                                            targetTypes,
+                                                            operations
+                                                        ),
+                                                        rbrace.remaining
+                                                    )
+                                                    is ParseResult.Failure -> rbrace
                                                 }
                                             }
                                             is ParseResult.Failure -> lbrace
