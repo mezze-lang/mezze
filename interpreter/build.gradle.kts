@@ -3,19 +3,9 @@ plugins {
     kotlin("kapt") // Re-enable for Truffle annotation processing
 }
 
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-    kotlinOptions {
-        jvmTarget = "21"
-    }
-}
-
-tasks.withType<JavaCompile> {
-    options.release.set(21)
-}
-
 // Enable annotation processing
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(24)
 }
 
 dependencies {

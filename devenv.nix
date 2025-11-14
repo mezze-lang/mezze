@@ -1,29 +1,60 @@
-{
-  pkgs,
-  lib,
-  config,
-  inputs,
-  ...
-}:
+{ pkgs, lib, config, inputs, ... }:
+
 let
   pkgs-unstable = import inputs.nixpkgs-unstable { system = pkgs.stdenv.system; };
+
+  # Prebuilt GraalVM for Linux
+  graalvm-oracle-linux-prebuilt =
+    if pkgs.stdenv.isLinux then
+      pkgs.stdenv.mkDerivation rec {
+        pname = "graalvm-oracle-24-linux";
+        version = "24.0.2";
+
+        src = pkgs.fetchurl {
+          url = "https://download.oracle.com/graalvm/24/archive/graalvm-jdk-24.0.2_linux-x64_bin.tar.gz";
+          sha256 = "1blv4lh4jgpy8mlmwxv3whamlah5p2mxybakjw3g9l61pd4il5mh";
+        };
+
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+
+        unpackPhase = ''
+          mkdir -p $out
+          tar -xzf $src --strip-components=1 -C $out
+        '';
+
+        installPhase = "true";
+
+        # Expose 'home' attribute for devenv
+        home = "$out";
+      }
+    else
+      pkgs-unstable.graalvmPackages.graalvm-oracle;
+
 in
 {
   packages = [
     pkgs-unstable.kotlin
-    pkgs-unstable.graalvmPackages.graalvm-oracle
+    graalvm-oracle-linux-prebuilt
+    pkgs.zlib
+    pkgs.gcc
   ];
 
   languages = {
     java = {
       enable = true;
-      jdk.package = pkgs-unstable.graalvmPackages.graalvm-oracle;
+      jdk.package = graalvm-oracle-linux-prebuilt;
       gradle.enable = true;
     };
   };
 
+  # Set environment variables for Gradle and other Java tools
+  env = {
+    JAVA_HOME = lib.mkForce "${graalvm-oracle-linux-prebuilt}";
+    JAVA_OPTS = "--enable-native-access=ALL-UNNAMED";
+    LIBRARY_PATH = "${pkgs.zlib}/lib:${pkgs.stdenv.cc.cc.lib}/lib";
+  };
+
   scripts = {
-    # Basic build commands
     build.exec = ''
       echo "🔨 Building Funk language..."
       gradle build
@@ -39,23 +70,22 @@ in
       gradle test
     '';
 
-    # Development CLI (JAR-based, faster builds)
     funk-dev.exec = ''
       if [ ! -f "./cli/build/libs/funk.jar" ]; then
         echo "❌ JAR not found. Building it first..."
         gradle build
       fi
-      java \
-        $JAVA_OPTS \
-        --enable-native-access=ALL-UNNAMED \
+      java $JAVA_OPTS \
         -Dpolyglot.engine.WarnInterpreterOnly=false \
         -Dtruffle.TruffleRuntime=com.oracle.truffle.api.impl.DefaultTruffleRuntime \
         -jar ./cli/build/libs/funk.jar "$@"
     '';
 
-    # Native binary build and execution
     build-native.exec = ''
       echo "🚀 Building native Funk binary..."
+      export PATH="${graalvm-oracle-linux-prebuilt}/bin:${pkgs.gcc}/bin:$PATH"
+      export ZLIB_LIB_PATH="${pkgs.zlib}/lib"
+
       gradle build
       gradle :cli:nativeCompile
 
@@ -99,7 +129,6 @@ in
     echo ""
   '';
 
-  # https://devenv.sh/tests/
   enterTest = ''
     echo "Running environment tests"
     java -version

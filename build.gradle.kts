@@ -1,6 +1,7 @@
 plugins {
     kotlin("jvm") version "2.0.21" apply false
     kotlin("plugin.serialization") version "2.0.21" apply false
+    java // Needed for java { toolchain { ... } } in root project
 }
 
 allprojects {
@@ -15,9 +16,23 @@ allprojects {
 
 subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
-    
+    apply(plugin = "java") // required for java { toolchain { ... } }
+
+    // Kotlin toolchain (use 24 which is available, Kotlin will fallback to JVM 22 target automatically)
     configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> {
-        jvmToolchain(21)
+        jvmToolchain(24)
+    }
+
+    // Java toolchain (use GraalVM 24, but target 22 bytecode to match Kotlin)
+    java {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(24))
+        }
+    }
+
+    // Ensure Java bytecode targets JVM 22 (to match Kotlin's fallback from 24)
+    tasks.withType<JavaCompile> {
+        options.release.set(22)
     }
 
     dependencies {

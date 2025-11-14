@@ -12,14 +12,8 @@ application {
     applicationName = "funk"
 }
 
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-    kotlinOptions {
-        jvmTarget = "21"  // GraalVM 24.0.2 supports JDK 21 features
-    }
-}
-
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(24)
 }
 
 dependencies {
@@ -111,23 +105,35 @@ graalvmNative {
         named("main") {
             imageName.set("funk")
             mainClass.set("com.funk.language.cli.MainKt")
-            buildArgs.addAll(
+
+            // Get zlib path from environment or use default
+            val zlibLibPath = System.getenv("ZLIB_LIB_PATH") ?: ""
+
+            val args = mutableListOf(
+                // Unlock experimental options FIRST
+                "-H:+UnlockExperimentalVMOptions",
+
                 // Core native image settings for GraalVM 24.0.2
                 "--no-fallback",
                 "-H:+ReportExceptionStackTraces",
                 "-H:+AllowVMInspection",
-                "-H:-CheckToolchain",
-                
+                "-H:-CheckToolchain"
+            )
+
+            // Add zlib library path if available
+            if (zlibLibPath.isNotEmpty()) {
+                args.add("-H:NativeLinkerOption=-L$zlibLibPath")
+                args.add("-H:NativeLinkerOption=-Wl,-rpath,$zlibLibPath")
+            }
+
+            args.addAll(listOf(
                 // Essential Polyglot support
                 "-H:IncludeResources=META-INF/truffle-languages/.*",
                 "-H:IncludeResources=META-INF/services/.*",
 
                 // Include stdlib as resources
                 "-H:IncludeResources=std/.*\\.funk",
-                
-                // Enable experimental options
-                "-H:+UnlockExperimentalVMOptions",
-                
+
                 // Include all charsets for language support
                 "-H:+AddAllCharsets",
                 
@@ -140,7 +146,9 @@ graalvmNative {
                 
                 // Initialize all our interpreter classes at build time (safer approach)
                 "--initialize-at-build-time=com.funk.language.interpreter"
-            )
+            ))
+
+            buildArgs.addAll(args)
         }
     }
 }
