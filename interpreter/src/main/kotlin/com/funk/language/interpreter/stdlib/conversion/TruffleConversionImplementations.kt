@@ -24,13 +24,35 @@ object TruffleConversionImplementations {
         // To string conversions
         context["intToString"] = NativeFunkFunction("intToString") { args ->
             val record = args[0] as FunkRecord
-            val value = record.fields["val"] as? FunkInt ?: throw NativeFunctionException("intToString", "expects 'val' as Int")
+            val value = record.fields["n"] as? FunkInt ?: throw NativeFunctionException("intToString", "expects 'n' as Int")
             FunkString(value.value.toString())
         }
 
         // Hidden native version for int module
         context["__native_int_to_string"] = context["intToString"]!!
-        
+
+        // Convert String to Int (returns Option)
+        context["__native_int_from_string"] = NativeFunkFunction("__native_int_from_string") { args ->
+            val record = args[0] as FunkRecord
+            val s = record.fields["s"] as? FunkString ?: throw NativeFunctionException("__native_int_from_string", "expects 's' as String")
+
+            try {
+                val intValue = s.value.toLong()
+                // Some { val = int_value }
+                FunkVariant("Some", FunkRecord(mapOf("val" to FunkInt(intValue))))
+            } catch (e: NumberFormatException) {
+                // None
+                FunkVariant("None", null)
+            }
+        }
+
+        // Convert Nat to Int
+        context["__native_int_from_nat"] = NativeFunkFunction("__native_int_from_nat") { args ->
+            val record = args[0] as FunkRecord
+            val n = record.fields["n"] as? FunkNat ?: throw NativeFunctionException("__native_int_from_nat", "expects 'n' as Nat")
+            FunkInt(n.value.toLong())
+        }
+
         context["floatToString"] = NativeFunkFunction("floatToString") { args ->
             val record = args[0] as FunkRecord
             val value = record.fields["n"] as? FunkFloat ?: throw NativeFunctionException("floatToString", "expects 'n' as Float")

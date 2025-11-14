@@ -306,7 +306,7 @@ class AbilityMethodCallTest {
             }
 
             impl Eq Bool where {
-                eq: {x: Bool, y: Bool} -> Bool = {x, y} -> if x then y else not {val = y}
+                eq: {x: Bool, y: Bool} -> Bool = {x, y} -> if x then y else not {b = y}
             }
 
             let showIfEqual = {x, y} ->

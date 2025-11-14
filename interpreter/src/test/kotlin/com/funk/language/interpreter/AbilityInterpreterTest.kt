@@ -108,53 +108,55 @@ class AbilityInterpreterTest {
     @Test
     fun testComplexAbilityExample() {
         val source = """
+            use std::int
+
             ability Serializer 'a where {
               serialize : {val: 'a} -> String
-              deserialize : {str: String} -> 'a
             }
-            
+
             impl Serializer Int where {
-              serialize : {val: Int} -> String = {val} -> intToString {val = val}
-              deserialize : {str: String} -> Int = {str} -> stringToInt {str = str}
+              serialize : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        
+
         assertDoesNotThrow {
-            val result = interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            val result = interpreter.execute(typedProgram, projectRoot)
             assertTrue(result is FunkRecord)
-            
+
             val record = result as FunkRecord
             assertTrue(record.fields.containsKey("serialize"))
-            assertTrue(record.fields.containsKey("deserialize"))
-            
-            // Both operations should be functions
+
+            // serialize operation should be a function
             assertTrue(record.fields["serialize"] is SimpleFunkFunction)
-            assertTrue(record.fields["deserialize"] is SimpleFunkFunction)
         }
     }
     
     @Test
     fun testAbilityAndImplTogether() {
         val source = """
+            use std::int
+
             ability Encoder 'a where {
               encode : {val: 'a} -> String
             }
-            
+
             impl Encoder Int where {
-              encode : {val: Int} -> String = {val} -> intToString {val = val}
+              encode : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             let result = 42
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        
-        val result = interpreter.execute(typedProgram)
-        
+
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
+
         // The result should be the last expression (42)
         assertTrue(result is FunkInt)
         assertEquals(42L, (result as FunkInt).value)

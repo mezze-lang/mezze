@@ -120,7 +120,7 @@ class EffectHandlerRulesTest {
             }
 
             effect Auth {
-              check: { token: String } -> Bool
+              check: { token: String } -> Boolean
             }
 
             impl Database for PostgresDB where {
@@ -128,7 +128,7 @@ class EffectHandlerRulesTest {
             }
 
             impl Auth for DatabaseAuth where {
-              check: { token: String } -> Bool <Database> = { token } -> do
+              check: { token: String } -> Boolean <Database> = { token } -> do
                 let results = Database.query { sql = "SELECT * FROM tokens" }
                 results.length > 0
             }

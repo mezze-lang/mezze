@@ -49,12 +49,14 @@ class AbilityValidationTest {
     @Test
     fun `test ability with type parameter specialization`() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show: {val: 'a} -> String
             }
 
             impl Show Int where {
-              show: {val: Int} -> String = {val} -> intToString {n = val}
+              show: {val: Int} -> String = {val} -> int::to_string {n = val}
             }
 
             let display = {value} -> Show.show {val = value}
@@ -71,12 +73,17 @@ class AbilityValidationTest {
     @Test
     fun `test multi-parameter ability`() {
         val source = """
+            use std::int
+
             ability Convert 'from 'to where {
               convert: {value: 'from} -> 'to
             }
 
             impl Convert String Int where {
-              convert: {value: String} -> Int = {value} -> parseInt {str = value}
+              convert: {value: String} -> Int = {value} ->
+                match int::from_string {s = value} is
+                  Some {val} -> val
+                  None -> 0
             }
 
             let transform = {value} -> Convert.convert {value = value}
@@ -93,12 +100,14 @@ class AbilityValidationTest {
     @Test
     fun `test ability with record types`() {
         val source = """
+            use std::int
+
             ability Display 'a where {
               display: {val: 'a} -> {text: String}
             }
 
             impl Display Int where {
-              display: {val: Int} -> {text: String} = {val} -> {text = intToString {n = val}}
+              display: {val: Int} -> {text: String} = {val} -> {text = int::to_string {n = val}}
             }
 
             let render = {value} -> Display.display {val = value}
@@ -130,7 +139,7 @@ class AbilityValidationTest {
             }
 
             impl Ord String where {
-              compare: {l: String, r: String} -> Int = {l, r} -> stringCompare {a = l, b = r},
+              compare: {l: String, r: String} -> Int = {l, r} -> if stringEquals {a = l, b = r} then 0 else if l < r then -1 else 1,
               lt: {l: String, r: String} -> Bool = {l, r} -> (Ord.compare {l = l, r = r}) < 0,
               gt: {l: String, r: String} -> Bool = {l, r} -> (Ord.compare {l = l, r = r}) > 0
             }

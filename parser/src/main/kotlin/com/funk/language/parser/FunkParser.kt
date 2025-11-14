@@ -1114,6 +1114,7 @@ class FunkParser {
 
     private val implAbilityOperationParser: Parser<ImplAbilityOperation> = { stream ->
         // Parse: operationName : ParamType -> ReturnType = implementation
+        //   or:  operationName = implementation (type inferred from ability declaration)
         val name = identifierParser(stream)
         when (name) {
             is ParseResult.Success -> {
@@ -1122,6 +1123,7 @@ class FunkParser {
 
                 when (colon) {
                     is ParseResult.Success -> {
+                        // With explicit type annotation
                         val stream2 = skipNewlines(colon.remaining)
                         val functionType = functionTypeAnnotation(stream2)
 
@@ -1159,7 +1161,30 @@ class FunkParser {
                             is ParseResult.Failure -> functionType
                         }
                     }
-                    is ParseResult.Failure -> colon
+                    is ParseResult.Failure -> {
+                        // No colon, try without type annotation
+                        val assign = tok(TokenType.ASSIGN)(stream1)
+                        when (assign) {
+                            is ParseResult.Success -> {
+                                val stream2 = skipNewlines(assign.remaining)
+                                val impl = expression(stream2)
+
+                                when (impl) {
+                                    is ParseResult.Success -> ParseResult.Success(
+                                        ImplAbilityOperation(
+                                            name.value.text,
+                                            null,  // Type will be inferred by typechecker
+                                            null,  // Type will be inferred by typechecker
+                                            impl.value
+                                        ),
+                                        impl.remaining
+                                    )
+                                    is ParseResult.Failure -> impl
+                                }
+                            }
+                            is ParseResult.Failure -> assign
+                        }
+                    }
                 }
             }
             is ParseResult.Failure -> name

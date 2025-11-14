@@ -62,12 +62,15 @@ class BasicAbilitiesInterpreterTest {
     @Test
     fun testNativeFunctionCall() {
         val source = """
-            intToString {val = 42}
+            use std::int
+
+            int::to_string {n = 42}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("42", (result as FunkString).value)

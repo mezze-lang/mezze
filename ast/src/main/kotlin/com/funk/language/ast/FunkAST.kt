@@ -728,10 +728,10 @@ data class PerformerParameter(
 @Serializable
 data class PerformerOperation(
     val name: String,
-    val paramType: TypeAnnotation,
-    val returnType: TypeAnnotation,
+    val paramType: TypeAnnotation?,  // Optional - can be inferred from effect declaration
+    val returnType: TypeAnnotation?, // Optional - can be inferred from effect declaration
     val implementation: Expression,
-    val effects: EffectRowAnnotation? = null
+    val effects: EffectRowAnnotation? = null  // Optional - can be inferred if not specified
 )
 
 // Keep ImplOperation for backward compatibility during transition
@@ -780,8 +780,8 @@ data class AbilityOperation(
 @Serializable
 data class ImplAbilityOperation(
     val name: String,
-    val paramType: TypeAnnotation,
-    val returnType: TypeAnnotation,
+    val paramType: TypeAnnotation?,  // Optional - can be inferred from ability declaration
+    val returnType: TypeAnnotation?, // Optional - can be inferred from ability declaration
     val implementation: Expression
 )
 

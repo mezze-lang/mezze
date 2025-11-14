@@ -59,7 +59,7 @@ class OpenRecordFixtureTest {
             is com.funk.language.ast.FunkType.FracType -> "Frac"
             is com.funk.language.ast.FunkType.NatType -> "Nat"
             is com.funk.language.ast.FunkType.StringType -> "String"
-            is com.funk.language.ast.FunkType.BooleanType -> "Boolean"
+            is com.funk.language.ast.FunkType.BooleanType -> "Bool"
             is com.funk.language.ast.FunkType.NumType -> "Num ${type.constraint}"
             is com.funk.language.ast.FunkType.RecordType -> {
                 val fields = type.fields.map { (name, fieldType) -> "$name: ${prettyPrintType(fieldType)}" }
@@ -204,7 +204,7 @@ class OpenRecordFixtureTest {
     @Test
     fun `function inference with open records`() {
         val source = """
-            let processOpen = {record} -> {record | processed = true}
+            let processOpen = {record} -> {...record, processed = true}
             let testRecord = {name = "test", value = 123, ...}
             let result = processOpen {record = testRecord}
         """.trimIndent()

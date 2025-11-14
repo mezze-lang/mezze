@@ -119,7 +119,8 @@ class PerformerValidationTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type
@@ -141,7 +142,8 @@ class PerformerValidationTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type
@@ -150,6 +152,8 @@ class PerformerValidationTest {
     @Test
     fun testMultipleParameterizedPerformers() {
         val source = """
+            use std::int
+
             effect Database {
               query : {sql: String} -> String
             }
@@ -160,8 +164,8 @@ class PerformerValidationTest {
 
             impl Database for PostgresDB {host: String, port: Int} where {
               query : {sql: String} -> String <Log> = {sql} -> do
-                Log.info {msg = "Executing query on " ++ host ++ ":" ++ intToString {val = port}}
-                host ++ ":" ++ intToString {val = port} ++ " -> " ++ sql
+                Log.info {msg = "Executing query on " ++ host ++ ":" ++ int::to_string {n = port}}
+                host ++ ":" ++ int::to_string {n = port} ++ " -> " ++ sql
             }
 
             impl Log for FileLogger {path: String} where {
@@ -173,7 +177,8 @@ class PerformerValidationTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("localhost:5432 -> SELECT 1", (result as FunkString).value)
@@ -210,7 +215,8 @@ class PerformerValidationTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type

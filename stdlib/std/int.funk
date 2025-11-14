@@ -22,6 +22,12 @@ pub let modulo = { l: Int, r: Int } ->
 pub let to_string = { n: Int } ->
     __native_int_to_string { n = n }
 
+pub let from_string = { s: String } ->
+    __native_int_from_string { s = s }
+
+pub let from_nat = { n: Nat } ->
+    __native_int_from_nat { n = n }
+
 # Utility functions for integers
 pub let abs = { n: Int } ->
     if n < 0 then -n else n

@@ -30,7 +30,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -45,7 +46,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -67,7 +69,8 @@ class FunkInterpreterComprehensiveTest {
         }
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -83,7 +86,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -101,7 +105,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -119,7 +124,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -136,7 +142,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -151,7 +158,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -167,7 +175,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -183,7 +192,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -199,7 +209,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -218,7 +229,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -234,7 +246,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -252,7 +265,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -272,7 +286,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -290,7 +305,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -312,7 +328,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -333,7 +350,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -349,22 +367,26 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
     @Test
     fun testNativeBuiltinFunctions() {
         val source = """
-            let str = intToString {val = 42}
+            use std::int
+
+            let str = int::to_string {n = 42}
             let num = stringToInt {val = "123"}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast)
-        
+
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 
@@ -386,7 +408,8 @@ class FunkInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast)
         
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+            interpreter.execute(typedProgram, projectRoot)
         }
     }
 }

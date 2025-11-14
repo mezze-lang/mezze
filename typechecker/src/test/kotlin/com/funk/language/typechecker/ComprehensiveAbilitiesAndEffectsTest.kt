@@ -17,7 +17,6 @@ class ComprehensiveAbilitiesAndEffectsTest {
 
     @BeforeEach
     fun setup() {
-        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         parser = FunkParser()
         typeChecker = TypeChecker()
     }
@@ -25,14 +24,16 @@ class ComprehensiveAbilitiesAndEffectsTest {
     @Test
     fun testBasicAbilityDeclarationAndImplementation() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
+
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> intToString {val = val}
+              show : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             let displayValue: {val: 'a} -> String with Show 'a = {val} -> Show.show {val = val}
         """.trimIndent()
 
@@ -94,20 +95,22 @@ class ComprehensiveAbilitiesAndEffectsTest {
     @Test
     fun testSimpleAbilityDeclaration() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
+
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> intToString {val = val}
+              show : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             let displayValue: {val: 'a} -> String with Show 'a = {val} -> Show.show {val = val}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        
+
         // Should not throw
         assertTrue(true)
     }
@@ -115,17 +118,19 @@ class ComprehensiveAbilitiesAndEffectsTest {
     @Test
     fun testFunctionWithAbilityConstraints() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
+
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> intToString {val = val}
+              show : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             let displayValue: {val: 'a} -> String with Show 'a = {val} ->
               Show.show {val = val}
-            
+
             let result = displayValue {val = 42}
         """.trimIndent()
 
@@ -147,14 +152,16 @@ class ComprehensiveAbilitiesAndEffectsTest {
     @Test
     fun testMultiParameterAbilities() {
         val source = """
+            use std::int
+
             ability Convert 'a 'b where {
               convert : {val: 'a} -> 'b
             }
-            
+
             impl Convert Int String where {
-              convert : {val: Int} -> String = {val} -> intToString {val = val}
+              convert : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             let result = Convert.convert {val = 42}
         """.trimIndent()
 
@@ -177,16 +184,18 @@ class ComprehensiveAbilitiesAndEffectsTest {
     @Test
     fun testBasicEffectPropagation() {
         val source = """
+            use std::int
+
             effect Database {
               query : {sql: String} -> String <Log>
             }
-            
+
             effect Log {
               log : {message: String} -> Unit <>
             }
-            
+
             let fetchUser: {id: Int} -> String <Database, Log> = {id} ->
-              Database.query {sql = "SELECT * FROM users WHERE id = " ++ intToString {val = id}}
+              Database.query {sql = "SELECT * FROM users WHERE id = " ++ int::to_string {n = id}}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -208,24 +217,26 @@ class ComprehensiveAbilitiesAndEffectsTest {
     @Test
     fun testNestedEffectPropagation() {
         val source = """
+            use std::int
+
             effect Auth {
               authenticate : {token: String} -> Boolean <>
             }
-            
+
             effect Database {
               query : {sql: String} -> String <Log>
             }
-            
+
             effect Log {
               log : {message: String} -> Unit <>
             }
-            
+
             effect SecureDatabase {
               secureQuery : {sql: String, token: String} -> String <Database, Auth, Log>
             }
-            
+
             let secureUserFetch: {id: Int, token: String} -> String <SecureDatabase, Database, Auth, Log> = {id, token} ->
-              SecureDatabase.secureQuery {sql = "SELECT * FROM users WHERE id = " ++ intToString {val = id}, token = token}
+              SecureDatabase.secureQuery {sql = "SELECT * FROM users WHERE id = " ++ int::to_string {n = id}, token = token}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -254,14 +265,14 @@ class ComprehensiveAbilitiesAndEffectsTest {
             effect Log {
               log : {message: String} -> Unit <>
             }
-            
+
             impl Log for ConsoleLogger where {
-              log : {message: String} -> Unit = {message} -> unit
+              log : {message: String} -> Unit = {message} -> {}
             }
-            
-            let loggedOperation: {value: Int} -> Int <Log> = {value} -> 
+
+            let loggedOperation: {value: Int} -> Int <Log> = {value} ->
               value * 2
-            
+
             let result = perform ConsoleLogger in loggedOperation {value = 42}
         """.trimIndent()
 
@@ -290,18 +301,20 @@ class ComprehensiveAbilitiesAndEffectsTest {
     @Test
     fun testAbilityConstraintValidation() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
+
             # Missing implementation for Boolean
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> intToString {val = val}
+              show : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             let showValue: {val: 'a} -> String with Show 'a = {val} ->
               Show.show {val = val}
-            
+
             # This should fail - no Show Boolean implementation
             let result = showValue {val = true}
         """.trimIndent()
@@ -316,27 +329,29 @@ class ComprehensiveAbilitiesAndEffectsTest {
     @Test
     fun testComplexAbilityAndEffectInteraction() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
+
             effect Log {
               log : {message: String} -> Unit <>
             }
-            
+
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> intToString {val = val}
+              show : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             impl Log for ConsoleLogger where {
-              log : {message: String} -> Unit = {message} -> unit
+              log : {message: String} -> Unit = {message} -> {}
             }
-            
+
             let loggedShow: {val: 'a} -> String <Log> with Show 'a = {val} -> do
               let str = Show.show {val = val}
               Log.log {message = "Showing value: " ++ str}
               str
-            
+
             let result = perform ConsoleLogger in loggedShow {val = 42}
         """.trimIndent()
 

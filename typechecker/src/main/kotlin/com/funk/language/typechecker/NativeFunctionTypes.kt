@@ -19,7 +19,7 @@ object NativeFunctionTypes {
         
         // Type conversion functions
         context["intToString"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("val" to FunkType.IntType)),
+            FunkType.RecordType(mapOf("n" to FunkType.IntType)),
             FunkType.StringType
         )
         
@@ -242,17 +242,6 @@ object NativeFunctionTypes {
             FunkType.StringType
         )
         
-        // Native implementations for primitive type modules
-        context["__native_int_to_string"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("n" to FunkType.IntType)),
-            FunkType.StringType
-        )
-
-        context["__native_float_to_string"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("n" to FunkType.FloatType)),
-            FunkType.StringType
-        )
-        
         context["__native_string_to_string"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("value" to FunkType.StringType)),
             FunkType.StringType
@@ -340,6 +329,16 @@ object NativeFunctionTypes {
             FunkType.StringType
         )
 
+        context["__native_int_from_string"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("s" to FunkType.StringType)),
+            FunkType.OptionType(FunkType.IntType)
+        )
+
+        context["__native_int_from_nat"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("n" to FunkType.NatType)),
+            FunkType.IntType
+        )
+
         context["__native_int_equals"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("l" to FunkType.IntType, "r" to FunkType.IntType)),
             FunkType.BooleanType
@@ -401,6 +400,11 @@ object NativeFunctionTypes {
             FunkType.FloatType
         )
 
+        context["__native_float_to_string"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("n" to FunkType.FloatType)),
+            FunkType.StringType
+        )
+
         context["__native_float_from_int"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("n" to FunkType.IntType)),
             FunkType.FloatType
@@ -446,7 +450,17 @@ object NativeFunctionTypes {
             FunkType.RecordType(mapOf("n" to FunkType.IntType)),
             FunkType.StringType
         )
-        
+
+        context["int::from_string"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("s" to FunkType.StringType)),
+            FunkType.OptionType(FunkType.IntType)
+        )
+
+        context["int::from_nat"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("n" to FunkType.NatType)),
+            FunkType.IntType
+        )
+
         // Module-qualified functions for float
         context["float::abs"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("x" to FunkType.FloatType)),

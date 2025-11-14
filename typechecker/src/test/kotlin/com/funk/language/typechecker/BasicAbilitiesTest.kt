@@ -132,9 +132,9 @@ class BasicAbilitiesTest {
             effect Log {
               log : {message: String} -> Unit
             }
-            
+
             impl Log for ConsoleLogger where {
-              log : {message: String} -> Unit = {message} -> unit
+              log : {message: String} -> Unit = {message} -> {}
             }
         """.trimIndent()
 

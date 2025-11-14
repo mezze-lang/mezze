@@ -27,7 +27,7 @@ class EffectPropagationTest {
             
             impl Database for Postgres where {
               query : {sql: String} -> String = {sql} -> do
-                Log.log {msg = "Executing: " + sql}
+                Log.log {msg = "Executing: " ++ sql}
                 "result"
             }
             
@@ -75,14 +75,14 @@ class EffectPropagationTest {
             
             impl Auth for SimpleAuth where {
               checkPermission : {resource: String} -> Boolean = {resource} -> do
-                Log.log {msg = "Checking permission for " + resource}
+                Log.log {msg = "Checking permission for " ++ resource}
                 true
             }
             
             impl Database for SecureDB where {
               query : {sql: String} -> String = {sql} -> do
                 let hasPermission = Auth.checkPermission {resource = "database"}
-                Log.log {msg = "Executing query: " + sql}
+                Log.log {msg = "Executing query: " ++ sql}
                 "secure_result"
             }
             
@@ -183,12 +183,13 @@ class EffectPropagationTest {
             }
             
             impl FileSystem for LocalFS where {
-              readFile : {path: String} -> String = {path} -> do
-                Log.log {msg = "Reading file: " ++ path}
+              readFile : {path: String} -> String = {path} ->
                 if path == "missing" then do
+                  Log.log {msg = "Reading file: " ++ path}
                   Error.throw {msg = "File not found"}
                   ""
-                else
+                else do
+                  Log.log {msg = "Reading file: " ++ path}
                   "file content"
               writeFile : {path: String, content: String} -> {} = {path, content} -> do
                 Log.log {msg = "Writing to file: " ++ path}
@@ -238,7 +239,7 @@ class EffectPropagationTest {
 
             impl Database for TestDB where {
               query : {sql: String} -> String = {sql} -> do
-                Log.log {msg = "Test query: " + sql}
+                Log.log {msg = "Test query: " ++ sql}
                 "test_result"
             }
 

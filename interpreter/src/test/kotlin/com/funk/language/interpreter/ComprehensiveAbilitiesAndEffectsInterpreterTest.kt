@@ -26,20 +26,23 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testBasicAbilityExecution() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
+
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> intToString {val = val}
+              show : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             Show.show {val = 42}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("42", (result as FunkString).value)
@@ -48,20 +51,23 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testMultiParameterAbilityExecution() {
         val source = """
+            use std::int
+
             ability Convert 'a 'b where {
               convert : {val: 'a} -> 'b
             }
-            
+
             impl Convert Int String where {
-              convert : {val: Int} -> String = {val} -> intToString {val = val}
+              convert : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             Convert.convert {val = 123}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("123", (result as FunkString).value)
@@ -70,27 +76,30 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testAbilityWithConstraintsExecution() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
+
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> intToString {val = val}
+              show : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
-            
+
             impl Show Boolean where {
               show : {val: Boolean} -> String = {val} -> boolToString {val = val}
             }
-            
+
             let displayValue: {val: 'a} -> String with Show 'a = {val} ->
               Show.show {val = val}
-            
+
             displayValue {val = 42}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("42", (result as FunkString).value)
@@ -99,27 +108,30 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testAbilityWithDifferentTypesExecution() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
+
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> "INT:" ++ intToString {val = val}
+              show : {val: Int} -> String = {val} -> "INT:" ++ int::to_string {n = val}
             }
-            
+
             impl Show String where {
               show : {val: String} -> String = {val} -> "STR:" ++ val
             }
-            
+
             let displayInt = Show.show {val = 42}
             let displayStr = Show.show {val = "hello"}
-            
+
             displayInt ++ " | " ++ displayStr
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("INT:42 | STR:hello", (result as FunkString).value)
@@ -152,7 +164,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("mock_result_for_SELECT * FROM users", (result as FunkString).value)
@@ -203,7 +216,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("db:SELECT * FROM users", (result as FunkString).value)
@@ -236,7 +250,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("logged_123", (result as FunkString).value)
@@ -276,7 +291,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("5 == 5 is true", (result as FunkString).value)
@@ -308,7 +324,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("PREFIX: hello | world :SUFFIX", (result as FunkString).value)
@@ -339,7 +356,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val result = interpreter.execute(typedProgram, projectRoot)
 
         assertTrue(result is FunkInt)
         assertEquals(1L, (result as FunkInt).value)

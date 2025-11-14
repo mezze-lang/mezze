@@ -1,7 +1,7 @@
 # Closed record types (exact field matching)
 let intToString = { val: Int} -> "number"                                      # expected: intToString : { val: Int } -> String
 
-let processUser = {user} -> user.name ++ " is " ++ intToString {val = user.age} # expected: processUser : { user: { name: String, age: 'a } } -> String
+let processUser = {user} -> user.name ++ " is " ++ intToString {val = user.age} # expected: processUser : { user: { name: String, age: Int } } -> String
 
 let user1 = {name = "Alice", age = 30}                                         # expected: user1 : { name: String, age: Int }
 let user2 = {name = "Bob", age = 25}                                           # expected: user2 : { name: String, age: Int }
