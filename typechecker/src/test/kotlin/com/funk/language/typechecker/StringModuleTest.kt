@@ -16,6 +16,7 @@ class StringModuleTest {
 
     @BeforeEach
     fun setup() {
+        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         typeChecker = TypeChecker()
         // Set project root for module resolution
         System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")

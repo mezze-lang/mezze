@@ -17,6 +17,7 @@ class ErrorReportingTest {
     
     @BeforeEach
     fun setup() {
+        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         // Enable strict validation for typechecker tests
         System.setProperty("funk.typecheck.strict", "true")
         

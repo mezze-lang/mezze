@@ -29,6 +29,7 @@ class TypeCheckerComprehensiveTest {
 
     private fun parseAndTypeCheck(source: String): com.funk.language.ast.Program {
         // CRITICAL FIX: Create fresh TypeChecker for each test to avoid state leakage
+        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val typeChecker = TypeChecker()
         val program = parser.parse(source)
         return typeChecker.typeCheck(program)

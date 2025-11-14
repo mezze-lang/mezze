@@ -32,6 +32,7 @@ class FixtureBasedTypeCheckerTest {
     }
 
     private fun parseAndTypeCheck(source: String): Program {
+        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         return typeChecker.typeCheck(program)

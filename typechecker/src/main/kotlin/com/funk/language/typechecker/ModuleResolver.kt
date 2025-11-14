@@ -122,6 +122,14 @@ class ModuleResolver(
     companion object {
         // Cache for parsed modules to avoid reprocessing (shared across all instances)
         private val moduleCache = mutableMapOf<String, Module>()
+
+        /**
+         * Clear the module cache. This is useful for tests to ensure clean state between runs.
+         */
+        @JvmStatic
+        fun clearCache() {
+            moduleCache.clear()
+        }
     }
 
     // Track modules currently being loaded to detect circular dependencies (per-instance to track call stack)
@@ -603,13 +611,5 @@ class ModuleResolver(
             )
         }
         moduleCache[modulePath] = updatedModule
-    }
-
-    /**
-     * Clear the module cache (useful for testing)
-     */
-    fun clearCache() {
-        moduleCache.clear()
-        loadingStack.clear()
     }
 }
