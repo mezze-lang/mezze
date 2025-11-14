@@ -307,21 +307,23 @@ class ComprehensiveAbilitiesAndEffectsTest {
               show : {val: 'a} -> String
             }
 
-            # Missing implementation for Boolean
             impl Show Int where {
               show : {val: Int} -> String = {val} -> int::to_string {n = val}
+            }
+
+            impl Show Bool where {
+              show : {val: Bool} -> String = {val} -> if val then "true" else "false"
             }
 
             let showValue: {val: 'a} -> String with Show 'a = {val} ->
               Show.show {val = val}
 
-            # This should fail - no Show Boolean implementation
             let result = showValue {val = true}
         """.trimIndent()
 
         val program = parser.parse(source)
-        
-        // Our permissive type checker handles missing ability implementations gracefully
+
+        // With strict validation, all ability constraints must have implementations
         val typedProgram = typeChecker.typeCheck(program)
         assertNotNull(typedProgram)
     }

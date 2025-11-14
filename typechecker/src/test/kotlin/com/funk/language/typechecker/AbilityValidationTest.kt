@@ -86,7 +86,7 @@ class AbilityValidationTest {
                   None -> 0
             }
 
-            let transform = {value} -> Convert.convert {value = value}
+            let transform: {value: String} -> Int = {value} -> Convert.convert {value = value}
 
             transform {value = "123"}
         """.trimIndent()
@@ -370,5 +370,232 @@ class AbilityValidationTest {
         assertThrows<TypeCheckError>("Should fail: Record field name is 'val' not 'value'") {
             typeChecker.typeCheck(program)
         }
+    }
+
+    // ========== CONSTRAINT VALIDATION AT CALL SITES ==========
+
+    @Test
+    fun `test constraint validation at call site - missing implementation should fail`() {
+        val source = """
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            impl Show Int where {
+              show: {val: Int} -> String = {val} -> "number"
+            }
+
+            let display: {val: 'a} -> String with Show 'a = {val} ->
+              Show.show {val = val}
+
+            display {val = 3.14}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        assertThrows<TypeCheckError>("Should fail: Float does not implement Show") {
+            typeChecker.typeCheck(program)
+        }
+    }
+
+    @Test
+    fun `test constraint validation at call site - with implementation should pass`() {
+        val source = """
+            use std::int
+
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            impl Show Int where {
+              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+            }
+
+            impl Show Float where {
+              show: {val: Float} -> String = {val} -> "float"
+            }
+
+            let display: {val: 'a} -> String with Show 'a = {val} ->
+              Show.show {val = val}
+
+            display {val = 3.14}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program)
+
+        assertNotNull(typedProgram, "Should pass: Float implements Show")
+    }
+
+    @Test
+    fun `test constraint validation in pipe operator - should fail`() {
+        val source = """
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            let noiseAdd = {x, y} -> do
+              let sum = x + y
+              let diff = x - y
+              diff |> Show.show {val = @ }
+
+            noiseAdd {x = 5.0, y = 6.0}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        assertThrows<TypeCheckError>("Should fail: Float does not implement Show") {
+            typeChecker.typeCheck(program)
+        }
+    }
+
+    @Test
+    fun `test constraint validation with multiple constraints - all satisfied`() {
+        val source = """
+            use std::int
+
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            ability Eq 'a where {
+              eq: {l: 'a, r: 'a} -> Bool
+            }
+
+            impl Show Int where {
+              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+            }
+
+            impl Eq Int where {
+              eq: {l: Int, r: Int} -> Bool = {l, r} -> l == r
+            }
+
+            let compare: {x: 'a, y: 'a} -> String with Show 'a, Eq 'a = {x, y} ->
+              if Eq.eq {l = x, r = y} then
+                "Equal: " ++ Show.show {val = x}
+              else
+                "Not equal"
+
+            compare {x = 5, y = 5}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program)
+
+        assertNotNull(typedProgram, "Should pass: Int implements both Show and Eq")
+    }
+
+    @Test
+    fun `test constraint validation with multiple constraints - one missing`() {
+        val source = """
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            ability Eq 'a where {
+              eq: {l: 'a, r: 'a} -> Bool
+            }
+
+            impl Show String where {
+              show: {val: String} -> String = {val} -> val
+            }
+
+            # Missing Eq String implementation
+
+            let compare: {x: String, y: String} -> String with Show String, Eq String = {x, y} ->
+              if Eq.eq {l = x, r = y} then
+                "Equal: " ++ Show.show {val = x}
+              else
+                "Not equal"
+
+            compare {x = "hello", y = "world"}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        assertThrows<TypeCheckError>("Should fail: String does not implement Eq") {
+            typeChecker.typeCheck(program)
+        }
+    }
+
+    @Test
+    fun `test constraint validation in nested function calls`() {
+        val source = """
+            use std::int
+
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            impl Show Int where {
+              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+            }
+
+            let display: {val: 'a} -> String with Show 'a = {val} ->
+              Show.show {val = val}
+
+            let format: {x: 'a} -> String with Show 'a = {x} ->
+              "[" ++ display {val = x} ++ "]"
+
+            format {x = 42}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program)
+
+        assertNotNull(typedProgram, "Should pass: Constraint propagates through nested calls")
+    }
+
+    @Test
+    fun `test constraint validation with multi-parameter ability at call site`() {
+        val source = """
+            use std::int
+
+            ability Convert 'from 'to where {
+              convert: {value: 'from} -> 'to
+            }
+
+            impl Convert String Int where {
+              convert: {value: String} -> Int = {value} -> 0
+            }
+
+            let transform: {val: Float} -> Int with Convert Float Int = {val} ->
+              Convert.convert {value = val}
+
+            # This should fail - no Convert Float Int implementation
+            let result = transform {val = 3.14}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        assertThrows<TypeCheckError>("Should fail: Float, Int does not implement Convert") {
+            typeChecker.typeCheck(program)
+        }
+    }
+
+    @Test
+    fun `test constraint validation passes when type matches exactly`() {
+        val source = """
+            use std::int
+
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            impl Show Int where {
+              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+            }
+
+            let display: {val: 'a} -> String with Show 'a = {val} ->
+              Show.show {val = val}
+
+            # This should pass - Int has Show implementation
+            display {val = 42}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program)
+
+        assertNotNull(typedProgram, "Should pass: Int implements Show")
     }
 }
