@@ -1,0 +1,18 @@
+// Test open record patterns in lambda parameters
+
+// Test 1: Simple open record pattern
+let my_func = {x, y, ...} -> x + y
+
+// Test 2: Open record pattern should accept extra fields
+let test1 = my_func {x = 1, y = 2}
+let test2 = my_func {x = 1, y = 2, z = 3}
+let test3 = my_func {x = 1, y = 2, z = 3, w = 4}
+
+// Test 3: Closed record pattern (without ...) should only accept exact fields
+let closed_func = {x, y} -> x + y
+let test4 = closed_func {x = 1, y = 2}
+
+// Test 4: Nested open record patterns in match expressions
+let match_test = match {x = 1, y = 2, z = 3} {
+  {x, y, ...} -> x + y
+}

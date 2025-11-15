@@ -236,4 +236,61 @@ class OpenRecordTest {
 
         assertNotNull(typedProgram, "Should pass: record literals can be declared as open")
     }
+
+    @Test
+    fun `test open record pattern destructuring in lambda`() {
+        val source = """
+            let my_func = {x, y, ...} -> x + y
+
+            my_func {x = 1, y = 0, z = ""}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program)
+
+        assertNotNull(typedProgram, "Should pass: open record pattern in lambda accepts extra fields")
+    }
+
+    @Test
+    fun `test closed record pattern destructuring in lambda rejects extra fields`() {
+        val source = """
+            let my_func = {x, y} -> x + y
+
+            my_func {x = 1, y = 0, z = ""}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        assertThrows<TypeCheckError>("Should fail: closed record pattern cannot accept extra fields") {
+            typeChecker.typeCheck(program)
+        }
+    }
+
+    @Test
+    fun `test open record pattern destructuring with single field`() {
+        val source = """
+            let my_func = {x, ...} -> x
+
+            my_func {x = 1, y = 2, z = 3}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program)
+
+        assertNotNull(typedProgram, "Should pass: single field open record pattern")
+    }
+
+    @Test
+    fun `test nested record in open pattern - outer open accepts extra fields`() {
+        val source = """
+            let my_func = {a, b, ...} -> a.x + b
+
+            my_func {a = {x = 10}, b = 5, c = "extra"}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program)
+
+        assertNotNull(typedProgram, "Should pass: outer pattern is open, accepts extra field 'c'")
+    }
 }

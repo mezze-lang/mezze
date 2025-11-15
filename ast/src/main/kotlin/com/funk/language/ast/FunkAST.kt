@@ -1171,7 +1171,8 @@ data class ConstructorPattern(
 
 @Serializable
 data class RecordPattern(
-    val entries: List<RecordPatternEntry>
+    val entries: List<RecordPatternEntry>,
+    val isOpen: Boolean = false  // true if ... was used in the pattern
 ) : Pattern
 
 @Serializable

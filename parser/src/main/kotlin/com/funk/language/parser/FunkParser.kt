@@ -1541,12 +1541,30 @@ class FunkParser {
     }
 
     private val untypedLambdaParams: Parser<LambdaParameters> = { stream ->
-        // {x, y} or {}
+        // {x, y} or {x, y, ...} or {}
         val params = Parsers.sepBy(identifierParser, tok(TokenType.COMMA))(stream)
         when (params) {
             is ParseResult.Success -> {
                 val names = (params as ParseResult.Success).value.map { it.text }
-                ParseResult.Success(UntypedParameters(names, false), params.remaining)
+                val stream1 = params.remaining
+
+                // Check for optional comma before ellipsis (same logic as recordPatternParser)
+                val afterComma = if (stream1.current()?.type == TokenType.COMMA) {
+                    skipNewlines(stream1.advance())
+                } else {
+                    stream1
+                }
+
+                // Check for ellipsis (open record marker: ...)
+                val isOpen = afterComma.current()?.type == TokenType.ELLIPSIS
+
+                val stream2 = if (isOpen) {
+                    skipNewlines(afterComma.advance())  // Skip the ellipsis token
+                } else {
+                    afterComma
+                }
+
+                ParseResult.Success(UntypedParameters(names, isOpen), stream2)
             }
             is ParseResult.Failure -> params
         }
@@ -2328,7 +2346,7 @@ class FunkParser {
                                         ident.value.text,
                                         RecordPattern(listOf(
                                             RecordPatternEntry("value", VariablePattern(varPat.value.text))
-                                        ))
+                                        ), false)  // Shorthand patterns are always closed
                                     ),
                                     varPat.remaining
                                 )
@@ -2363,11 +2381,28 @@ class FunkParser {
                 when (entries) {
                     is ParseResult.Success -> {
                         val stream2 = skipNewlines(entries.remaining)
-                        val rbrace = tok(TokenType.RBRACE)(stream2)
+
+                        // Check for optional comma before ellipsis (same logic as recordTypeAnnotationParser)
+                        val afterComma = if (stream2.current()?.type == TokenType.COMMA) {
+                            skipNewlines(stream2.advance())
+                        } else {
+                            stream2
+                        }
+
+                        // Check for ellipsis (open record marker: ...)
+                        val isOpen = afterComma.current()?.type == TokenType.ELLIPSIS
+
+                        val stream3 = if (isOpen) {
+                            skipNewlines(afterComma.advance())  // Skip the ellipsis token
+                        } else {
+                            afterComma
+                        }
+
+                        val rbrace = tok(TokenType.RBRACE)(stream3)
 
                         when (rbrace) {
                             is ParseResult.Success -> ParseResult.Success(
-                                RecordPattern(entries.value),
+                                RecordPattern(entries.value, isOpen),
                                 rbrace.remaining
                             )
                             is ParseResult.Failure -> rbrace
