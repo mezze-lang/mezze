@@ -1330,26 +1330,34 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
             }
         }
         is FunctionTypeAnnotation -> {
+            // Validate that parameter type is a RecordTypeAnnotation
+            if (annotation.paramType !is RecordTypeAnnotation) {
+                throw IllegalArgumentException(
+                    "Function parameter type must be a record type (e.g., {x: Int} -> Int), " +
+                    "but got: ${annotation.paramType::class.simpleName}"
+                )
+            }
+
             val paramType = convertTypeAnnotation(annotation.paramType)
             val returnType = convertTypeAnnotation(annotation.returnType)
-            
+
             // Convert effect annotations
             val effects = annotation.effects?.let { effectRow ->
                 FunkType.EffectRow(effectRow.effects.toSet())
             }
-            
-            // Convert ability constraints  
+
+            // Convert ability constraints
             val abilityConstraints = annotation.abilityConstraints.map { constraint ->
                 FunkType.FunctionAbilityConstraint(
                     constraint.abilityName,
                     constraint.typeArgs.map { convertTypeAnnotation(it) }
                 )
             }
-            
+
             FunkType.FunctionType(
-                paramType, 
-                returnType, 
-                effects, 
+                paramType,
+                returnType,
+                effects,
                 abilityConstraints
             )
         }

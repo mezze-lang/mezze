@@ -1,0 +1,15 @@
+# Module that defines a custom type and ability implementation
+
+pub type Person = { name: String, age: Int }
+
+# Define a Show ability
+pub ability Show 'a where {
+    show: { val: 'a } -> String
+}
+
+# Implement Show for Person
+pub impl Show Person where {
+    show = { val } -> val.name ++ " (age: " ++ Inspect.to_str { val = val.age } ++ ")"
+}
+
+pub let default_person = { name = "Alice", age = 30 }

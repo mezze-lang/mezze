@@ -1,0 +1,6 @@
+let x: Int = 42
+let y: String = "hello"
+let z: Bool = true
+let f: {n: Int} -> Int = {n} -> n + 1
+
+f {n = x}

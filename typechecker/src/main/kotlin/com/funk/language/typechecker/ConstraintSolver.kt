@@ -28,6 +28,18 @@ sealed class Constraint {
     ) : Constraint() {
         override fun toString(): String = "${typeVar.name} : $ability"
     }
+
+    /**
+     * Annotation constraint: inferred type must match declared type annotation
+     */
+    data class AnnotationConstraint(
+        val inferredType: FunkType,
+        val declaredType: FunkType,
+        val expression: com.funk.language.ast.Expression,
+        val sourceLocation: SourceLocation? = null
+    ) : Constraint() {
+        override fun toString(): String = "Annotation: ${expression::class.simpleName} must have type $declaredType"
+    }
 }
 
 /**
@@ -141,7 +153,8 @@ class AbilityRegistry {
 data class ConstraintContext(
     val equalityConstraints: MutableSet<Constraint.Equality> = mutableSetOf(),
     val abilityConstraints: MutableSet<Constraint.AbilityConstraint> = mutableSetOf(),
-    val instanceConstraints: MutableSet<Constraint.Instance> = mutableSetOf()
+    val instanceConstraints: MutableSet<Constraint.Instance> = mutableSetOf(),
+    val annotationConstraints: MutableSet<Constraint.AnnotationConstraint> = mutableSetOf()
 ) {
     /**
      * Add an ability constraint
@@ -149,14 +162,26 @@ data class ConstraintContext(
     fun addAbilityConstraint(typeVar: TypeVar, ability: String, location: SourceLocation? = null) {
         abilityConstraints.add(Constraint.AbilityConstraint(typeVar, ability, location))
     }
-    
+
+    /**
+     * Add an annotation constraint
+     */
+    fun addAnnotationConstraint(
+        inferredType: FunkType,
+        declaredType: FunkType,
+        expression: com.funk.language.ast.Expression,
+        location: SourceLocation? = null
+    ) {
+        annotationConstraints.add(Constraint.AnnotationConstraint(inferredType, declaredType, expression, location))
+    }
+
     /**
      * Get all constraints as a single set
      */
     fun getAllConstraints(): Set<Constraint> {
-        return equalityConstraints + abilityConstraints + instanceConstraints
+        return equalityConstraints + abilityConstraints + instanceConstraints + annotationConstraints
     }
-    
+
     /**
      * Clear all constraints
      */
@@ -164,6 +189,7 @@ data class ConstraintContext(
         equalityConstraints.clear()
         abilityConstraints.clear()
         instanceConstraints.clear()
+        annotationConstraints.clear()
     }
 }
 
@@ -391,26 +417,30 @@ class ConstraintSolver(
      * Solve constraints with ability validation
      */
     fun solveWithAbilities(constraints: Set<Constraint>): Substitution {
-        val (equalityConstraints, abilityConstraints) = constraints.partition { 
-            it is Constraint.Equality || it is Constraint.Instance 
-        }
-        
+        // Partition constraints into equality/instance vs validation constraints
+        val equalityConstraints = constraints.filter { it is Constraint.Equality || it is Constraint.Instance }
+        val abilityConstraints = constraints.filterIsInstance<Constraint.AbilityConstraint>()
+        val annotationConstraints = constraints.filterIsInstance<Constraint.AnnotationConstraint>()
+
         // First solve equality constraints using existing unification
         var substitution = solveConstraints(equalityConstraints, Substitution.empty())
-        
+
         // ENHANCED: Apply aggressive constraint propagation for related type variables
-        substitution = applyAggressiveConstraintPropagation(substitution, abilityConstraints.filterIsInstance<Constraint.AbilityConstraint>())
-        
+        substitution = applyAggressiveConstraintPropagation(substitution, abilityConstraints)
+
         // CRITICAL FIX: Apply transitive constraint propagation to handle cases like:
         // 'a = Int, { left: 'a, right: 'b } = { left: 'a, right: 'a } => 'b = Int
         if (System.getProperty("funk.typecheck.debug") == "true") {
             println("DEBUG: About to apply transitive constraint propagation")
         }
         substitution = applyTransitiveConstraintPropagation(substitution, equalityConstraints)
-        
+
         // Then validate ability constraints
-        validateAbilityConstraints(abilityConstraints.filterIsInstance<Constraint.AbilityConstraint>(), substitution)
-        
+        validateAbilityConstraints(abilityConstraints, substitution)
+
+        // Finally validate annotation constraints
+        validateAnnotationConstraints(annotationConstraints, substitution)
+
         return substitution
     }
     
@@ -595,10 +625,10 @@ class ConstraintSolver(
             is Constraint.Equality -> {
                 val unifier = unify(constraint.left, constraint.right)
                 val newSubstitution = substitution.compose(unifier)
-                
+
                 // Apply the new substitution to remaining constraints
                 val updatedConstraints = remainingConstraints.map { applySubstitutionToConstraint(it, unifier) }
-                
+
                 solveConstraints(updatedConstraints, newSubstitution)
             }
             is Constraint.Instance -> {
@@ -609,6 +639,10 @@ class ConstraintSolver(
             }
             is Constraint.AbilityConstraint -> {
                 // Ability constraints are validated after unification
+                solveConstraints(remainingConstraints, substitution)
+            }
+            is Constraint.AnnotationConstraint -> {
+                // Annotation constraints are validated after unification
                 solveConstraints(remainingConstraints, substitution)
             }
         }
@@ -641,7 +675,130 @@ class ConstraintSolver(
             }
         }
     }
-    
+
+    /**
+     * Validate annotation constraints against resolved types
+     */
+    private fun validateAnnotationConstraints(
+        constraints: List<Constraint.AnnotationConstraint>,
+        substitution: Substitution
+    ) {
+        for (constraint in constraints) {
+            // Apply substitutions to both inferred and declared types
+            val resolvedInferred = substitution.apply(constraint.inferredType)
+            val resolvedDeclared = substitution.apply(constraint.declaredType)
+
+            // Check if the resolved types are compatible
+            if (!areTypesCompatible(resolvedInferred, resolvedDeclared)) {
+                throw TypeCheckError.typeMismatch(resolvedDeclared, resolvedInferred, constraint.expression)
+            }
+        }
+    }
+
+    /**
+     * Check if two types are compatible after substitution.
+     * Unlike unification, this does not create new substitutions.
+     * Type variables with the same name are considered compatible.
+     */
+    private fun areTypesCompatible(type1: FunkType, type2: FunkType): Boolean {
+        return when {
+            // Base types must match exactly
+            type1 is FunkType.IntType && type2 is FunkType.IntType -> true
+            type1 is FunkType.FloatType && type2 is FunkType.FloatType -> true
+            type1 is FunkType.StringType && type2 is FunkType.StringType -> true
+            type1 is FunkType.BooleanType && type2 is FunkType.BooleanType -> true
+
+            // Type variables - if both are type variables, they're compatible
+            // (represents polymorphic/generic types)
+            type1 is FunkType.VarType && type2 is FunkType.VarType -> true
+
+            // Function types - check parameter and return types recursively
+            type1 is FunkType.FunctionType && type2 is FunkType.FunctionType ->
+                areTypesCompatible(type1.paramType, type2.paramType) &&
+                areTypesCompatible(type1.returnType, type2.returnType)
+
+            // List types - check element type recursively
+            type1 is FunkType.ListType && type2 is FunkType.ListType ->
+                areTypesCompatible(type1.elementType, type2.elementType)
+
+            // Record types - check all fields match
+            type1 is FunkType.RecordType && type2 is FunkType.RecordType -> {
+                if (type1.fields.size != type2.fields.size) return false
+                type1.fields.all { (name, fieldType1) ->
+                    val fieldType2 = type2.fields[name]
+                    fieldType2 != null && areTypesCompatible(fieldType1, fieldType2)
+                }
+            }
+
+            // Variant types - check all constructors match
+            type1 is FunkType.VariantType && type2 is FunkType.VariantType -> {
+                if (type1.constructors.size != type2.constructors.size) return false
+                type1.constructors.all { (name, constrType1) ->
+                    val constrType2 = type2.constructors[name]
+                    if (constrType2 == null) return@all false
+                    (constrType1 == null && constrType2 == null) ||
+                    (constrType1 != null && constrType2 != null && areTypesCompatible(constrType1, constrType2))
+                }
+            }
+
+            else -> false
+        }
+    }
+
+    /**
+     * Check if two types match structurally (after substitution)
+     * This is NOT unification - we check if the types are already equal
+     */
+    private fun typesMatch(type1: FunkType, type2: FunkType): Boolean {
+        return when {
+            // Base types must match exactly
+            type1 is FunkType.IntType && type2 is FunkType.IntType -> true
+            type1 is FunkType.FloatType && type2 is FunkType.FloatType -> true
+            type1 is FunkType.StringType && type2 is FunkType.StringType -> true
+            type1 is FunkType.BooleanType && type2 is FunkType.BooleanType -> true
+
+            // Type variables - same variable means match
+            type1 is FunkType.VarType && type2 is FunkType.VarType ->
+                type1.variable == type2.variable
+
+            // Function types - check parameter and return types recursively
+            type1 is FunkType.FunctionType && type2 is FunkType.FunctionType ->
+                typesMatch(type1.paramType, type2.paramType) &&
+                typesMatch(type1.returnType, type2.returnType)
+
+            // List types - check element type recursively
+            type1 is FunkType.ListType && type2 is FunkType.ListType ->
+                typesMatch(type1.elementType, type2.elementType)
+
+            // Record types - check all fields match
+            type1 is FunkType.RecordType && type2 is FunkType.RecordType -> {
+                if (type1.fields.size != type2.fields.size) return false
+                type1.fields.all { (name, fieldType1) ->
+                    val fieldType2 = type2.fields[name]
+                    fieldType2 != null && typesMatch(fieldType1, fieldType2)
+                }
+            }
+
+            // Variant types - check all constructors match
+            type1 is FunkType.VariantType && type2 is FunkType.VariantType -> {
+                if (type1.constructors.size != type2.constructors.size) return false
+                type1.constructors.all { (name, constrType1) ->
+                    val constrType2 = type2.constructors[name]
+                    if (constrType2 == null) return@all false
+                    // Both null or both match
+                    (constrType1 == null && constrType2 == null) ||
+                    (constrType1 != null && constrType2 != null && typesMatch(constrType1, constrType2))
+                }
+            }
+
+            // Named types - check name and type arguments (skipped for now due to complex matching)
+            // type1 is FunkType.NamedType && type2 is FunkType.NamedType -> ...
+
+            // Otherwise types don't match
+            else -> false
+        }
+    }
+
     /**
      * Get the ability registry
      */
@@ -665,10 +822,18 @@ class ConstraintSolver(
                         else -> constraint.typeVar // Keep original if substituted to concrete type
                     }
                 } ?: constraint.typeVar
-                
+
                 Constraint.AbilityConstraint(
                     typeVar = newTypeVar,
                     ability = constraint.ability,
+                    sourceLocation = constraint.sourceLocation
+                )
+            }
+            is Constraint.AnnotationConstraint -> {
+                Constraint.AnnotationConstraint(
+                    inferredType = substitution.apply(constraint.inferredType),
+                    declaredType = substitution.apply(constraint.declaredType),
+                    expression = constraint.expression,
                     sourceLocation = constraint.sourceLocation
                 )
             }

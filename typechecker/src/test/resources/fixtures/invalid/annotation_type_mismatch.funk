@@ -1,0 +1,3 @@
+let x: Int = "hello"
+
+x

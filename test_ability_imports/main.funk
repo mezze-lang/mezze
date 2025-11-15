@@ -1,0 +1,10 @@
+# Test: Import module with ability implementation
+use my_types::{Person, Show, default_person}
+
+# Can we use the Show ability on Person?
+let test_person = { name = "Bob", age = 25 }
+
+# Try to call Show.show on a Person
+let result = Show.show { val = test_person }
+
+result

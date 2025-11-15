@@ -2914,15 +2914,67 @@ class FunkParser {
     }
 
     private val functionTypeAnnotation: Parser<TypeAnnotation> = { stream ->
-        // Parse: paramType -> returnType <effects> or just primaryType
+        // Parse: paramType with Ability T1, Ability T2 -> returnType ! Effect1, Effect2
+        // or just primaryType
         var result: ParseResult<TypeAnnotation> = primaryTypeAnnotation(stream)
 
         while (result is ParseResult.Success) {
             val currentStream = result.remaining
-            val arrow = currentStream.current()
+
+            // Parse optional ability constraints with 'with' keyword BEFORE the arrow
+            val streamBeforeWith = skipNewlines(currentStream)
+            val abilityConstraints = mutableListOf<FunctionAbilityConstraint>()
+            var streamAfterAbilities = currentStream
+
+            if (streamBeforeWith.current()?.type == TokenType.WITH) {
+                // Skip the 'with' keyword
+                var abilityStream = skipNewlines(streamBeforeWith.advance())
+
+                // Parse ability constraints: AbilityName TypeArg1 TypeArg2...
+                while (abilityStream.current()?.type == TokenType.IDENTIFIER) {
+                    val abilityNameToken = abilityStream.current()!!
+                    val abilityName = abilityNameToken.text
+                    abilityStream = skipNewlines(abilityStream.advance())
+
+                    // Parse type arguments (space-separated types)
+                    val typeArgs = mutableListOf<TypeAnnotation>()
+                    while (true) {
+                        val typeResult = primaryTypeAnnotation(abilityStream)
+                        when (typeResult) {
+                            is ParseResult.Success -> {
+                                typeArgs.add(typeResult.value)
+                                abilityStream = skipNewlines(typeResult.remaining)
+
+                                // Stop if we see arrow, comma, or another WITH
+                                val nextToken = abilityStream.current()
+                                if (nextToken?.type == TokenType.ARROW ||
+                                    nextToken?.type == TokenType.COMMA ||
+                                    nextToken?.type == TokenType.WITH ||
+                                    nextToken == null) {
+                                    break
+                                }
+                            }
+                            is ParseResult.Failure -> break
+                        }
+                    }
+
+                    abilityConstraints.add(FunctionAbilityConstraint(abilityName, typeArgs))
+
+                    // Check for comma (more constraints)
+                    if (abilityStream.current()?.type == TokenType.COMMA) {
+                        abilityStream = skipNewlines(abilityStream.advance())
+                    } else {
+                        break
+                    }
+                }
+
+                streamAfterAbilities = abilityStream
+            }
+
+            val arrow = skipNewlines(streamAfterAbilities).current()
 
             if (arrow?.type == TokenType.ARROW) {
-                val arrowStream = currentStream.advance()
+                val arrowStream = skipNewlines(streamAfterAbilities).advance()
                 val returnType = primaryTypeAnnotation(arrowStream)
 
                 result = when (returnType) {
@@ -2968,69 +3020,15 @@ class FunkParser {
                             Pair(emptyList<String>(), returnType.remaining)
                         }
 
-                        // Parse optional ability constraints with 'with' keyword
-                        var streamAfterWith = finalStream
-                        val abilityConstraints = mutableListOf<FunctionAbilityConstraint>()
-
-                        // Check for 'with' keyword
-                        val streamBeforeWith = skipNewlines(finalStream)
-                        if (streamBeforeWith.current()?.type == TokenType.WITH) {
-                            // Skip the 'with' keyword
-                            var currentStream = skipNewlines(streamBeforeWith.advance())
-
-                            // Parse ability constraints: AbilityName TypeArg1 TypeArg2...
-                            while (currentStream.current()?.type == TokenType.IDENTIFIER) {
-                                val abilityNameToken = currentStream.current()!!
-                                val abilityName = abilityNameToken.text
-                                currentStream = skipNewlines(currentStream.advance())
-
-                                // Parse type arguments (space-separated types)
-                                // Try to parse as many type arguments as possible
-                                val typeArgs = mutableListOf<TypeAnnotation>()
-                                while (true) {
-                                    // Try to parse a primary type annotation (identifier, record, etc.)
-                                    val typeResult = primaryTypeAnnotation(currentStream)
-                                    when (typeResult) {
-                                        is ParseResult.Success -> {
-                                            typeArgs.add(typeResult.value)
-                                            currentStream = skipNewlines(typeResult.remaining)
-
-                                            // Check if next token could be another type argument
-                                            // Stop if we see =, comma, or WITH (another constraint)
-                                            val nextToken = currentStream.current()
-                                            if (nextToken?.type == TokenType.ASSIGN ||
-                                                nextToken?.type == TokenType.COMMA ||
-                                                nextToken?.type == TokenType.WITH ||
-                                                nextToken == null) {
-                                                break
-                                            }
-                                            // Otherwise, continue trying to parse more type args
-                                        }
-                                        is ParseResult.Failure -> break  // No more type args
-                                    }
-                                }
-
-                                abilityConstraints.add(FunctionAbilityConstraint(abilityName, typeArgs))
-
-                                // Check for comma (more constraints) - if not, we're done
-                                if (currentStream.current()?.type == TokenType.COMMA) {
-                                    currentStream = skipNewlines(currentStream.advance())
-                                } else {
-                                    break
-                                }
-                            }
-
-                            streamAfterWith = currentStream
-                        }
-
+                        // Use the ability constraints we parsed before the arrow
                         ParseResult.Success(
                             FunctionTypeAnnotation(
                                 result.value,
                                 returnType.value,
                                 if (effects.isNotEmpty()) EffectRowAnnotation(effects) else null,
-                                abilityConstraints
+                                abilityConstraints  // This comes from the parsing before the arrow
                             ),
-                            streamAfterWith
+                            finalStream
                         )
                     }
                     is ParseResult.Failure -> break
@@ -3073,6 +3071,7 @@ class FunkParser {
         Parsers.oneOf(
             arrayTypeAnnotation,
             parenTypeAnnotation,
+            variantTypeAnnotationParser,
             recordTypeAnnotationParser,
             typeApplicationAnnotation,
             identifierTypeAnnotation
