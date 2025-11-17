@@ -6,8 +6,6 @@ pub let pi = 3.141592653589793
 pub let e = 2.718281828459045
 
 # Polymorphic mathematical functions
-pub let abs : { n: 'a } -> 'a with Ord 'a = {n} ->
-    if n < 0 then -n else n
 
 pub let min : { l: 'a, r: 'a } -> 'a with Ord 'a = {l, r} ->
     if l < r then l else r

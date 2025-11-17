@@ -262,6 +262,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
     @Test
     fun testEffectHandling() {
         val source = """
+            use std::int
+
             effect Log {
               log : {message: String} -> Unit <>
             }
@@ -270,8 +272,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
               log : {message: String} -> Unit = {message} -> {}
             }
 
-            let loggedOperation: {value: Int} -> Int <Log> = {value} ->
-              value * 2
+            let loggedOperation: {value: Int} -> Int <Log> = {value} -> Log.log {message = int::to_string{n = value * 2 }}
 
             let result = perform ConsoleLogger in loggedOperation {value = 42}
         """.trimIndent()

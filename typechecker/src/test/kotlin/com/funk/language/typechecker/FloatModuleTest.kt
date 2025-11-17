@@ -30,7 +30,7 @@ class FloatModuleTest {
     @Test
     fun `test float abs function`() {
         val source = """
-            use std::math::core::{min, max, abs, ceil, floor, pow, sqrt, round}
+            use std::float::{abs}
             let result1 = abs { n = -3.14 }
             let result2 = abs { n = 2.71 }
         """.trimIndent()
@@ -42,7 +42,7 @@ class FloatModuleTest {
     @Test
     fun `test float min function`() {
         val source = """
-            use std::math::core::{min, max, abs, ceil, floor, pow, sqrt, round}
+            use std::math::core::{min}
             let result = min { l = 3.14, r = 2.71 }
         """.trimIndent()
 
@@ -53,7 +53,7 @@ class FloatModuleTest {
     @Test
     fun `test float max function`() {
         val source = """
-            use std::math::core::{min, max, abs, ceil, floor, pow, sqrt, round}
+            use std::math::core::{max}
             let result = max { l = 3.14, r = 2.71 }
         """.trimIndent()
 
@@ -141,12 +141,11 @@ class FloatModuleTest {
     @Test
     fun `test multiple float operations`() {
         val source = """
-            use std::math::core::{min, max, abs}
+            use std::math::core::{min, max}
             let x = 3.14
             let y = 2.71
             let min_val = min { l = x, r = y }
             let max_val = max { l = x, r = y }
-            let abs_val = abs { n = -5.5 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

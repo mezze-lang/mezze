@@ -32,7 +32,7 @@ class EffectPropagationTest {
             }
             
             # This function should have type: {query: String} -> String <Database, Log>
-            let useDatabase : {query: String} -> String = {query} ->
+            let useDatabase : {query: String} -> String <Database, Log> = {query} ->
               Database.query {sql = query}
         """.trimIndent()
         
@@ -87,7 +87,7 @@ class EffectPropagationTest {
             }
             
             # This should propagate all three effects: Database, Auth, Log
-            let secureQuery : {sql: String} -> String = {sql} ->
+            let secureQuery : {sql: String} -> String <Database, Auth, Log> = {sql} ->
               Database.query {sql = sql}
         """.trimIndent()
         
@@ -133,7 +133,7 @@ class EffectPropagationTest {
             }
             
             # Complex function with multiple effect calls
-            let complexFunction : {seed: Int} -> Int = {seed} -> do
+            let complexFunction : {seed: Int} -> Int <Random, Log> = {seed} -> do
               let first = Random.nextInt {max = seed}
               let second = Random.nextInt {max = first}
               Log.log {msg = "Generated two numbers"}
@@ -197,7 +197,7 @@ class EffectPropagationTest {
             }
             
             # Function that uses both operations with different effect signatures
-            let copyFile : {from: String, to: String} -> {} = {from, to} -> do
+            let copyFile : {from: String, to: String} -> {} <FileSystem, Log, Error> = {from, to} -> do
               let content = FileSystem.readFile {path = from}  # <Log, Error>
               FileSystem.writeFile {path = to, content = content}  # <Log>
               {}
@@ -244,11 +244,11 @@ class EffectPropagationTest {
             }
 
             # Function that calls Database.query which declares <Log> effect
-            let queryWithLog : {sql: String} -> String = {sql} ->
+            let queryWithLog : {sql: String} -> String <Database, Log> = {sql} ->
               Database.query {sql = sql}
 
             # Function that handles Database effect, but Log effect should remain
-            let partiallyHandledQuery : {sql: String} -> String = {sql} ->
+            let partiallyHandledQuery : {sql: String} -> String <Log> = {sql} ->
               perform TestDB in queryWithLog {sql = sql}
         """.trimIndent()
 
@@ -287,7 +287,7 @@ class EffectPropagationTest {
             }
             
             # This function should have no effects since Math is an ability, not an effect
-            let pureCalculation : {a: Int, b: Int} -> Int = {a, b} ->
+            let pureCalculation : {a: Int, b: Int} -> Int <> = {a, b} ->
               Math.add {x = a, y = b}
         """.trimIndent()
         

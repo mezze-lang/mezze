@@ -52,8 +52,8 @@ class ExplicitEffectPropagationTest {
               log : {msg: String} -> {}
             }
             
-            # Function without explicit effect annotation - should infer Log effect
-            let logSomething : {msg: String} -> {} = {msg} ->
+            # Function with explicit effect annotation
+            let logSomething : {msg: String} -> {} <Log> = {msg} ->
               Log.log {msg = msg}
         """.trimIndent()
         

@@ -251,13 +251,10 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
             is FunkType.ArrayListType -> {
                 FunkType.ArrayListType(elementType = apply(type.elementType))
             }
-            is FunkType.OptionType -> {
-                FunkType.OptionType(elementType = apply(type.elementType))
-            }
-            is FunkType.ResultType -> {
-                FunkType.ResultType(
-                    errorType = apply(type.errorType),
-                    valueType = apply(type.valueType)
+            is FunkType.TypeApplication -> {
+                FunkType.TypeApplication(
+                    constructor = type.constructor,
+                    args = type.args.map { apply(it) }
                 )
             }
             is FunkType.ListType -> {

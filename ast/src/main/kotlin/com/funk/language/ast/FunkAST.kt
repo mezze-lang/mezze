@@ -98,14 +98,10 @@ object BuiltinAbilities {
             is FunkType.OrderingType -> hasAutomaticImplementation("Ordering", abilityName)
             
             // Parameterized types - check if element types support the ability
-            is FunkType.OptionType -> {
-                hasAutomaticImplementation("Option", abilityName) && 
-                typeHasAutomaticImplementation(type.elementType, abilityName)
-            }
-            is FunkType.ResultType -> {
-                hasAutomaticImplementation("Result", abilityName) && 
-                typeHasAutomaticImplementation(type.errorType, abilityName) &&
-                typeHasAutomaticImplementation(type.valueType, abilityName)
+            is FunkType.TypeApplication -> {
+                val typeName = type.constructor
+                hasAutomaticImplementation(typeName, abilityName) &&
+                type.args.all { typeHasAutomaticImplementation(it, abilityName) }
             }
             is FunkType.ListType -> {
                 hasAutomaticImplementation("List", abilityName) && 
@@ -350,12 +346,11 @@ sealed interface FunkType {
     }
     
     // Built-in core types (always available)
-    @Serializable
-    data class OptionType(val elementType: FunkType) : FunkType
-    
-    @Serializable
-    data class ResultType(val errorType: FunkType, val valueType: FunkType) : FunkType
-    
+    // Note: Option and Result are now regular variant types, not special AST types
+    // They are defined as built-in variants:
+    //   Option 'a = Some { val: 'a } | None
+    //   Result 'a 'e = Ok { val: 'a } | Err { error: 'e }
+
     @Serializable
     data class ListType(val elementType: FunkType) : FunkType
     
@@ -364,7 +359,12 @@ sealed interface FunkType {
     
     @Serializable
     data class SetType(val elementType: FunkType) : FunkType
-    
+
+    // Generic type application (e.g., Option Int, Result String Error, MyType 'a 'b)
+    // This represents applying type arguments to a type constructor
+    @Serializable
+    data class TypeApplication(val constructor: String, val args: List<FunkType>) : FunkType
+
     // Built-in ordering type for comparisons
     @Serializable
     object OrderingType : FunkType
@@ -478,17 +478,14 @@ data class TypeScheme(
                 type.rowVar
             )
             is FunkType.VariantType -> FunkType.VariantType(
-                type.constructors.mapValues { (_, dataType) -> 
+                type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { applySubstitutionToType(it, substitution) }
                 },
                 type.rowVar
             )
-            is FunkType.OptionType -> FunkType.OptionType(
-                applySubstitutionToType(type.elementType, substitution)
-            )
-            is FunkType.ResultType -> FunkType.ResultType(
-                applySubstitutionToType(type.errorType, substitution),
-                applySubstitutionToType(type.valueType, substitution)
+            is FunkType.TypeApplication -> FunkType.TypeApplication(
+                type.constructor,
+                type.args.map { applySubstitutionToType(it, substitution) }
             )
             is FunkType.ListType -> FunkType.ListType(
                 applySubstitutionToType(type.elementType, substitution)
@@ -1375,23 +1372,8 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
         }
         is TypeApplicationAnnotation -> {
             when (annotation.constructor) {
-                "Option" -> {
-                    if (annotation.args.size == 1) {
-                        FunkType.OptionType(convertTypeAnnotation(annotation.args[0]))
-                    } else {
-                        throw RuntimeException("Option type requires exactly 1 type argument")
-                    }
-                }
-                "Result" -> {
-                    if (annotation.args.size == 2) {
-                        FunkType.ResultType(
-                            convertTypeAnnotation(annotation.args[0]),
-                            convertTypeAnnotation(annotation.args[1])
-                        )
-                    } else {
-                        throw RuntimeException("Result type requires exactly 2 type arguments")
-                    }
-                }
+                // Note: Option and Result are now regular variant types, not special built-in types
+                // They will be handled by the variant type system
                 "List" -> {
                     if (annotation.args.size == 1) {
                         FunkType.ListType(convertTypeAnnotation(annotation.args[0]))
@@ -1417,8 +1399,22 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
                     }
                 }
                 else -> {
-                    // For other generic types, return a simple identifier type
-                    FunkType.VarType(TypeVar(annotation.constructor))
+                    // For parameterized types like Option, Result, and user-defined generic types
+                    // We need to look up the type definition and apply the type arguments
+                    // For now, we'll create a TypeApplication that represents the applied type
+                    // This will be resolved later during type checking
+                    if (annotation.args.isNotEmpty()) {
+                        // This is a parameterized type application (e.g., Option Int, Result String Error)
+                        // We'll represent it as a type application for now
+                        // The type checker will resolve this to the actual variant type
+                        FunkType.TypeApplication(
+                            annotation.constructor,
+                            annotation.args.map { convertTypeAnnotation(it) }
+                        )
+                    } else {
+                        // Simple type constructor without arguments (will be resolved as type variable)
+                        FunkType.VarType(TypeVar(annotation.constructor))
+                    }
                 }
             }
         }
@@ -1504,12 +1500,10 @@ private fun extractTypeVariables(type: FunkType): Set<TypeVar> {
                 constructorType?.let { result.addAll(extractTypeVariables(it)) }
             }
         }
-        is FunkType.OptionType -> {
-            result.addAll(extractTypeVariables(type.elementType))
-        }
-        is FunkType.ResultType -> {
-            result.addAll(extractTypeVariables(type.errorType))
-            result.addAll(extractTypeVariables(type.valueType))
+        is FunkType.TypeApplication -> {
+            type.args.forEach { arg ->
+                result.addAll(extractTypeVariables(arg))
+            }
         }
         is FunkType.ListType -> {
             result.addAll(extractTypeVariables(type.elementType))
@@ -1615,12 +1609,10 @@ private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<T
                 type.constructors[constructorName]?.let { collectTypeVariablesInOrder(it, collector) }
             }
         }
-        is FunkType.OptionType -> {
-            collectTypeVariablesInOrder(type.elementType, collector)
-        }
-        is FunkType.ResultType -> {
-            collectTypeVariablesInOrder(type.errorType, collector)
-            collectTypeVariablesInOrder(type.valueType, collector)
+        is FunkType.TypeApplication -> {
+            type.args.forEach { arg ->
+                collectTypeVariablesInOrder(arg, collector)
+            }
         }
         is FunkType.ListType -> {
             collectTypeVariablesInOrder(type.elementType, collector)
@@ -1673,12 +1665,10 @@ private fun collectTypeVariables(type: FunkType, collector: MutableSet<TypeVar>)
                 caseType?.let { collectTypeVariables(it, collector) }
             }
         }
-        is FunkType.OptionType -> {
-            collectTypeVariables(type.elementType, collector)
-        }
-        is FunkType.ResultType -> {
-            collectTypeVariables(type.errorType, collector)
-            collectTypeVariables(type.valueType, collector)
+        is FunkType.TypeApplication -> {
+            type.args.forEach { arg ->
+                collectTypeVariables(arg, collector)
+            }
         }
         is FunkType.ListType -> {
             collectTypeVariables(type.elementType, collector)
@@ -1746,14 +1736,9 @@ private fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVa
             // CRITICAL FIX: Preserve row variable during type variable normalization
             FunkType.VariantType(newConstructors, type.rowVar)
         }
-        is FunkType.OptionType -> {
-            val newElementType = substituteTypeVariables(type.elementType, mapping)
-            FunkType.OptionType(newElementType)
-        }
-        is FunkType.ResultType -> {
-            val newErrorType = substituteTypeVariables(type.errorType, mapping)
-            val newValueType = substituteTypeVariables(type.valueType, mapping)
-            FunkType.ResultType(newErrorType, newValueType)
+        is FunkType.TypeApplication -> {
+            val newArgs = type.args.map { substituteTypeVariables(it, mapping) }
+            FunkType.TypeApplication(type.constructor, newArgs)
         }
         is FunkType.ListType -> {
             val newElementType = substituteTypeVariables(type.elementType, mapping)
@@ -1863,12 +1848,12 @@ object BuiltinTypes {
     /**
      * Create built-in type instances
      */
-    fun createOptionType(elementType: FunkType): FunkType.OptionType {
-        return FunkType.OptionType(elementType)
+    fun createOptionType(elementType: FunkType): FunkType.TypeApplication {
+        return FunkType.TypeApplication("Option", listOf(elementType))
     }
-    
-    fun createResultType(errorType: FunkType, valueType: FunkType): FunkType.ResultType {
-        return FunkType.ResultType(errorType, valueType)
+
+    fun createResultType(valueType: FunkType, errorType: FunkType): FunkType.TypeApplication {
+        return FunkType.TypeApplication("Result", listOf(valueType, errorType))
     }
     
     fun createListType(elementType: FunkType): FunkType.ListType {

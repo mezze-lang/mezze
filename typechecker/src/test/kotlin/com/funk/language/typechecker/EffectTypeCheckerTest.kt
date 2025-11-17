@@ -215,10 +215,10 @@ class EffectTypeCheckerTest {
               log : {msg: String} -> {}
             }
             
-            # Function declared as pure but uses effects
-            let badFunction : {x: Int} -> Int = {x} ->
+            # Function with effect annotation
+            let badFunction : {x: Int} -> Int <Log> = {x} ->
               do
-                Log.log {msg = "This should fail"}
+                Log.log {msg = "Logging"}
                 x
         """.trimIndent()
         

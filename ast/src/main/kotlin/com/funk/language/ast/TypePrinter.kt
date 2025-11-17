@@ -47,12 +47,10 @@ private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableSet<
         is FunkType.ArrayType -> {
             collectTypeVariablesRecursive(type.elementType, variables)
         }
-        is FunkType.OptionType -> {
-            collectTypeVariablesRecursive(type.elementType, variables)
-        }
-        is FunkType.ResultType -> {
-            collectTypeVariablesRecursive(type.errorType, variables)
-            collectTypeVariablesRecursive(type.valueType, variables)
+        is FunkType.TypeApplication -> {
+            type.args.forEach { arg ->
+                collectTypeVariablesRecursive(arg, variables)
+            }
         }
         is FunkType.ListType -> {
             collectTypeVariablesRecursive(type.elementType, variables)
@@ -95,94 +93,35 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     is FunkType.FracType -> "Frac"
     is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
-        val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
+        val fields = type.fields.entries.sortedBy { it.key }.joinToString(", ") { (name, fieldType) ->
             "$name: ${prettyPrintTypeWithMapping(fieldType, typeVarMapping)}"
         }
         if (type.isOpen) {
-            "{ $fields, ... }"
+            if (fields.isEmpty()) "{ ... }" else "{ $fields, ... }"
         } else {
-            "{ $fields }"
+            if (fields.isEmpty()) "{}" else "{ $fields }"
         }
     }
     is FunkType.VariantType -> {
-        // Check if this is a Result type (has Ok and Err constructors)
-        val hasOk = type.constructors.containsKey("Ok")
-        val hasErr = type.constructors.containsKey("Err")
-
-        if (hasOk && hasErr && type.constructors.size == 2) {
-            // This is a Result type - print as: Result valueType | errors |
-            val okType = type.constructors["Ok"]
-            val errType = type.constructors["Err"]
-
-            // Extract value type from Ok { val: T }
-            val valueType = when (okType) {
-                is FunkType.RecordType -> okType.fields["val"]
-                else -> null
+        // Print as regular variant type (inline variant syntax)
+        val constructors = type.constructors.entries.sortedBy { it.key }.joinToString(", ") { (name, dataType) ->
+            when (dataType) {
+                null -> name
+                is FunkType.RecordType -> "$name ${prettyPrintTypeWithMapping(dataType, typeVarMapping)}"
+                else -> "$name(${prettyPrintTypeWithMapping(dataType, typeVarMapping)})"
             }
-
-            // Extract error variant from Err { error: VariantType }
-            val errorVariant = when (errType) {
-                is FunkType.RecordType -> errType.fields["error"]
-                else -> null
-            }
-
-            val valueTypeStr = if (valueType != null) {
-                prettyPrintTypeWithMapping(valueType, typeVarMapping)
-            } else {
-                "'unknown"
-            }
-
-            val errorTypeStr = when (errorVariant) {
-                is FunkType.VariantType -> {
-                    val errorConstructors = errorVariant.constructors.map { (name, dataType) ->
-                        if (dataType != null) {
-                            "$name ${prettyPrintTypeWithMapping(dataType, typeVarMapping)}"
-                        } else {
-                            name
-                        }
-                    }
-                    "| ${errorConstructors.joinToString(", ")} |"
-                }
-                else -> if (errorVariant != null) prettyPrintTypeWithMapping(errorVariant, typeVarMapping) else "'unknown"
-            }
-
-            "Result $valueTypeStr $errorTypeStr"
+        }
+        if (type.isOpen) {
+            "| $constructors, ... |"
         } else {
-            // Regular variant type
-            val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
-                when (dataType) {
-                    null -> name
-                    is FunkType.RecordType -> "$name ${prettyPrintTypeWithMapping(dataType, typeVarMapping)}"
-                    else -> "$name(${prettyPrintTypeWithMapping(dataType, typeVarMapping)})"
-                }
-            }
-            if (type.isOpen) {
-                "| $constructors, ... |"
-            } else {
-                "| $constructors |"
-            }
+            "| $constructors |"
         }
     }
     is FunkType.ArrayListType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
     is FunkType.ArrayType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
-    is FunkType.OptionType -> "Option ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
-    is FunkType.ResultType -> {
-        val valueTypeStr = prettyPrintTypeWithMapping(type.valueType, typeVarMapping)
-        val errorTypeStr = when (val errorType = type.errorType) {
-            is FunkType.VariantType -> {
-                // Print anonymous variant syntax: | Constructor1 { ... }, Constructor2 { ... } |
-                val constructorStrs = errorType.constructors.map { (name, dataType) ->
-                    if (dataType != null) {
-                        "$name ${prettyPrintTypeWithMapping(dataType, typeVarMapping)}"
-                    } else {
-                        name
-                    }
-                }
-                "| ${constructorStrs.joinToString(", ")} |"
-            }
-            else -> prettyPrintTypeWithMapping(errorType, typeVarMapping)
-        }
-        "Result $valueTypeStr $errorTypeStr"
+    is FunkType.TypeApplication -> {
+        val argsStr = type.args.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
+        "${type.constructor} $argsStr"
     }
     is FunkType.ListType -> "List ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is FunkType.MapType -> "Map ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
@@ -357,7 +296,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
 
             val errorTypeStr = when (errorVariant) {
                 is FunkType.VariantType -> {
-                    val errorConstructors = errorVariant.constructors.map { (name, dataType) ->
+                    val errorConstructors = errorVariant.constructors.entries.sortedBy { it.key }.map { (name, dataType) ->
                         if (dataType != null) {
                             "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping)}"
                         } else {
@@ -388,24 +327,9 @@ private fun prettyPrintTypeWithAliasesRecursive(
     }
     is FunkType.ArrayListType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}]"
     is FunkType.ArrayType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}]"
-    is FunkType.OptionType -> "Option ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
-    is FunkType.ResultType -> {
-        val valueTypeStr = prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)
-        val errorTypeStr = when (val errorType = type.errorType) {
-            is FunkType.VariantType -> {
-                // Print anonymous variant syntax: | Constructor1 { ... }, Constructor2 { ... } |
-                val constructorStrs = errorType.constructors.map { (name, dataType) ->
-                    if (dataType != null) {
-                        "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping)}"
-                    } else {
-                        name
-                    }
-                }
-                "| ${constructorStrs.joinToString(", ")} |"
-            }
-            else -> prettyPrintWithAliasCheck(errorType, typeAliases, showExpansion, typeVarMapping)
-        }
-        "Result $valueTypeStr $errorTypeStr"
+    is FunkType.TypeApplication -> {
+        val argsStr = type.args.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
+        "${type.constructor} $argsStr"
     }
     is FunkType.ListType -> "List ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
     is FunkType.MapType -> "Map ${prettyPrintWithAliasCheck(type.keyType, typeAliases, showExpansion, typeVarMapping)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)}"
@@ -712,11 +636,10 @@ fun isBuiltinType(type: FunkType): Boolean {
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
         is FunkType.OrderingType -> true
-        
+
         // Core built-in types
-        is FunkType.OptionType, is FunkType.ResultType, is FunkType.ListType,
-        is FunkType.MapType, is FunkType.SetType -> true
-        
+        is FunkType.ListType, is FunkType.MapType, is FunkType.SetType -> true
+
         // Function types are built-in constructs
         is FunkType.FunctionType -> true
 
@@ -734,6 +657,9 @@ fun isBuiltinType(type: FunkType): Boolean {
 
         // ArrayList and Array types are legacy/compatibility types
         is FunkType.ArrayListType, is FunkType.ArrayType -> false
+
+        // TypeApplication (e.g., Option Int) - check if constructor is built-in
+        is FunkType.TypeApplication -> type.constructor in setOf("Option", "Result")
     }
 }
 
@@ -749,11 +675,10 @@ fun getBuiltinTypeName(type: FunkType): String? {
         is FunkType.NatType -> "Nat"
         is FunkType.FracType -> "Frac"
         is FunkType.OrderingType -> "Ordering"
-        is FunkType.OptionType -> "Option"
-        is FunkType.ResultType -> "Result"
         is FunkType.ListType -> "List"
         is FunkType.MapType -> "Map"
         is FunkType.SetType -> "Set"
+        is FunkType.TypeApplication -> if (type.constructor in setOf("Option", "Result")) type.constructor else null
         else -> null
     }
 }

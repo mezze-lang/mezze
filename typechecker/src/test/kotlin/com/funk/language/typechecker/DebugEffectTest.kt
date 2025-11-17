@@ -17,7 +17,7 @@ class DebugEffectTest {
               log : {msg: String} -> {}
             }
             
-            let logSomething : {msg: String} -> {} = {msg} ->
+            let logSomething : {msg: String} -> {} <Log> = {msg} ->
               Log.log {msg = msg}
         """.trimIndent()
         

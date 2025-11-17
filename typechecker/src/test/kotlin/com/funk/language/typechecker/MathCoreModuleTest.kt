@@ -195,7 +195,7 @@ class MathCoreModuleTest {
     @Test
     fun `test abs polymorphic function with int`() {
         val source = """
-            use std::math::core::{abs}
+            use std::int::{abs}
             let result = abs { n = -5 }
         """.trimIndent()
 

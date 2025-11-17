@@ -3,6 +3,21 @@ package com.funk.language.typechecker
 import com.funk.language.ast.FunkType
 
 /**
+ * Helper function to create Option type (as TypeApplication)
+ */
+private fun optionType(elementType: FunkType): FunkType {
+    return FunkType.TypeApplication("Option", listOf(elementType))
+}
+
+/**
+ * Helper function to create Result type (as TypeApplication)
+ * Note: Result takes value type first, then error type
+ */
+private fun resultType(valueType: FunkType, errorType: FunkType): FunkType {
+    return FunkType.TypeApplication("Result", listOf(valueType, errorType))
+}
+
+/**
  * Type signatures for native functions in the Funk language typechecker
  */
 object NativeFunctionTypes {
@@ -331,7 +346,7 @@ object NativeFunctionTypes {
 
         context["__native_int_from_string"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("s" to FunkType.StringType)),
-            FunkType.OptionType(FunkType.IntType)
+            optionType(FunkType.IntType)
         )
 
         context["__native_int_from_nat"] = FunkType.FunctionType(
@@ -417,7 +432,7 @@ object NativeFunctionTypes {
 
         context["__native_float_from_string"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("s" to FunkType.StringType)),
-            FunkType.OptionType(FunkType.FloatType)
+            optionType(FunkType.FloatType)
         )
 
         // Module-qualified arithmetic functions for int
@@ -453,7 +468,7 @@ object NativeFunctionTypes {
 
         context["int::from_string"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("s" to FunkType.StringType)),
-            FunkType.OptionType(FunkType.IntType)
+            optionType(FunkType.IntType)
         )
 
         context["int::from_nat"] = FunkType.FunctionType(
@@ -623,17 +638,17 @@ object NativeFunctionTypes {
 
         context["__native_nat_from_int"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("n" to FunkType.IntType)),
-            FunkType.OptionType(FunkType.NatType)
+            optionType(FunkType.NatType)
         )
 
         context["__native_nat_from_float"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("n" to FunkType.FloatType)),
-            FunkType.OptionType(FunkType.NatType)
+            optionType(FunkType.NatType)
         )
 
         context["__native_nat_from_string"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("s" to FunkType.StringType)),
-            FunkType.OptionType(FunkType.NatType)
+            optionType(FunkType.NatType)
         )
 
         // Module-qualified functions for nat
@@ -647,17 +662,17 @@ object NativeFunctionTypes {
 
         context["nat::from_int"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("n" to FunkType.IntType)),
-            FunkType.OptionType(FunkType.NatType)
+            optionType(FunkType.NatType)
         )
 
         context["nat::from_float"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("n" to FunkType.FloatType)),
-            FunkType.OptionType(FunkType.NatType)
+            optionType(FunkType.NatType)
         )
 
         context["nat::from_string"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("s" to FunkType.StringType)),
-            FunkType.OptionType(FunkType.NatType)
+            optionType(FunkType.NatType)
         )
 
         context["nat::min"] = FunkType.FunctionType(
@@ -1025,7 +1040,7 @@ object NativeFunctionTypes {
 
         context["__native_env_get"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("name" to FunkType.StringType)),
-            FunkType.OptionType(FunkType.StringType)
+            optionType(FunkType.StringType)
         )
 
         context["__native_env_set"] = FunkType.FunctionType(
@@ -1615,7 +1630,7 @@ object NativeFunctionTypes {
                 "xs" to arrayType,
                 "p" to arrayPredicateType
             )),
-            FunkType.OptionType(arrayElemType)
+            optionType(arrayElemType)
         )
 
         context["__native_arraylist_contains"] = FunkType.FunctionType(
@@ -1631,7 +1646,7 @@ object NativeFunctionTypes {
                 "xs" to arrayType,
                 "x" to arrayElemType
             )),
-            FunkType.OptionType(FunkType.IntType)
+            optionType(FunkType.IntType)
         )
 
         context["__native_arraylist_reverse"] = FunkType.FunctionType(
@@ -1700,7 +1715,7 @@ object NativeFunctionTypes {
                 "m" to mapType,
                 "k" to FunkType.VarType(mapKeyTypeVar)
             )),
-            FunkType.OptionType(FunkType.VarType(mapValTypeVar))
+            optionType(FunkType.VarType(mapValTypeVar))
         )
 
         context["__native_map_remove"] = FunkType.FunctionType(
@@ -2033,9 +2048,9 @@ object NativeFunctionTypes {
 
         context["__native_fs_read_file"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError),
-                FunkType.StringType
+            resultType(
+                FunkType.StringType,
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError)
             )
         )
 
@@ -2044,49 +2059,49 @@ object NativeFunctionTypes {
                 "path" to FunkType.StringType,
                 "content" to FunkType.StringType
             )),
-            FunkType.ResultType(
-                FunkType.VariantType(permissionDeniedError + ioError + diskFullError),
-                unitType
+            resultType(
+                unitType,
+                FunkType.VariantType(permissionDeniedError + ioError + diskFullError)
             )
         )
 
         context["__native_fs_exists"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(permissionDeniedError + ioError),
-                FunkType.BooleanType
+            resultType(
+                FunkType.BooleanType,
+                FunkType.VariantType(permissionDeniedError + ioError)
             )
         )
 
         context["__native_fs_delete"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(fileNotFoundError + permissionDeniedError + directoryNotEmptyError + ioError),
-                unitType
+            resultType(
+                unitType,
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + directoryNotEmptyError + ioError)
             )
         )
 
         context["__native_fs_list_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError),
-                FunkType.ListType(FunkType.StringType)
+            resultType(
+                FunkType.ListType(FunkType.StringType),
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError)
             )
         )
 
         context["__native_fs_create_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(alreadyExistsError + permissionDeniedError + invalidPathError + ioError),
-                unitType
+            resultType(
+                unitType,
+                FunkType.VariantType(alreadyExistsError + permissionDeniedError + invalidPathError + ioError)
             )
         )
 
         context["__native_fs_file_size"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError),
-                FunkType.IntType
+            resultType(
+                FunkType.IntType,
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError)
             )
         )
 
@@ -2096,9 +2111,9 @@ object NativeFunctionTypes {
 
         context["__native_memfs_read_file"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError),
-                FunkType.StringType
+            resultType(
+                FunkType.StringType,
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError)
             )
         )
 
@@ -2107,49 +2122,49 @@ object NativeFunctionTypes {
                 "path" to FunkType.StringType,
                 "content" to FunkType.StringType
             )),
-            FunkType.ResultType(
-                FunkType.VariantType(permissionDeniedError + ioError + diskFullError),
-                unitType
+            resultType(
+                unitType,
+                FunkType.VariantType(permissionDeniedError + ioError + diskFullError)
             )
         )
 
         context["__native_memfs_exists"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(permissionDeniedError + ioError),
-                FunkType.BooleanType
+            resultType(
+                FunkType.BooleanType,
+                FunkType.VariantType(permissionDeniedError + ioError)
             )
         )
 
         context["__native_memfs_delete"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(fileNotFoundError + permissionDeniedError + directoryNotEmptyError + ioError),
-                unitType
+            resultType(
+                unitType,
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + directoryNotEmptyError + ioError)
             )
         )
 
         context["__native_memfs_list_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError),
-                FunkType.ListType(FunkType.StringType)
+            resultType(
+                FunkType.ListType(FunkType.StringType),
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError)
             )
         )
 
         context["__native_memfs_create_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(alreadyExistsError + permissionDeniedError + invalidPathError + ioError),
-                unitType
+            resultType(
+                unitType,
+                FunkType.VariantType(alreadyExistsError + permissionDeniedError + invalidPathError + ioError)
             )
         )
 
         context["__native_memfs_file_size"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
-            FunkType.ResultType(
-                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError),
-                FunkType.IntType
+            resultType(
+                FunkType.IntType,
+                FunkType.VariantType(fileNotFoundError + permissionDeniedError + ioError)
             )
         )
 
@@ -2162,7 +2177,7 @@ object NativeFunctionTypes {
                 "env_vars" to FunkType.MapType(FunkType.StringType, FunkType.StringType),
                 "name" to FunkType.StringType
             )),
-            FunkType.OptionType(FunkType.StringType)
+            optionType(FunkType.StringType)
         )
     }
 }
