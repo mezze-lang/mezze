@@ -638,16 +638,20 @@ class FunkInterpreter {
                 if (expr.function is MemberAccess) {
                     val memberAccess = expr.function as MemberAccess
                     if (memberAccess.receiver is Identifier) {
-                        val effectName = (memberAccess.receiver as Identifier).name
+                        val receiverName = (memberAccess.receiver as Identifier).name
                         val operationName = memberAccess.member
-                        // CRITICAL: Always check if this is an effect call FIRST
-                        // This ensures handlers take precedence over effect declarations
-                        if (effectHandler.shouldConvertToEffectCall(effectName, context)) {
-                            return effectHandler.executeEffectCall(effectName, operationName, evaluateExpression(expr.arguments, context), context, this)
+
+                        // Effect names and ability names always start with uppercase
+                        // Regular records (like tree_ops) start with lowercase
+                        val isCapitalized = receiverName.firstOrNull()?.isUpperCase() == true
+
+                        // CRITICAL: Only check for effects/abilities if the name is capitalized
+                        if (isCapitalized && effectHandler.shouldConvertToEffectCall(receiverName, context)) {
+                            return effectHandler.executeEffectCall(receiverName, operationName, evaluateExpression(expr.arguments, context), context, this)
                         }
-                        
+
                         // Check if this is an ability call (e.g., Show.show, Eq.equals)
-                        if (context.containsKey("${effectName}_ability")) {
+                        if (isCapitalized && context.containsKey("${receiverName}_ability")) {
                             // Ability resolution - inline implementation to avoid scope issues
                             val arguments = evaluateExpression(expr.arguments, context)
                             
@@ -699,8 +703,8 @@ class FunkInterpreter {
                             // Find matching implementation by searching all available implementations
                             // This handles multi-parameter abilities by matching input types and finding compatible implementations
                             val matchingImpl = context.entries.find { (key, value) ->
-                                if (value is FunkRecord && key.startsWith("${effectName}_")) {
-                                    val keyTypes = key.removePrefix("${effectName}_").split("_")
+                                if (value is FunkRecord && key.startsWith("${receiverName}_")) {
+                                    val keyTypes = key.removePrefix("${receiverName}_").split("_")
                                     // Check if the input types match the beginning of the implementation types
                                     typeArgs.size <= keyTypes.size &&
                                     typeArgs.zip(keyTypes).all { (inputType, implType) -> inputType == implType }
@@ -712,18 +716,18 @@ class FunkInterpreter {
                                 implementation as FunkRecord
                             } else {
                                 // Try to derive implementation for Record/Variant types
-                                val derivedOp = deriveDerivedAbilityImplementation(effectName, operationName, typeArgs, arguments)
+                                val derivedOp = deriveDerivedAbilityImplementation(receiverName, operationName, typeArgs, arguments)
                                 if (derivedOp != null) {
                                     // Create a FunkRecord with the derived operation
                                     FunkRecord(mapOf(operationName to derivedOp))
                                 } else {
-                                    throw RuntimeException("No implementation found for ability $effectName with input types $typeArgs")
+                                    throw RuntimeException("No implementation found for ability $receiverName with input types $typeArgs")
                                 }
                             }
-                            
+
                             // Get the operation function from the implementation
                             val operationFunction = implRecord.fields[operationName]
-                                ?: throw RuntimeException("Operation $operationName not found in $effectName implementation")
+                                ?: throw RuntimeException("Operation $operationName not found in $receiverName implementation")
                             
                             // Call the operation function using existing infrastructure (preserves tail call optimization and Loom threads)
                             return when (operationFunction) {
