@@ -27,7 +27,7 @@ let processList = {items} -> match items is
 # Row extension with return polymorphism
 let returnVariant = {v} -> match v is
   Input {x} -> Output {y = x}
-  _ -> Default                                                  # expected: returnVariant : { v: | Input { x: 'a }, ... | } -> | Output |
+  _ -> Default                                                  # expected: returnVariant : { v: | Input { x: 'a }, ... | } -> | Output { y: 'a } |
 
 # Multiple constructors with same field names
 let sameFields = {v} -> match v is
@@ -55,6 +55,6 @@ let chain = {v} -> match v is
 # Open variant returning open variant
 let transform = {input} -> match input is
   Alpha {x} -> Beta {y = x}
-  _ -> Gamma                                                    # expected: transform : { input: | Alpha { x: 'a }, ... | } -> | Beta |
+  _ -> Gamma                                                    # expected: transform : { input: | Alpha { x: 'a }, ... | } -> | Beta { y: 'a } |
 
 transform {input = Alpha {x = 42}}

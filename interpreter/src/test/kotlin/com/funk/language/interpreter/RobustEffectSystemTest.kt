@@ -186,21 +186,20 @@ class RobustEffectSystemTest {
             effect Log {
               info : {msg: String} -> {}
             }
-            
+
             impl Log for TestLogger where {
               info : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             # This should fail - warn operation doesn't exist
             perform TestLogger in Log.warn {msg = "Test"}
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        
-        // This should throw a runtime error about missing operation
-        assertFailsWith<Exception> {
-            interpreter.execute(typedProgram)
+
+        // This should throw a type check error - warn operation doesn't exist in Log effect
+        assertFailsWith<com.funk.language.typechecker.TypeCheckError> {
+            typeChecker.typeCheck(program)
         }
     }
 

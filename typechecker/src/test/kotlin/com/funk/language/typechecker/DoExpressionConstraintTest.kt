@@ -200,4 +200,175 @@ class DoExpressionConstraintTest {
         assertNotNull(paramType.fields["text"], "text should have a type")
         assertNotNull(mixedType.returnType, "return should have a type")
     }
+
+    @Test
+    fun testAbilityCallWithConcreteTypeInDoShouldFail() {
+        // Test case for the bug fix: calling Show.show with a concrete Bool type
+        // should fail when no impl Show Bool exists
+        val source = """
+            ability Show 'a where {
+                show: {val: 'a} -> String
+            }
+
+            let noiseAdd = {x, y} -> do
+              let sum = x + y
+              let diff = x - y
+              let val = diff > sum
+              Show.show {val}
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+
+        // This should fail because val has type Bool, but there's no impl Show Bool
+        assertThrows(TypeCheckError::class.java) {
+            typeChecker.typeCheck(ast)
+        }
+    }
+
+    @Test
+    fun testAbilityCallWithExplicitFieldValueInDo() {
+        // Using explicit field value {val = diff} where diff is polymorphic
+        val source = """
+            ability Show 'a where {
+                show: {val: 'a} -> String
+            }
+
+            let noiseAdd = {x, y} -> do
+              let diff = x - y
+              Show.show {val = diff}
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(ast)
+
+        val noiseAddType = getVariableType(typedProgram, "noiseAdd") as FunkType.FunctionType
+
+        // Should succeed because diff is polymorphic (inferred from x - y)
+        // and adds a Show constraint
+        assertNotNull(noiseAddType)
+        assertTrue(noiseAddType.abilityConstraints.any { it.abilityName == "Show" || it.abilityName == "NumSub" })
+    }
+
+    @Test
+    fun testAbilityCallWithPolymorphicTypeInDoShouldSucceed() {
+        // When the type is truly polymorphic, it should add a constraint and succeed
+        val source = """
+            ability Show 'a where {
+                show: {val: 'a} -> String
+            }
+
+            let polyShow = {val} -> do
+              let result = Show.show {val}
+              result
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(ast)
+
+        val polyShowType = getVariableType(typedProgram, "polyShow") as FunkType.FunctionType
+
+        // Verify type checking succeeds and return type is correct
+        assertEquals(FunkType.StringType, polyShowType.returnType)
+
+        // Ability constraints should be propagated from do expressions to enclosing lambda
+        assertTrue(polyShowType.abilityConstraints.any { it.abilityName == "Show" })
+    }
+
+    @Test
+    fun testRecordShorthandWithConcreteTypeLookup() {
+        // Test that record shorthand {val} correctly looks up val's concrete type from context
+        val source = """
+            let test = {x} -> do
+              let val = true
+              {val}
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(ast)
+
+        val testType = getVariableType(typedProgram, "test") as FunkType.FunctionType
+        val returnType = testType.returnType as FunkType.RecordType
+
+        // The field 'val' should have Bool type, not a type variable
+        assertEquals(FunkType.BooleanType, returnType.fields["val"])
+    }
+
+    @Test
+    fun testRecordShorthandWithMultipleFields() {
+        // Test that multiple shorthand fields all get correct types
+        val source = """
+            let test = {x, y} -> do
+              let sum = x + y
+              let diff = x - y
+              let isPositive = sum > 0
+              let doubleSum = sum * 2
+              {sum, diff, isPositive, doubleSum}
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(ast)
+
+        val testType = getVariableType(typedProgram, "test") as FunkType.FunctionType
+        val returnType = testType.returnType as FunkType.RecordType
+
+        // sum and diff should have the same type as x and y (type variable)
+        assertNotNull(returnType.fields["sum"])
+        assertNotNull(returnType.fields["diff"])
+
+        // isPositive should be Bool
+        assertEquals(FunkType.BooleanType, returnType.fields["isPositive"])
+
+        // doubleSum should have same type as sum
+        assertNotNull(returnType.fields["doubleSum"])
+    }
+
+    @Test
+    fun testInspectWithConcreteTypeInDoShouldSucceed() {
+        // Inspect is a built-in ability that works for all types, so this should succeed
+        val source = """
+            let test = {x} -> do
+              let val = true
+              Inspect.to_str {val}
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(ast)
+
+        val testType = getVariableType(typedProgram, "test") as FunkType.FunctionType
+
+        // Should succeed because Inspect is built-in and works for all types
+        assertNotNull(testType)
+    }
+
+    @Test
+    fun testPolymorphicShowConstraintInDoWithLetBinding() {
+        // Test that ability constraints from do expressions with let bindings
+        // are correctly propagated to the enclosing lambda
+        val source = """
+            ability Show 'a where {
+                show: {val: 'a} -> String
+            }
+
+            let noiseAdd = {x, y} -> do
+              let sum = x + y
+              let diff = x - y
+              let val = diff
+              Show.show { val }
+        """.trimIndent()
+
+        val ast = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(ast)
+
+        val noiseAddType = getVariableType(typedProgram, "noiseAdd") as FunkType.FunctionType
+
+        // Type checking should succeed
+        assertNotNull(noiseAddType)
+        assertEquals(FunkType.StringType, noiseAddType.returnType)
+
+        // The Show constraint should be propagated from the do expression
+        assertTrue(noiseAddType.abilityConstraints.any { it.abilityName == "Show" })
+
+        // NumAdd and NumSub constraints should also be present
+        assertTrue(noiseAddType.abilityConstraints.any { it.abilityName == "NumAdd" || it.abilityName == "NumSub" })
+    }
 }

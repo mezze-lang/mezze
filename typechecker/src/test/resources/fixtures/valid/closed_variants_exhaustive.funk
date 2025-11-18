@@ -59,7 +59,7 @@ let handleUnit = {u} -> match u is
 
 # Exhaustive with all polymorphic fields
 let swapPair = {p} -> match p is
-  Pair {a, b} -> Pair {a = b, b = a}                            # expected: swapPair : { p: | Pair { a: 'a, b: 'b } | } -> | Pair |
+  Pair {a, b} -> Pair {a = b, b = a}                            # expected: swapPair : { p: | Pair { a: 'a, b: 'b } | } -> | Pair { a: 'b, b: 'a } |
 
 # Closed variant returning closed variant
 let transform = {input} -> match input is

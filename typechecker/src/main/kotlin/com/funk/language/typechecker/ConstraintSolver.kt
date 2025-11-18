@@ -228,7 +228,13 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
                 FunkType.FunctionType(
                     paramType = applyWithVisited(type.paramType, visited),
                     returnType = applyWithVisited(type.returnType, visited),
-                    effects = type.effects?.let { applyToEffectRowWithVisited(it, visited) }
+                    effects = type.effects?.let { applyToEffectRowWithVisited(it, visited) },
+                    abilityConstraints = type.abilityConstraints.map { constraint ->
+                        FunkType.FunctionAbilityConstraint(
+                            constraint.abilityName,
+                            constraint.typeArgs.map { applyWithVisited(it, visited) }
+                        )
+                    }
                 )
             }
             is FunkType.RecordType -> {
@@ -239,40 +245,40 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
             }
             is FunkType.VariantType -> {
                 FunkType.VariantType(
-                    constructors = type.constructors.mapValues { (_, dataType) -> 
-                        dataType?.let { apply(it) }
+                    constructors = type.constructors.mapValues { (_, dataType) ->
+                        dataType?.let { applyWithVisited(it, visited) }
                     },
                     rowVar = type.rowVar // Row variables handled separately
                 )
             }
             is FunkType.ArrayType -> {
-                FunkType.ArrayType(elementType = apply(type.elementType))
+                FunkType.ArrayType(elementType = applyWithVisited(type.elementType, visited))
             }
             is FunkType.ArrayListType -> {
-                FunkType.ArrayListType(elementType = apply(type.elementType))
+                FunkType.ArrayListType(elementType = applyWithVisited(type.elementType, visited))
             }
             is FunkType.TypeApplication -> {
                 FunkType.TypeApplication(
                     constructor = type.constructor,
-                    args = type.args.map { apply(it) }
+                    args = type.args.map { applyWithVisited(it, visited) }
                 )
             }
             is FunkType.ListType -> {
-                FunkType.ListType(elementType = apply(type.elementType))
+                FunkType.ListType(elementType = applyWithVisited(type.elementType, visited))
             }
             is FunkType.MapType -> {
                 FunkType.MapType(
-                    keyType = apply(type.keyType),
-                    valueType = apply(type.valueType)
+                    keyType = applyWithVisited(type.keyType, visited),
+                    valueType = applyWithVisited(type.valueType, visited)
                 )
             }
             is FunkType.SetType -> {
-                FunkType.SetType(elementType = apply(type.elementType))
+                FunkType.SetType(elementType = applyWithVisited(type.elementType, visited))
             }
             is FunkType.SuspendedType -> {
                 FunkType.SuspendedType(
-                    valueType = apply(type.valueType),
-                    effects = applyToEffectRow(type.effects)
+                    valueType = applyWithVisited(type.valueType, visited),
+                    effects = applyToEffectRowWithVisited(type.effects, visited)
                 )
             }
 

@@ -5,17 +5,17 @@ let wrapColor = {c} -> match c is
   Red -> Wrapped {val = 1}
   Green -> Wrapped {val = 2}
   Blue -> Default
-  _ -> Other                                                    # expected: wrapColor : { c: | Red, Green, Blue, ... | } -> | Wrapped |
+  _ -> Other                                                    # expected: wrapColor : { c: | Red, Green, Blue, ... | } -> | Wrapped { val: Int } |
 
 # Open variant parameter, closed variant return
 let unwrapSafely = {w} -> match w is
   Wrapped {val} -> Some {val = val}
-  _ -> None                                                     # expected: unwrapSafely : { w: | Wrapped { val: 'a }, ... | } -> | Some |
+  _ -> None                                                     # expected: unwrapSafely : { w: | Wrapped { val: 'a }, ... | } -> Option 'a
 
 # Both closed
 let boolToResult = {b} -> match b is
   True -> Ok
-  False -> Err                                                  # expected: boolToResult : { b: Bool } -> | Ok |
+  False -> Err                                                  # expected: boolToResult : { b: Bool } -> { val: 'a } -> Result 'a 'b
 
 # Both open
 let partialMatch = {x, y} -> match x is
@@ -66,7 +66,7 @@ let exhaustiveInput = {x} -> match x is
   A -> Result {val = 1}
   B -> Result {val = 2}
   C -> Other
-  _ -> Unknown                                                  # expected: exhaustiveInput : { x: | A, B, C, ... | } -> | Result |
+  _ -> Unknown                                                  # expected: exhaustiveInput : { x: | A, B, C, ... | } -> | Result { val: Int } |
 
 # Polymorphic closed variant with constraints
 let closedCompare = {cmp, x, y} -> match cmp is

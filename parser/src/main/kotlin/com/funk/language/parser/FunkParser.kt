@@ -2752,18 +2752,44 @@ class FunkParser {
 
             when (token?.type) {
                 TokenType.LBRACE -> {
-                    // Function call: f {x = 1}
+                    // Function call or variant construction: f {x = 1} or Some {x = 1}
                     // Check if this is a record literal (arguments) not a lambda
                     if (!lookAheadForArrowAfterBrace(currentStream)) {
                         val args = recordLiteral(currentStream)
                         result = when (args) {
-                            is ParseResult.Success -> ParseResult.Success(
-                                FunctionCall(
-                                    result.value,
-                                    args.value
-                                ),
-                                args.remaining
-                            )
+                            is ParseResult.Success -> {
+                                // Check if the function is an uppercase identifier (variant constructor)
+                                val expr = result.value
+                                when {
+                                    expr is Identifier && expr.name.firstOrNull()?.isUpperCase() == true -> {
+                                        // This is a variant construction: Some {val = 42}
+                                        ParseResult.Success(
+                                            VariantConstruction(
+                                                constructor = expr.name,
+                                                value = args.value
+                                            ),
+                                            args.remaining
+                                        )
+                                    }
+                                    expr is VariantConstruction -> {
+                                        // Already parsed as variant construction (uppercase id), now add the payload
+                                        ParseResult.Success(
+                                            expr.copy(value = args.value),
+                                            args.remaining
+                                        )
+                                    }
+                                    else -> {
+                                        // Regular function call: f {x = 1}
+                                        ParseResult.Success(
+                                            FunctionCall(
+                                                result.value,
+                                                args.value
+                                            ),
+                                            args.remaining
+                                        )
+                                    }
+                                }
+                            }
                             is ParseResult.Failure -> break  // Not a function call
                         }
                     } else {
@@ -2834,7 +2860,19 @@ class FunkParser {
                     }
                 }
 
-                failed ?: ParseResult.Success(Identifier(name), currentStream)
+                if (failed != null) {
+                    failed
+                } else {
+                    // Check if this is an uppercase identifier (variant constructor without payload)
+                    // Only for simple names (not qualified names with ::)
+                    if (!name.contains("::") && name.firstOrNull()?.isUpperCase() == true) {
+                        // This is a variant construction without payload: None, True, False, etc.
+                        ParseResult.Success(VariantConstruction(constructor = name, value = null), currentStream)
+                    } else {
+                        // Regular identifier
+                        ParseResult.Success(Identifier(name), currentStream)
+                    }
+                }
             }
             is ParseResult.Failure -> first
         }

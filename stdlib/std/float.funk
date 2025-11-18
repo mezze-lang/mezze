@@ -2,7 +2,7 @@
 # This module provides utility functions for working with floats
 # Note: The Float type and basic operations are now built-in
 # Built-in ability implementations (NumAdd, NumSub, NumMul, NumDiv, Eq, Inspect) are automatically available
-# Note: Mathematical functions like abs, min, max, pow, sqrt, floor, ceil, round are in std::math::core
+# Note: Mathematical functions like min, max, pow, sqrt, floor, ceil, round are in std::math::core
 
 # Type conversions
 pub let to_string = { n: Float } ->

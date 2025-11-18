@@ -180,6 +180,8 @@ class AbilityMethodCallTest {
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
+        println("DEBUG: test type = ${letBinding!!.inferredType}")
+        println("DEBUG: test type class = ${letBinding!!.inferredType?.javaClass?.simpleName}")
         assertTrue(letBinding!!.inferredType is FunkType.FunctionType)
 
         val funcType = letBinding!!.inferredType as FunkType.FunctionType
