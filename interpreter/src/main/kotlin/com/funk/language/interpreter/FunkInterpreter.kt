@@ -431,7 +431,14 @@ class FunkInterpreter {
                 
                 // Handle field entries (they can override spread fields)
                 for (entry in expr.getFieldEntries()) {
-                    val value = entry.value?.let { evaluateExpression(it, context) } ?: FunkNull
+                    val valueExpr = entry.value
+                    val value = if (valueExpr != null) {
+                        // Explicit field: {name = expression}
+                        evaluateExpression(valueExpr, context)
+                    } else {
+                        // Shorthand field: {name} means {name = name}
+                        context[entry.name] ?: FunkNull
+                    }
                     fields[entry.name] = value
                 }
                 
@@ -970,7 +977,45 @@ class FunkInterpreter {
         }
         throw RuntimeException("No matching pattern found for value: $value")
     }
-    
+
+    /**
+     * Evaluate a match expression with tail call detection
+     */
+    private fun evaluateMatchExpressionWithTailCallDetection(
+        value: FunkValue,
+        cases: List<MatchCase>,
+        context: MutableMap<String, FunkValue>,
+        currentFunction: SimpleFunkFunction
+    ): FunkValue {
+        for (case in cases) {
+            // Try each pattern in the case
+            for (pattern in case.patterns) {
+                val patternContext = mutableMapOf<String, FunkValue>()
+                if (matchesPattern(value, pattern, patternContext)) {
+                    // Pattern matched, now check guard if present
+                    val newContext = context.toMutableMap()
+                    newContext.putAll(patternContext)
+
+                    // Evaluate guard condition if present
+                    val guardPassed = case.guard?.let { guard ->
+                        val guardResult = evaluateExpression(guard, newContext)
+                        when (guardResult) {
+                            is FunkBool -> guardResult.value
+                            else -> throw RuntimeException("Guard condition must evaluate to Boolean, got ${guardResult::class.simpleName}")
+                        }
+                    } ?: true // No guard means it passes
+
+                    if (guardPassed) {
+                        // Guard passed (or no guard), execute case body with tail call detection
+                        return evaluateExpressionWithTailCallDetection(case.expression, newContext, currentFunction)
+                    }
+                    // Guard failed, continue to next pattern/case
+                }
+            }
+        }
+        throw RuntimeException("No matching pattern found for value: $value")
+    }
+
     /**
      * Check if a value matches a pattern and extract bindings
      */
@@ -2805,12 +2850,12 @@ class FunkInterpreter {
             if (result is TailCall && result.function == currentFunction) {
                 // This is a tail recursive call - optimize it
                 currentContext = currentFunction.closure.toMutableMap()
-                
+
                 // Add recursive reference
                 currentFunction.recursiveName?.let { name ->
                     currentContext[name] = currentFunction
                 }
-                
+
                 // Bind new parameters from tail call
                 when (result.args) {
                     is FunkRecord -> {
@@ -2884,16 +2929,21 @@ class FunkInterpreter {
             is DoExpression -> {
                 // Only the result expression is in tail position
                 val localContext = context.toMutableMap()
-                
+
                 // Execute statements (not in tail position)
                 localContext["__in_tail_position"] = FunkBool(false)
                 for (stmt in expr.statements) {
                     executeStatement(stmt, localContext)
                 }
-                
+
                 // Result expression is in tail position
                 localContext["__in_tail_position"] = FunkBool(true)
                 evaluateExpressionWithTailCallDetection(expr.result, localContext, currentFunction)
+            }
+            is MatchExpression -> {
+                // Match case bodies are in tail position
+                val value = evaluateExpression(expr.expression, context)
+                evaluateMatchExpressionWithTailCallDetection(value, expr.cases, context, currentFunction)
             }
             else -> {
                 // For other expressions, use regular evaluation
