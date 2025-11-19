@@ -554,8 +554,9 @@ class FunkParser {
                 val fields = recordTypeAnn.entries.map { entry ->
                     RecordFieldDef(entry.name, entry.type)
                 }
+                val isOpen = recordTypeAnn.restField != null
                 ParseResult.Success(
-                    RecordDefinition(fields),
+                    RecordDefinition(fields, isOpen),
                     recordType.remaining
                 )
             }

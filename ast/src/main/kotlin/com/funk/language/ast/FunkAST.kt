@@ -687,7 +687,8 @@ sealed interface TypeDefinition
 
 @Serializable
 data class RecordDefinition(
-    val fields: List<RecordFieldDef>
+    val fields: List<RecordFieldDef>,
+    val isOpen: Boolean = false
 ) : TypeDefinition
 
 @Serializable
