@@ -43,3 +43,11 @@ pub let repeat = { s: String, n: Int } ->
     if n <= 0 then ""
     else if n == 1 then s
     else concat { l = s, r = repeat { s = s, n = n - 1 } }
+
+# Split string by delimiter into an array of strings
+pub let split = { s: String, delimiter: String } ->
+    __native_string_split { s = s, delimiter = delimiter }
+
+# Join array of strings with separator
+pub let join = { strings: [String], separator: String } ->
+    __native_string_join { strings = strings, separator = separator }

@@ -161,4 +161,64 @@ class StringModuleTest {
         val typed = parseAndTypeCheck(source)
         assertNotNull(typed)
     }
+
+    @Test
+    fun `test string split function`() {
+        val source = """
+            use std::string
+            let result = string::split { s = "a,b,c", delimiter = "," }
+        """.trimIndent()
+
+        val typed = parseAndTypeCheck(source)
+        assertNotNull(typed)
+    }
+
+    @Test
+    fun `test string join function`() {
+        val source = """
+            use std::string
+            let result = string::join { strings = ["one", "two", "three"], separator = ", " }
+        """.trimIndent()
+
+        val typed = parseAndTypeCheck(source)
+        assertNotNull(typed)
+    }
+
+    @Test
+    fun `test split then join round trip`() {
+        val source = """
+            use std::string
+            let split_func = { s } -> string::split { s = s, delimiter = "," }
+            let join_func = { parts } -> string::join { strings = parts, separator = "," }
+            let round_trip = { s } -> do
+                let parts = split_func { s = s }
+                join_func { parts = parts }
+        """.trimIndent()
+
+        val typed = parseAndTypeCheck(source)
+        assertNotNull(typed)
+    }
+
+    @Test
+    fun `test split with empty delimiter`() {
+        val source = """
+            use std::string
+            let result = string::split { s = "abc", delimiter = "" }
+        """.trimIndent()
+
+        val typed = parseAndTypeCheck(source)
+        assertNotNull(typed)
+    }
+
+    @Test
+    fun `test join with newline separator`() {
+        val source = """
+            use std::string
+            let lines = ["line1", "line2", "line3"]
+            let result = string::join { strings = lines, separator = "\n" }
+        """.trimIndent()
+
+        val typed = parseAndTypeCheck(source)
+        assertNotNull(typed)
+    }
 }

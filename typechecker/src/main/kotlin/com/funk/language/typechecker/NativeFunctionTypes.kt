@@ -313,6 +313,16 @@ object NativeFunctionTypes {
             FunkType.BooleanType
         )
 
+        context["__native_string_split"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("s" to FunkType.StringType, "delimiter" to FunkType.StringType)),
+            FunkType.ArrayListType(FunkType.StringType)
+        )
+
+        context["__native_string_join"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("strings" to FunkType.ArrayListType(FunkType.StringType), "separator" to FunkType.StringType)),
+            FunkType.StringType
+        )
+
         // Native arithmetic operations for int module
         context["__native_int_add"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("l" to FunkType.IntType, "r" to FunkType.IntType)),

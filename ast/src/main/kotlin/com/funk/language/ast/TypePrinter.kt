@@ -95,7 +95,7 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     is FunkType.FracType -> "Frac"
     is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
-        val fields = type.fields.entries.sortedBy { it.key }.joinToString(", ") { (name, fieldType) ->
+        val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
             "$name: ${prettyPrintTypeWithMapping(fieldType, typeVarMapping)}"
         }
         if (type.isOpen) {
@@ -106,7 +106,7 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     }
     is FunkType.VariantType -> {
         // Print as regular variant type (inline variant syntax)
-        val constructors = type.constructors.entries.sortedBy { it.key }.joinToString(", ") { (name, dataType) ->
+        val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
             when (dataType) {
                 null -> name
                 is FunkType.RecordType -> "$name ${prettyPrintTypeWithMapping(dataType, typeVarMapping)}"
@@ -209,6 +209,22 @@ private fun findTypeDeclarationForVariant(
         val typeArgs = extractTypeArgumentsFromVariant(variantType, decl.typeParams.size, typeVarMapping)
         if (typeArgs != null) {
             return TypeDeclMatch(decl.name, typeArgs)
+        }
+
+        // FALLBACK: If we have the right constructors but couldn't extract type args,
+        // try a more lenient approach - collect all distinct type vars and use those
+        if (decl.typeParams.size == 1) {
+            // For single-parameter types, collect all type variables that appear
+            val allTypeVarsList = mutableListOf<TypeVar>()
+            for (constructorType in variantType.constructors.values) {
+                constructorType?.let { collectTypeVars(it, allTypeVarsList) }
+            }
+            // Get the most common type variable (heuristic: the "main" type parameter)
+            val typeVarCounts = allTypeVarsList.groupingBy { it }.eachCount()
+            val mostCommonVar = typeVarCounts.maxByOrNull { it.value }?.key
+            if (mostCommonVar != null) {
+                return TypeDeclMatch(decl.name, listOf(FunkType.VarType(mostCommonVar)))
+            }
         }
     }
     return null
@@ -343,9 +359,9 @@ private fun prettyPrintTypeWithAliasesRecursive(
             "$name: ${prettyPrintWithAliasCheck(fieldType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
         }
         if (type.isOpen) {
-            "{ $fields, ... }"
+            if (fields.isEmpty()) "{ ... }" else "{ $fields, ... }"
         } else {
-            "{ $fields }"
+            if (fields.isEmpty()) "{}" else "{ $fields }"
         }
     }
     is FunkType.VariantType -> {
@@ -389,7 +405,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
 
             val errorTypeStr = when (errorVariant) {
                 is FunkType.VariantType -> {
-                    val errorConstructors = errorVariant.constructors.entries.sortedBy { it.key }.map { (name, dataType) ->
+                    val errorConstructors = errorVariant.constructors.entries.map { (name, dataType) ->
                         if (dataType != null) {
                             "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
                         } else {
@@ -471,9 +487,12 @@ private fun prettyPrintTypeWithAliasesRecursive(
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
     is FunkType.SuspendedType -> {
-        // Suspended types: just print the value type
-        // Effects are handled by the enclosing FunctionType
-        prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+        // CRITICAL FIX: Suspended types should print their effects!
+        // Example: String <Log, FileSystem>
+        // These represent values with unhandled effects
+        val valueTypeStr = prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+        val effectList = type.effects.effects.sorted().joinToString(", ")
+        "$valueTypeStr <$effectList>"
     }
     else -> type.toString() // Fallback for any other types
 }
@@ -785,4 +804,146 @@ fun prettyPrintTypeWithBuiltinInfo(type: FunkType): Pair<String, Boolean> {
     val typeStr = prettyPrintType(type)
     val isBuiltin = isBuiltinType(type)
     return Pair(typeStr, isBuiltin)
+}
+
+/**
+ * Check if two types are alpha-equivalent (structurally equal modulo variable renaming)
+ * Also handles record field ordering - fields can be in any order as long as they match
+ */
+fun areTypesAlphaEquivalent(type1: FunkType, type2: FunkType): Boolean {
+    return alphaEquivHelper(type1, type2, mutableMapOf(), mutableMapOf())
+}
+
+private fun alphaEquivHelper(
+    type1: FunkType,
+    type2: FunkType,
+    mapping1to2: MutableMap<TypeVar, TypeVar>,
+    mapping2to1: MutableMap<TypeVar, TypeVar>
+): Boolean {
+    return when {
+        // Base types - exact match
+        type1 is FunkType.IntType && type2 is FunkType.IntType -> true
+        type1 is FunkType.FloatType && type2 is FunkType.FloatType -> true
+        type1 is FunkType.StringType && type2 is FunkType.StringType -> true
+        type1 is FunkType.BooleanType && type2 is FunkType.BooleanType -> true
+        type1 is FunkType.NatType && type2 is FunkType.NatType -> true
+        type1 is FunkType.FracType && type2 is FunkType.FracType -> true
+        type1 is FunkType.OrderingType && type2 is FunkType.OrderingType -> true
+
+        // Type variables - check consistent renaming
+        type1 is FunkType.VarType && type2 is FunkType.VarType -> {
+            val existingMapping = mapping1to2[type1.variable]
+            val existingReverseMapping = mapping2to1[type2.variable]
+
+            when {
+                existingMapping != null && existingReverseMapping != null -> {
+                    // Both variables already mapped - check consistency
+                    existingMapping == type2.variable && existingReverseMapping == type1.variable
+                }
+                existingMapping == null && existingReverseMapping == null -> {
+                    // Neither mapped yet - create new mapping
+                    mapping1to2[type1.variable] = type2.variable
+                    mapping2to1[type2.variable] = type1.variable
+                    true
+                }
+                else -> false // Inconsistent mapping
+            }
+        }
+
+        // Function types
+        type1 is FunkType.FunctionType && type2 is FunkType.FunctionType -> {
+            // Check parameter and return types
+            alphaEquivHelper(type1.paramType, type2.paramType, mapping1to2, mapping2to1) &&
+            alphaEquivHelper(type1.returnType, type2.returnType, mapping1to2, mapping2to1) &&
+            // Check ability constraints (must match in count and structure)
+            type1.abilityConstraints.size == type2.abilityConstraints.size &&
+            type1.abilityConstraints.zip(type2.abilityConstraints).all { (c1, c2) ->
+                c1.abilityName == c2.abilityName &&
+                c1.typeArgs.size == c2.typeArgs.size &&
+                c1.typeArgs.zip(c2.typeArgs).all { (a1, a2) ->
+                    alphaEquivHelper(a1, a2, mapping1to2, mapping2to1)
+                }
+            } &&
+            // Check effect rows (both nullable)
+            when {
+                type1.effects == null && type2.effects == null -> true
+                type1.effects != null && type2.effects != null ->
+                    alphaEquivHelper(type1.effects, type2.effects, mapping1to2, mapping2to1)
+                else -> false
+            }
+        }
+
+        // Record types - fields can be in any order!
+        type1 is FunkType.RecordType && type2 is FunkType.RecordType -> {
+            type1.isOpen == type2.isOpen &&
+            type1.fields.size == type2.fields.size &&
+            type1.fields.all { (name, fieldType1) ->
+                val fieldType2 = type2.fields[name]
+                fieldType2 != null && alphaEquivHelper(fieldType1, fieldType2, mapping1to2, mapping2to1)
+            }
+        }
+
+        // Variant types
+        type1 is FunkType.VariantType && type2 is FunkType.VariantType -> {
+            type1.isOpen == type2.isOpen &&
+            type1.constructors.size == type2.constructors.size &&
+            type1.constructors.all { (name, dataType1) ->
+                val dataType2 = type2.constructors[name]
+                when {
+                    dataType1 == null && dataType2 == null -> true
+                    dataType1 != null && dataType2 != null ->
+                        alphaEquivHelper(dataType1, dataType2, mapping1to2, mapping2to1)
+                    else -> false
+                }
+            }
+        }
+
+        // List types
+        type1 is FunkType.ListType && type2 is FunkType.ListType -> {
+            alphaEquivHelper(type1.elementType, type2.elementType, mapping1to2, mapping2to1)
+        }
+
+        // ArrayList types
+        type1 is FunkType.ArrayListType && type2 is FunkType.ArrayListType -> {
+            alphaEquivHelper(type1.elementType, type2.elementType, mapping1to2, mapping2to1)
+        }
+
+        // Array types
+        type1 is FunkType.ArrayType && type2 is FunkType.ArrayType -> {
+            alphaEquivHelper(type1.elementType, type2.elementType, mapping1to2, mapping2to1)
+        }
+
+        // Map types
+        type1 is FunkType.MapType && type2 is FunkType.MapType -> {
+            alphaEquivHelper(type1.keyType, type2.keyType, mapping1to2, mapping2to1) &&
+            alphaEquivHelper(type1.valueType, type2.valueType, mapping1to2, mapping2to1)
+        }
+
+        // Set types
+        type1 is FunkType.SetType && type2 is FunkType.SetType -> {
+            alphaEquivHelper(type1.elementType, type2.elementType, mapping1to2, mapping2to1)
+        }
+
+        // Suspended types
+        type1 is FunkType.SuspendedType && type2 is FunkType.SuspendedType -> {
+            alphaEquivHelper(type1.valueType, type2.valueType, mapping1to2, mapping2to1)
+        }
+
+        // Type applications (e.g., Option Int, Result String Int)
+        type1 is FunkType.TypeApplication && type2 is FunkType.TypeApplication -> {
+            type1.constructor == type2.constructor &&
+            type1.args.size == type2.args.size &&
+            type1.args.zip(type2.args).all { (a1, a2) ->
+                alphaEquivHelper(a1, a2, mapping1to2, mapping2to1)
+            }
+        }
+
+        // Effect rows
+        type1 is FunkType.EffectRow && type2 is FunkType.EffectRow -> {
+            type1.isOpen == type2.isOpen &&
+            type1.effects == type2.effects
+        }
+
+        else -> false
+    }
 }

@@ -282,7 +282,7 @@ class AnnotationTypeCheckingTest {
             person
             """.trimIndent(),
             "person",
-            "{ age: Int, name: String }"
+            "{ name: String, age: Int }"
         )
     }
 
@@ -328,7 +328,7 @@ class AnnotationTypeCheckingTest {
             status
             """.trimIndent(),
             "status",
-            "| Failure, Success |"
+            "| Success, Failure |"
         )
     }
 
@@ -340,7 +340,7 @@ class AnnotationTypeCheckingTest {
             result
             """.trimIndent(),
             "result",
-            "| None, Some { val: Int } |"
+            "| Some { val: Int }, None |"
         )
     }
 
@@ -376,7 +376,7 @@ class AnnotationTypeCheckingTest {
             getName {person = {name = "Alice", age = 30}}
             """.trimIndent(),
             "getName",
-            "{ person: { age: Int, name: String } } -> String"
+            "{ person: { name: String, age: Int } } -> String"
         )
     }
 
@@ -693,7 +693,7 @@ class AnnotationTypeCheckingTest {
             unwrap {opt = Some {val = 42}}
             """.trimIndent(),
             "unwrap",
-            "{ opt: | None, Some { val: Int } | } -> Int"
+            "{ opt: | Some { val: Int }, None | } -> Int"
         )
     }
 
@@ -706,7 +706,7 @@ class AnnotationTypeCheckingTest {
             makeResult {n = 5}
             """.trimIndent(),
             "makeResult",
-            "{ n: Int } -> | Err { msg: String }, Ok { val: Int } |"
+            "{ n: Int } -> | Ok { val: Int }, Err { msg: String } |"
         )
     }
 
@@ -785,6 +785,34 @@ class AnnotationTypeCheckingTest {
     }
 
     @Test
+    fun `test custom type variable names from annotation are accepted but normalized`() {
+        // Annotation with custom names like 'foo and 'bar is accepted
+        // But the inferred type normalizes them to standard names like 'a, 'b
+        // This is current behavior - custom names guide type checking but aren't preserved
+        assertTypeChecks(
+            """
+            let fst: { x: 'foo, y: 'bar } -> 'foo = {x, y} -> x
+            fst
+            """.trimIndent(),
+            "fst",
+            "{ x: 'a, y: 'b } -> 'a"
+        )
+    }
+
+    @Test
+    fun `test unannotated polymorphic function uses default names`() {
+        // Without annotation, should infer with default type variable names
+        assertTypeChecks(
+            """
+            let fst = {x, y} -> x
+            fst
+            """.trimIndent(),
+            "fst",
+            "{ x: 'a, y: 'b } -> 'a"
+        )
+    }
+
+    @Test
     fun `test polymorphic function returning function`() {
         val program = parseAndTypeCheck(
             """
@@ -806,7 +834,7 @@ class AnnotationTypeCheckingTest {
             none
             """.trimIndent(),
             "none",
-            "| None, Some { val: Int } |"
+            "| Some { val: Int }, None |"
         )
     }
 
@@ -819,7 +847,7 @@ class AnnotationTypeCheckingTest {
             result
             """.trimIndent(),
             "result",
-            "| Err { code: Int, msg: String }, Ok { val: Int } |"
+            "| Ok { val: Int }, Err { msg: String, code: Int } |"
         )
     }
 

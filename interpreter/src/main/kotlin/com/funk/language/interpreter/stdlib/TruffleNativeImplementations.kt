@@ -280,6 +280,37 @@ object TruffleNativeImplementations {
             val substring = record.fields["substring"] as? FunkString ?: throw NativeFunctionException("__native_string_contains", "expects 'substring' as String")
             FunkBool(s.value.contains(substring.value))
         }
+
+        context["__native_string_split"] = NativeFunkFunction("__native_string_split") { args ->
+            val record = args.firstOrNull() as? FunkRecord ?: throw NativeFunctionException("__native_string_split", "expects FunkRecord")
+            val s = record.fields["s"] as? FunkString ?: throw NativeFunctionException("__native_string_split", "expects 's' as String")
+            val delimiter = record.fields["delimiter"] as? FunkString ?: throw NativeFunctionException("__native_string_split", "expects 'delimiter' as String")
+
+            val parts = if (delimiter.value.isEmpty()) {
+                // Split into individual characters
+                s.value.map { it.toString() }
+            } else {
+                s.value.split(delimiter.value)
+            }
+
+            FunkArrayList(parts.map { FunkString(it) })
+        }
+
+        context["__native_string_join"] = NativeFunkFunction("__native_string_join") { args ->
+            val record = args.firstOrNull() as? FunkRecord ?: throw NativeFunctionException("__native_string_join", "expects FunkRecord")
+            val strings = record.fields["strings"] as? FunkArrayList ?: throw NativeFunctionException("__native_string_join", "expects 'strings' as List")
+            val separator = record.fields["separator"] as? FunkString ?: throw NativeFunctionException("__native_string_join", "expects 'separator' as String")
+
+            val stringValues = strings.elements.map { element ->
+                when (element) {
+                    is FunkString -> element.value
+                    else -> throw NativeFunctionException("__native_string_join", "all list elements must be strings")
+                }
+            }
+
+            FunkString(stringValues.joinToString(separator.value))
+        }
+
         // Console native functions (required by interpreter)
         context["__native_console_print"] = NativeFunkFunction("__native_console_print") { args ->
             val record = args.firstOrNull() as? FunkRecord ?: throw NativeFunctionException("__native_console_print", "expects FunkRecord")
