@@ -393,7 +393,7 @@ private fun handleExecCommand(args: List<String>) {
         val result = interpreter.execute(typedProgram, projectRoot)
         val context = interpreter.getLastExecutionContext()
 
-        // Check if 'main' exists and is a function
+        // Check if 'main' exists
         val mainValue = context["main"]
         if (mainValue == null) {
             println("❌ Error: No 'main' function found")
@@ -425,6 +425,17 @@ private fun handleExecCommand(args: List<String>) {
             kotlin.system.exitProcess(1)
         }
 
+        // Check if main has the signature {} -> {} for auto-execution
+        // Get the type of main from the typed program
+        val mainBinding = typedProgram.items.filterIsInstance<LetBinding>().find { it.variableName == "main" }
+        val mainType = mainBinding?.inferredType
+
+        val shouldAutoExecute = mainType is FunkType.FunctionType &&
+                                mainType.paramType is FunkType.RecordType &&
+                                (mainType.paramType as FunkType.RecordType).fields.isEmpty() &&
+                                mainType.returnType is FunkType.RecordType &&
+                                (mainType.returnType as FunkType.RecordType).fields.isEmpty()
+
         // Call main with empty record argument
         // Use the execution context that has all the imports
         val emptyArgs = com.funk.language.interpreter.FunkRecord(emptyMap())
@@ -444,9 +455,17 @@ private fun handleExecCommand(args: List<String>) {
             }
         }
 
-        println("✅ Execution successful!")
-        println()
-        println(prettyPrintResult(mainResult))
+        // For auto-executing main with {} -> {}, just indicate success without printing the empty result
+        if (shouldAutoExecute) {
+            // Main auto-executed, don't print the empty record result
+            println()
+            println("✅ Execution successful!")
+        } else {
+            // Regular main or main with different signature - print result
+            println("✅ Execution successful!")
+            println()
+            println(prettyPrintResult(mainResult))
+        }
         
     } catch (e: TypeCheckError) {
         println("❌ Type Error:")

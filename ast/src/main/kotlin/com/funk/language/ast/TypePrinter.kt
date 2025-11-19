@@ -12,32 +12,34 @@ fun prettyPrintType(type: FunkType): String {
  * Collect all type variables in a type and assign them readable names
  */
 private fun collectTypeVariables(type: FunkType): Map<TypeVar, String> {
-    val variables = mutableSetOf<TypeVar>()
+    val variables = mutableListOf<TypeVar>()
     collectTypeVariablesRecursive(type, variables)
 
-    // Sort by name to ensure consistent ordering
-    val sortedVars = variables.sortedBy { it.name }
+    // Remove duplicates while preserving order of first appearance
+    val orderedVars = variables.distinct()
 
-    // Assign names 'a, 'b, 'c, etc.
-    return sortedVars.mapIndexed { index, typeVar ->
+    // Assign names 'a, 'b, 'c, etc. in order of appearance
+    return orderedVars.mapIndexed { index, typeVar ->
         val letter = ('a' + index).toString()
         typeVar to "'$letter"
     }.toMap()
 }
 
 /**
- * Recursively collect type variables from a type
+ * Recursively collect type variables from a type in order of first appearance
  */
-private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableSet<TypeVar>) {
+private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableList<TypeVar>) {
     when (type) {
         is FunkType.VarType -> variables.add(type.variable)
         is FunkType.RecordType -> {
-            type.fields.values.forEach { fieldType ->
+            // Sort fields by name for consistent type variable ordering
+            type.fields.entries.sortedBy { it.key }.forEach { (_, fieldType) ->
                 collectTypeVariablesRecursive(fieldType, variables)
             }
         }
         is FunkType.VariantType -> {
-            type.constructors.values.forEach { constructorType ->
+            // Sort constructors by name for consistent type variable ordering
+            type.constructors.entries.sortedBy { it.key }.forEach { (_, constructorType) ->
                 constructorType?.let { collectTypeVariablesRecursive(it, variables) }
             }
         }
