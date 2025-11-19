@@ -954,10 +954,16 @@ private fun printTypeCheckSuccess(result: Program, typeAliases: Map<String, Type
     if (typeDeclarations.isNotEmpty()) {
         println("🏷️  Types:")
         for (item in typeDeclarations) {
-            val expansionStr = item.inferredType?.let { 
-                " = ${prettyPrintType(it)}" 
+            // Include type parameters in the name (e.g., "Tree 'a")
+            val typeParamsStr = if (item.typeParams.isNotEmpty()) {
+                " " + item.typeParams.joinToString(" ")
+            } else {
+                ""
+            }
+            val expansionStr = item.inferredType?.let {
+                " = ${prettyPrintType(it)}"
             } ?: ""
-            println("   ${item.name}$expansionStr")
+            println("   ${item.name}$typeParamsStr$expansionStr")
         }
         println()
     }
@@ -975,10 +981,18 @@ private fun printTypeCheckSuccess(result: Program, typeAliases: Map<String, Type
     if (letBindings.isNotEmpty()) {
         println("📝 Variables:")
         for (item in letBindings) {
-            val typeStr = item.inferredType?.let { 
-                prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false) 
-            } ?: "unknown"
-            
+            // Use TypeScheme if available (for polymorphic functions with constraints),
+            // otherwise fall back to inferredType (for monomorphic bindings)
+            val scheme = item.typeScheme
+            val typeStr = if (scheme != null && scheme.type is com.funk.language.ast.FunkType.FunctionType) {
+                // For polymorphic functions, display the type from the scheme which includes constraints
+                prettyPrintTypeWithAliases(scheme.type, typeAliases, showExpansion = false, typeDeclarations = typeDeclarations)
+            } else {
+                item.inferredType?.let {
+                    prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false, typeDeclarations = typeDeclarations)
+                } ?: "unknown"
+            }
+
             // Add emoji based on type
             val emoji = when {
                 typeStr.contains("->") -> "🔧" // Function
@@ -989,7 +1003,7 @@ private fun printTypeCheckSuccess(result: Program, typeAliases: Map<String, Type
                 typeStr == "Boolean" -> "✅"
                 else -> "📋"
             }
-            
+
             println("   $emoji ${item.variableName} : $typeStr")
         }
     }

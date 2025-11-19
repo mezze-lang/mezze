@@ -611,7 +611,8 @@ data class LetBinding(
     val variableName: String,
     val visibility: Visibility = Visibility.PRIVATE,
     val typeAnnotation: TypeAnnotation? = null,  // From parser
-    val inferredType: FunkType? = null,          // From typechecker
+    val inferredType: FunkType? = null,          // From typechecker (monomorphic, instantiated type)
+    val typeScheme: TypeScheme? = null,          // From typechecker (polymorphic type with constraints)
     val expression: Expression
 ) : ProgramItem
 

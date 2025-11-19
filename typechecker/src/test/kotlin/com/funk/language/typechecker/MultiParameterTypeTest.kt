@@ -1,0 +1,165 @@
+package com.funk.language.typechecker
+
+import com.funk.language.parser.FunkParser
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.*
+
+/**
+ * Tests for multi-parameter type declarations
+ */
+class MultiParameterTypeTest {
+    private val parser = FunkParser()
+    private val typeChecker = TypeChecker()
+
+    @Test
+    fun `test two parameter type declaration parses correctly`() {
+        val source = """
+            type Either 'a 'b = | Left 'a, Right 'b |
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val result = typeChecker.typeCheck(program)
+
+        val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
+        assertEquals("Either", typeDecl.name)
+        assertEquals(2, typeDecl.typeParams.size)
+        assertEquals("'a", typeDecl.typeParams[0])
+        assertEquals("'b", typeDecl.typeParams[1])
+    }
+
+    @Test
+    fun `test Result type with two parameters`() {
+        val source = """
+            type Result 'ok 'err = | Ok 'ok, Err 'err |
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val result = typeChecker.typeCheck(program)
+
+        val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
+        assertEquals("Result", typeDecl.name)
+        assertEquals(2, typeDecl.typeParams.size)
+        assertEquals("'ok", typeDecl.typeParams[0])
+        assertEquals("'err", typeDecl.typeParams[1])
+    }
+
+    @Test
+    fun `test three parameter type declaration`() {
+        val source = """
+            type Triple 'a 'b 'c = | MkTriple { first: 'a, second: 'b, third: 'c } |
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val result = typeChecker.typeCheck(program)
+
+        val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
+        assertEquals("Triple", typeDecl.name)
+        assertEquals(3, typeDecl.typeParams.size)
+    }
+
+    @Test
+    fun `test Either type with constructors`() {
+        val source = """
+            type Either 'a 'b = | Left 'a, Right 'b |
+            
+            let left_val = Left 42
+            let right_val = Right "hello"
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val result = typeChecker.typeCheck(program)
+
+        // Check that the type declaration exists
+        val typeDecls = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>()
+        assertEquals(1, typeDecls.size)
+
+        // Check that the let bindings typecheck
+        val letBindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
+        assertEquals(2, letBindings.size)
+        
+        // Both should have inferred types
+        assertNotNull(letBindings[0].inferredType)
+        assertNotNull(letBindings[1].inferredType)
+    }
+
+    @Test
+    fun `test multi-parameter type with record constructors`() {
+        val source = """
+            type Pair 'a 'b = | MkPair { first: 'a, second: 'b } |
+            
+            let pair = MkPair { first = 1, second = "one" }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val result = typeChecker.typeCheck(program)
+
+        val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
+        assertEquals("Pair", typeDecl.name)
+        assertEquals(2, typeDecl.typeParams.size)
+
+        val letBinding = result.items.filterIsInstance<com.funk.language.ast.LetBinding>().first()
+        assertNotNull(letBinding.inferredType)
+    }
+
+    @Test
+    fun `test multi-parameter type with mixed constructor payloads`() {
+        val source = """
+            type Maybe2 'a 'b = | Nothing, JustFirst { first: 'a }, JustSecond { second: 'b }, Both { first: 'a, second: 'b } |
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val result = typeChecker.typeCheck(program)
+
+        val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
+        assertEquals("Maybe2", typeDecl.name)
+        assertEquals(2, typeDecl.typeParams.size)
+
+        val definition = typeDecl.definition as com.funk.language.ast.VariantDefinition
+        assertEquals(4, definition.constructors.size)
+    }
+
+    @Test
+    fun `test multi-parameter type preserves type variables correctly`() {
+        val source = """
+            type Either 'a 'b = | Left 'a, Right 'b |
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val result = typeChecker.typeCheck(program)
+
+        val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
+        val definition = typeDecl.definition as com.funk.language.ast.VariantDefinition
+
+        // Check Left constructor
+        val leftConstructor = definition.constructors.find { it.name == "Left" }!!
+        val leftType = leftConstructor.dataType as com.funk.language.ast.IdentifierTypeAnnotation
+        assertEquals("'a", leftType.name)
+
+        // Check Right constructor
+        val rightConstructor = definition.constructors.find { it.name == "Right" }!!
+        val rightType = rightConstructor.dataType as com.funk.language.ast.IdentifierTypeAnnotation
+        assertEquals("'b", rightType.name)
+    }
+
+    @Test
+    fun `test multi-parameter type without constructor payloads`() {
+        val source = """
+            type Status 'a 'b = | Pending, InProgress, Complete |
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val result = typeChecker.typeCheck(program)
+
+        val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
+        assertEquals("Status", typeDecl.name)
+        assertEquals(2, typeDecl.typeParams.size)
+        
+        val definition = typeDecl.definition as com.funk.language.ast.VariantDefinition
+        assertEquals(3, definition.constructors.size)
+        
+        // All constructors should have null dataType (unit constructors)
+        definition.constructors.forEach { constructor ->
+            assertNull(constructor.dataType)
+        }
+    }
+}

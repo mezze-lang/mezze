@@ -180,26 +180,104 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
 }
 
 /**
+ * Helper to match a variant type against type declarations and extract type arguments
+ */
+private data class TypeDeclMatch(val declName: String, val typeArgs: List<FunkType>)
+
+private fun findTypeDeclarationForVariant(
+    variantType: FunkType.VariantType,
+    typeDeclarations: List<TypeDeclaration>,
+    typeVarMapping: Map<TypeVar, String>
+): TypeDeclMatch? {
+    for (decl in typeDeclarations) {
+        if (decl.definition !is VariantDefinition) continue
+
+        val variantDef = decl.definition as VariantDefinition
+
+        // Check if constructor names match
+        if (variantDef.constructors.map { it.name }.toSet() != variantType.constructors.keys) {
+            continue
+        }
+
+        // If no type parameters, it's a simple match
+        if (decl.typeParams.isEmpty()) {
+            return TypeDeclMatch(decl.name, emptyList())
+        }
+
+        // Try to extract type arguments by examining constructor types
+        // For simplicity, extract type variables that appear in the variant type
+        val typeArgs = extractTypeArgumentsFromVariant(variantType, decl.typeParams.size, typeVarMapping)
+        if (typeArgs != null) {
+            return TypeDeclMatch(decl.name, typeArgs)
+        }
+    }
+    return null
+}
+
+private fun extractTypeArgumentsFromVariant(
+    variantType: FunkType.VariantType,
+    expectedParamCount: Int,
+    typeVarMapping: Map<TypeVar, String>
+): List<FunkType>? {
+    // Collect all type variables from the variant constructors
+    val typeVars = mutableListOf<TypeVar>()
+    for (constructorType in variantType.constructors.values) {
+        constructorType?.let { collectTypeVars(it, typeVars) }
+    }
+
+    // Get unique type variables in order of appearance
+    val uniqueTypeVars = typeVars.distinctBy { typeVarMapping[it] ?: it.name }
+
+    if (uniqueTypeVars.size != expectedParamCount) {
+        return null
+    }
+
+    return uniqueTypeVars.map { FunkType.VarType(it) }
+}
+
+private fun collectTypeVars(type: FunkType, result: MutableList<TypeVar>) {
+    when (type) {
+        is FunkType.VarType -> result.add(type.variable)
+        is FunkType.RecordType -> type.fields.values.forEach { collectTypeVars(it, result) }
+        is FunkType.VariantType -> type.constructors.values.forEach { it?.let { t -> collectTypeVars(t, result) } }
+        is FunkType.TypeApplication -> type.args.forEach { collectTypeVars(it, result) }
+        is FunkType.FunctionType -> {
+            collectTypeVars(type.paramType, result)
+            collectTypeVars(type.returnType, result)
+        }
+        is FunkType.ListType -> collectTypeVars(type.elementType, result)
+        is FunkType.ArrayListType -> collectTypeVars(type.elementType, result)
+        is FunkType.ArrayType -> collectTypeVars(type.elementType, result)
+        is FunkType.MapType -> {
+            collectTypeVars(type.keyType, result)
+            collectTypeVars(type.valueType, result)
+        }
+        else -> {} // Primitive types have no type variables
+    }
+}
+
+/**
  * Pretty printer for Funk types with type alias expansion support
  */
 fun prettyPrintTypeWithAliases(
     type: FunkType,
     typeAliases: Map<String, TypeAliasInfo> = emptyMap(),
-    showExpansion: Boolean = false
+    showExpansion: Boolean = false,
+    typeDeclarations: List<TypeDeclaration> = emptyList()
 ): String {
     val typeVarMapping = collectTypeVariables(type)
-    
+
     // First, check if this type matches any alias
     val aliasMatch = findTypeAliasForType(type, typeAliases)
-    
+
     return if (aliasMatch != null) {
         val aliasName = if (aliasMatch.typeArgs.isEmpty()) {
             aliasMatch.aliasName
         } else {
-            val typeArgsStr = aliasMatch.typeArgs.joinToString(" ") { prettyPrintTypeWithAliases(it, typeAliases, showExpansion) }
+            val typeArgsStr = aliasMatch.typeArgs.joinToString(" ") { prettyPrintTypeWithAliases(it, typeAliases, showExpansion, typeDeclarations) }
             "${aliasMatch.aliasName} $typeArgsStr"
         }
-        
+
         if (showExpansion) {
             "$aliasName (= ${prettyPrintTypeWithMapping(type, typeVarMapping)})"
         } else {
@@ -207,7 +285,7 @@ fun prettyPrintTypeWithAliases(
         }
     } else {
         // No direct alias match - recursively apply aliases to subcomponents
-        prettyPrintTypeWithAliasesRecursive(type, typeAliases, showExpansion, typeVarMapping)
+        prettyPrintTypeWithAliasesRecursive(type, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
     }
 }
 
@@ -218,7 +296,8 @@ private fun prettyPrintWithAliasCheck(
     type: FunkType,
     typeAliases: Map<String, TypeAliasInfo>,
     showExpansion: Boolean,
-    typeVarMapping: Map<TypeVar, String>
+    typeVarMapping: Map<TypeVar, String>,
+    typeDeclarations: List<TypeDeclaration> = emptyList()
 ): String {
     // First, check if this type matches any alias
     val aliasMatch = findTypeAliasForType(type, typeAliases)
@@ -227,7 +306,7 @@ private fun prettyPrintWithAliasCheck(
         val aliasName = if (aliasMatch.typeArgs.isEmpty()) {
             aliasMatch.aliasName
         } else {
-            val typeArgsStr = aliasMatch.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
+            val typeArgsStr = aliasMatch.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
             "${aliasMatch.aliasName} $typeArgsStr"
         }
 
@@ -238,7 +317,7 @@ private fun prettyPrintWithAliasCheck(
         }
     } else {
         // No direct alias match - recursively apply aliases to subcomponents
-        prettyPrintTypeWithAliasesRecursive(type, typeAliases, showExpansion, typeVarMapping)
+        prettyPrintTypeWithAliasesRecursive(type, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
     }
 }
 
@@ -249,7 +328,8 @@ private fun prettyPrintTypeWithAliasesRecursive(
     type: FunkType,
     typeAliases: Map<String, TypeAliasInfo>,
     showExpansion: Boolean,
-    typeVarMapping: Map<TypeVar, String>
+    typeVarMapping: Map<TypeVar, String>,
+    typeDeclarations: List<TypeDeclaration> = emptyList()
 ): String = when (type) {
     is FunkType.IntType -> "Int"
     is FunkType.FloatType -> "Float"
@@ -260,7 +340,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
-            "$name: ${prettyPrintWithAliasCheck(fieldType, typeAliases, showExpansion, typeVarMapping)}"
+            "$name: ${prettyPrintWithAliasCheck(fieldType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
         }
         if (type.isOpen) {
             "{ $fields, ... }"
@@ -269,6 +349,17 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
     }
     is FunkType.VariantType -> {
+        // First, check if this variant matches a known type declaration
+        val declMatch = findTypeDeclarationForVariant(type, typeDeclarations, typeVarMapping)
+        if (declMatch != null) {
+            // Print as named type (e.g., "Tree 'a" instead of expanded variant)
+            val typeArgsStr = if (declMatch.typeArgs.isEmpty()) {
+                ""
+            } else {
+                " " + declMatch.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
+            }
+            declMatch.declName + typeArgsStr
+        } else {
         // Check if this is a Result type (has Ok and Err constructors)
         val hasOk = type.constructors.containsKey("Ok")
         val hasErr = type.constructors.containsKey("Err")
@@ -291,7 +382,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
             }
 
             val valueTypeStr = if (valueType != null) {
-                prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping)
+                prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
             } else {
                 "'unknown"
             }
@@ -300,14 +391,14 @@ private fun prettyPrintTypeWithAliasesRecursive(
                 is FunkType.VariantType -> {
                     val errorConstructors = errorVariant.constructors.entries.sortedBy { it.key }.map { (name, dataType) ->
                         if (dataType != null) {
-                            "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping)}"
+                            "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
                         } else {
                             name
                         }
                     }
                     "| ${errorConstructors.joinToString(", ")} |"
                 }
-                else -> if (errorVariant != null) prettyPrintWithAliasCheck(errorVariant, typeAliases, showExpansion, typeVarMapping) else "'unknown"
+                else -> if (errorVariant != null) prettyPrintWithAliasCheck(errorVariant, typeAliases, showExpansion, typeVarMapping, typeDeclarations) else "'unknown"
             }
 
             "Result $valueTypeStr $errorTypeStr"
@@ -316,8 +407,8 @@ private fun prettyPrintTypeWithAliasesRecursive(
             val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
                 when (dataType) {
                     null -> name
-                    is FunkType.RecordType -> "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping)}"
-                    else -> "$name(${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping)})"
+                    is FunkType.RecordType -> "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
+                    else -> "$name(${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)})"
                 }
             }
             if (type.isOpen) {
@@ -326,24 +417,25 @@ private fun prettyPrintTypeWithAliasesRecursive(
                 "| $constructors |"
             }
         }
+        }
     }
-    is FunkType.ArrayListType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}]"
-    is FunkType.ArrayType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}]"
+    is FunkType.ArrayListType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}]"
+    is FunkType.ArrayType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}]"
     is FunkType.TypeApplication -> {
-        val argsStr = type.args.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
+        val argsStr = type.args.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
         "${type.constructor} $argsStr"
     }
-    is FunkType.ListType -> "List ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
-    is FunkType.MapType -> "Map ${prettyPrintWithAliasCheck(type.keyType, typeAliases, showExpansion, typeVarMapping)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)}"
-    is FunkType.SetType -> "Set ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping)}"
+    is FunkType.ListType -> "List ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
+    is FunkType.MapType -> "Map ${prettyPrintWithAliasCheck(type.keyType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
+    is FunkType.SetType -> "Set ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
     is FunkType.FunctionType -> {
         // Build parameter type string
-        val paramTypeStr = prettyPrintWithAliasCheck(type.paramType, typeAliases, showExpansion, typeVarMapping)
+        val paramTypeStr = prettyPrintWithAliasCheck(type.paramType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
 
         // Add ability constraints after parameter type but before arrow
         val abilityConstraints = if (type.abilityConstraints.isNotEmpty()) {
             " with " + type.abilityConstraints.joinToString(", ") { constraint ->
-                val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping) }
+                val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
                 if (typeArgs.isNotEmpty()) {
                     "${constraint.abilityName} $typeArgs"
                 } else {
@@ -355,7 +447,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
 
         // Build return type string
-        val returnTypeStr = prettyPrintWithAliasCheck(type.returnType, typeAliases, showExpansion, typeVarMapping)
+        val returnTypeStr = prettyPrintWithAliasCheck(type.returnType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
 
         // Add effects
         val effects = if (type.effects != null && type.effects.effects.isNotEmpty()) {
@@ -381,7 +473,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is FunkType.SuspendedType -> {
         // Suspended types: just print the value type
         // Effects are handled by the enclosing FunctionType
-        prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping)
+        prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
     }
     else -> type.toString() // Fallback for any other types
 }

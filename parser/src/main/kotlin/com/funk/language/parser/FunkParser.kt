@@ -198,6 +198,7 @@ class FunkParser {
                                             visibility,
                                             typeAnnotation,
                                             null, // inferredType filled by typechecker
+                                            null, // typeScheme filled by typechecker
                                             expr.value
                                         ),
                                         expr.remaining
@@ -523,13 +524,17 @@ class FunkParser {
         when (name) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(name.remaining)
-                // Check for optional record type
-                val recordType = recordTypeAnnotationParser(stream1)
+                // Check for optional type annotation (record or any other type)
+                // Try record type first (for backwards compatibility), then any type annotation
+                val dataType = Parsers.oneOf(
+                    recordTypeAnnotationParser,
+                    identifierTypeAnnotation  // Allows bare type variables like 'a
+                )(stream1)
 
-                when (recordType) {
+                when (dataType) {
                     is ParseResult.Success -> ParseResult.Success(
-                        VariantConstructorDef(name.value.text, recordType.value),
-                        recordType.remaining
+                        VariantConstructorDef(name.value.text, dataType.value),
+                        dataType.remaining
                     )
                     is ParseResult.Failure -> ParseResult.Success(
                         VariantConstructorDef(name.value.text, null),
