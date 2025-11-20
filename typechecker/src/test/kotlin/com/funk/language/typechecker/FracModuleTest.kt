@@ -42,7 +42,7 @@ class FracModuleTest {
     fun `test frac from_int function`() {
         val source = """
             use std::frac
-            let f = frac::from_int { int = 42 }
+            let f = frac::from_int { n = 42 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -53,7 +53,7 @@ class FracModuleTest {
     fun `test frac from_nat function`() {
         val source = """
             use std::frac
-            let f = frac::from_nat { nat = 10 }
+            let f = frac::from_nat { n = 10 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -66,7 +66,7 @@ class FracModuleTest {
             use std::frac
             let f1 = frac::make { numerator = 1, denominator = 2 }
             let f2 = frac::make { numerator = 1, denominator = 3 }
-            let result = frac::add { left = f1, right = f2 }
+            let result = frac::add { l = f1, r = f2 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -79,7 +79,7 @@ class FracModuleTest {
             use std::frac
             let f1 = frac::make { numerator = 3, denominator = 4 }
             let f2 = frac::make { numerator = 1, denominator = 4 }
-            let result = frac::subtract { left = f1, right = f2 }
+            let result = frac::subtract { l = f1, r = f2 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -92,7 +92,7 @@ class FracModuleTest {
             use std::frac
             let f1 = frac::make { numerator = 2, denominator = 3 }
             let f2 = frac::make { numerator = 3, denominator = 4 }
-            let result = frac::multiply { left = f1, right = f2 }
+            let result = frac::multiply { l = f1, r = f2 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -105,7 +105,7 @@ class FracModuleTest {
             use std::frac
             let f1 = frac::make { numerator = 1, denominator = 2 }
             let f2 = frac::make { numerator = 1, denominator = 3 }
-            let result = frac::divide { left = f1, right = f2 }
+            let result = frac::divide { l = f1, r = f2 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -118,7 +118,7 @@ class FracModuleTest {
             use std::frac
             let f1 = frac::make { numerator = 1, denominator = 2 }
             let f2 = frac::make { numerator = 2, denominator = 4 }
-            let result = frac::equals { left = f1, right = f2 }
+            let result = frac::equals { l = f1, r = f2 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -131,7 +131,7 @@ class FracModuleTest {
             use std::frac
             let f1 = frac::make { numerator = 1, denominator = 3 }
             let f2 = frac::make { numerator = 1, denominator = 2 }
-            let result = frac::less_than { left = f1, right = f2 }
+            let result = frac::less_than { l = f1, r = f2 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -144,7 +144,7 @@ class FracModuleTest {
             use std::frac
             let f1 = frac::make { numerator = 3, denominator = 4 }
             let f2 = frac::make { numerator = 1, denominator = 2 }
-            let result = frac::greater_than { left = f1, right = f2 }
+            let result = frac::greater_than { l = f1, r = f2 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -156,7 +156,7 @@ class FracModuleTest {
         val source = """
             use std::frac
             let f = frac::make { numerator = 3, denominator = 4 }
-            let result = frac::to_float { frac = f }
+            let result = frac::to_float { n = f }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -168,7 +168,7 @@ class FracModuleTest {
         val source = """
             use std::frac
             let f = frac::make { numerator = 3, denominator = 4 }
-            let result = frac::to_string { frac = f }
+            let result = frac::to_string { n = f }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -180,7 +180,7 @@ class FracModuleTest {
         val source = """
             use std::frac
             let f = frac::make { numerator = 3, denominator = 4 }
-            let result = frac::numerator { frac = f }
+            let result = frac::numerator { n = f }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -192,7 +192,7 @@ class FracModuleTest {
         val source = """
             use std::frac
             let f = frac::make { numerator = 3, denominator = 4 }
-            let result = frac::denominator { frac = f }
+            let result = frac::denominator { n = f }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -204,7 +204,7 @@ class FracModuleTest {
         val source = """
             use std::frac
             let f = frac::make { numerator = -3, denominator = 4 }
-            let result = frac::abs { frac = f }
+            let result = frac::abs { n = f }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -216,7 +216,7 @@ class FracModuleTest {
         val source = """
             use std::frac
             let f = frac::make { numerator = 3, denominator = 4 }
-            let result = frac::negate { frac = f }
+            let result = frac::negate { n = f }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -228,7 +228,7 @@ class FracModuleTest {
         val source = """
             use std::frac
             let f = frac::make { numerator = 6, denominator = 8 }
-            let result = frac::reduce { frac = f }
+            let result = frac::reduce { n = f }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

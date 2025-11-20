@@ -719,67 +719,67 @@ object NativeFunctionTypes {
         // Native frac operations
         context["__native_frac_add"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.FracType
         )
 
         context["__native_frac_subtract"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.FracType
         )
 
         context["__native_frac_multiply"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.FracType
         )
 
         context["__native_frac_divide"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.FracType
         )
 
         context["__native_frac_equals"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.BooleanType
         )
 
         context["__native_frac_less_than"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.BooleanType
         )
 
         context["__native_frac_greater_than"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.BooleanType
         )
 
         context["__native_frac_to_float"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FloatType
         )
 
         context["__native_frac_to_string"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.StringType
         )
 
@@ -792,104 +792,104 @@ object NativeFunctionTypes {
         )
 
         context["__native_int_to_frac"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("int" to FunkType.IntType)),
+            FunkType.RecordType(mapOf("n" to FunkType.IntType)),
             FunkType.FracType
         )
 
         context["__native_nat_to_frac"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("nat" to FunkType.NatType)),
+            FunkType.RecordType(mapOf("n" to FunkType.NatType)),
             FunkType.FracType
         )
 
         context["__native_frac_numerator"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.IntType
         )
 
         context["__native_frac_denominator"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.IntType
         )
 
         context["__native_reduce_frac"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FracType
         )
 
         context["__native_abs_frac"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FracType
         )
 
         context["__native_negate_frac"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FracType
         )
 
         // Module-qualified functions for frac
         context["frac::add"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.FracType
         )
 
         context["frac::subtract"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.FracType
         )
 
         context["frac::multiply"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.FracType
         )
 
         context["frac::divide"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.FracType
         )
 
         context["frac::equals"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.BooleanType
         )
 
         context["frac::less_than"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.BooleanType
         )
 
         context["frac::greater_than"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "left" to FunkType.FracType,
-                "right" to FunkType.FracType
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
             )),
             FunkType.BooleanType
         )
 
         context["frac::to_float"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FloatType
         )
 
         context["frac::to_string"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.StringType
         )
 
@@ -902,37 +902,37 @@ object NativeFunctionTypes {
         )
 
         context["frac::from_int"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("int" to FunkType.IntType)),
+            FunkType.RecordType(mapOf("n" to FunkType.IntType)),
             FunkType.FracType
         )
 
         context["frac::from_nat"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("nat" to FunkType.NatType)),
+            FunkType.RecordType(mapOf("n" to FunkType.NatType)),
             FunkType.FracType
         )
 
         context["frac::numerator"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.IntType
         )
 
         context["frac::denominator"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.IntType
         )
 
         context["frac::reduce"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FracType
         )
 
         context["frac::abs"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FracType
         )
 
         context["frac::negate"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("frac" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FracType
         )
 

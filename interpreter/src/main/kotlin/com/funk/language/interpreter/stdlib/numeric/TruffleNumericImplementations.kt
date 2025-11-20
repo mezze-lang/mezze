@@ -39,9 +39,9 @@ object TruffleNumericImplementations {
         
         context["add_frac"] = NativeFunkFunction("add_frac") { args ->
             val record = args[0] as FunkRecord
-            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("add_frac", "expects 'l' as Frac")
-            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("add_frac", "expects 'r' as Frac")
-            
+            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("add_frac", "expects 'left' as Frac")
+            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("add_frac", "expects 'right' as Frac")
+
             // a/b + c/d = (a*d + c*b) / (b*d)
             val numerator = l.numerator * r.denominator + r.numerator * l.denominator
             val denominator = l.denominator * r.denominator
@@ -72,9 +72,9 @@ object TruffleNumericImplementations {
         
         context["subtract_frac"] = NativeFunkFunction("subtract_frac") { args ->
             val record = args[0] as FunkRecord
-            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("subtract_frac", "expects 'l' as Frac")
-            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("subtract_frac", "expects 'r' as Frac")
-            
+            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("subtract_frac", "expects 'left' as Frac")
+            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("subtract_frac", "expects 'right' as Frac")
+
             // a/b - c/d = (a*d - c*b) / (b*d)
             val numerator = l.numerator * r.denominator - r.numerator * l.denominator
             val denominator = l.denominator * r.denominator
@@ -106,12 +106,12 @@ object TruffleNumericImplementations {
         
         context["multiply_frac"] = NativeFunkFunction("multiply_frac") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFrac ?: throw NativeFunctionException("multiply_frac", "expects 'left' as Frac")
-            val right = record.fields["right"] as? FunkFrac ?: throw NativeFunctionException("multiply_frac", "expects 'right' as Frac")
+            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("multiply_frac", "expects 'left' as Frac")
+            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("multiply_frac", "expects 'right' as Frac")
             
             // a/b * c/d = (a*c) / (b*d)
-            val numerator = left.numerator * right.numerator
-            val denominator = left.denominator * right.denominator
+            val numerator = l.numerator * r.numerator
+            val denominator = l.denominator * r.denominator
             FunkFrac(numerator, denominator).reduce()
         }
         
@@ -141,14 +141,14 @@ object TruffleNumericImplementations {
         
         context["divide_frac"] = NativeFunkFunction("divide_frac") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFrac ?: throw NativeFunctionException("divide_frac", "expects 'left' as Frac")
-            val right = record.fields["right"] as? FunkFrac ?: throw NativeFunctionException("divide_frac", "expects 'right' as Frac")
+            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("divide_frac", "expects 'left' as Frac")
+            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("divide_frac", "expects 'right' as Frac")
             
-            if (right.numerator == 0L) throw FunkException("Division by zero")
+            if (r.numerator == 0L) throw FunkException("Division by zero")
             
             // a/b ÷ c/d = a/b * d/c = (a*d) / (b*c)
-            val numerator = left.numerator * right.denominator
-            val denominator = left.denominator * right.numerator
+            val numerator = l.numerator * r.denominator
+            val denominator = l.denominator * r.numerator
             FunkFrac(numerator, denominator).reduce()
         }
         
@@ -207,11 +207,11 @@ object TruffleNumericImplementations {
         
         context["equal_frac"] = NativeFunkFunction("equal_frac") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFrac ?: throw NativeFunctionException("equal_frac", "expects 'left' as Frac")
-            val right = record.fields["right"] as? FunkFrac ?: throw NativeFunctionException("equal_frac", "expects 'right' as Frac")
+            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("equal_frac", "expects 'left' as Frac")
+            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("equal_frac", "expects 'right' as Frac")
             
             // Cross multiply: a/b == c/d iff a*d == b*c
-            FunkBool(left.numerator * right.denominator == right.numerator * left.denominator)
+            FunkBool(l.numerator * r.denominator == r.numerator * l.denominator)
         }
         
         context["equal_nat"] = NativeFunkFunction("equal_nat") { args ->
@@ -238,11 +238,11 @@ object TruffleNumericImplementations {
         
         context["lessThan_frac"] = NativeFunkFunction("lessThan_frac") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFrac ?: throw NativeFunctionException("lessThan_frac", "expects 'left' as Frac")
-            val right = record.fields["right"] as? FunkFrac ?: throw NativeFunctionException("lessThan_frac", "expects 'right' as Frac")
+            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("lessThan_frac", "expects 'left' as Frac")
+            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("lessThan_frac", "expects 'right' as Frac")
             
             // Cross multiply: a/b < c/d iff a*d < c*b (assuming positive denominators)
-            FunkBool(left.numerator * right.denominator < right.numerator * left.denominator)
+            FunkBool(l.numerator * r.denominator < r.numerator * l.denominator)
         }
         
         context["lessThan_nat"] = NativeFunkFunction("lessThan_nat") { args ->
@@ -269,11 +269,11 @@ object TruffleNumericImplementations {
         
         context["greaterThan_frac"] = NativeFunkFunction("greaterThan_frac") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFrac ?: throw NativeFunctionException("greaterThan_frac", "expects 'left' as Frac")
-            val right = record.fields["right"] as? FunkFrac ?: throw NativeFunctionException("greaterThan_frac", "expects 'right' as Frac")
+            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("greaterThan_frac", "expects 'left' as Frac")
+            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("greaterThan_frac", "expects 'right' as Frac")
             
             // Cross multiply: a/b > c/d iff a*d > c*b (assuming positive denominators)
-            FunkBool(left.numerator * right.denominator > right.numerator * left.denominator)
+            FunkBool(l.numerator * r.denominator > r.numerator * l.denominator)
         }
         
         context["greaterThan_nat"] = NativeFunkFunction("greaterThan_nat") { args ->
@@ -334,10 +334,16 @@ object TruffleNumericImplementations {
         
         context["fracToFloat"] = NativeFunkFunction("fracToFloat") { args ->
             val record = args[0] as FunkRecord
-            val value = record.fields["val"] as? FunkFrac ?: throw NativeFunctionException("fracToFloat", "expects 'val' as Frac")
-            FunkFloat(value.numerator.toDouble() / value.denominator.toDouble())
+            val n = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("fracToFloat", "expects 'frac' as Frac")
+            FunkFloat(n.numerator.toDouble() / n.denominator.toDouble())
         }
-        
+
+        context["fracToString"] = NativeFunkFunction("fracToString") { args ->
+            val record = args[0] as FunkRecord
+            val n = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("fracToString", "expects 'frac' as Frac")
+            FunkString("${n.numerator}/${n.denominator}")
+        }
+
         // Nat conversions
         context["natToInt"] = NativeFunkFunction("natToInt") { args ->
             val record = args[0] as FunkRecord
@@ -365,32 +371,32 @@ object TruffleNumericImplementations {
         // Hidden Int operations
         context["__native_int_equals"] = NativeFunkFunction("__native_int_equals") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkInt ?: throw NativeFunctionException("__native_int_equals", "expects 'left' as Int")
-            val right = record.fields["right"] as? FunkInt ?: throw NativeFunctionException("__native_int_equals", "expects 'right' as Int")
-            FunkBool(left.value == right.value)
+            val l = record.fields["l"] as? FunkInt ?: throw NativeFunctionException("__native_int_equals", "expects 'l' as Int")
+            val r = record.fields["r"] as? FunkInt ?: throw NativeFunctionException("__native_int_equals", "expects 'r' as Int")
+            FunkBool(l.value == r.value)
         }
         
         context["__native_int_less_than"] = NativeFunkFunction("__native_int_less_than") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkInt ?: throw NativeFunctionException("__native_int_less_than", "expects 'left' as Int")
-            val right = record.fields["right"] as? FunkInt ?: throw NativeFunctionException("__native_int_less_than", "expects 'right' as Int")
-            FunkBool(left.value < right.value)
+            val l = record.fields["l"] as? FunkInt ?: throw NativeFunctionException("__native_int_less_than", "expects 'l' as Int")
+            val r = record.fields["r"] as? FunkInt ?: throw NativeFunctionException("__native_int_less_than", "expects 'r' as Int")
+            FunkBool(l.value < r.value)
         }
         
         context["__native_int_greater_than"] = NativeFunkFunction("__native_int_greater_than") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkInt ?: throw NativeFunctionException("__native_int_greater_than", "expects 'left' as Int")
-            val right = record.fields["right"] as? FunkInt ?: throw NativeFunctionException("__native_int_greater_than", "expects 'right' as Int")
-            FunkBool(left.value > right.value)
+            val l = record.fields["l"] as? FunkInt ?: throw NativeFunctionException("__native_int_greater_than", "expects 'l' as Int")
+            val r = record.fields["r"] as? FunkInt ?: throw NativeFunctionException("__native_int_greater_than", "expects 'r' as Int")
+            FunkBool(l.value > r.value)
         }
         
         context["__native_int_compare"] = NativeFunkFunction("__native_int_compare") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkInt ?: throw NativeFunctionException("__native_int_compare", "expects 'left' as Int")
-            val right = record.fields["right"] as? FunkInt ?: throw NativeFunctionException("__native_int_compare", "expects 'right' as Int")
+            val l = record.fields["l"] as? FunkInt ?: throw NativeFunctionException("__native_int_compare", "expects 'l' as Int")
+            val r = record.fields["r"] as? FunkInt ?: throw NativeFunctionException("__native_int_compare", "expects 'r' as Int")
             val result = when {
-                left.value < right.value -> "Less"
-                left.value > right.value -> "Greater"
+                l.value < r.value -> "Less"
+                l.value > r.value -> "Greater"
                 else -> "Equal"
             }
             // TODO: Return proper variant instead of string
@@ -399,66 +405,66 @@ object TruffleNumericImplementations {
         
         context["__native_int_to_string"] = NativeFunkFunction("__native_int_to_string") { args ->
             val record = args[0] as FunkRecord
-            val value = record.fields["value"] as? FunkInt ?: throw NativeFunctionException("__native_int_to_string", "expects 'value' as Int")
-            FunkString(value.value.toString())
+            val n = record.fields["n"] as? FunkInt ?: throw NativeFunctionException("__native_int_to_string", "expects 'n' as Int")
+            FunkString(n.value.toString())
         }
         
         // Hidden Float operations
         context["__native_float_equals"] = NativeFunkFunction("__native_float_equals") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_equals", "expects 'l' as Float")
-            val right = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_equals", "expects 'r' as Float")
-            FunkBool(left.value == right.value)
+            val l = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_equals", "expects 'l' as Float")
+            val r = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_equals", "expects 'r' as Float")
+            FunkBool(l.value == r.value)
         }
         
         context["__native_float_less_than"] = NativeFunkFunction("__native_float_less_than") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFloat ?: throw NativeFunctionException("__native_float_less_than", "expects 'left' as Float")
-            val right = record.fields["right"] as? FunkFloat ?: throw NativeFunctionException("__native_float_less_than", "expects 'right' as Float")
-            FunkBool(left.value < right.value)
+            val l = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_less_than", "expects 'l' as Float")
+            val r = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_less_than", "expects 'r' as Float")
+            FunkBool(l.value < r.value)
         }
         
         context["__native_float_greater_than"] = NativeFunkFunction("__native_float_greater_than") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFloat ?: throw NativeFunctionException("__native_float_greater_than", "expects 'left' as Float")
-            val right = record.fields["right"] as? FunkFloat ?: throw NativeFunctionException("__native_float_greater_than", "expects 'right' as Float")
-            FunkBool(left.value > right.value)
+            val l = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_greater_than", "expects 'l' as Float")
+            val r = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_greater_than", "expects 'r' as Float")
+            FunkBool(l.value > r.value)
         }
         
         context["__native_float_to_string"] = NativeFunkFunction("__native_float_to_string") { args ->
             val record = args[0] as FunkRecord
-            val value = record.fields["val"] as? FunkFloat ?: throw NativeFunctionException("__native_float_to_string", "expects 'val' as Float")
-            FunkString(value.value.toString())
+            val n = record.fields["n"] as? FunkFloat ?: throw NativeFunctionException("__native_float_to_string", "expects 'n' as Float")
+            FunkString(n.value.toString())
         }
         
         // Hidden String operations
         context["__native_string_equals"] = NativeFunkFunction("__native_string_equals") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["l"] as? FunkString ?: throw NativeFunctionException("__native_string_equals", "expects 'l' as String")
-            val right = record.fields["r"] as? FunkString ?: throw NativeFunctionException("__native_string_equals", "expects 'r' as String")
-            FunkBool(left.value == right.value)
+            val l = record.fields["l"] as? FunkString ?: throw NativeFunctionException("__native_string_equals", "expects 'l' as String")
+            val r = record.fields["r"] as? FunkString ?: throw NativeFunctionException("__native_string_equals", "expects 'r' as String")
+            FunkBool(l.value == r.value)
         }
         
         context["__native_string_less_than"] = NativeFunkFunction("__native_string_less_than") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkString ?: throw NativeFunctionException("__native_string_less_than", "expects 'left' as String")
-            val right = record.fields["right"] as? FunkString ?: throw NativeFunctionException("__native_string_less_than", "expects 'right' as String")
-            FunkBool(left.value < right.value)
+            val l = record.fields["l"] as? FunkString ?: throw NativeFunctionException("__native_string_less_than", "expects 'l' as String")
+            val r = record.fields["r"] as? FunkString ?: throw NativeFunctionException("__native_string_less_than", "expects 'r' as String")
+            FunkBool(l.value < r.value)
         }
         
         context["__native_string_greater_than"] = NativeFunkFunction("__native_string_greater_than") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkString ?: throw NativeFunctionException("__native_string_greater_than", "expects 'left' as String")
-            val right = record.fields["right"] as? FunkString ?: throw NativeFunctionException("__native_string_greater_than", "expects 'right' as String")
-            FunkBool(left.value > right.value)
+            val l = record.fields["l"] as? FunkString ?: throw NativeFunctionException("__native_string_greater_than", "expects 'l' as String")
+            val r = record.fields["r"] as? FunkString ?: throw NativeFunctionException("__native_string_greater_than", "expects 'r' as String")
+            FunkBool(l.value > r.value)
         }
         
         // Hidden Boolean operations
         context["__native_boolean_equals"] = NativeFunkFunction("__native_boolean_equals") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["l"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_equals", "expects 'l' as Boolean")
-            val right = record.fields["r"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_equals", "expects 'r' as Boolean")
-            FunkBool(left.value == right.value)
+            val l = record.fields["l"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_equals", "expects 'l' as Boolean")
+            val r = record.fields["r"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_equals", "expects 'r' as Boolean")
+            FunkBool(l.value == r.value)
         }
         
         context["__native_boolean_to_string"] = NativeFunkFunction("__native_boolean_to_string") { args ->
@@ -470,23 +476,23 @@ object TruffleNumericImplementations {
         // Hidden Nat operations
         context["__native_nat_equals"] = NativeFunkFunction("__native_nat_equals") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_equals", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_equals", "expects 'right' as Nat")
-            FunkBool(left.value == right.value)
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_equals", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_equals", "expects 'r' as Nat")
+            FunkBool(l.value == r.value)
         }
         
         context["__native_nat_less_than"] = NativeFunkFunction("__native_nat_less_than") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_less_than", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_less_than", "expects 'right' as Nat")
-            FunkBool(left.value < right.value)
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_less_than", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_less_than", "expects 'r' as Nat")
+            FunkBool(l.value < r.value)
         }
         
         context["__native_nat_greater_than"] = NativeFunkFunction("__native_nat_greater_than") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_greater_than", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_greater_than", "expects 'right' as Nat")
-            FunkBool(left.value > right.value)
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_greater_than", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_greater_than", "expects 'r' as Nat")
+            FunkBool(l.value > r.value)
         }
         
         context["__native_nat_to_string"] = NativeFunkFunction("__native_nat_to_string") { args ->
@@ -497,9 +503,9 @@ object TruffleNumericImplementations {
         
         context["__native_nat_subtract_to_int"] = NativeFunkFunction("__native_nat_subtract_to_int") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_subtract_to_int", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_subtract_to_int", "expects 'right' as Nat")
-            FunkInt(left.value - right.value) // Returns Int, not Nat
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_subtract_to_int", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_subtract_to_int", "expects 'r' as Nat")
+            FunkInt(l.value - r.value) // Returns Int, not Nat
         }
         
         // Additional hidden native functions for primitive implementations
@@ -542,45 +548,45 @@ object TruffleNumericImplementations {
         
         context["__native_float_add"] = NativeFunkFunction("__native_float_add") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFloat ?: throw NativeFunctionException("__native_float_add", "expects 'left' as Float")
-            val right = record.fields["right"] as? FunkFloat ?: throw NativeFunctionException("__native_float_add", "expects 'right' as Float")
+            val left = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_add", "expects 'l' as Float")
+            val right = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_add", "expects 'r' as Float")
             FunkFloat(left.value + right.value)
         }
-        
+
         context["__native_float_subtract"] = NativeFunkFunction("__native_float_subtract") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFloat ?: throw NativeFunctionException("__native_float_subtract", "expects 'left' as Float")
-            val right = record.fields["right"] as? FunkFloat ?: throw NativeFunctionException("__native_float_subtract", "expects 'right' as Float")
+            val left = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_subtract", "expects 'l' as Float")
+            val right = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_subtract", "expects 'r' as Float")
             FunkFloat(left.value - right.value)
         }
-        
+
         context["__native_float_multiply"] = NativeFunkFunction("__native_float_multiply") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFloat ?: throw NativeFunctionException("__native_float_multiply", "expects 'left' as Float")
-            val right = record.fields["right"] as? FunkFloat ?: throw NativeFunctionException("__native_float_multiply", "expects 'right' as Float")
+            val left = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_multiply", "expects 'l' as Float")
+            val right = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_multiply", "expects 'r' as Float")
             FunkFloat(left.value * right.value)
         }
-        
+
         context["__native_float_divide"] = NativeFunkFunction("__native_float_divide") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFloat ?: throw NativeFunctionException("__native_float_divide", "expects 'left' as Float")
-            val right = record.fields["right"] as? FunkFloat ?: throw NativeFunctionException("__native_float_divide", "expects 'right' as Float")
+            val left = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_divide", "expects 'l' as Float")
+            val right = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_divide", "expects 'r' as Float")
             if (right.value == 0.0) throw FunkException("Division by zero")
             FunkFloat(left.value / right.value)
         }
-        
+
         context["__native_float_modulo"] = NativeFunkFunction("__native_float_modulo") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFloat ?: throw NativeFunctionException("__native_float_modulo", "expects 'left' as Float")
-            val right = record.fields["right"] as? FunkFloat ?: throw NativeFunctionException("__native_float_modulo", "expects 'right' as Float")
+            val left = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_modulo", "expects 'l' as Float")
+            val right = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_modulo", "expects 'r' as Float")
             if (right.value == 0.0) throw FunkException("Modulo by zero")
             FunkFloat(left.value % right.value)
         }
-        
+
         context["__native_float_compare"] = NativeFunkFunction("__native_float_compare") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkFloat ?: throw NativeFunctionException("__native_float_compare", "expects 'left' as Float")
-            val right = record.fields["right"] as? FunkFloat ?: throw NativeFunctionException("__native_float_compare", "expects 'right' as Float")
+            val left = record.fields["l"] as? FunkFloat ?: throw NativeFunctionException("__native_float_compare", "expects 'l' as Float")
+            val right = record.fields["r"] as? FunkFloat ?: throw NativeFunctionException("__native_float_compare", "expects 'r' as Float")
             val result = when {
                 left.value < right.value -> "Less"
                 left.value > right.value -> "Greater"
@@ -592,11 +598,11 @@ object TruffleNumericImplementations {
         
         context["__native_string_compare"] = NativeFunkFunction("__native_string_compare") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkString ?: throw NativeFunctionException("__native_string_compare", "expects 'left' as String")
-            val right = record.fields["right"] as? FunkString ?: throw NativeFunctionException("__native_string_compare", "expects 'right' as String")
+            val l = record.fields["l"] as? FunkString ?: throw NativeFunctionException("__native_string_compare", "expects 'l' as String")
+            val r = record.fields["r"] as? FunkString ?: throw NativeFunctionException("__native_string_compare", "expects 'r' as String")
             val result = when {
-                left.value < right.value -> "Less"
-                left.value > right.value -> "Greater"
+                l.value < r.value -> "Less"
+                l.value > r.value -> "Greater"
                 else -> "Equal"
             }
             // TODO: Return proper variant instead of string
@@ -605,49 +611,49 @@ object TruffleNumericImplementations {
         
         context["__native_nat_add"] = NativeFunkFunction("__native_nat_add") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_add", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_add", "expects 'right' as Nat")
-            FunkNat(left.value + right.value)
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_add", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_add", "expects 'r' as Nat")
+            FunkNat(l.value + r.value)
         }
-        
+
         context["__native_nat_subtract"] = NativeFunkFunction("__native_nat_subtract") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_subtract", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_subtract", "expects 'right' as Nat")
-            if (left.value < right.value) throw FunkException("Nat subtraction would result in negative value")
-            FunkNat(left.value - right.value)
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_subtract", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_subtract", "expects 'r' as Nat")
+            if (l.value < r.value) throw FunkException("Nat subtraction would result in negative value")
+            FunkNat(l.value - r.value)
         }
-        
+
         context["__native_nat_multiply"] = NativeFunkFunction("__native_nat_multiply") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_multiply", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_multiply", "expects 'right' as Nat")
-            FunkNat(left.value * right.value)
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_multiply", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_multiply", "expects 'r' as Nat")
+            FunkNat(l.value * r.value)
         }
-        
+
         context["__native_nat_divide"] = NativeFunkFunction("__native_nat_divide") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_divide", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_divide", "expects 'right' as Nat")
-            if (right.value == 0L) throw FunkException("Division by zero")
-            FunkNat(left.value / right.value)
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_divide", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_divide", "expects 'r' as Nat")
+            if (r.value == 0L) throw FunkException("Division by zero")
+            FunkNat(l.value / r.value)
         }
-        
+
         context["__native_nat_modulo"] = NativeFunkFunction("__native_nat_modulo") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_modulo", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_modulo", "expects 'right' as Nat")
-            if (right.value == 0L) throw FunkException("Modulo by zero")
-            FunkNat(left.value % right.value)
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_modulo", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_modulo", "expects 'r' as Nat")
+            if (r.value == 0L) throw FunkException("Modulo by zero")
+            FunkNat(l.value % r.value)
         }
-        
+
         context["__native_nat_compare"] = NativeFunkFunction("__native_nat_compare") { args ->
             val record = args[0] as FunkRecord
-            val left = record.fields["left"] as? FunkNat ?: throw NativeFunctionException("__native_nat_compare", "expects 'left' as Nat")
-            val right = record.fields["right"] as? FunkNat ?: throw NativeFunctionException("__native_nat_compare", "expects 'right' as Nat")
+            val l = record.fields["l"] as? FunkNat ?: throw NativeFunctionException("__native_nat_compare", "expects 'l' as Nat")
+            val r = record.fields["r"] as? FunkNat ?: throw NativeFunctionException("__native_nat_compare", "expects 'r' as Nat")
             val result = when {
-                left.value < right.value -> "Less"
-                left.value > right.value -> "Greater"
+                l.value < r.value -> "Less"
+                l.value > r.value -> "Greater"
                 else -> "Equal"
             }
             // TODO: Return proper variant instead of string
@@ -665,17 +671,17 @@ object TruffleNumericImplementations {
         context["__native_frac_to_float"] = context["fracToFloat"]!!
         context["__native_frac_to_string"] = context["fracToString"]!!
 
-        // Conversion functions (note: stdlib uses 'int' and 'nat', not 'val')
+        // Conversion functions
         context["__native_int_to_frac"] = NativeFunkFunction("__native_int_to_frac") { args ->
             val record = args[0] as FunkRecord
-            val value = record.fields["int"] as? FunkInt ?: throw NativeFunctionException("__native_int_to_frac", "expects 'int' as Int")
-            FunkFrac(value.value, 1L)
+            val n = record.fields["n"] as? FunkInt ?: throw NativeFunctionException("__native_int_to_frac", "expects 'n' as Int")
+            FunkFrac(n.value, 1L)
         }
 
         context["__native_nat_to_frac"] = NativeFunkFunction("__native_nat_to_frac") { args ->
             val record = args[0] as FunkRecord
-            val value = record.fields["nat"] as? FunkNat ?: throw NativeFunctionException("__native_nat_to_frac", "expects 'nat' as Nat")
-            FunkFrac(value.value, 1L)
+            val n = record.fields["n"] as? FunkNat ?: throw NativeFunctionException("__native_nat_to_frac", "expects 'n' as Nat")
+            FunkFrac(n.value, 1L)
         }
 
         // Frac utility operations (need implementation)
@@ -689,32 +695,32 @@ object TruffleNumericImplementations {
 
         context["__native_frac_numerator"] = NativeFunkFunction("__native_frac_numerator") { args ->
             val record = args[0] as FunkRecord
-            val frac = record.fields["frac"] as? FunkFrac ?: throw NativeFunctionException("__native_frac_numerator", "expects 'frac' as Frac")
-            FunkInt(frac.numerator)
+            val n = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("__native_frac_numerator", "expects 'frac' as Frac")
+            FunkInt(n.numerator)
         }
 
         context["__native_frac_denominator"] = NativeFunkFunction("__native_frac_denominator") { args ->
             val record = args[0] as FunkRecord
-            val frac = record.fields["frac"] as? FunkFrac ?: throw NativeFunctionException("__native_frac_denominator", "expects 'frac' as Frac")
-            FunkInt(frac.denominator)
+            val n = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("__native_frac_denominator", "expects 'frac' as Frac")
+            FunkInt(n.denominator)
         }
 
         context["__native_reduce_frac"] = NativeFunkFunction("__native_reduce_frac") { args ->
             val record = args[0] as FunkRecord
-            val frac = record.fields["frac"] as? FunkFrac ?: throw NativeFunctionException("__native_reduce_frac", "expects 'frac' as Frac")
-            frac.reduce()
+            val n = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("__native_reduce_frac", "expects 'frac' as Frac")
+            n.reduce()
         }
 
         context["__native_abs_frac"] = NativeFunkFunction("__native_abs_frac") { args ->
             val record = args[0] as FunkRecord
-            val frac = record.fields["frac"] as? FunkFrac ?: throw NativeFunctionException("__native_abs_frac", "expects 'frac' as Frac")
-            FunkFrac(kotlin.math.abs(frac.numerator), frac.denominator).reduce()
+            val n = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("__native_abs_frac", "expects 'frac' as Frac")
+            FunkFrac(kotlin.math.abs(n.numerator), n.denominator).reduce()
         }
 
         context["__native_negate_frac"] = NativeFunkFunction("__native_negate_frac") { args ->
             val record = args[0] as FunkRecord
-            val frac = record.fields["frac"] as? FunkFrac ?: throw NativeFunctionException("__native_negate_frac", "expects 'frac' as Frac")
-            FunkFrac(-frac.numerator, frac.denominator).reduce()
+            val n = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("__native_negate_frac", "expects 'frac' as Frac")
+            FunkFrac(-n.numerator, n.denominator).reduce()
         }
     }
 }
