@@ -238,17 +238,19 @@ class SynchronizationPoint(
         if (state.compareAndSet(SyncPointState.PENDING, SyncPointState.BLOCKED)) {
             // Check if all dependencies are available
             val unavailableDeps = dependencies.filter { !manager.isValueAvailable(it) }
-            
+
             if (unavailableDeps.isEmpty()) {
                 // All dependencies available, start computation
                 startComputation()
             } else {
                 // Wait for dependencies in a virtual thread
+                val executor = Executors.newVirtualThreadPerTaskExecutor()
                 val dependencyFuture = CompletableFuture.supplyAsync({
                     waitForDependencies(unavailableDeps)
-                }, Executors.newVirtualThreadPerTaskExecutor())
-                
-                dependencyFuture.thenRun {
+                }, executor)
+
+                dependencyFuture.whenComplete { _, _ ->
+                    executor.shutdown() // Clean up executor
                     if (!cancellationToken.isCancelled()) {
                         startComputation()
                     }
@@ -279,15 +281,17 @@ class SynchronizationPoint(
     private fun startComputation() {
         if (state.compareAndSet(SyncPointState.BLOCKED, SyncPointState.RUNNING) ||
             state.compareAndSet(SyncPointState.PENDING, SyncPointState.RUNNING)) {
-            
+
+            val executor = Executors.newVirtualThreadPerTaskExecutor()
             val computationFuture = CompletableFuture.supplyAsync({
                 executeComputation()
-            }, Executors.newVirtualThreadPerTaskExecutor())
-            
+            }, executor)
+
             future.set(computationFuture)
-            
+
             // Handle completion
             computationFuture.whenComplete { value, throwable ->
+                executor.shutdown() // Clean up executor
                 if (throwable != null) {
                     state.set(SyncPointState.FAILED)
                     error.set(throwable)

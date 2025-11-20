@@ -23,12 +23,6 @@ class AsyncEffectHandler {
     
     companion object {
         private val handlerIdCounter = AtomicInteger(0)
-        
-        // Built-in async effects
-        val BUILT_IN_ASYNC_EFFECTS = setOf(
-            "IO", "File", "Network", "HTTP", "Timer", "Sleep", 
-            "Database", "Cache", "Queue", "Stream", "Channel"
-        )
     }
     
     /**
@@ -40,6 +34,7 @@ class AsyncEffectHandler {
     
     /**
      * Execute an async effect call using state machine compilation
+     * ALL effects now run on virtual threads - no hardcoded "async" effects
      */
     fun executeAsyncEffectCall(
         effectName: String,
@@ -47,16 +42,10 @@ class AsyncEffectHandler {
         arguments: FunkValue,
         context: MutableMap<String, FunkValue>
     ): FunkValue {
-        
-        // Check if this is a built-in async effect
-        if (BUILT_IN_ASYNC_EFFECTS.contains(effectName)) {
-            return executeBuiltInAsyncEffect(effectName, operationName, arguments, context)
-        }
-        
-        // Look for registered handler
+        // Look for registered handler - all effects are treated uniformly
         val handler = findAsyncHandler(effectName)
             ?: throw RuntimeException("No async handler found for effect: $effectName")
-        
+
         return handler.executeOperation(operationName, arguments, context)
     }
     
@@ -148,261 +137,12 @@ class AsyncEffectHandler {
         }
     }
     
-    /**
-     * Execute built-in async effects
-     */
-    private fun executeBuiltInAsyncEffect(
-        effectName: String,
-        operationName: String,
-        arguments: FunkValue,
-        context: MutableMap<String, FunkValue>
-    ): FunkValue {
-        
-        return when (effectName.uppercase()) {
-            "IO" -> executeIOEffect(operationName, arguments)
-            "FILE" -> executeFileEffect(operationName, arguments)
-            "NETWORK", "HTTP" -> executeNetworkEffect(operationName, arguments)
-            "TIMER", "SLEEP" -> executeTimerEffect(operationName, arguments)
-            "DATABASE" -> executeDatabaseEffect(operationName, arguments)
-            "CACHE" -> executeCacheEffect(operationName, arguments)
-            "QUEUE" -> executeQueueEffect(operationName, arguments)
-            "STREAM" -> executeStreamEffect(operationName, arguments)
-            "CHANNEL" -> executeChannelEffect(operationName, arguments)
-            else -> throw RuntimeException("Unknown built-in async effect: $effectName")
-        }
-    }
-    
-    private fun executeIOEffect(operation: String, arguments: FunkValue): FunkValue {
-        val executor = Executors.newVirtualThreadPerTaskExecutor()
-        return try {
-            CompletableFuture.supplyAsync({
-                when (operation.lowercase()) {
-                    "read" -> {
-                        Thread.sleep(10) // Simulate IO delay
-                        FunkString("io-read-result")
-                    }
-                    "write" -> {
-                        Thread.sleep(15) // Simulate IO delay
-                        FunkString("io-write-success")
-                    }
-                    "flush" -> {
-                        Thread.sleep(5) // Simulate IO delay
-                        FunkString("io-flush-success")
-                    }
-                    else -> FunkString("io-$operation-completed")
-                }
-            }, executor).get()
-        } finally {
-            executor.shutdown()
-        }
-    }
-    
-    private fun executeFileEffect(operation: String, arguments: FunkValue): FunkValue {
-        return executeWithVirtualThread {
-            when (operation.lowercase()) {
-                "read" -> {
-                    Thread.sleep(20) // Simulate file read delay
-                    FunkString("file-content-data")
-                }
-                "write" -> {
-                    Thread.sleep(25) // Simulate file write delay
-                    FunkString("file-write-success")
-                }
-                "exists" -> {
-                    Thread.sleep(5) // Simulate file check delay
-                    FunkBool(true)
-                }
-                "delete" -> {
-                    Thread.sleep(10) // Simulate file delete delay
-                    FunkString("file-delete-success")
-                }
-                else -> FunkString("file-$operation-completed")
-            }
-        }
-    }
-    
-    private fun executeNetworkEffect(operation: String, arguments: FunkValue): FunkValue {
-        return executeWithVirtualThread {
-            when (operation.lowercase()) {
-                "get", "fetch" -> {
-                    Thread.sleep(100) // Simulate network delay
-                    FunkString("network-response-data")
-                }
-                "post" -> {
-                    Thread.sleep(120) // Simulate network delay
-                    FunkString("network-post-success")
-                }
-                "put" -> {
-                    Thread.sleep(110) // Simulate network delay
-                    FunkString("network-put-success")
-                }
-                "delete" -> {
-                    Thread.sleep(90) // Simulate network delay
-                    FunkString("network-delete-success")
-                }
-                else -> FunkString("network-$operation-completed")
-            }
-        }
-    }
-    
-    private fun executeTimerEffect(operation: String, arguments: FunkValue): FunkValue {
-        return executeWithVirtualThread {
-            when (operation.lowercase()) {
-                "sleep", "delay" -> {
-                    val duration = extractDuration(arguments)
-                    Thread.sleep(duration)
-                    FunkString("slept-for-${duration}ms")
-                }
-                "timeout" -> {
-                    val duration = extractDuration(arguments)
-                    Thread.sleep(duration)
-                    FunkString("timeout-after-${duration}ms")
-                }
-                else -> FunkString("timer-$operation-completed")
-            }
-        }
-    }
-    
-    private fun executeDatabaseEffect(operation: String, arguments: FunkValue): FunkValue {
-        return executeWithVirtualThread {
-            when (operation.lowercase()) {
-                "query" -> {
-                    Thread.sleep(50) // Simulate database query delay
-                    FunkString("database-query-result")
-                }
-                "insert" -> {
-                    Thread.sleep(30) // Simulate database insert delay
-                    FunkString("database-insert-success")
-                }
-                "update" -> {
-                    Thread.sleep(40) // Simulate database update delay
-                    FunkString("database-update-success")
-                }
-                "delete" -> {
-                    Thread.sleep(35) // Simulate database delete delay
-                    FunkString("database-delete-success")
-                }
-                else -> FunkString("database-$operation-completed")
-            }
-        }
-    }
-    
-    private fun executeCacheEffect(operation: String, arguments: FunkValue): FunkValue {
-        return executeWithVirtualThread {
-            when (operation.lowercase()) {
-                "get" -> {
-                    Thread.sleep(5) // Simulate cache lookup delay
-                    FunkString("cache-value")
-                }
-                "set" -> {
-                    Thread.sleep(3) // Simulate cache set delay
-                    FunkString("cache-set-success")
-                }
-                "delete" -> {
-                    Thread.sleep(2) // Simulate cache delete delay
-                    FunkString("cache-delete-success")
-                }
-                "clear" -> {
-                    Thread.sleep(10) // Simulate cache clear delay
-                    FunkString("cache-clear-success")
-                }
-                else -> FunkString("cache-$operation-completed")
-            }
-        }
-    }
-    
-    private fun executeQueueEffect(operation: String, arguments: FunkValue): FunkValue {
-        return executeWithVirtualThread {
-            when (operation.lowercase()) {
-                "enqueue", "push" -> {
-                    Thread.sleep(5) // Simulate queue operation delay
-                    FunkString("queue-enqueue-success")
-                }
-                "dequeue", "pop" -> {
-                    Thread.sleep(5) // Simulate queue operation delay
-                    FunkString("queue-item")
-                }
-                "peek" -> {
-                    Thread.sleep(2) // Simulate queue peek delay
-                    FunkString("queue-peek-item")
-                }
-                "size" -> {
-                    Thread.sleep(1) // Simulate queue size delay
-                    FunkInt(42)
-                }
-                else -> FunkString("queue-$operation-completed")
-            }
-        }
-    }
-    
-    private fun executeStreamEffect(operation: String, arguments: FunkValue): FunkValue {
-        return executeWithVirtualThread {
-            when (operation.lowercase()) {
-                "read" -> {
-                    Thread.sleep(15) // Simulate stream read delay
-                    FunkString("stream-data")
-                }
-                "write" -> {
-                    Thread.sleep(10) // Simulate stream write delay
-                    FunkString("stream-write-success")
-                }
-                "close" -> {
-                    Thread.sleep(5) // Simulate stream close delay
-                    FunkString("stream-close-success")
-                }
-                else -> FunkString("stream-$operation-completed")
-            }
-        }
-    }
-    
-    private fun executeChannelEffect(operation: String, arguments: FunkValue): FunkValue {
-        val executor = Executors.newVirtualThreadPerTaskExecutor()
-        return try {
-            CompletableFuture.supplyAsync({
-                when (operation.lowercase()) {
-                    "send" -> {
-                        Thread.sleep(8) // Simulate channel send delay
-                        FunkString("channel-send-success")
-                    }
-                    "receive" -> {
-                        Thread.sleep(12) // Simulate channel receive delay
-                        FunkString("channel-message")
-                    }
-                    "close" -> {
-                        Thread.sleep(3) // Simulate channel close delay
-                        FunkString("channel-close-success")
-                    }
-                    else -> FunkString("channel-$operation-completed")
-                }
-            }, executor).get()
-        } finally {
-            executor.shutdown()
-        }
-    }
-    
     private fun findAsyncHandler(effectName: String): AsyncEffectHandlerSet? {
         return lock.withLock {
             handlerStack.findLast { it.effectName == effectName }
         }
     }
-    
-    private fun executeWithVirtualThread(task: () -> FunkValue): FunkValue {
-        val executor = Executors.newVirtualThreadPerTaskExecutor()
-        return try {
-            CompletableFuture.supplyAsync(task, executor).get()
-        } finally {
-            executor.shutdown()
-        }
-    }
-    
-    private fun extractDuration(arguments: FunkValue): Long {
-        return when (arguments) {
-            is FunkRecord -> (arguments.fields["duration"] as? FunkInt)?.value ?: 100L
-            is FunkInt -> arguments.value
-            else -> 100L
-        }
-    }
-    
+
     private fun generateCacheKey(doExpr: DoExpression): String {
         // Generate a cache key based on the structure of the do expression
         return "do_expr_${doExpr.hashCode()}"

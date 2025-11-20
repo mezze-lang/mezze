@@ -813,7 +813,8 @@ data class NativeFunkFunction(
 @ExportLibrary(InteropLibrary::class)
 data class FunkSuspended(
     val value: FunkValue,
-    val unhandledEffects: Set<String>
+    val unhandledEffects: Set<String>,
+    val capturedHandlers: Map<String, FunkValue> = emptyMap()  // Handlers already applied
 ) : FunkValue() {
     override fun getDisplayString(): String {
         val effectList = unhandledEffects.sorted().joinToString(", ")
@@ -837,6 +838,39 @@ data class FunkSuspended(
             "Cannot use suspended value with unhandled effects: ${unhandledEffects.sorted().joinToString(", ")}. " +
             "Use 'perform' to handle these effects first."
         )
+    }
+}
+
+/**
+ * Thunk - a lazy function call with its arguments captured.
+ * Used to defer execution of functions with unhandled effects.
+ *
+ * Unlike FunkPartialFunction (which is for partial application),
+ * FunkThunk represents a complete function call that's ready to execute
+ * but is waiting for effect handlers to be available.
+ *
+ * Example:
+ *   perform Console in demo {}
+ *   - demo is a function with <Log, FileSystem> effects
+ *   - Console handles Log, but FileSystem is unhandled
+ *   - Instead of executing demo{} immediately, we create FunkThunk(demo, {})
+ *   - The thunk is wrapped in FunkSuspended with unhandledEffects={FileSystem}
+ *   - When FileSystem handler is provided, the thunk executes
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkThunk(
+    val function: FunkValue,
+    val arguments: FunkValue
+) : FunkValue() {
+    override fun getDisplayString(): String = "<thunk>"
+
+    @ExportMessage
+    fun isExecutable(): Boolean = false  // Not directly executable - must be unwrapped first
+
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun execute(arguments: Array<Any?>): Any {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
     }
 }
 

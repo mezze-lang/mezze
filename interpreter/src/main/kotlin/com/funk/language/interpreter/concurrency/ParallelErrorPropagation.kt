@@ -354,40 +354,41 @@ class ParallelOperation(
             // Already running or completed
             return awaitResult()
         }
-        
+
         startTime.set(Instant.now())
-        
+        val executor = Executors.newVirtualThreadPerTaskExecutor()
+
         try {
             // Check for cancellation
             context.throwIfCancelled()
-            
+
             // Wait for dependencies if any
             waitForDependencies()
-            
+
             // Execute the computation
             val computationFuture = CompletableFuture.supplyAsync({
                 executeComputation()
-            }, Executors.newVirtualThreadPerTaskExecutor())
-            
+            }, executor)
+
             future.set(computationFuture)
-            
+
             // Apply timeout if specified
             val resultValue = if (timeout != null) {
                 computationFuture.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS)
             } else {
                 computationFuture.get()
             }
-            
+
             // Mark as completed
             result.set(resultValue)
             operationState.set(OperationState.COMPLETED)
             endTime.set(Instant.now())
-            
+
             // Notify group of success
             group.handleOperationSuccess(id, resultValue)
-            
+
             return resultValue
-            
+
         } catch (e: Exception) {
             // Handle error
             val parallelError = ParallelExecutionError(
@@ -405,6 +406,9 @@ class ParallelOperation(
             group.handleOperationError(parallelError)
 
             throw parallelError
+        } finally {
+            // Clean up executor
+            executor.shutdown()
         }
     }
     

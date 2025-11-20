@@ -754,19 +754,48 @@ class FunkInterpreter {
                 
                 val function = evaluateExpression(expr.function, context)
                 val argumentsValue = evaluateExpression(expr.arguments, context)
-                
+
                 // Special case: If function is a variant constructor, create variant construction
                 if (function is FunkVariant && function.value == null && argumentsValue is FunkRecord) {
                     // This is a variant constructor call like Success {data = 42}
                     // Convert to variant construction
                     FunkVariant(function.constructor, argumentsValue)
-                } else if (argumentsValue is FunkRecord) {
-                // Handle record arguments for partial application
-                    callFunctionWithRecord(function, argumentsValue, context)
                 } else {
-                    // Otherwise treat as single argument (legacy)
-                    val args = listOf(argumentsValue)
-                    callFunction(function, args, context)
+                    // CRITICAL: Check for unhandled effects BEFORE calling the function
+                    // If function has unhandled effects, create a THUNK instead of executing
+                    if (function is SimpleFunkFunction && function.hasUnhandledEffects()) {
+                        val unhandledEffects = function.getUnhandledEffects()
+                        val availableHandlers = (context["__handlers"] as? FunkRecord)?.fields?.keys ?: emptySet()
+                        val actuallyUnhandledEffects = unhandledEffects - availableHandlers
+
+                        if (actuallyUnhandledEffects.isNotEmpty()) {
+                            // Create a THUNK - defer execution until all effects are handled
+                            val currentHandlers = (context["__handlers"] as? FunkRecord)?.fields ?: emptyMap()
+                            FunkSuspended(
+                                value = FunkThunk(
+                                    function = function,
+                                    arguments = argumentsValue
+                                ),
+                                unhandledEffects = actuallyUnhandledEffects,
+                                capturedHandlers = currentHandlers
+                            )
+                        } else {
+                            // All effects handled - proceed with normal call
+                            if (argumentsValue is FunkRecord) {
+                                callFunctionWithRecord(function, argumentsValue, context)
+                            } else {
+                                val args = listOf(argumentsValue)
+                                callFunction(function, args, context)
+                            }
+                        }
+                    } else if (argumentsValue is FunkRecord) {
+                        // Handle record arguments for partial application
+                        callFunctionWithRecord(function, argumentsValue, context)
+                    } else {
+                        // Otherwise treat as single argument (legacy)
+                        val args = listOf(argumentsValue)
+                        callFunction(function, args, context)
+                    }
                 }
             }
             is LambdaExpression -> {
@@ -838,35 +867,124 @@ class FunkInterpreter {
                     // Evaluate the expression with handlers available
                     val result = evaluateExpression(expr.expression, context)
 
+                    // CRITICAL: If result is a function, wrap handlers in its closure
+                    // This allows handler composition: perform H1 in (perform H2 in func)
+                    val wrappedResult = when (result) {
+                        is SimpleFunkFunction -> {
+                            // Create a new function that carries the handlers in its closure
+                            val newClosure = result.closure.toMutableMap()
+                            newClosure["__handlers"] = handlersRecord
+
+                            // Update function type to remove handled effects
+                            val newInferredType = when (val originalType = result.inferredType) {
+                                is com.funk.language.ast.FunkType.FunctionType -> {
+                                    val remainingEffects = originalType.effects?.effects?.toMutableSet() ?: mutableSetOf()
+                                    handlerMap.keys.forEach { effectName ->
+                                        remainingEffects.remove(effectName)
+                                    }
+                                    val newEffectRow = if (remainingEffects.isEmpty()) {
+                                        null
+                                    } else {
+                                        com.funk.language.ast.FunkType.EffectRow(remainingEffects)
+                                    }
+                                    originalType.copy(effects = newEffectRow)
+                                }
+                                else -> originalType
+                            }
+
+                            SimpleFunkFunction(
+                                parameters = result.parameters,
+                                body = result.body,
+                                closure = newClosure,
+                                name = result.name,
+                                inferredType = newInferredType
+                            )
+                        }
+                        else -> {
+                            // For non-functions (direct values), return as-is
+                            result
+                        }
+                    }
+
                     // Check if result is a suspended value (performing on already suspended computation)
-                    val finalResult = if (result is FunkSuspended) {
+                    val finalResult = if (wrappedResult is FunkSuspended) {
                         // Handle effects on suspended computation
                         val handledEffects = handlerMap.keys
-                        val remainingEffects = result.unhandledEffects - handledEffects
+                        val remainingEffects = wrappedResult.unhandledEffects - handledEffects
 
                         if (remainingEffects.isEmpty()) {
-                            // All effects handled - unwrap the value
-                            result.value
+                            // All effects handled - EXECUTE the suspended computation
+                            // The suspended value holds a partial function with all args bound
+                            // CRITICAL: Merge captured handlers with current handlers
+                            val mergedHandlers = wrappedResult.capturedHandlers.toMutableMap()
+                            val currentHandlers = (context["__handlers"] as? FunkRecord)?.fields ?: emptyMap()
+                            mergedHandlers.putAll(currentHandlers)
+
+                            // Create execution context with ALL handlers
+                            val execContext = context.toMutableMap()
+                            val mergedHandlersRecord = FunkRecord(mergedHandlers)
+                            execContext["__handlers"] = mergedHandlersRecord
+
+                            // CRITICAL: Push merged handlers onto effect handler stack
+                            // so that getCurrentHandlers() returns them during function execution
+                            effectHandler.pushHandlers(mergedHandlersRecord)
+
+                            try {
+                                when (val suspendedValue = wrappedResult.value) {
+                                    is FunkThunk -> {
+                                        // Execute the thunk with all handlers now available
+                                        // Thunk holds the function and its arguments
+                                        if (suspendedValue.arguments is FunkRecord) {
+                                            callFunctionWithRecord(suspendedValue.function, suspendedValue.arguments, execContext)
+                                        } else {
+                                            callFunction(suspendedValue.function, listOf(suspendedValue.arguments), execContext)
+                                        }
+                                    }
+                                    is FunkPartialFunction -> {
+                                        // Call the function with all handlers now available
+                                        val allArgs = FunkRecord(suspendedValue.providedArguments)
+                                        callFunctionWithRecord(suspendedValue.originalFunction, allArgs, execContext)
+                                    }
+                                    is SimpleFunkFunction -> {
+                                        // Direct function - call it with empty args
+                                        callFunctionWithRecord(suspendedValue, FunkRecord(emptyMap()), execContext)
+                                    }
+                                    else -> {
+                                        // If it's not a function, just return it
+                                        suspendedValue
+                                    }
+                                }
+                            } finally {
+                                // CRITICAL: Pop handlers from stack after execution
+                                effectHandler.popHandlers()
+                            }
                         } else {
                             // Some effects remain - return new suspended value
-                            FunkSuspended(result.value, remainingEffects)
+                            // CRITICAL: Preserve captured handlers from previous suspensions
+                            // and merge with any new handlers we just applied
+                            val preservedHandlers = wrappedResult.capturedHandlers.toMutableMap()
+                            preservedHandlers.putAll(handlerMap)
+                            FunkSuspended(wrappedResult.value, remainingEffects, preservedHandlers)
                         }
                     } else {
                         // Check if the result type is SuspendedType and wrap if needed
                         when (val resultType = expr.inferredType) {
                             is com.funk.language.ast.FunkType.SuspendedType -> {
                                 // The result has unhandled effects - wrap it in FunkSuspended
+                                // Capture current handlers for later execution
+                                val currentHandlers = (context["__handlers"] as? FunkRecord)?.fields ?: emptyMap()
                                 FunkSuspended(
-                                    value = if (result is FunkNull) FunkRecord(emptyMap()) else result,
-                                    unhandledEffects = resultType.effects.effects
+                                    value = if (wrappedResult is FunkNull) FunkRecord(emptyMap()) else wrappedResult,
+                                    unhandledEffects = resultType.effects.effects,
+                                    capturedHandlers = currentHandlers
                                 )
                             }
                             else -> {
                                 // No unhandled effects - return as normal
-                                if (result is FunkNull) {
+                                if (wrappedResult is FunkNull) {
                                     FunkRecord(emptyMap()) // Unit type
                                 } else {
-                                    result
+                                    wrappedResult
                                 }
                             }
                         }
@@ -1454,11 +1572,32 @@ class FunkInterpreter {
                 val providedParams = arguments.fields.keys
                 val requiredParams = function.parameters.toSet()
                 val missingParams = requiredParams - providedParams
-                
+
                 if (missingParams.isEmpty()) {
-                    // All parameters provided - execute function
-                    // Note: We don't check for unhandled effects here because the function body
-                    // may contain perform expressions that will install handlers during execution
+                    // All parameters provided - check for unhandled effects first
+                    // CRITICAL: Check if function has unhandled effects
+                    // If it does, SUSPEND the computation instead of executing it
+                    if (function.hasUnhandledEffects()) {
+                        val unhandledEffects = function.getUnhandledEffects()
+                        val availableHandlers = (context["__handlers"] as? FunkRecord)?.fields?.keys ?: emptySet()
+                        val actuallyUnhandledEffects = unhandledEffects - availableHandlers
+
+                        if (actuallyUnhandledEffects.isNotEmpty()) {
+                            // SUSPEND: Return a suspended computation
+                            // The suspended value holds the function and its arguments
+                            // CRITICAL: Capture current handlers so they're available when we resume
+                            val currentHandlers = (context["__handlers"] as? FunkRecord)?.fields ?: emptyMap()
+                            return FunkSuspended(
+                                value = FunkPartialFunction(
+                                    originalFunction = function,
+                                    providedArguments = arguments.fields,
+                                    remainingParameters = emptyList()
+                                ),
+                                unhandledEffects = actuallyUnhandledEffects,
+                                capturedHandlers = currentHandlers
+                            )
+                        }
+                    }
 
                     // Execute function with inherited context
                     val newContext = function.closure.toMutableMap()
@@ -1530,35 +1669,48 @@ class FunkInterpreter {
                 function.call(argsRecord.fields.values.toList())
             }
             is SimpleFunkFunction -> {
-                // RUNTIME EFFECT VALIDATION: Check if function has unhandled effects
+                // CRITICAL: Check if function has unhandled effects
+                // If it does, SUSPEND the computation instead of executing it
                 if (function.hasUnhandledEffects()) {
                     val unhandledEffects = function.getUnhandledEffects()
                     val availableHandlers = (context["__handlers"] as? FunkRecord)?.fields?.keys ?: emptySet()
                     val actuallyUnhandledEffects = unhandledEffects - availableHandlers
-                    
+
                     if (actuallyUnhandledEffects.isNotEmpty()) {
-                        throw FunkException(
-                            "Cannot execute function with unhandled effects: ${actuallyUnhandledEffects.joinToString(", ")}. " +
-                            "Use 'perform ... in' to provide handlers for these effects."
+                        // SUSPEND: Return a suspended computation instead of throwing
+                        // This allows perform expressions to handle effects incrementally
+                        // The suspended value holds the function and its arguments
+                        // CRITICAL: Capture current handlers so they're available when we resume
+                        val currentHandlers = (context["__handlers"] as? FunkRecord)?.fields ?: emptyMap()
+                        return FunkSuspended(
+                            value = FunkPartialFunction(
+                                originalFunction = function,
+                                providedArguments = args.mapIndexed { index, value ->
+                                    "arg$index" to value
+                                }.toMap(),
+                                remainingParameters = emptyList()
+                            ),
+                            unhandledEffects = actuallyUnhandledEffects,
+                            capturedHandlers = currentHandlers
                         )
                     }
                 }
-                
+
                         // Create new context with captured closure and parameters
                         val newContext = function.closure.toMutableMap()
-                        
+
                         // Bind parameters (simplified - assume list of parameter names)
                         function.parameters.forEachIndexed { index, param ->
                             if (index < args.size) {
                                 newContext[param] = args[index]
                             }
                         }
-                        
+
                         // Propagate effect handlers from current context
-                        context["__handlers"]?.let { 
-                            newContext["__handlers"] = it 
+                        context["__handlers"]?.let {
+                            newContext["__handlers"] = it
                         }
-                        
+
                         evaluateExpression(function.body, newContext)
             }
             else -> throw RuntimeException("Cannot call non-function value: ${function::class.simpleName}")

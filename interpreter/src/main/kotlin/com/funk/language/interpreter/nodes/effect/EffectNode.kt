@@ -280,14 +280,15 @@ class AsyncEffectStateNode(
     
     override fun execute(frame: VirtualFrame, context: StateMachineContext): FunkValue {
         val arguments = argumentsNode.execute(frame)
-        
+
         // Create async computation
         val executor = Executors.newVirtualThreadPerTaskExecutor()
         val future = CompletableFuture.supplyAsync({
             executeAsyncEffect(frame, arguments)
         }, executor)
-        
-        return AsyncStateTransition(nextStateId, future)
+
+        // Pass executor to AsyncStateTransition for proper cleanup
+        return AsyncStateTransition(nextStateId, future, executor)
     }
     
     private fun executeAsyncEffect(frame: VirtualFrame, arguments: FunkValue): FunkValue {
@@ -471,19 +472,23 @@ class StateTransition(val nextState: Int, val value: FunkValue) : FunkValue() {
  * Async state transition with future result
  */
 class AsyncStateTransition(
-    val nextState: Int, 
-    private val future: CompletableFuture<FunkValue>
+    val nextState: Int,
+    private val future: CompletableFuture<FunkValue>,
+    private val executor: ExecutorService? = null
 ) : FunkValue() {
-    
+
     @TruffleBoundary
     fun awaitValue(): FunkValue {
         return try {
             future.get()
         } catch (e: Exception) {
             throw RuntimeException("Async operation failed: ${e.message}", e)
+        } finally {
+            // Clean up executor if provided
+            executor?.shutdown()
         }
     }
-    
+
     override fun getDisplayString(): String = "AsyncStateTransition(next=$nextState, pending=true)"
 }
 

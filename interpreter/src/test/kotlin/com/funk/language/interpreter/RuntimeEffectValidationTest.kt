@@ -26,28 +26,42 @@ class RuntimeEffectValidationTest {
             effect Log {
               print : {msg: String} -> {}
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             let effectfulFunc : {x: Int} -> Int <Log> = {x} -> do
               Log.print {msg = "test"}
               x + 1
-            
-            # Try to call function with unhandled effects - should fail
-            let result = effectfulFunc {x = 5}
+
+            # Call function with unhandled effects - should suspend
+            let main = {} -> effectfulFunc {x = 5}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast)
-        
-        val exception = assertThrows(RuntimeException::class.java) {
+
+        // Execute should not throw - functions suspend instead
+        assertDoesNotThrow {
             interpreter.execute(typedProgram)
         }
-        
-        assertTrue(exception.message!!.contains("No handlers available for effect call"))
-        assertTrue(exception.message!!.contains("Log"))
+
+        // Get the context and call main
+        val context = interpreter.getLastExecutionContext()
+        val mainValue = context["main"] as? SimpleFunkFunction
+        assertNotNull(mainValue, "main function should exist")
+
+        // Call main{} - it should return FunkSuspended
+        val result = interpreter.callFunctionWithRecord(mainValue!!, FunkRecord(emptyMap()), context.toMutableMap())
+
+        // Result should be a suspended computation
+        assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")
+        val suspended = result as FunkSuspended
+
+        // Should have Log as unhandled effect
+        assertTrue(suspended.unhandledEffects.contains("Log"),
+            "Unhandled effects should contain Log but was ${suspended.unhandledEffects}")
     }
 
     @Test
@@ -84,39 +98,52 @@ class RuntimeEffectValidationTest {
             effect Log {
               print : {msg: String} -> {}
             }
-            
+
             effect Random {
               nextInt : {max: Int} -> Int
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             impl Random for SystemRandom where {
               nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
             }
-            
+
             let multiEffectFunc = {x} -> do
               Log.print {msg = "start"}
               let value = Random.nextInt {max = x}
               Log.print {msg = "end"}
               value
-            
-            # Try to call function with multiple unhandled effects
-            let result = multiEffectFunc {x = 10}
+
+            # Call function with multiple unhandled effects - should suspend
+            let main = {} -> multiEffectFunc {x = 10}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast)
-        
-        val exception = assertThrows(RuntimeException::class.java) {
+
+        // Execute should not throw - functions suspend instead
+        assertDoesNotThrow {
             interpreter.execute(typedProgram)
         }
-        
-        assertTrue(exception.message!!.contains("No handlers available for effect call"))
-        // Should mention both effects
-        assertTrue(exception.message!!.contains("Log") || exception.message!!.contains("Random"))
+
+        // Get the context and call main
+        val context = interpreter.getLastExecutionContext()
+        val mainValue = context["main"] as? SimpleFunkFunction
+        assertNotNull(mainValue, "main function should exist")
+
+        // Call main{} - it should return FunkSuspended
+        val result = interpreter.callFunctionWithRecord(mainValue!!, FunkRecord(emptyMap()), context.toMutableMap())
+
+        // Result should be a suspended computation
+        assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")
+        val suspended = result as FunkSuspended
+
+        // Should have both Log and Random as unhandled effects
+        assertTrue(suspended.unhandledEffects.contains("Log") || suspended.unhandledEffects.contains("Random"),
+            "Unhandled effects should contain Log or Random but was ${suspended.unhandledEffects}")
     }
 
     @Test
@@ -125,38 +152,53 @@ class RuntimeEffectValidationTest {
             effect Log {
               print : {msg: String} -> {}
             }
-            
+
             effect Random {
               nextInt : {max: Int} -> Int
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             impl Random for SystemRandom where {
               nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
             }
-            
+
             let multiEffectFunc : {x: Int} -> Int <Log, Random> = {x} -> do
               Log.print {msg = "start"}
               let value = Random.nextInt {max = x}
               value
-            
-            # Handle only one effect - should still fail
-            let result = perform Console in multiEffectFunc {x = 10}
+
+            # Handle only one effect - should suspend with remaining effect
+            let main = {} -> perform Console in multiEffectFunc {x = 10}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast)
-        
-        val exception = assertThrows(Exception::class.java) {
+
+        // Execute should not throw - partially handled functions still suspend
+        assertDoesNotThrow {
             interpreter.execute(typedProgram)
         }
 
-        assertTrue(exception.message!!.contains("No handler found for effect"))
-        // Should mention the remaining unhandled effect
-        assertTrue(exception.message!!.contains("Random"))
+        // Get the context and call main
+        val context = interpreter.getLastExecutionContext()
+        val mainValue = context["main"] as? SimpleFunkFunction
+        assertNotNull(mainValue, "main function should exist")
+
+        // Call main{} - it should return FunkSuspended
+        val result = interpreter.callFunctionWithRecord(mainValue!!, FunkRecord(emptyMap()), context.toMutableMap())
+
+        // Result should be a suspended computation with Random unhandled
+        assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")
+        val suspended = result as FunkSuspended
+
+        // Should have Random as the remaining unhandled effect
+        assertTrue(suspended.unhandledEffects.contains("Random"),
+            "Unhandled effects should contain Random but was ${suspended.unhandledEffects}")
+        assertFalse(suspended.unhandledEffects.contains("Log"),
+            "Log should be handled, unhandled effects: ${suspended.unhandledEffects}")
     }
 
     @Test
@@ -218,32 +260,46 @@ class RuntimeEffectValidationTest {
             effect Log {
               print : {msg: String} -> {}
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             let innerFunc : {x: Int} -> Int <Log> = {x} -> do
               Log.print {msg = "inner"}
               x * 2
-            
+
             let outerFunc : {y: Int} -> Int <Log> = {y} -> do
               let result = innerFunc {x = y}
               result + 1
-            
-            # Both functions have unhandled effects
-            let result = outerFunc {y = 5}
+
+            # Both functions have unhandled effects - should suspend
+            let main = {} -> outerFunc {y = 5}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast)
-        
-        val exception = assertThrows(RuntimeException::class.java) {
+
+        // Execute should not throw - nested effectful functions should suspend
+        assertDoesNotThrow {
             interpreter.execute(typedProgram)
         }
-        
-        assertTrue(exception.message!!.contains("No handlers available for effect call"))
-        assertTrue(exception.message!!.contains("Log"))
+
+        // Get the context and call main
+        val context = interpreter.getLastExecutionContext()
+        val mainValue = context["main"] as? SimpleFunkFunction
+        assertNotNull(mainValue, "main function should exist")
+
+        // Call main{} - it should return FunkSuspended
+        val result = interpreter.callFunctionWithRecord(mainValue!!, FunkRecord(emptyMap()), context.toMutableMap())
+
+        // Result should be a suspended computation
+        assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")
+        val suspended = result as FunkSuspended
+
+        // Should have Log as unhandled effect
+        assertTrue(suspended.unhandledEffects.contains("Log"),
+            "Unhandled effects should contain Log but was ${suspended.unhandledEffects}")
     }
 
     @Test
@@ -252,18 +308,18 @@ class RuntimeEffectValidationTest {
             effect Log {
               print : {msg: String} -> {}
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             let effectfulFunc = {x, y} -> do
               Log.print {msg = "computing"}
               x + y
-            
+
             # Partial application should still preserve effect information
             let partialFunc = effectfulFunc {x = 5}
-            let result = partialFunc {y = 3}
+            let main = {} -> partialFunc {y = 3}
         """.trimIndent()
 
         val ast = parser.parse(source)
@@ -273,12 +329,26 @@ class RuntimeEffectValidationTest {
             // If type checking fails, use the untyped program
             ast
         }
-        
-        val exception = assertThrows(RuntimeException::class.java) {
+
+        // Execute should not throw - partial application should suspend
+        assertDoesNotThrow {
             interpreter.execute(typedProgram)
         }
-        
-        assertTrue(exception.message!!.contains("No handlers available for effect call"))
-        assertTrue(exception.message!!.contains("Log"))
+
+        // Get the context and call main
+        val context = interpreter.getLastExecutionContext()
+        val mainValue = context["main"] as? SimpleFunkFunction
+        assertNotNull(mainValue, "main function should exist")
+
+        // Call main{} - it should return FunkSuspended
+        val result = interpreter.callFunctionWithRecord(mainValue!!, FunkRecord(emptyMap()), context.toMutableMap())
+
+        // Result should be a suspended computation
+        assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")
+        val suspended = result as FunkSuspended
+
+        // Should have Log as unhandled effect
+        assertTrue(suspended.unhandledEffects.contains("Log"),
+            "Unhandled effects should contain Log but was ${suspended.unhandledEffects}")
     }
 }
