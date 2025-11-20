@@ -1,16 +1,27 @@
 package com.funk.language.interpreter.stdlib
 
 import com.funk.language.interpreter.*
-import com.funk.language.interpreter.stdlib.conversion.TruffleConversionImplementations
-import com.funk.language.interpreter.stdlib.io.TruffleIOImplementations
-import com.funk.language.interpreter.stdlib.numeric.TruffleNumericImplementations
-import com.funk.language.interpreter.stdlib.system.TruffleSystemImplementations
-import com.funk.language.interpreter.stdlib.math.TruffleMathImplementations
+import com.funk.language.interpreter.stdlib.basic.IntImplementations
+import com.funk.language.interpreter.stdlib.basic.FloatImplementations
+import com.funk.language.interpreter.stdlib.basic.NatImplementations
+import com.funk.language.interpreter.stdlib.basic.BoolImplementations
+import com.funk.language.interpreter.stdlib.basic.StringImplementations
+import com.funk.language.interpreter.stdlib.basic.FracImplementations
+import com.funk.language.interpreter.stdlib.math.MathCoreImplementations
+import com.funk.language.interpreter.stdlib.math.MathTrigImplementations
+import com.funk.language.interpreter.stdlib.math.MathRandomImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleListImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleNonEmptyListImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleArrayListImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleMapImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleSetImplementations
+import com.funk.language.interpreter.stdlib.effects.LogImplementations
+import com.funk.language.interpreter.stdlib.effects.FilesystemImplementations
+import com.funk.language.interpreter.stdlib.effects.TimeImplementations
+import com.funk.language.interpreter.stdlib.effects.EnvironmentImplementations
+import com.funk.language.interpreter.stdlib.conversion.TruffleConversionImplementations
+import com.funk.language.interpreter.stdlib.io.TruffleIOImplementations
+import com.funk.language.interpreter.stdlib.system.TruffleSystemImplementations
 
 
 /**
@@ -33,27 +44,36 @@ object TruffleNativeImplementations {
      * Register minimal native implementations in the interpreter context
      */
     fun registerAll(context: MutableMap<String, FunkValue>) {
-        // Register conversion functions (intToString, etc.)
-        TruffleConversionImplementations.registerAll(context)
+        // Register basic type implementations (int, float, nat, bool, string, frac)
+        IntImplementations.registerAll(context)
+        FloatImplementations.registerAll(context)
+        NatImplementations.registerAll(context)
+        BoolImplementations.registerAll(context)
+        StringImplementations.registerAll(context)
+        FracImplementations.registerAll(context)
 
-        // Register IO functions (print, native_print, etc.)
-        TruffleIOImplementations.registerAll(context)
+        // Register math implementations (core, trig, random)
+        MathCoreImplementations.registerAll(context)
+        MathTrigImplementations.registerAll(context)
+        MathRandomImplementations.registerAll(context)
 
-        // Register numeric functions (add_int, etc.)
-        TruffleNumericImplementations.registerAll(context)
-
-        // Register system functions (time, environment, etc.)
-        TruffleSystemImplementations.registerAll(context)
-
-        // Register math functions (pow, sqrt, sin, cos, random, etc.)
-        TruffleMathImplementations.registerAll(context)
-
-        // Register collection functions (List, NonEmptyList, ArrayList, Map, Set)
+        // Register collection implementations (List, NonEmptyList, ArrayList, Map, Set)
         TruffleListImplementations.registerAll(context)
         TruffleNonEmptyListImplementations.registerAll(context)
         TruffleArrayListImplementations.registerAll(context)
         TruffleMapImplementations.registerAll(context)
         TruffleSetImplementations.registerAll(context)
+
+        // Register effects implementations (log, filesystem, time, environment)
+        LogImplementations.registerAll(context)
+        FilesystemImplementations.registerAll(context)
+        TimeImplementations.registerAll(context)
+        EnvironmentImplementations.registerAll(context)
+
+        // Register legacy implementations (for backward compatibility)
+        TruffleConversionImplementations.registerAll(context)
+        TruffleIOImplementations.registerAll(context)
+        TruffleSystemImplementations.registerAll(context)
 
         // Register minimal crash function for testing
         context["__native_crash"] = NativeFunkFunction("__native_crash") { args ->
