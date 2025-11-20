@@ -43,12 +43,14 @@ class BasicAbilitiesTest {
     @Test
     fun testSimpleAbilityImplementation() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
+
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> intToString {val = val}
+              show : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
         """.trimIndent()
 

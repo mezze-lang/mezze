@@ -36,6 +36,8 @@ class CompleteTypeInferenceTest {
     @Test
     fun `test complete shape calculator example with full inference`() {
         val code = """
+            use std::int
+
             type Shape = | Circle { radius: Int }, Rectangle { width: Int, height: Int }, Triangle { base: Int, height: Int } |
 
             let calculateArea = {shape} -> match shape is
@@ -51,7 +53,7 @@ class CompleteTypeInferenceTest {
             let rectangleArea = calculateArea { shape = rectangle }
             let triangleArea = calculateArea { shape = triangle }
 
-            "Circle: " ++ intToString { val = circleArea } ++ ", Rectangle: " ++ intToString { val = rectangleArea } ++ ", Triangle: " ++ intToString { val = triangleArea }
+            "Circle: " ++ int::to_string { n = circleArea } ++ ", Rectangle: " ++ int::to_string { n = rectangleArea } ++ ", Triangle: " ++ int::to_string { n = triangleArea }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -181,11 +183,13 @@ class CompleteTypeInferenceTest {
     @Test
     fun `test multiple patterns with same variable names`() {
         val code = """
+            use std::int
+
             type Temperature = | Hot { degrees: Int }, Cold { degrees: Int } |
-            
+
             let describe = {temp} -> match temp is
-              Hot { degrees } | Cold { degrees } -> "Temperature is " ++ intToString { val = degrees }
-              
+              Hot { degrees } | Cold { degrees } -> "Temperature is " ++ int::to_string { n = degrees }
+
             let result = describe { temp = Hot { degrees = 80 } }
         """.trimIndent()
 

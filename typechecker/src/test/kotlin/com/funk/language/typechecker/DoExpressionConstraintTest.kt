@@ -87,10 +87,12 @@ class DoExpressionConstraintTest {
     @Test
     fun testDoExpressionWithMultipleOperations() {
         val source = """
+            use std::int
+
             let complex = {x, y, z} -> do
               let sum = x + y
               let product = sum * z
-              let message = "Result: " ++ intToString {val = product}
+              let message = "Result: " ++ int::to_string {n = product}
               message
         """.trimIndent()
 
@@ -183,9 +185,11 @@ class DoExpressionConstraintTest {
     @Test
     fun testDoExpressionWithMixedTypes() {
         val source = """
+            use std::int
+
             let mixed = {num, text} -> do
               let doubled = num * 2
-              let message = text ++ " = " ++ intToString {val = doubled}
+              let message = text ++ " = " ++ int::to_string {n = doubled}
               message
         """.trimIndent()
 

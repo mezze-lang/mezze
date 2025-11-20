@@ -38,12 +38,14 @@ class AbilityMethodCallTest {
     @Test
     fun `test simple ability method call with Int implementation`() {
         val source = """
+            use std::int
+
             ability Show 'a where {
                 show: {val: 'a} -> String
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> intToString {val = val}
+                show: {val: Int} -> String = {val} -> int::to_string {n = val}
             }
 
             let test = Show.show {val = 42}
@@ -115,6 +117,8 @@ class AbilityMethodCallTest {
     @Test
     fun `test ability method call with multiple implementations`() {
         val source = """
+            use std::int
+
             ability Show 'a where {
                 show: {val: 'a} -> String
             }
@@ -124,7 +128,7 @@ class AbilityMethodCallTest {
             }
 
             impl Show Int where {
-                show: {val: Int} -> String = {val} -> intToString {val = val}
+                show: {val: Int} -> String = {val} -> int::to_string {n = val}
             }
 
             let test1 = Show.show {val = true}
@@ -192,12 +196,14 @@ class AbilityMethodCallTest {
     @Test
     fun `test ability with multiple type parameters`() {
         val source = """
+            use std::int
+
             ability Convert 'a 'b where {
                 convert: {val: 'a} -> 'b
             }
 
             impl Convert Int String where {
-                convert: {val: Int} -> String = {val} -> intToString {val = val}
+                convert: {val: Int} -> String = {val} -> int::to_string {n = val}
             }
 
             let test = Convert.convert {val = 42}
@@ -295,6 +301,8 @@ class AbilityMethodCallTest {
     @Test
     fun `test multiple ability constraints on same function`() {
         val source = """
+            use std::bool
+
             ability Show 'a where {
                 show: {val: 'a} -> String
             }
@@ -308,7 +316,7 @@ class AbilityMethodCallTest {
             }
 
             impl Eq Bool where {
-                eq: {x: Bool, y: Bool} -> Bool = {x, y} -> if x then y else not {b = y}
+                eq: {x: Bool, y: Bool} -> Bool = {x, y} -> if x then y else bool::not {b = y}
             }
 
             let showIfEqual = {x, y} ->

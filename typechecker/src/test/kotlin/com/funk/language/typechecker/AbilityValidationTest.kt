@@ -237,12 +237,14 @@ class AbilityValidationTest {
     @Test
     fun `test type variable not specialized should fail`() {
         val source = """
+            use std::int
+
             ability Show 'a where {
               show: {val: 'a} -> String
             }
 
             impl Show Int where {
-              show: {val: 'a} -> String = {val} -> intToString {n = val}
+              show: {val: 'a} -> String = {val} -> int::to_string {n = val}
             }
 
             let display = {value} -> Show.show {val = value}
@@ -306,12 +308,14 @@ class AbilityValidationTest {
     @Test
     fun `test record field mismatch should fail`() {
         val source = """
+            use std::int
+
             ability Display 'a where {
               display: {val: 'a} -> {text: String}
             }
 
             impl Display Int where {
-              display: {val: Int} -> {message: String} = {val} -> {message = intToString {n = val}}
+              display: {val: Int} -> {message: String} = {val} -> {message = int::to_string {n = val}}
             }
 
             let render = {value} -> Display.display {val = value}
@@ -352,12 +356,14 @@ class AbilityValidationTest {
     @Test
     fun `test parameter type mismatch should fail`() {
         val source = """
+            use std::int
+
             ability Process 'a where {
               process: {value: 'a} -> String
             }
 
             impl Process Int where {
-              process: {val: Int} -> String = {val} -> intToString {n = val}
+              process: {val: Int} -> String = {val} -> int::to_string {n = val}
             }
 
             let run = {value} -> Process.process {value = value}

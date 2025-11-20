@@ -307,10 +307,12 @@ class MatchExhaustivenessTest {
     @Test
     fun `test single constructor variant exhaustiveness`() {
         val code = """
+            use std::int
+
             type Single = | Only { value: Int } |
-            
+
             let test: {single: Single} -> String = {single} -> match single is
-              Only { value } -> "value: " ++ intToString {val = value}
+              Only { value } -> "value: " ++ int::to_string {n = value}
         """.trimIndent()
 
         // Should not throw - single constructor fully covered

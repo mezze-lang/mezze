@@ -287,12 +287,14 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body with wrong record field should fail`() {
         val source = """
+            use std::int
+
             ability Display 'a where {
               display: {val: 'a} -> {text: String}
             }
 
             impl Display Int where {
-              display = {val} -> {message = intToString {n = val}}
+              display = {val} -> {message = int::to_string {n = val}}
             }
 
             let render = {value} -> Display.display {val = value}
@@ -449,12 +451,14 @@ class AbilityImplementationBodyValidationTest {
     @Test
     fun `test ability body with type mismatch in nested expression should fail`() {
         val source = """
+            use std::int
+
             ability Transform 'a where {
               transform: {val: 'a} -> String
             }
 
             impl Transform Int where {
-              transform = {val} -> intToString {n = "not an int"}
+              transform = {val} -> int::to_string {n = "not an int"}
             }
 
             let t = {x} -> Transform.transform {val = x}

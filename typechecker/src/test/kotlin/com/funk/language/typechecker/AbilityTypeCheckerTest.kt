@@ -34,24 +34,26 @@ class AbilityTypeCheckerTest {
     @Test
     fun testImplAbilityDeclaration() {
         val source = """
+            use std::int
+
             ability Encoder 'a where {
               encode : {val: 'a} -> String
             }
-            
+
             impl Encoder Int where {
-              encode : {val: Int} -> String = {val} -> intToString {val = val}
+              encode : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
         """.trimIndent()
         
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
-        
-        assertEquals(2, typedProgram.items.size)
-        
-        val ability = typedProgram.items[0] as AbilityDeclaration
+
+        assertEquals(3, typedProgram.items.size) // use statement + ability + impl
+
+        val ability = typedProgram.items[1] as AbilityDeclaration
         assertNotNull(ability.inferredType)
-        
-        val impl = typedProgram.items[1] as ImplAbilityDeclaration
+
+        val impl = typedProgram.items[2] as ImplAbilityDeclaration
         assertNotNull(impl.inferredType)
         assertTrue(impl.inferredType is FunkType.RecordType)
         

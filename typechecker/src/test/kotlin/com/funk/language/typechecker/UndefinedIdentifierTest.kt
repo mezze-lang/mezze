@@ -116,7 +116,9 @@ class UndefinedIdentifierTest {
     @Test
     fun `test built-in functions are defined`() {
         val source = """
-            let result = intToString {val = 42}
+            use std::int
+
+            let result = int::to_string {n = 42}
 
             result
         """.trimIndent()

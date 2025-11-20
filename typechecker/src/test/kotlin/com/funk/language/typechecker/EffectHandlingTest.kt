@@ -64,35 +64,37 @@ class EffectHandlingTest {
     @Test
     fun testMultipleEffectsInOneFunction() {
         val source = """
+            use std::int
+
             effect Log {
               print : {msg: String} -> {}
             }
-            
+
             effect Random {
               nextInt : {max: Int} -> Int
             }
-            
+
             effect FileIO {
               writeFile : {path: String, content: String} -> {}
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             impl Random for SystemRandom where {
               nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
             }
-            
+
             impl FileIO for SystemFileIO where {
               writeFile : {path: String, content: String} -> {} = {path, content} -> native_write_file {path = path, content = content}
             }
-            
+
             let multiEffectFunc = {x, y} -> do
               let sum = x + y
               Log.print {msg = "Computing"}
               let randomValue = Random.nextInt {max = sum}
-              FileIO.writeFile {path = "out.txt", content = intToString {val = randomValue}}
+              FileIO.writeFile {path = "out.txt", content = int::to_string {n = randomValue}}
               sum + randomValue
         """.trimIndent()
 

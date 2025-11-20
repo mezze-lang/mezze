@@ -35,9 +35,9 @@ x + 10
     @Test
     fun `test closed records`() {
         val source = """
-let intToString = { val: Int} -> "number"                                      # expected: intToString : { val: Int } -> String
+use std::int
 
-let processUser = {user} -> user.name ++ " is " ++ intToString {val = user.age} # expected: processUser : { user: { name: String, age: Int } } -> String
+let processUser = {user} -> user.name ++ " is " ++ int::to_string {n = user.age} # expected: processUser : { user: { name: String, age: Int } } -> String
 
 let user1 = {name = "Alice", age = 30}                                         # expected: user1 : { name: String, age: Int }
 let user2 = {name = "Bob", age = 25}                                           # expected: user2 : { name: String, age: Int }
@@ -296,9 +296,9 @@ let updatedConfig = {...configRecord, timeout = 60, debug = true}
     @Test
     fun `test open records`() {
         val source = """
-let intToString = { val: Int} -> "number"                   # expected: intToString : { val: Int } -> String
+use std::int
 
-let processUser: {user: {name: String, age: Int, ...}} -> String = {user} -> user.name ++ " is " ++ intToString {val = user.age} # expected: processUser : { user: { name: String, age: Int, ... } } -> String
+let processUser: {user: {name: String, age: Int, ...}} -> String = {user} -> user.name ++ " is " ++ int::to_string {n = user.age} # expected: processUser : { user: { name: String, age: Int, ... } } -> String
 
 let user1 = {name = "Alice", age = 30, city = "NYC"}        # expected: user1 : { name: String, age: Int, city: String }
 let user2 = {name = "Bob", age = 25, email = "bob@test.com"} # expected: user2 : { name: String, age: Int, email: String }
