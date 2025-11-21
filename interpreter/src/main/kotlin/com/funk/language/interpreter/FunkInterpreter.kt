@@ -30,7 +30,8 @@ class FunkInterpreter {
 
     // Execution state stack for continuation capture
     // This tracks the current execution context so continuations can capture "the rest of the computation"
-    private val executionStateStack = mutableListOf<ExecutionState>()
+    // IMPORTANT: ThreadLocal to support async state machine execution across virtual threads
+    private val executionStateStack = ThreadLocal.withInitial { mutableListOf<ExecutionState>() }
 
     /**
      * Represents the execution state at a point in time.
@@ -116,7 +117,23 @@ class FunkInterpreter {
      * Returns null if no execution state is available (not in a do-block).
      */
     fun getCurrentExecutionState(): ExecutionState? {
-        return executionStateStack.lastOrNull()
+        return executionStateStack.get().lastOrNull()
+    }
+
+    /**
+     * Push an execution state onto the stack for continuation capture.
+     * Used by generator resume functions to set up proper state before executing statements.
+     */
+    fun pushExecutionState(state: ExecutionState) {
+        executionStateStack.get().add(state)
+    }
+
+    /**
+     * Pop the current execution state from the stack.
+     * Should be called after pushExecutionState when statement execution completes.
+     */
+    fun popExecutionState() {
+        executionStateStack.get().removeLastOrNull()
     }
 
     /**
@@ -1037,14 +1054,35 @@ class FunkInterpreter {
                         // Check if the result type is SuspendedType and wrap if needed
                         when (val resultType = expr.inferredType) {
                             is com.funk.language.ast.FunkType.SuspendedType -> {
-                                // The result has unhandled effects - wrap it in FunkSuspended
-                                // Capture current handlers for later execution
-                                val currentHandlers = (context["__handlers"] as? FunkRecord)?.fields ?: emptyMap()
-                                FunkSuspended(
-                                    value = if (wrappedResult is FunkNull) FunkRecord(emptyMap()) else wrappedResult,
-                                    unhandledEffects = resultType.effects.effects,
-                                    capturedHandlers = currentHandlers
-                                )
+                                // CRITICAL FIX: Only wrap in FunkSuspended if we're deferring execution.
+                                // If the result is already a concrete value (not a function/thunk),
+                                // then the computation already happened, so DON'T wrap it.
+                                // Wrapping causes the outer handler to re-execute the computation.
+                                val shouldWrap = when (wrappedResult) {
+                                    is SimpleFunkFunction,
+                                    is NativeFunkFunction,
+                                    is FunkThunk,
+                                    is FunkPartialFunction -> true  // These represent deferred computation
+                                    else -> false  // Concrete values like FunkInt, FunkString, etc. - already computed
+                                }
+
+                                if (shouldWrap) {
+                                    // The result has unhandled effects - wrap it in FunkSuspended
+                                    // Capture current handlers for later execution
+                                    val currentHandlers = (context["__handlers"] as? FunkRecord)?.fields ?: emptyMap()
+                                    FunkSuspended(
+                                        value = if (wrappedResult is FunkNull) FunkRecord(emptyMap()) else wrappedResult,
+                                        unhandledEffects = resultType.effects.effects,
+                                        capturedHandlers = currentHandlers
+                                    )
+                                } else {
+                                    // Already a concrete value - return as-is
+                                    if (wrappedResult is FunkNull) {
+                                        FunkRecord(emptyMap())
+                                    } else {
+                                        wrappedResult
+                                    }
+                                }
                             }
                             else -> {
                                 // No unhandled effects - return as normal
@@ -1860,7 +1898,7 @@ class FunkInterpreter {
             context = context.toMap(),
             location = "do-block:state-machine"
         )
-        executionStateStack.add(executionState)
+        executionStateStack.get().add(executionState)
 
         try {
             // Create a state machine for this do block
@@ -1878,7 +1916,7 @@ class FunkInterpreter {
             // Execute state machine with Loom virtual thread
             return executeStateMachineAsync(stateMachine, states, context)
         } finally {
-            executionStateStack.removeLastOrNull()
+            executionStateStack.get().removeLastOrNull()
         }
     }
     
@@ -1898,30 +1936,38 @@ class FunkInterpreter {
                 context = localContext.toMap(),
                 location = "do-block:statement-$index"
             )
-            executionStateStack.add(executionState)
+            executionStateStack.get().add(executionState)
 
             try {
-                executeStatement(stmt, localContext)
+                val result = executeStatement(stmt, localContext)
+                // If an ExpressionStatement returned a suspended continuation (e.g., from Generator.yield),
+                // propagate it immediately instead of continuing to the next statement.
+                // Note: For LetStatement, the suspension is a VALUE to be bound (e.g., let g = counter {})
+                // so we don't propagate it - only ExpressionStatements cause suspension.
+                if (stmt is ExpressionStatement && result is FunkContinuationSuspended) {
+                    return result
+                }
             } finally {
                 // Pop execution state after statement completes
-                executionStateStack.removeLastOrNull()
+                executionStateStack.get().removeLastOrNull()
             }
         }
 
-        // Push state for result expression (empty remaining statements)
-        val resultState = ExecutionState(
+        // Push "done" state for result expression - when yield captures this state,
+        // resuming should return Unit, not re-evaluate the result expression
+        val doneState = ExecutionState(
             remainingStatements = emptyList(),
-            resultExpression = expr.result,
+            resultExpression = RecordLiteral(emptyList()),  // Unit - nothing left to compute
             context = localContext.toMap(),
-            location = "do-block:result"
+            location = "do-block:done"
         )
-        executionStateStack.add(resultState)
+        executionStateStack.get().add(doneState)
 
         try {
             // Execute result expression
             return evaluateExpression(expr.result, localContext)
         } finally {
-            executionStateStack.removeLastOrNull()
+            executionStateStack.get().removeLastOrNull()
         }
     }
     
@@ -1931,30 +1977,37 @@ class FunkInterpreter {
     private fun executeStateMachine(stateMachine: StateMachine, expr: DoExpression, context: MutableMap<String, FunkValue>): FunkValue {
         var currentMachine = stateMachine
         val localContext = currentMachine.localVariables
-        
+
         // Execute statements sequentially, handling async effects
         for ((index, stmt) in expr.statements.withIndex()) {
-            when (stmt) {
+            val result = when (stmt) {
                 is LetStatement -> {
                     // Check if the expression contains async effects
-                    if (containsEffectCallsInExpression(stmt.expression)) {
-                        val result = executeExpressionWithAsyncSupport(stmt.expression, localContext, currentMachine)
-                        localContext[stmt.variableName] = result
-                    } else {
-                        val result = evaluateExpression(stmt.expression, localContext)
-                        localContext[stmt.variableName] = result
-                    }
-                }
-                is ExpressionStatement -> {
-                    if (containsEffectCallsInExpression(stmt.expression)) {
+                    val value = if (containsEffectCallsInExpression(stmt.expression)) {
                         executeExpressionWithAsyncSupport(stmt.expression, localContext, currentMachine)
                     } else {
                         evaluateExpression(stmt.expression, localContext)
                     }
+                    // For LetStatement, the suspension is a VALUE to be bound (e.g., let g = counter {})
+                    // so we don't propagate it - just assign
+                    localContext[stmt.variableName] = value
+                    value
+                }
+                is ExpressionStatement -> {
+                    val value = if (containsEffectCallsInExpression(stmt.expression)) {
+                        executeExpressionWithAsyncSupport(stmt.expression, localContext, currentMachine)
+                    } else {
+                        evaluateExpression(stmt.expression, localContext)
+                    }
+                    // If an ExpressionStatement returned a suspended continuation, propagate it
+                    if (value is FunkContinuationSuspended) {
+                        return value
+                    }
+                    value
                 }
             }
         }
-        
+
         // Execute result expression
         return if (containsEffectCallsInExpression(expr.result)) {
             executeExpressionWithAsyncSupport(expr.result, localContext, currentMachine)
@@ -2035,13 +2088,25 @@ class FunkInterpreter {
     
     /**
      * Execute state machine asynchronously using Loom virtual threads
+     *
+     * NOTE: Currently executes synchronously. When true async execution is implemented,
+     * the executionStateStack must be propagated to virtual threads:
+     *
+     * 1. Capture the current thread's execution state before spawning virtual thread:
+     *    val parentState = executionStateStack.get()
+     *
+     * 2. In the virtual thread, set the execution state:
+     *    executionStateStack.set(parentState.toMutableList())
+     *
+     * This ensures continuations can be captured correctly across async boundaries.
      */
     private fun executeStateMachineAsync(
-        initialStateMachine: StateMachine, 
-        states: List<StateMachineState>, 
+        initialStateMachine: StateMachine,
+        states: List<StateMachineState>,
         context: MutableMap<String, FunkValue>
     ): FunkValue {
         // Simple state machine execution without async for now
+        // TODO: Implement true async execution with Loom virtual threads
         var currentMachine = initialStateMachine
         var result: FunkValue = FunkNull
         

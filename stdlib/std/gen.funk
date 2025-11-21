@@ -1,0 +1,87 @@
+# std/gen.funk - Thunk-based lazy generators
+#
+# Gen 'a represents a lazy stream using thunks (like Roc's CIS pattern).
+# A generator is a record { value: 'a, next: {} -> Gen 'a }
+# where `next` is a thunk that produces the next generator when called.
+#
+# Example:
+#   use std::gen::{fib, take, from, nth}
+#   let fibs = take { gen = fib {}, n = 10 }  # [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+#   let n = nth { gen = fib {}, n = 10 }      # 55
+#   let nums = take { gen = from { start = 1 }, n = 5 }  # [1, 2, 3, 4, 5]
+#
+# Note: Transformer functions (map, filter, zip) work for single values
+# but may have stack issues when combined with take due to interpreter limits.
+
+# =============================================================================
+# Core Generator Operations
+# =============================================================================
+
+# Get the value from a generator step
+pub let value = { gen: 'a } -> gen.value
+
+# Get the next generator state by calling the thunk
+pub let advance = { gen: 'a } -> gen.next {}
+
+# Take first n values from a generator into a list
+pub let take = { gen: 'a, n: Int } ->
+    if n <= 0 then []
+    else __native_arraylist_concat { xs = [gen.value], ys = take { gen = gen.next {}, n = n - 1 } }
+
+# Drop first n values from a generator, returning remaining generator
+pub let drop = { gen: 'a, n: Int } ->
+    if n <= 0 then gen
+    else drop { gen = gen.next {}, n = n - 1 }
+
+# Get the nth value from a generator (0-indexed)
+pub let nth = { gen: 'a, n: Int } ->
+    if n <= 0 then gen.value
+    else nth { gen = gen.next {}, n = n - 1 }
+
+# =============================================================================
+# Generator Constructors
+# =============================================================================
+
+# Create an infinite generator that repeats a single value
+pub let repeat = { x: 'a } -> { value = x, next = {} -> repeat { x = x } }
+
+# Create an infinite generator from a seed and step function
+pub let iterate = { f: 'b, x: 'a } -> { value = x, next = {} -> iterate { f = f, x = f { val = x } } }
+
+# Create a generator from a range [start, start+1, start+2, ...]
+pub let from = { start: Int } -> { value = start, next = {} -> from { start = start + 1 } }
+
+# =============================================================================
+# Generator Transformers (Lazy)
+# =============================================================================
+
+# Map a function over a generator (lazy)
+pub let map = { gen: 'a, f: 'b } -> { value = f { x = gen.value }, next = {} -> map { gen = gen.next {}, f = f } }
+
+# Filter a generator by a predicate (lazy)
+pub let filter = { gen: 'a, p: 'b } ->
+    if p { x = gen.value } then { value = gen.value, next = {} -> filter { gen = gen.next {}, p = p } }
+    else filter { gen = gen.next {}, p = p }
+
+# Zip two generators into pairs (lazy)
+pub let zip = { gen1: 'a, gen2: 'b } -> { value = { first = gen1.value, second = gen2.value }, next = {} -> zip { gen1 = gen1.next {}, gen2 = gen2.next {} } }
+
+# Take while predicate is true (returns list)
+pub let take_while = { gen: 'a, p: 'b } ->
+    if p { x = gen.value } then __native_arraylist_concat { xs = [gen.value], ys = take_while { gen = gen.next {}, p = p } }
+    else []
+
+# Drop while predicate is true (returns generator)
+pub let drop_while = { gen: 'a, p: 'b } ->
+    if p { x = gen.value } then drop_while { gen = gen.next {}, p = p }
+    else gen
+
+# =============================================================================
+# Fibonacci
+# =============================================================================
+
+# Classic Fibonacci generator
+pub let fibonacci = { a: Int, b: Int } -> { value = a, next = {} -> fibonacci { a = b, b = a + b } }
+
+# Start Fibonacci from 0, 1
+pub let fib = {} -> fibonacci { a = 0, b = 1 }

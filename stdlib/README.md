@@ -105,6 +105,41 @@ let half = frac::create { num = 1, denom = 2 }
 let sum = frac::add { l = half, r = half }  # 1/1
 ```
 
+### Generators
+
+**`std::gen`** - Thunk-based lazy generators (Roc-style CIS pattern)
+```funk
+use std::gen::{fib, take, from, nth, drop}
+
+# Fibonacci sequence
+let fibs = take { gen = fib {}, n = 10 }  # [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+
+# Get nth Fibonacci number
+let fib_10 = nth { gen = fib {}, n = 10 }  # 55
+
+# Infinite integer sequence
+let nums = take { gen = from { start = 1 }, n = 5 }  # [1, 2, 3, 4, 5]
+
+# Skip first 5, take next 5
+let skipped = take { gen = drop { gen = from { start = 1 }, n = 5 }, n = 5 }  # [6, 7, 8, 9, 10]
+```
+
+**`std::effects::generator`** - Continuation-based generators (effect system)
+```funk
+use std::effects::generator::{Generator, Yieldable, take}
+
+# Define a generator using effects
+let count_up = { start: Int } -> perform Yieldable in do
+    Generator.yield { value = start }
+    count_up { start = start + 1 }
+
+# Use take to get values
+let main = {} -> do
+    let g = count_up { start = 1 }
+    let result = take { gen = g, n = 5 }
+    result.values  # [1, 2, 3, 4, 5]
+```
+
 ### Collections (`std::collections`)
 
 **`std::collections::array`** - Array/list operations
@@ -282,6 +317,7 @@ arr::map { xs = [1, 2, 3], f = { x } -> x * 2 }
 - `std::result` - Result/error handling
 - `std::nat` - Natural numbers
 - `std::frac` - Fractions
+- `std::gen` - Thunk-based lazy generators
 
 ### Collections
 - `std::collections::array` - Arrays/lists
@@ -299,6 +335,8 @@ arr::map { xs = [1, 2, 3], f = { x } -> x * 2 }
 - `std::effects::time` - Time (SystemTime, MockTime)
 - `std::effects::random` - Random (SystemRandom, SeededRandom)
 - `std::effects::environment` - Environment (SystemEnvironment, MockEnvironment)
+- `std::effects::generator` - Continuation-based generators (Yieldable)
+- `std::effects::continuation` - Delimited continuations (Delimited)
 
 ## Testing Patterns
 

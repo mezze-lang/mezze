@@ -1,0 +1,46 @@
+# std/effects/generator.funk - Generator effect for lazy sequences
+
+# Generator effect provides yield/resume pattern for creating lazy sequences.
+# Built on top of the Continuation effect.
+#
+# Generators allow you to yield values one at a time, suspending execution
+# between yields. This enables lazy evaluation and infinite sequences.
+
+use std::effects::continuation::{Continuation, Delimited}
+
+# Generator effect - allows yielding values from a computation
+pub effect Generator {
+    # Yield a value and suspend execution
+    # Returns control to the caller with the yielded value
+    # Can be resumed to continue generating more values
+    yield: { value: 'a } -> {}
+}
+
+# Yieldable performer - implements Generator using continuations
+# When you yield, it suspends the computation and returns the yielded value
+pub impl Generator for Yieldable where {
+    yield = { value } -> __native_generator_yield { value = value }
+}
+
+# =============================================================================
+# Generator Utility Functions
+# =============================================================================
+
+# Get the next value from a generator
+# Returns { value: Option, gen: next_state }
+# - value is Some { val } if there's a yielded value, None if done
+# - gen is the next generator state to use for subsequent calls
+pub let next = { gen } ->
+    __native_generator_next { gen = gen }
+
+# Consume entire generator into a list
+# Warning: Will not terminate for infinite generators!
+pub let to_list = { gen } ->
+    __native_generator_to_list { gen = gen }
+
+# Take first n values from a generator
+# Returns { values: List, gen: remaining_state }
+# - values is a list of up to n yielded values
+# - gen is the remaining generator state (can be used to continue)
+pub let take = { gen, n } ->
+    __native_generator_take { gen = gen, n = n }
