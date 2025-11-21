@@ -27,6 +27,21 @@ class FunkInterpreter {
 
     // Store last execution context for CLI access
     private var lastExecutionContext: Map<String, FunkValue> = emptyMap()
+
+    // Execution state stack for continuation capture
+    // This tracks the current execution context so continuations can capture "the rest of the computation"
+    private val executionStateStack = mutableListOf<ExecutionState>()
+
+    /**
+     * Represents the execution state at a point in time.
+     * Used for capturing continuations.
+     */
+    data class ExecutionState(
+        val remainingStatements: List<Statement>,  // Statements yet to be executed in current do-block
+        val resultExpression: Expression,          // The result expression of the current do-block
+        val context: Map<String, FunkValue>,       // Current execution context
+        val location: String                       // Debug info: where this state was captured
+    )
     
     // Constructor for full parsing/typechecking (used by funk exec)
     constructor() {
@@ -95,6 +110,14 @@ class FunkInterpreter {
      * Get the context from the last program execution
      */
     fun getLastExecutionContext(): Map<String, FunkValue> = lastExecutionContext
+
+    /**
+     * Get the current execution state for continuation capture.
+     * Returns null if no execution state is available (not in a do-block).
+     */
+    fun getCurrentExecutionState(): ExecutionState? {
+        return executionStateStack.lastOrNull()
+    }
 
     /**
      * Execute a program (enhanced with type information)
@@ -391,7 +414,7 @@ class FunkInterpreter {
     /**
      * Evaluate an expression (simplified version)
      */
-    private fun evaluateExpression(expr: Expression, context: MutableMap<String, FunkValue>): FunkValue {
+    internal fun evaluateExpression(expr: Expression, context: MutableMap<String, FunkValue>): FunkValue {
         // println("DEBUG: Evaluating expression: ${expr::class.simpleName}")
         return when (expr) {
             is IntLiteral -> FunkInt(expr.value)
@@ -1250,7 +1273,7 @@ class FunkInterpreter {
     /**
      * Execute a statement
      */
-    private fun executeStatement(stmt: Statement, context: MutableMap<String, FunkValue>): FunkValue {
+    internal fun executeStatement(stmt: Statement, context: MutableMap<String, FunkValue>): FunkValue {
         return when (stmt) {
             is LetStatement -> {
                 val value = evaluateExpression(stmt.expression, context)
@@ -1830,20 +1853,33 @@ class FunkInterpreter {
      * Execute a do block as a state machine (for effectful code)
      */
     private fun executeDoBlockAsStateMachine(expr: DoExpression, context: MutableMap<String, FunkValue>): FunkValue {
-        // Create a state machine for this do block
-        val stateMachine = StateMachine.create(
-            localVariables = context.toMutableMap(),
-            effectContext = EffectContext(
-                handlers = extractEffectHandlers(context),
-                currentHandler = context["__current_handler"] as? FunkRecord
-            )
+        // Push execution state for continuation capture
+        val executionState = ExecutionState(
+            remainingStatements = expr.statements,
+            resultExpression = expr.result,
+            context = context.toMap(),
+            location = "do-block:state-machine"
         )
-        
-        // Compile do block into state machine states
-        val states = compileDoBlockToStates(expr)
-        
-        // Execute state machine with Loom virtual thread
-        return executeStateMachineAsync(stateMachine, states, context)
+        executionStateStack.add(executionState)
+
+        try {
+            // Create a state machine for this do block
+            val stateMachine = StateMachine.create(
+                localVariables = context.toMutableMap(),
+                effectContext = EffectContext(
+                    handlers = extractEffectHandlers(context),
+                    currentHandler = context["__current_handler"] as? FunkRecord
+                )
+            )
+
+            // Compile do block into state machine states
+            val states = compileDoBlockToStates(expr)
+
+            // Execute state machine with Loom virtual thread
+            return executeStateMachineAsync(stateMachine, states, context)
+        } finally {
+            executionStateStack.removeLastOrNull()
+        }
     }
     
     /**
@@ -1851,14 +1887,42 @@ class FunkInterpreter {
      */
     private fun executeDoBlockSequentially(expr: DoExpression, context: MutableMap<String, FunkValue>): FunkValue {
         val localContext = context.toMutableMap()
-        
-        // Execute statements
-        for (stmt in expr.statements) {
-            executeStatement(stmt, localContext)
+
+        // Execute statements with execution state tracking for continuations
+        for ((index, stmt) in expr.statements.withIndex()) {
+            // Push execution state: capture "the rest of the computation"
+            val remainingStatements = expr.statements.drop(index + 1)
+            val executionState = ExecutionState(
+                remainingStatements = remainingStatements,
+                resultExpression = expr.result,
+                context = localContext.toMap(),
+                location = "do-block:statement-$index"
+            )
+            executionStateStack.add(executionState)
+
+            try {
+                executeStatement(stmt, localContext)
+            } finally {
+                // Pop execution state after statement completes
+                executionStateStack.removeLastOrNull()
+            }
         }
-        
-        // Execute result expression
-        return evaluateExpression(expr.result, localContext)
+
+        // Push state for result expression (empty remaining statements)
+        val resultState = ExecutionState(
+            remainingStatements = emptyList(),
+            resultExpression = expr.result,
+            context = localContext.toMap(),
+            location = "do-block:result"
+        )
+        executionStateStack.add(resultState)
+
+        try {
+            // Execute result expression
+            return evaluateExpression(expr.result, localContext)
+        } finally {
+            executionStateStack.removeLastOrNull()
+        }
     }
     
     /**

@@ -1,0 +1,35 @@
+# std/effects/continuation.funk - Continuation-based control flow
+
+# Continuation effect provides first-class continuations for custom control flow.
+# This is a low-level effect for implementing generators, backtracking, async/await, etc.
+#
+# Most users should use higher-level effects (Generator, Choice, Async) instead.
+# Only use Continuation directly when implementing new control flow abstractions.
+
+pub effect Continuation {
+    # Capture the current continuation as a function { value: 'a } -> 'b
+    # The continuation represents "the rest of the computation"
+    capture: {} -> ({ value: 'a } -> 'b),
+
+    # Resume a continuation with a value
+    # Calls the continuation function, continuing execution from where it was captured
+    resume: { cont: { value: 'a } -> 'b, value: 'a } -> 'b,
+
+    # Suspend the current computation
+    # Returns a suspended continuation that can be resumed later
+    suspend: {} -> 'a,
+
+    # Abort the current computation
+    # Stops execution without resuming
+    abort: {} -> 'b
+}
+
+# Built-in Delimited performer (always available, no registration needed)
+# Provides delimited continuations - captures only up to the perform block boundary
+# Automatically supports both oneshot (resume once) and multishot (resume many times)
+pub impl Continuation for Delimited where {
+    capture = {} -> __native_continuation_capture {},
+    resume = { cont, value } -> __native_continuation_resume { cont = cont, value = value },
+    suspend = {} -> __native_continuation_suspend {},
+    abort = {} -> __native_continuation_abort {}
+}

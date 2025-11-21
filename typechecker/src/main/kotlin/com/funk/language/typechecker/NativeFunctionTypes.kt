@@ -14,6 +14,7 @@ import com.funk.language.typechecker.types.effects.LogTypes
 import com.funk.language.typechecker.types.effects.FilesystemTypes
 import com.funk.language.typechecker.types.effects.TimeTypes
 import com.funk.language.typechecker.types.effects.EnvironmentTypes
+import com.funk.language.typechecker.types.effects.ContinuationTypes
 
 /**
  * Helper function to create Option type (as TypeApplication)
@@ -53,6 +54,7 @@ object NativeFunctionTypes {
         FilesystemTypes.registerAll(context)
         TimeTypes.registerAll(context)
         EnvironmentTypes.registerAll(context)
+        ContinuationTypes.registerAll(context)
 
         context["crash"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("msg" to FunkType.StringType)),
