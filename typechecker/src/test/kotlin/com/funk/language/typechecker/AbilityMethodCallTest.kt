@@ -148,7 +148,7 @@ class AbilityMethodCallTest {
     }
 
     @Test
-    fun `test ability access returns variant type`() {
+    fun `test ability cannot be used as value - should fail`() {
         val source = """
             ability Show 'a where {
                 show: {val: 'a} -> String
@@ -160,11 +160,11 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
 
-        val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
-        assertNotNull(letBinding)
-        assertTrue(letBinding!!.inferredType is FunkType.VariantType)
+        // Abilities cannot be used as values - should throw TypeCheckError
+        assertThrows(TypeCheckError::class.java) {
+            typeChecker.typeCheck(program)
+        }
     }
 
     @Test
