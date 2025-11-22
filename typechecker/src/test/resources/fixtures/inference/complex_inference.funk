@@ -6,6 +6,6 @@ let calculator = {operation, x, y} -> match operation is
   Multiply -> x * y
   Divide -> if y == 0 then 0 else x / y
 
-let formatResult = {calc, op, a, b} -> "Result: " ++ int::to_string {n = calc {operation = op, x = a, y = b} }
+let formatResult = {calc, op, a, b} -> "Result: $(int::to_string {n = calc {operation = op, x = a, y = b} })"
 
 formatResult

@@ -6,8 +6,8 @@ use std::effects::log::{Log, Console, QuietConsole}
 # Function that uses the Log effect
 let greet_with_log = { name: String } -> do
     Log.info { msg = "Starting greeting..." }
-    Log.debug { msg = "Name parameter: " ++ name }
-    let message = "Hello, " ++ name ++ "!"
+    Log.debug { msg = "Name parameter: $(name)" }
+    let message = "Hello, $(name)!"
     Log.println { msg = message }
     Log.info { msg = "Greeting complete!" }
 

@@ -25,7 +25,6 @@ enum class TokenType {
 
     // Operators
     PLUS, MINUS, STAR, SLASH, PERCENT,
-    PLUSPLUS,  // String concatenation operator ++
     EQ, NEQ, LT, GT, LTE, GTE,
     AND, OR, NOT,
     PIPE, PIPE_OP, DOUBLE_COLON,  // PIPE is |, PIPE_OP is |>
@@ -177,12 +176,6 @@ class Lexer(private val source: String) {
             return Token(TokenType.ELLIPSIS, "...", start, startLine, startColumn)
         }
 
-        // Check for ++ operator (string concatenation)
-        if (char == '+' && peek() == '+') {
-            advance(2)
-            return Token(TokenType.PLUSPLUS, "++", start, startLine, startColumn)
-        }
-
         // Single character tokens
         val type = when (char) {
             '+' -> TokenType.PLUS
@@ -251,6 +244,11 @@ class Lexer(private val source: String) {
             if (current() == '\\') {
                 advance()  // skip escape character
                 if (!isAtEnd()) advance()
+            } else if (current() == '$' && peek() == '(') {
+                // Handle string interpolation $()
+                advance()  // skip $
+                advance()  // skip (
+                lexInterpolationContent()
             } else {
                 advance()
             }
@@ -262,6 +260,76 @@ class Lexer(private val source: String) {
 
         advance()  // skip closing quote
         return Token(TokenType.STRING, source.substring(start, position), start, startLine, startColumn)
+    }
+
+    /**
+     * Lex the content inside $() interpolation, handling nested parentheses and strings.
+     * This method is called after consuming "$(" and should consume until the matching ")".
+     */
+    private fun lexInterpolationContent() {
+        var parenDepth = 1  // We've already consumed the opening (
+
+        while (!isAtEnd() && parenDepth > 0) {
+            when {
+                current() == '(' -> {
+                    parenDepth++
+                    advance()
+                }
+                current() == ')' -> {
+                    parenDepth--
+                    if (parenDepth > 0) advance()  // Don't advance past the final )
+                }
+                current() == '"' -> {
+                    // Handle nested string inside interpolation
+                    lexNestedString()
+                }
+                current() == '#' -> {
+                    // Skip comments inside interpolation
+                    while (!isAtEnd() && current() != '\n') {
+                        advance()
+                    }
+                }
+                current() == '\n' -> {
+                    line++
+                    column = 1
+                    advance()
+                }
+                else -> advance()
+            }
+        }
+
+        if (parenDepth == 0) {
+            advance()  // consume the final )
+        }
+    }
+
+    /**
+     * Lex a nested string inside an interpolation (e.g., the "yes" in $(if {c} then "yes" else "no"))
+     */
+    private fun lexNestedString() {
+        advance()  // skip opening quote
+
+        while (!isAtEnd() && current() != '"') {
+            if (current() == '\n') {
+                line++
+                column = 1
+            }
+            if (current() == '\\') {
+                advance()  // skip escape character
+                if (!isAtEnd()) advance()
+            } else if (current() == '$' && peek() == '(') {
+                // Handle nested interpolation inside nested string
+                advance()  // skip $
+                advance()  // skip (
+                lexInterpolationContent()
+            } else {
+                advance()
+            }
+        }
+
+        if (!isAtEnd()) {
+            advance()  // skip closing quote
+        }
     }
 
     private fun lexTypeVariable(start: Int, startLine: Int, startColumn: Int): Token {

@@ -103,12 +103,12 @@ class TypeDisplayIntegrationTest {
     @Test
     @Disabled("Type display format needs to be updated - not critical for stdlib work")
     fun `test nested function types with constraints`() {
-        // Simulate: ('a -> 'b) -> ('c -> 'd) where 'a : NumAdd, 'b : Eq, 'c : Ord, 'd : StringConcat
+        // Simulate: ('a -> 'b) -> ('c -> 'd) where 'a : NumAdd, 'b : Eq, 'c : Ord, 'd : Ord
         val typeVarA = TypeVar("a")
         val typeVarB = TypeVar("b")
         val typeVarC = TypeVar("c")
         val typeVarD = TypeVar("d")
-        
+
         val innerFunction1 = FunkType.FunctionType(
             FunkType.VarType(typeVarA),
             FunkType.VarType(typeVarB)
@@ -118,16 +118,16 @@ class TypeDisplayIntegrationTest {
             FunkType.VarType(typeVarD)
         )
         val outerFunction = FunkType.FunctionType(innerFunction1, innerFunction2)
-        
+
         val constraints = listOf(
             InspectAbilityConstraint("a", "NumAdd"),
             InspectAbilityConstraint("b", "Eq"),
             InspectAbilityConstraint("c", "Ord"),
-            InspectAbilityConstraint("d", "StringConcat")
+            InspectAbilityConstraint("d", "Ord")
         )
-        
+
         val result = printTypeWithConstraints(outerFunction, constraints)
-        assertEquals("('a -> 'b) -> ('c -> 'd) where a : NumAdd, b : Eq, c : Ord, d : StringConcat", result)
+        assertEquals("('a -> 'b) -> ('c -> 'd) where a : NumAdd, b : Eq, c : Ord, d : Ord", result)
     }
     
     @Test
@@ -160,12 +160,12 @@ class TypeDisplayIntegrationTest {
             InspectAbilityConstraint("'c", "Ord"),
             InspectAbilityConstraint("'a", "NumAdd"),
             InspectAbilityConstraint("'a", "Eq"),
-            InspectAbilityConstraint("'b", "StringConcat"),
+            InspectAbilityConstraint("'b", "Eq"),
             InspectAbilityConstraint("'a", "Ord")
         )
-        
+
         val result = printConstraints(constraints)
         // Should group by variable and sort abilities within each group
-        assertEquals("'a : Eq + NumAdd + Ord, 'b : StringConcat, 'c : Ord", result)
+        assertEquals("'a : Eq + NumAdd + Ord, 'b : Eq, 'c : Ord", result)
     }
 }

@@ -24,7 +24,7 @@ let flag = true   # expected: flag : Boolean
 
 x + 10
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -37,7 +37,7 @@ x + 10
         val source = """
 use std::int
 
-let processUser = {user} -> user.name ++ " is " ++ int::to_string {n = user.age} # expected: processUser : { user: { name: String, age: Int } } -> String
+let processUser = {user} -> "$(user.name) is $(int::to_string {n = user.age})" # expected: processUser : { user: { name: String, age: Int } } -> String
 
 let user1 = {name = "Alice", age = 30}                                         # expected: user1 : { name: String, age: Int }
 let user2 = {name = "Bob", age = 25}                                           # expected: user2 : { name: String, age: Int }
@@ -47,7 +47,7 @@ let result2 = processUser {user = user2}                                       #
 
 result1
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -66,7 +66,7 @@ let result2 = classify {age = 25}
 
 result1
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -87,7 +87,7 @@ let result3 = flip {f = constant, x = 1, y = 2}
 
 result1
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -103,14 +103,14 @@ type Color = | Red, Blue { val: Int }, Green |
 
 let processColor: {color: Color} -> String = {color} -> match color is
   Red -> "red"
-  Blue {val} -> "blue"  
+  Blue {val} -> "blue"
   Green -> "green"                                                       # expected: processColor : { color: Color } -> String
 
 let result = processColor {color = Red}                 # expected: result : String
 
 result
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -146,7 +146,7 @@ let preciseFrac: Frac = 22//7      # expected: preciseFrac : Frac
 
 half
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -179,7 +179,7 @@ let explicitInt: Int = 42                      # 42 is already Int (default)
 
 intDefault
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -212,7 +212,7 @@ let natSum = natValue + natValue   # expected: natSum : Nat
 
 count
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -231,7 +231,7 @@ let result = compose {f = multiply, g = add, x = 5}
 
 result
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -253,7 +253,7 @@ let result2 = processOpenUser {user = user2}               # expected: result2 :
 
 result1
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -285,7 +285,7 @@ let configRecord = {timeout = 30, retries = 3, debug = false}
 
 let updatedConfig = {...configRecord, timeout = 60, debug = true}
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -298,7 +298,7 @@ let updatedConfig = {...configRecord, timeout = 60, debug = true}
         val source = """
 use std::int
 
-let processUser: {user: {name: String, age: Int, ...}} -> String = {user} -> user.name ++ " is " ++ int::to_string {n = user.age} # expected: processUser : { user: { name: String, age: Int, ... } } -> String
+let processUser: {user: {name: String, age: Int, ...}} -> String = {user} -> "$(user.name) is $(int::to_string {n = user.age})" # expected: processUser : { user: { name: String, age: Int, ... } } -> String
 
 let user1 = {name = "Alice", age = 30, city = "NYC"}        # expected: user1 : { name: String, age: Int, city: String }
 let user2 = {name = "Bob", age = 25, email = "bob@test.com"} # expected: user2 : { name: String, age: Int, email: String }
@@ -308,7 +308,7 @@ let result2 = processUser {user = user2}                    # expected: result2 
 
 result1
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -330,7 +330,7 @@ let result2 = processColor {color = Blue {val = 42}}    # expected: result2 : St
 
 result1
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -341,9 +341,9 @@ result1
     @Test
     fun `test polymorphic arithmetic multiparameter`() {
         val source = """
-let complex = {x, y, z} -> x + y # expected: complex : { x: 'a, y: 'a, z: 'b} with NumAdd 'a -> 'a 
+let complex = {x, y, z} -> x + y # expected: complex : { x: 'a, y: 'a, z: 'b} with NumAdd 'a -> 'a
 
-let fourParam = {x, y, z, w} -> x + y # expected: fourParam : { x: 'a, y: 'a, z: 'b, w: 'c } with NumAdd 'a -> 'a 
+let fourParam = {x, y, z, w} -> x + y # expected: fourParam : { x: 'a, y: 'a, z: 'b, w: 'c } with NumAdd 'a -> 'a
 
 let recordResult = {x, y, z} -> {result = x + y, other = z} # expected: recordResult : { x: 'a, y: 'a, z: 'b } with NumAdd 'a -> { result: 'a, other: 'b }
 
@@ -356,7 +356,7 @@ let intResult = complex { x = 21, y = 42, z = "test" } # expected: intResult : I
 let floatResult = complex { x = 21.5, y = 42.5, z = true } # expected: floatResult : Float
 let doResult = doMultiple { x = 1, y = 2, z = 3 } # expected: doResult : Int
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -386,7 +386,7 @@ let intZero = isPositive { x = 0 }          # expected: intZero : Boolean
 
 intResult
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -408,7 +408,7 @@ let copyPerson = {...person}
 let calc = {a = 10, b = 20}
 let calcUpdate = {...calc, a = calc.b * 2, b = calc.a + calc.b}
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -420,14 +420,14 @@ let calcUpdate = {...calc, a = calc.b * 2, b = calc.a + calc.b}
     fun `test simple functions`() {
         val source = """
 let add = {x, y} -> x + y               # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
-let greet = {name} -> "Hello " ++ name  # expected: greet : { name: String } -> String
+let greet = {name} -> "Hello $(name)"  # expected: greet : { name: String } -> String
 
 let result1 = add {x = 10, y = 20}      # expected: result1 : Int
 let result2 = greet {name = "World"}    # expected: result2 : String
 
 result1 + 100
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -449,7 +449,7 @@ let result = processColor {color = Red}                 # expected: result : Str
 
 result
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(program)
@@ -463,7 +463,7 @@ result
     fun `test invalid closed record extra fields`() {
         val source = """
 # Should fail: closed record function called with extra fields
-let processUser = {user} -> user.name ++ " is " ++ user.age
+let processUser = {user} -> "$(user.name) is $(user.age)"
 
 let user1 = {name = "Alice", age = 30, city = "NYC"}
 
@@ -471,7 +471,7 @@ let result = processUser {user = user1}
 
 result
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -496,7 +496,7 @@ let result = processUser {user = {name = "Alice", age = 30, city = "NYC"}}
 
 result
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -519,7 +519,7 @@ let result = add {x = 10, y = 20, z = 30}
 
 result
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -536,7 +536,7 @@ result
     fun `test invalid missing record fields`() {
         val source = """
 # Should fail: missing required fields
-let processUser = {user} -> user.name ++ " is " ++ user.age
+let processUser = {user} -> "$(user.name) is $(user.age)"
 
 let user1 = {name = "Alice"}
 
@@ -544,7 +544,7 @@ let result = processUser {user = user1}
 
 result
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -572,7 +572,7 @@ let mixedComp = intVal < fracVal   # Type error: cannot compare Int and Frac
 
 mixedSum1
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -605,7 +605,7 @@ let invalidUse = intFunction { x = explicitNat }  # Type error: cannot use Nat w
 
 validInt
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -632,7 +632,7 @@ let processColor: {color: Color} -> String = {color} -> match color is
 
 processColor
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -658,7 +658,7 @@ let processColor: {color: Color} -> String = {color} -> match color is
 
 processColor
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -691,7 +691,7 @@ let notRecord = 42
 let invalidBase = {...notRecord, x = 10}
 # This should fail: Cannot spread non-record value
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -719,7 +719,7 @@ let notRecord = 42
 let invalidBase = {...notRecord, x = 10}
 # This should fail: Cannot spread non-record value
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -743,7 +743,7 @@ let result = name + age
 
 result
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -765,7 +765,7 @@ let y = x + z
 
 y
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -791,7 +791,7 @@ let result = processColor {color = Blue {name = "wrong"}}
 
 result
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()
@@ -817,7 +817,7 @@ let processColor: {color: Color} -> String = {color} -> match color is
 
 processColor
         """.trimIndent()
-        
+
         try {
             val program = parser.parse(source)
             val typeChecker = TypeChecker()

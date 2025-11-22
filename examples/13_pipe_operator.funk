@@ -53,7 +53,7 @@ let example3 = 5 |> add { x = @, y = 10 } |> multiply_by_two { x = @ }
 # ============================================================================
 
 let to_upper = { s } -> string::to_upper { s = s }
-let add_prefix = { s } -> ">>> " ++ s
+let add_prefix = { s } -> ">>> $(s)"
 
 # Using pipe operator
 let example4 = "hello" |> to_upper { s = @ } |> add_prefix { s = @ }
@@ -93,31 +93,28 @@ let main = {} -> do
     Log.println { msg = "" }
 
     Log.println { msg = "Example 1 - Simple pipe:" }
-    Log.println { msg = "  5 |> square { x = @ } = " ++ int::to_string { val = example1 } }
+    Log.println { msg = "  5 |> square { x = @ } = $(int::to_string { val = example1 })" }
     Log.println { msg = "" }
 
     Log.println { msg = "Example 2 - Chained pipe:" }
-    Log.println { msg = "  5 |> add_ten |> multiply_by_two |> square = " ++
-        int::to_string { val = example2 } }
+    Log.println { msg = "  5 |> add_ten |> multiply_by_two |> square = $(int::to_string { val = example2 })" }
     Log.println { msg = "" }
 
     Log.println { msg = "Example 3 - Pipe with multiple parameters:" }
-    Log.println { msg = "  5 |> add { x = @, y = 10 } |> multiply_by_two = " ++
-        int::to_string { val = example3 } }
+    Log.println { msg = "  5 |> add { x = @, y = 10 } |> multiply_by_two = $(int::to_string { val = example3 })" }
     Log.println { msg = "" }
 
     Log.println { msg = "Example 4 - String transformation:" }
-    Log.println { msg = "  \"hello\" |> to_upper |> add_prefix = " ++ example4 }
+    Log.println { msg = "  \"hello\" |> to_upper |> add_prefix = $(example4)" }
     Log.println { msg = "" }
 
     Log.println { msg = "Example 5 - Array pipeline:" }
     Log.println { msg = "  [3,5,7,9,11] |> map double |> filter >10 |> map +5" }
-    Log.println { msg = "  Result length: " ++ int::to_string { val = array::length { xs = example5 } } }
+    Log.println { msg = "  Result length: $(int::to_string { val = array::length { xs = example5 } })" }
     Log.println { msg = "" }
 
     Log.println { msg = "Example 6 - Complex array pipeline:" }
-    Log.println { msg = "  [1,2,3,4,5] |> map square |> filter >5 |> fold sum = " ++
-        int::to_string { val = example6 } }
+    Log.println { msg = "  [1,2,3,4,5] |> map square |> filter >5 |> fold sum = $(int::to_string { val = example6 })" }
     Log.println { msg = "" }
 
     Log.println { msg = "Pipe operator syntax:" }

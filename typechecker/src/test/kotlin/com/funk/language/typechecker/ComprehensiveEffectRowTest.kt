@@ -343,9 +343,9 @@ class ComprehensiveEffectRowTest {
             }
             
             let fetchUser = {id: String} -> do
-              Log.info {msg = "Fetching user " ++ id}
-              Cache.get {key = "user:" ++ id}
-              Database.query {sql = "SELECT * FROM users WHERE id = " ++ id}
+              Log.info {msg = "Fetching user $(id)"}
+              Cache.get {key = "user:$(id)"}
+              Database.query {sql = "SELECT * FROM users WHERE id = $(id)"}
               "user data"
 
             let processUsers = {} -> do

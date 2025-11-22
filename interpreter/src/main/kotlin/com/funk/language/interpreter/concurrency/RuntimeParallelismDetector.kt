@@ -214,6 +214,17 @@ class RuntimeParallelismDetector(
                 }
             }
             is MemberAccess -> containsEffectCalls(expression.receiver)
+            is StringLiteral -> {
+                // Check interpolation parts for effect calls
+                val parts = expression.parts
+                if (expression.isInterpolated && parts != null) {
+                    parts.any { part ->
+                        part is ExpressionPart && containsEffectCalls(part.expression)
+                    }
+                } else {
+                    false
+                }
+            }
             else -> false
         }
     }
@@ -505,10 +516,6 @@ class LazyParallelExecutionPlan(
                     FunkInt(left.value / right.value)
                 }
                 else -> throw RuntimeException("Invalid operands for /: $left, $right")
-            }
-            "++" -> when {
-                left is FunkString && right is FunkString -> FunkString(left.value + right.value)
-                else -> throw RuntimeException("Invalid operands for ++: $left, $right")
             }
             ">" -> when {
                 left is FunkInt && right is FunkInt -> FunkBool(left.value > right.value)

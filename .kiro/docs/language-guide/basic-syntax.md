@@ -23,7 +23,7 @@ let isActive = true
 
 # Expressions
 let sum = 10 + 20
-let greeting = "Hello, " ++ name
+let greeting = "Hello, $(name)"
 ```
 
 ## Data Types
@@ -84,7 +84,7 @@ Functions are defined using lambda syntax:
 let add = {x, y} -> x + y
 
 # Function with type annotation
-let greet: {name: String} -> String = {name} -> "Hello, " ++ name
+let greet: {name: String} -> String = {name} -> "Hello, $(name)"
 
 # Function calls use record syntax
 let result = add {x = 5, y = 3}
@@ -123,12 +123,12 @@ let both = true && false    # Logical AND: false
 let either = true || false  # Logical OR: true
 ```
 
-### String Concatenation
+### String Interpolation
 
 ```funk
 let firstName = "John"
 let lastName = "Doe"
-let fullName = firstName ++ " " ++ lastName  # "John Doe"
+let fullName = "$(firstName) $(lastName)"  # "John Doe"
 ```
 
 ## Control Flow
@@ -169,8 +169,8 @@ let add: {x: Int, y: Int} -> Int = {x, y} -> x + y
 # Complex type annotation
 let process: {data: | Success { value: String } | Error { message: String } |} -> String = 
   {data} -> match data is
-    Success { value } -> "Got: " ++ value
-    Error { message } -> "Error: " ++ message
+    Success { value } -> "Got: $(value)"
+    Error { message } -> "Error: $(message)"
 ```
 
 ## Program Structure
@@ -215,13 +215,13 @@ type User = | User { name: String, age: Int } |
 type Status = | Active, Inactive |
 
 # Define helper functions before main logic
-let formatAge = {age} -> intToString {val = age} ++ " years old"
+let formatAge = {age} -> "$(intToString {val = age}) years old"
 let isAdult = {age} -> age >= 18
 
 # Main program logic
 let user = User { name = "Alice", age = 25 }
 let description = match user is
-  User { name, age } -> name ++ " is " ++ formatAge {age = age}
+  User { name, age } -> "$(name) is $(formatAge {age = age})"
 
 description
 ```

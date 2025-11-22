@@ -65,8 +65,8 @@ class PipeOperatorTest {
     @Test
     fun `test pipe with string operations`() {
         val source = """
-            let greet = {name} -> "Hello, " ++ name ++ "!"
-            let shout = {text} -> text ++ "!!!"
+            let greet = {name} -> "Hello, $(name)!"
+            let shout = {text} -> "$(text)!!!"
             let result = "World" |> greet {name = @} |> shout {text = @}
         """.trimIndent()
 
@@ -94,7 +94,7 @@ class PipeOperatorTest {
         val source = """
             let person = {name = "Alice", age = 30}
             let getName: {p: {name: String, ...}} -> String = {p} -> p.name
-            let greet = {name} -> "Hello, " ++ name ++ "!"
+            let greet = {name} -> "Hello, $(name)!"
             let result = person |> getName {p = @} |> greet {name = @}
         """.trimIndent()
 
@@ -194,7 +194,7 @@ class PipeOperatorTest {
         val source = """
             let add = {x, y} -> x + y
             let square = {x} -> x * x
-            let toString = {x} -> "Result: " ++ "calculated"
+            let toString = {x} -> "Result: calculated"
             let result = 2 |> add {x = 3, y = @} |> square {x = @} |> toString {x = @}
         """.trimIndent()
 

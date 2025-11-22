@@ -579,9 +579,9 @@ let process_files = {directory: String} -> do
     computations = map {
       list = files,
       f = {filename} -> {() -> do
-        let content = FileIO.readFile {path = directory ++ "/" ++ filename}
+        let content = FileIO.readFile {path = "$(directory)/$(filename)"}
         let processed = process_content {content = content}
-        let output_path = "output/" ++ filename
+        let output_path = "output/$(filename)"
         FileIO.writeFile {path = output_path, content = processed}
         {filename = filename, status = "completed"}
       }
@@ -597,9 +597,9 @@ let process_files = {directory: String} -> do
 // Concurrent API calls with error handling
 let fetch_user_data = {user_id: String} -> do
   let api_calls = [
-    {() -> HTTP.get {url = "https://api.example.com/users/" ++ user_id}},
-    {() -> HTTP.get {url = "https://api.example.com/users/" ++ user_id ++ "/profile"}},
-    {() -> HTTP.get {url = "https://api.example.com/users/" ++ user_id ++ "/settings"}}
+    {() -> HTTP.get {url = "https://api.example.com/users/$(user_id)"}},
+    {() -> HTTP.get {url = "https://api.example.com/users/$(user_id)/profile"}},
+    {() -> HTTP.get {url = "https://api.example.com/users/$(user_id)/settings"}}
   ]
   
   // Execute all API calls concurrently with timeout
@@ -614,7 +614,7 @@ let fetch_user_data = {user_id: String} -> do
     Success {value} -> 
       combine_api_results {results = value}
     Error {message} ->
-      Console.print {message = "API calls failed: " ++ message}
+      Console.print {message = "API calls failed: $(message)"}
       default_user_data {}
 ```
 
@@ -704,7 +704,7 @@ let benchmark_concurrency = do
   let end_time = System.currentTimeMillis {}
   let duration = end_time - start_time
   
-  Console.print {message = "Processed " ++ intToString {val = length {list = results}} ++ " operations in " ++ intToString {val = duration} ++ "ms"}
+  Console.print {message = "Processed $(intToString {val = length {list = results}}) operations in $(intToString {val = duration})ms"}
   
   // Typical results:
   // - Platform threads: OutOfMemoryError at ~10,000 operations
@@ -791,7 +791,7 @@ let retry_with_backoff = {operation: () -> a, max_retries: Int} ->
         Success {value = operation {}}
       catch e ->
         do
-          Console.print {message = "Attempt " ++ intToString {val = attempt} ++ " failed: " ++ e.message}
+          Console.print {message = "Attempt $(intToString {val = attempt}) failed: $(e.message)"}
           Thread.sleep {millis = delay}
           retry_helper {operation = operation, attempt = attempt + 1, delay = delay * 2}
   in retry_helper {operation = operation, attempt = 1, delay = 1000}

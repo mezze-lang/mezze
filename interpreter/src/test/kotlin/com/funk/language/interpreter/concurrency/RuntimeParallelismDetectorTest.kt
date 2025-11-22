@@ -129,10 +129,12 @@ class RuntimeParallelismDetectorTest {
                     operationName = "read",
                     arguments = StringLiteral("file2.txt")
                 )),
-                LetStatement.simple("z", BinaryOperation(
-                    left = Identifier("x"),
-                    operator = "++",
-                    right = Identifier("y")
+                LetStatement.simple("z", StringLiteral(
+                    value = "",
+                    parts = listOf(
+                        ExpressionPart(Identifier("x")),
+                        ExpressionPart(Identifier("y"))
+                    )
                 ))
             ),
             result = Identifier("z")
@@ -321,10 +323,12 @@ class RuntimeParallelismDetectorTest {
             arguments = StringLiteral("file.txt")
         )
         
-        val binaryOpWithEffect = BinaryOperation(
-            left = effectCallExpr,
-            operator = "++",
-            right = StringLiteral(" suffix")
+        val stringWithEffect = StringLiteral(
+            value = "",
+            parts = listOf(
+                ExpressionPart(effectCallExpr),
+                StringPart(" suffix")
+            )
         )
         
         val simpleExpr = IntLiteral(42)
@@ -337,7 +341,7 @@ class RuntimeParallelismDetectorTest {
         method.isAccessible = true
         
         assertTrue(method.invoke(detector, effectCallExpr) as Boolean)
-        assertTrue(method.invoke(detector, binaryOpWithEffect) as Boolean)
+        assertTrue(method.invoke(detector, stringWithEffect) as Boolean)
         assertFalse(method.invoke(detector, simpleExpr) as Boolean)
     }
     

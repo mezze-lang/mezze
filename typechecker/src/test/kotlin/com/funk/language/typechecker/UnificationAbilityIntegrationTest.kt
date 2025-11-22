@@ -96,28 +96,28 @@ class UnificationAbilityIntegrationTest {
     fun `test record type unification with ability constraints`() {
         val typeVarA = TypeVar("'a")
         val typeVarB = TypeVar("'b")
-        
+
         val recordType1 = FunkType.RecordType(mapOf(
             "x" to FunkType.VarType(typeVarA),
             "y" to FunkType.VarType(typeVarB)
         ))
-        
+
         val recordType2 = FunkType.RecordType(mapOf(
             "x" to FunkType.IntType,
             "y" to FunkType.StringType
         ))
-        
+
         val constraints = setOf(
             // Unify the record types
             Constraint.Equality(recordType1, recordType2),
             // Require abilities for the type variables
             Constraint.AbilityConstraint(typeVarA, "NumAdd"),
-            Constraint.AbilityConstraint(typeVarB, "StringConcat")
+            Constraint.AbilityConstraint(typeVarB, "Eq")
         )
-        
-        // Should succeed because Int has NumAdd and String has StringConcat
+
+        // Should succeed because Int has NumAdd and String has Eq
         val substitution = constraintSolver.solveWithAbilities(constraints)
-        
+
         assertEquals(FunkType.IntType, substitution.apply(FunkType.VarType(typeVarA)))
         assertEquals(FunkType.StringType, substitution.apply(FunkType.VarType(typeVarB)))
     }

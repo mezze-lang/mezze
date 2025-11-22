@@ -195,7 +195,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             let fetchUser: {id: Int} -> String <Database, Log> = {id} ->
-              Database.query {sql = "SELECT * FROM users WHERE id = " ++ int::to_string {n = id}}
+              Database.query {sql = "SELECT * FROM users WHERE id = $(int::to_string {n = id})"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -236,7 +236,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             let secureUserFetch: {id: Int, token: String} -> String <SecureDatabase, Database, Auth, Log> = {id, token} ->
-              SecureDatabase.secureQuery {sql = "SELECT * FROM users WHERE id = " ++ int::to_string {n = id}, token = token}
+              SecureDatabase.secureQuery {sql = "SELECT * FROM users WHERE id = $(int::to_string {n = id})", token = token}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -352,7 +352,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
 
             let loggedShow: {val: 'a} -> String <Log> with Show 'a = {val} -> do
               let str = Show.show {val = val}
-              Log.log {message = "Showing value: " ++ str}
+              Log.log {message = "Showing value: $(str)"}
               str
 
             let result = perform ConsoleLogger in loggedShow {val = 42}

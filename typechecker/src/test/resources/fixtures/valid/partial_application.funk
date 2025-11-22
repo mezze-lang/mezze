@@ -17,7 +17,7 @@ let add_xy = add_x { y = 2 }                                   # expected: add_x
 let result3 = add_xy { z = 3 }                                 # expected: result3 : Int
 
 # Partial application with string types
-let concat3 = { a, b, c } -> a ++ b ++ c                       # expected: concat3 : { a: String, b: String, c: String } -> String
+let concat3 = { a, b, c } -> "$(a)$(b)$(c)"                    # expected: concat3 : { a: String, b: String, c: String } -> String
 let with_hello = concat3 { a = "hello" }                       # expected: with_hello : { b: String, c: String } -> String
 let with_hello_world = with_hello { b = " world" }             # expected: with_hello_world : { c: String } -> String
 let result4 = with_hello_world { c = "!" }                     # expected: result4 : String

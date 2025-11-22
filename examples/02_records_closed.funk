@@ -41,16 +41,16 @@ let main = {} ->
         Log.println { msg = "" }
 
         Log.println { msg = "Original person:" }
-        Log.println { msg = "  name: " ++ person.name }
-        Log.println { msg = "  age: " ++ int::to_string { val = person.age } }
-        Log.println { msg = "  email: " ++ person.email }
+        Log.println { msg = "  name: $(person.name)" }
+        Log.println { msg = "  age: $(int::to_string { val = person.age })" }
+        Log.println { msg = "  email: $(person.email)" }
         Log.println { msg = "" }
 
         Log.println { msg = "After update:" }
-        Log.println { msg = "  age: " ++ int::to_string { val = older_person.age } }
+        Log.println { msg = "  age: $(int::to_string { val = older_person.age })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Nested record:" }
-        Log.println { msg = "  name: " ++ person_with_address.name }
-        Log.println { msg = "  city: " ++ city }
-        Log.println { msg = "  street: " ++ address.street }
+        Log.println { msg = "  name: $(person_with_address.name)" }
+        Log.println { msg = "  city: $(city)" }
+        Log.println { msg = "  street: $(address.street)" }

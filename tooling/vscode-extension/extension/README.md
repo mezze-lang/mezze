@@ -14,7 +14,8 @@ This extension provides rich syntax highlighting for all Funk language features:
 - **Effect Rows**: `<State, IO, Network>`
 - **Ability Constraints**: `with NumAdd 'a, Eq 'b`
 - **Module Paths**: `math::geometry::area`
-- **Operators**: `|>`, `->`, `++`, `==`, `&&`, `||`, `...`, `@`, etc.
+- **Operators**: `|>`, `->`, `==`, `&&`, `||`, `...`, `@`, etc.
+- **String Interpolation**: `"Hello, $(name)!"` syntax
 - **Comments**: Line comments with `#`
 - **Literals**: Strings, numbers, booleans, arrays, records
 

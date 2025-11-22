@@ -1,6 +1,6 @@
 # Record type inference from member access
 let getName = {obj} -> obj.name
 let getCoordinates = {point} -> point.x + point.y
-let processEmployee = {emp} -> emp.name ++ " works in " ++ emp.department
+let processEmployee = {emp} -> "$(emp.name) works in $(emp.department)"
 
 getName

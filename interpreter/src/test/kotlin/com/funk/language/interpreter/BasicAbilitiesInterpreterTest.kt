@@ -152,9 +152,11 @@ class BasicAbilitiesInterpreterTest {
     }
 
     @Test
-    fun testStringConcatenation() {
+    fun testStringInterpolation() {
         val source = """
-            "Hello" ++ " " ++ "World"
+            let hello = "Hello"
+            let world = "World"
+            "$(hello) $(world)"
         """.trimIndent()
 
         val program = parser.parse(source)

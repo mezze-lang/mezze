@@ -1,6 +1,6 @@
 # Explicit function type annotations
 let add: { x: Int, y: Int } -> Int = {x, y} -> x + y
-let greet: { name: String } -> String = {name} -> "Hello " ++ name
+let greet: { name: String } -> String = {name} -> "Hello $(name)"
 let isAdult: { age: Int } -> Bool = {age} -> age >= 18
 
 let result = add {x = 10, y = 20}

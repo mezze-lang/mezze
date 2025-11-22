@@ -97,7 +97,7 @@ class OpenRecordTypeAliasTest {
             type Person = { name: String, age: Int, ... }
 
             let greet: { person: Person } -> String = { person } ->
-                person.name ++ " is " ++ "awesome"
+                "$(person.name) is awesome"
 
             let result = greet { person = { name = "Diana", age = 28, city = "LA" } }
             result

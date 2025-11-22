@@ -176,9 +176,9 @@ class AbilityConstraintSolverTest {
             Constraint.Equality(FunkType.VarType(typeVarA), FunkType.IntType),
             Constraint.Equality(FunkType.VarType(typeVarB), FunkType.StringType),
             Constraint.AbilityConstraint(typeVarA, "NumAdd"),
-            Constraint.AbilityConstraint(typeVarB, "StringConcat")
+            Constraint.AbilityConstraint(typeVarB, "Eq")
         )
-        
+
         // Should not throw - both types have their required abilities
         val substitution = constraintSolver.solveWithAbilities(constraints)
         assertEquals(FunkType.IntType, substitution.mapping[typeVarA])

@@ -121,14 +121,13 @@ class RuntimeParallelismIntegrationTest {
                     operationName = "read",
                     arguments = StringLiteral("file3.txt")
                 )),
-                LetStatement.simple("combined", BinaryOperation(
-                    left = BinaryOperation(
-                        left = Identifier("file1"),
-                        operator = "++",
-                        right = Identifier("file2")
-                    ),
-                    operator = "++",
-                    right = Identifier("file3")
+                LetStatement.simple("combined", StringLiteral(
+                    value = "",
+                    parts = listOf(
+                        ExpressionPart(Identifier("file1")),
+                        ExpressionPart(Identifier("file2")),
+                        ExpressionPart(Identifier("file3"))
+                    )
                 ))
             ),
             result = Identifier("combined")

@@ -33,10 +33,10 @@ let main = {} ->
 
         Log.println { msg = "Random values (seed = 42):" }
         let values = generate_random_values { }
-        Log.println { msg = "  Random int (1-100): " ++ int::to_string { val = values.int_val } }
-        Log.println { msg = "  Random bool: " ++ (if values.bool_val then "true" else "false") }
+        Log.println { msg = "  Random int (1-100): $(int::to_string { val = values.int_val })" }
+        Log.println { msg = "  Random bool: $(if values.bool_val then "true" else "false")" }
         Log.println { msg = "" }
 
         Log.println { msg = "Coin flip game:" }
         let game_result = coin_flip_game { guesses = 3 }
-        Log.println { msg = "  " ++ game_result }
+        Log.println { msg = "  $(game_result)" }

@@ -323,7 +323,7 @@ let process_ints = {numbers: [Int]} ->
 
 // ✅ Good: Monomorphic for each function
 let process_strings = {texts: [String]} ->
-  texts |> map {s -> s ++ "!"} |> filter {s -> length {str = s} > 3}
+  texts |> map {s -> "$(s)!"} |> filter {s -> length {str = s} > 3}
 
 // ⚠️  Less optimal: Polymorphic - could be any numeric type
 let process_numbers = {numbers} ->

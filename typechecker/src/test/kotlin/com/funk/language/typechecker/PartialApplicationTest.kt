@@ -128,7 +128,7 @@ class PartialApplicationTest {
     @Test
     fun `test partial application with string types`() {
         val source = """
-            let concat3 = { a, b, c } -> a ++ b ++ c
+            let concat3 = { a, b, c } -> "$(a)$(b)$(c)"
             let with_hello = concat3 { a = "hello" }
             let with_hello_world = with_hello { b = " world" }
             let result = with_hello_world { c = "!" }

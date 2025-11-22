@@ -336,7 +336,7 @@ let file_operations = {path: String} -> do
 
 // Usage
 let file_info = file_operations {path = "/Users/shriyans/Projects/funk/README.md"}
-Console.print {message = "File: " ++ file_info.name ++ ", Size: " ++ intToString {val = file_info.length}}
+Console.print {message = "File: $(file_info.name), Size: $(intToString {val = file_info.length})"}
 ```
 
 ### 2. String Processing
@@ -659,7 +659,7 @@ let safe_host_call = {operation: () -> String} ->
   try
     Success {value = operation {}}
   catch e ->
-    Error {message = "Host call failed: " ++ e.message}
+    Error {message = "Host call failed: $(e.message)"}
 
 // Usage
 let safe_file_read = {path: String} -> 
@@ -690,7 +690,7 @@ let safe_file_read = {path: String} ->
         args = {path = path_obj}
       }
     else
-      throw {message = "File does not exist: " ++ path}
+      throw {message = "File does not exist: $(path)"}
   }
 ```
 
@@ -714,7 +714,7 @@ let string_builder_example = {words: [String]} -> do
       Host.call_for_object {
         object = acc_builder,
         method = "append",
-        args = {str = word ++ " "}
+        args = {str = "$(word) "}
       }
   }
   
@@ -778,13 +778,13 @@ let file_operations_safe = {path: String} -> do
     
     let info = if is_dir then
       let files = file_wrapper.list_files {file = file}
-      "Directory: " ++ name ++ ", Files: " ++ intToString {val = length {list = files}}
+      "Directory: $(name), Files: $(intToString {val = length {list = files}})"
     else
-      "File: " ++ name ++ ", Size: " ++ intToString {val = size} ++ " bytes"
+      "File: $(name), Size: $(intToString {val = size}) bytes"
     
     Success {value = info}
   else
-    Error {message = "File does not exist: " ++ path}
+    Error {message = "File does not exist: $(path)"}
 ```
 
 ### 4. Functional Interface Integration

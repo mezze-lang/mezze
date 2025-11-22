@@ -239,7 +239,7 @@ class MatchExhaustivenessTest {
               Active { priority } if priority > 0 -> "normal priority" 
               Active { priority } -> "low priority"
               Inactive -> "inactive"
-              Pending { reason } -> "pending: " ++ reason
+              Pending { reason } -> "pending: $(reason)"
         """.trimIndent()
 
         // Should not throw - all Active cases covered by guards, others explicit
@@ -310,7 +310,7 @@ class MatchExhaustivenessTest {
             let test: {result: Result} -> String = {result} -> match result is
               Success { value } if value > 0 -> "positive result"
               Success { value } -> "zero or negative result"
-              Error { message } -> "error: " ++ message
+              Error { message } -> "error: $(message)"
               Loading -> "loading..."
         """.trimIndent()
 
@@ -329,7 +329,7 @@ class MatchExhaustivenessTest {
             type Single = | Only { value: Int } |
 
             let test: {single: Single} -> String = {single} -> match single is
-              Only { value } -> "value: " ++ int::to_string {n = value}
+              Only { value } -> "value: $(int::to_string {n = value})"
         """.trimIndent()
 
         // Should not throw - single constructor fully covered

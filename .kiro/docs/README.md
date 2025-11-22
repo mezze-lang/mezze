@@ -73,7 +73,7 @@ effect Console {
 }
 
 let greet = {name: String} -> do
-  Console.print {message = "Hello, " ++ name ++ "!"}
+  Console.print {message = "Hello, $(name)!"}
 ```
 
 ## Getting Help

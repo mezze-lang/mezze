@@ -2814,7 +2814,7 @@ class FunkParser {
         result
     }
 
-    // Additive operators: +, -, ++
+    // Additive operators: +, -
     private val additiveExpression: Parser<Expression> = { stream ->
         var result: ParseResult<Expression> = multiplicativeExpression(stream)
 
@@ -2822,7 +2822,7 @@ class FunkParser {
             val currentStream = (result as ParseResult.Success).remaining
             val op = currentStream.current()
 
-            if (op?.type == TokenType.PLUS || op?.type == TokenType.MINUS || op?.type == TokenType.PLUSPLUS) {
+            if (op?.type == TokenType.PLUS || op?.type == TokenType.MINUS) {
                 val opStream = currentStream.advance()
                 val right = multiplicativeExpression(opStream)
                 result = when (right) {
@@ -3071,10 +3071,22 @@ class FunkParser {
                     ParseResult.Failure("Invalid fraction literal: ${token.text}", stream.getSourcePosition())
                 }
             }
-            TokenType.STRING -> ParseResult.Success(
-                StringLiteral(token.text.removeSurrounding("\"")),
-                stream.advance()
-            )
+            TokenType.STRING -> {
+                val stringContent = token.text.removeSurrounding("\"")
+
+                // Check if this is an interpolated string (has unescaped $()
+                if (hasUnescapedInterpolation(stringContent)) {
+                    // Parse as interpolated string
+                    parseInterpolatedString(stringContent, stream.advance())
+                } else {
+                    // Simple string literal - process escape sequences
+                    val processedContent = processEscapeSequences(stringContent)
+                    ParseResult.Success(
+                        StringLiteral(processedContent),
+                        stream.advance()
+                    )
+                }
+            }
             TokenType.BOOLEAN -> ParseResult.Success(
                 BooleanLiteral(token.text == "true"),
                 stream.advance()
@@ -3544,6 +3556,164 @@ class FunkParser {
             )
             is ParseResult.Failure -> ident
         }
+    }
+
+    // ===== STRING INTERPOLATION HELPERS =====
+
+    /**
+     * Check if a string contains unescaped $( for interpolation.
+     * Returns true if there's a $( that is NOT preceded by a backslash.
+     */
+    private fun hasUnescapedInterpolation(input: String): Boolean {
+        var i = 0
+        while (i < input.length - 1) {
+            if (input[i] == '\\') {
+                // Skip the next character (it's escaped)
+                i += 2
+            } else if (input[i] == '$' && input[i + 1] == '(') {
+                return true
+            } else {
+                i++
+            }
+        }
+        return false
+    }
+
+    /**
+     * Process escape sequences in a string (e.g., \n, \t, \\, \")
+     */
+    private fun processEscapeSequences(input: String): String {
+        val result = StringBuilder()
+        var i = 0
+        while (i < input.length) {
+            if (input[i] == '\\' && i + 1 < input.length) {
+                when (input[i + 1]) {
+                    'n' -> { result.append('\n'); i += 2 }
+                    't' -> { result.append('\t'); i += 2 }
+                    'r' -> { result.append('\r'); i += 2 }
+                    '\\' -> { result.append('\\'); i += 2 }
+                    '"' -> { result.append('"'); i += 2 }
+                    '$' -> { result.append('$'); i += 2 }  // Allow escaping $ to prevent interpolation
+                    else -> { result.append(input[i]); i++ }
+                }
+            } else {
+                result.append(input[i])
+                i++
+            }
+        }
+        return result.toString()
+    }
+
+    /**
+     * Parse an interpolated string, extracting string parts and expression parts.
+     * The input is the raw string content (escape sequences not yet processed).
+     */
+    private fun parseInterpolatedString(content: String, stream: TokenStream): ParseResult<Expression> {
+        val parts = mutableListOf<StringInterpolationPart>()
+        var i = 0
+        val currentStringPart = StringBuilder()
+
+        while (i < content.length) {
+            if (content[i] == '\\' && i + 1 < content.length) {
+                // Handle escape sequence
+                when (content[i + 1]) {
+                    'n' -> { currentStringPart.append('\n'); i += 2 }
+                    't' -> { currentStringPart.append('\t'); i += 2 }
+                    'r' -> { currentStringPart.append('\r'); i += 2 }
+                    '\\' -> { currentStringPart.append('\\'); i += 2 }
+                    '"' -> { currentStringPart.append('"'); i += 2 }
+                    '$' -> { currentStringPart.append('$'); i += 2 }  // Escaped $, not interpolation
+                    else -> { currentStringPart.append(content[i]); i++ }
+                }
+            } else if (content[i] == '$' && i + 1 < content.length && content[i + 1] == '(') {
+                // Found unescaped interpolation start
+                // First, add any accumulated string part
+                if (currentStringPart.isNotEmpty()) {
+                    parts.add(StringPart(currentStringPart.toString()))
+                    currentStringPart.clear()
+                }
+
+                // Find the matching closing paren
+                i += 2  // Skip "$("
+                val exprStart = i
+                var parenDepth = 1
+
+                while (i < content.length && parenDepth > 0) {
+                    when {
+                        content[i] == '\\' && i + 1 < content.length -> {
+                            // Skip escaped character
+                            i += 2
+                        }
+                        content[i] == '(' -> {
+                            parenDepth++
+                            i++
+                        }
+                        content[i] == ')' -> {
+                            parenDepth--
+                            if (parenDepth > 0) i++
+                        }
+                        content[i] == '"' -> {
+                            // Skip over nested string
+                            i++
+                            while (i < content.length && content[i] != '"') {
+                                if (content[i] == '\\' && i + 1 < content.length) {
+                                    i += 2
+                                } else {
+                                    i++
+                                }
+                            }
+                            if (i < content.length) i++  // Skip closing quote
+                        }
+                        else -> i++
+                    }
+                }
+
+                val exprContent = content.substring(exprStart, i)
+                if (i < content.length) i++  // Skip the closing )
+
+                // Parse the expression content
+                val exprParser = FunkParser()
+                try {
+                    // We need to parse just the expression, so wrap it to make it a valid program
+                    val exprProgram = exprParser.parse(exprContent, desugar = true)
+                    val expr = when (val firstItem = exprProgram.items.firstOrNull()) {
+                        is TopLevelExpression -> firstItem.expression
+                        is LetBinding -> firstItem.expression
+                        else -> return ParseResult.Failure(
+                            "Invalid expression in string interpolation: $exprContent",
+                            stream.getSourcePosition()
+                        )
+                    }
+                    parts.add(ExpressionPart(expr))
+                } catch (e: ParseException) {
+                    return ParseResult.Failure(
+                        "Failed to parse interpolated expression '$exprContent': ${e.message}",
+                        stream.getSourcePosition()
+                    )
+                }
+            } else {
+                currentStringPart.append(content[i])
+                i++
+            }
+        }
+
+        // Add any remaining string part
+        if (currentStringPart.isNotEmpty()) {
+            parts.add(StringPart(currentStringPart.toString()))
+        }
+
+        // If we only have one StringPart, it's actually not interpolated (edge case after escape processing)
+        if (parts.size == 1 && parts[0] is StringPart) {
+            return ParseResult.Success(
+                StringLiteral((parts[0] as StringPart).value),
+                stream
+            )
+        }
+
+        return ParseResult.Success(
+            StringLiteral(value = "", parts = parts),
+            stream
+        )
     }
 }
 

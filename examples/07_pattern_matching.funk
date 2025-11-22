@@ -53,21 +53,21 @@ let main = {} ->
         Log.println { msg = "" }
 
         Log.println { msg = "Option unwrapping:" }
-        Log.println { msg = "  Some(42) unwrap_or 0 = " ++ int::to_string { val = result1 } }
-        Log.println { msg = "  None unwrap_or 0 = " ++ int::to_string { val = result2 } }
+        Log.println { msg = "  Some(42) unwrap_or 0 = $(int::to_string { val = result1 })" }
+        Log.println { msg = "  None unwrap_or 0 = $(int::to_string { val = result2 })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Record field access:" }
-        Log.println { msg = "  Name from record: " ++ name }
+        Log.println { msg = "  Name from record: $(name)" }
         Log.println { msg = "" }
 
         Log.println { msg = "Age classification:" }
-        Log.println { msg = "  10 years: " ++ class1 }
-        Log.println { msg = "  16 years: " ++ class2 }
-        Log.println { msg = "  45 years: " ++ class3 }
+        Log.println { msg = "  10 years: $(class1)" }
+        Log.println { msg = "  16 years: $(class2)" }
+        Log.println { msg = "  45 years: $(class3)" }
         Log.println { msg = "" }
 
         Log.println { msg = "Nested matching:" }
-        Log.println { msg = "  Ok(Some(42)): " ++ int::to_string { val = nested1 } }
-        Log.println { msg = "  Ok(None): " ++ int::to_string { val = nested2 } }
-        Log.println { msg = "  Err: " ++ int::to_string { val = nested3 } }
+        Log.println { msg = "  Ok(Some(42)): $(int::to_string { val = nested1 })" }
+        Log.println { msg = "  Ok(None): $(int::to_string { val = nested2 })" }
+        Log.println { msg = "  Err: $(int::to_string { val = nested3 })" }

@@ -84,7 +84,7 @@ class AbilityRegistry {
             is FunkType.FracType -> abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord")
             is FunkType.NatType -> abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord")
             is FunkType.BooleanType -> abilityName in setOf("Eq", "LogicalAnd", "LogicalOr", "LogicalNot")
-            is FunkType.StringType -> abilityName in setOf("Eq", "Ord", "StringConcat")
+            is FunkType.StringType -> abilityName in setOf("Eq", "Ord")
             is FunkType.VarType -> false // Type variables don't have abilities until constrained (except Inspect which is universal)
             else -> typeAbilities[type]?.contains(abilityName) ?: false
         }
@@ -106,7 +106,6 @@ class AbilityRegistry {
             "&&" -> setOf("LogicalAnd")
             "||" -> setOf("LogicalOr")
             "!" -> setOf("LogicalNot")
-            "++" -> setOf("StringConcat")  // String concatenation
             else -> emptySet()
         }
     }
@@ -142,8 +141,6 @@ class AbilityRegistry {
         registerAbility(Ability("LogicalAnd", mapOf("&&" to arithmeticOpType)))
         registerAbility(Ability("LogicalOr", mapOf("||" to arithmeticOpType)))
         registerAbility(Ability("LogicalNot", mapOf("!" to FunkType.FunctionType(aType, FunkType.BooleanType))))
-        registerAbility(Ability("StringConcat", mapOf("++" to arithmeticOpType)))
-        registerAbility(Ability("StringConcat", mapOf("++" to arithmeticOpType)))
     }
 }
 

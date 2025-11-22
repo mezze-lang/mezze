@@ -130,7 +130,7 @@ class AbilityImplementationVerificationTest {
             }
 
             impl Show String where {
-                show: {val: String} -> String = {val} -> "\"" ++ val ++ "\""
+                show: {val: String} -> String = {val} -> "\"$(val)\""
             }
 
             let test = Show.show {val = Show.show {val = true}}

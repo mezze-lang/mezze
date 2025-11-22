@@ -1,6 +1,6 @@
 # Simple function definitions and calls
 let add = {x, y} -> x + y               # expected: add : { x: 'a, y: 'a } with NumAdd 'a -> 'a
-let greet = {name} -> "Hello " ++ name  # expected: greet : { name: String } -> String
+let greet = {name} -> "Hello $(name)"  # expected: greet : { name: String } -> String
 
 let result1 = add {x = 10, y = 20}      # expected: result1 : Int
 let result2 = greet {name = "World"}    # expected: result2 : String

@@ -305,7 +305,7 @@ let benchmark_factorial = do
   let result = factorial_optimized {n = n}
   let end_time = System.currentTimeMillis {}
   
-  Console.print {message = "Factorial of " ++ intToString {val = n} ++ " computed in " ++ intToString {val = end_time - start_time} ++ "ms"}
+  Console.print {message = "Factorial of $(intToString {val = n}) computed in $(intToString {val = end_time - start_time})ms"}
   result
 
 // Typical performance improvements:
@@ -514,7 +514,7 @@ let fibonacci_iter = {n: Int} -> do
 // Add debug information to understand tail call optimization
 let debug_factorial = {n: Int, acc: Int} ->
   do
-    Console.debug {message = "factorial(" ++ intToString {val = n} ++ ", " ++ intToString {val = acc} ++ ")"}
+    Console.debug {message = "factorial($(intToString {val = n}), $(intToString {val = acc}))"}
     if n <= 1 then acc
     else debug_factorial {n = n - 1, acc = acc * n}  // Tail call
 ```

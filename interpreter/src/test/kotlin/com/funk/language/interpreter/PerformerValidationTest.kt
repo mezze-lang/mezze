@@ -111,9 +111,9 @@ class PerformerValidationTest {
             
             # This should work - Log performer can use Console effect
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }
-            
+
             perform Terminal, ConsoleLogger in Log.info {msg = "Test"}
         """.trimIndent()
 
@@ -134,7 +134,7 @@ class PerformerValidationTest {
             }
             
             impl Log for FileLogger {path: String} where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = path ++ ": " ++ msg}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "$(path): $(msg)"}
             }
             
             perform FileLogger {path = "app.log"} in Log.info {msg = "Test message"}
@@ -164,8 +164,8 @@ class PerformerValidationTest {
 
             impl Database for PostgresDB {host: String, port: Int} where {
               query : {sql: String} -> String <Log> = {sql} -> do
-                Log.info {msg = "Executing query on " ++ host ++ ":" ++ int::to_string {n = port}}
-                host ++ ":" ++ int::to_string {n = port} ++ " -> " ++ sql
+                Log.info {msg = "Executing query on $(host):$(int::to_string {n = port})"}
+                "$(host):$(int::to_string {n = port}) -> $(sql)"
             }
 
             impl Log for FileLogger {path: String} where {
@@ -200,9 +200,9 @@ class PerformerValidationTest {
             }
             
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }
-            
+
             let outerFunction : {} -> {} <Log> = {} -> Log.info {msg = "outer"}
 
             let innerFunction : {} -> {} = {} ->

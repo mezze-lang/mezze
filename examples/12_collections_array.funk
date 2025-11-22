@@ -30,22 +30,22 @@ let main = {} ->
         Log.println { msg = "" }
 
         Log.println { msg = "Original array: [1, 2, 3, 4, 5]" }
-        Log.println { msg = "Length: " ++ int::to_string { val = length } }
+        Log.println { msg = "Length: $(int::to_string { val = length })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Map (x * 2):" }
         let str = int::to_string { val = doubled }
-        Log.println { msg = "  Result: " ++ str }
+        Log.println { msg = "  Result: $(str)" }
         Log.println { msg = "" }
 
         Log.println { msg = "Filter (evens only):" }
         let str2 = int::to_string { val = evens }
-        Log.println { msg = "  Result: " ++ str2 }
+        Log.println { msg = "  Result: $(str2)" }
         Log.println { msg = "" }
 
         Log.println { msg = "Fold (sum):" }
-        Log.println { msg = "  Result: " ++ int::to_string { val = sum } }
+        Log.println { msg = "  Result: $(int::to_string { val = sum })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Get element at index 2:" }
-        Log.println { msg = "  Result: " ++ int::to_string { val = third } }
+        Log.println { msg = "  Result: $(int::to_string { val = third })" }

@@ -10,13 +10,13 @@ class DebugTypeDisplayTest {
             InspectAbilityConstraint("'c", "Ord"),
             InspectAbilityConstraint("'a", "NumAdd"),
             InspectAbilityConstraint("'a", "Eq"),
-            InspectAbilityConstraint("'b", "StringConcat"),
+            InspectAbilityConstraint("'b", "Eq"),
             InspectAbilityConstraint("'a", "Ord")
         )
-        
+
         val result = printConstraints(constraints)
         println("Actual result: '$result'")
-        println("Expected: ''a : Eq + NumAdd + Ord, 'b : StringConcat, 'c : Ord'")
+        println("Expected: ''a : Eq + NumAdd + Ord, 'b : Eq, 'c : Ord'")
     }
     
     @Test
@@ -25,7 +25,7 @@ class DebugTypeDisplayTest {
         val typeVarB = TypeVar("b")
         val typeVarC = TypeVar("c")
         val typeVarD = TypeVar("d")
-        
+
         val innerFunction1 = FunkType.FunctionType(
             FunkType.VarType(typeVarA),
             FunkType.VarType(typeVarB)
@@ -35,16 +35,16 @@ class DebugTypeDisplayTest {
             FunkType.VarType(typeVarD)
         )
         val outerFunction = FunkType.FunctionType(innerFunction1, innerFunction2)
-        
+
         val constraints = listOf(
             InspectAbilityConstraint("a", "NumAdd"),  // Use TypeVar names without quotes
             InspectAbilityConstraint("b", "Eq"),
             InspectAbilityConstraint("c", "Ord"),
-            InspectAbilityConstraint("d", "StringConcat")
+            InspectAbilityConstraint("d", "Ord")
         )
-        
+
         val result = printTypeWithConstraints(outerFunction, constraints)
         println("Actual result: '$result'")
-        println("Expected: '('a -> 'b) -> ('c -> 'd) where a : NumAdd, b : Eq, c : Ord, d : StringConcat'")
+        println("Expected: '('a -> 'b) -> ('c -> 'd) where a : NumAdd, b : Eq, c : Ord, d : Ord'")
     }
 }

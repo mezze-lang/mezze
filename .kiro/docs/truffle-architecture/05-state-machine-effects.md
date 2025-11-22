@@ -534,7 +534,7 @@ let process_orders = do
       // Each order processed in parallel virtual thread
       let validated = validate_order {order = order}
       let updated = Database.query {
-        sql = "UPDATE orders SET status = 'processed' WHERE id = " ++ order.id
+        sql = "UPDATE orders SET status = 'processed' WHERE id = $(order.id)"
       }
       validated
   }
@@ -597,7 +597,7 @@ impl StructuredConcurrent for Concurrent {
     try
       Success {value = future.get {}}
     catch TimeoutException ->
-      Error {message = "Computation timed out after " ++ intToString {val = duration} ++ "ms"}
+      Error {message = "Computation timed out after $(intToString {val = duration})ms"}
 }
 
 // Usage example
@@ -637,7 +637,7 @@ let robust_processing = do
     Success {value} -> 
       FileIO.writeFile {path = "success.json", content = serialize {data = value}}
     Error {message} ->
-      Console.print {message = "Processing failed: " ++ message}
+      Console.print {message = "Processing failed: $(message)"}
 ```
 
 ### 3. Resource Management
@@ -724,14 +724,14 @@ let benchmark_concurrency = do
   let results = Concurrent.par {
     computations = map {
       list = requests,
-      f = {i} -> {() -> HTTP.get {url = "https://httpbin.org/delay/1?id=" ++ intToString {val = i}}}
+      f = {i} -> {() -> HTTP.get {url = "https://httpbin.org/delay/1?id=$(intToString {val = i})"}}
     }
   }
   
   let end_time = System.currentTimeMillis {}
   let duration = end_time - start_time
   
-  Console.print {message = "Processed " ++ intToString {val = length {list = results}} ++ " requests in " ++ intToString {val = duration} ++ "ms"}
+  Console.print {message = "Processed $(intToString {val = length {list = results}}) requests in $(intToString {val = duration})ms"}
   
   // Typical results:
   // - OS Threads: Would exhaust thread pool at ~1000 requests
@@ -750,7 +750,7 @@ let calculate: {x: Int, y: Int} -> Int = {x, y} -> x * y + 1
 
 // Function with effects - becomes state machine when called
 let process_file: {path: String} -> String <FileIO, Console> = {path} -> do
-  Console.print {message = "Processing " ++ path}               // Suspension point 1
+  Console.print {message = "Processing $(path)"}               // Suspension point 1
   let content = FileIO.readFile {path = path}                   // Suspension point 2
   let processed = process_content {content = content}           // Pure computation
   Console.print {message = "Completed processing"}             // Suspension point 3

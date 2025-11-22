@@ -36,8 +36,8 @@ Funk's async effect system leverages Project Loom's virtual threads and structur
 // Funk code with async effects
 let fetch_user_data = {user_id: Int} -> do
   let user = Database.query {sql = "SELECT * FROM users WHERE id = ?", params = [user_id]}
-  let profile = Network.get {url = "https://api.example.com/profile/" ++ intToString {val = user_id}}
-  let cache_key = "user_" ++ intToString {val = user_id}
+  let profile = Network.get {url = "https://api.example.com/profile/$(intToString {val = user_id})"}
+  let cache_key = "user_$(intToString {val = user_id})"
   Cache.set {key = cache_key, value = user, ttl = 300}
   {user = user, profile = profile}
 ```
@@ -356,8 +356,8 @@ Cache.set {key = "user_123", value = "John Doe", ttl = 300}
 let fetch_all_data = {user_id: Int} -> do
   // These run concurrently using structured concurrency
   let user_future = async { Database.query {sql = "SELECT * FROM users WHERE id = ?", params = [intToString {val = user_id}]} }
-  let profile_future = async { Network.get {url = "https://api.example.com/profile/" ++ intToString {val = user_id}} }
-  let settings_future = async { Cache.get {key = "settings_" ++ intToString {val = user_id}} }
+  let profile_future = async { Network.get {url = "https://api.example.com/profile/$(intToString {val = user_id})"} }
+  let settings_future = async { Cache.get {key = "settings_$(intToString {val = user_id})"} }
   
   // Wait for all to complete
   let user = await user_future
@@ -374,7 +374,7 @@ let fetch_with_fallback = {url: String} -> do
   let primary_future = async { Network.get {url = url} }
   let fallback_future = async { 
     Timer.sleep {duration = 1000}
-    Cache.get {key = "fallback_" ++ url}
+    Cache.get {key = "fallback_$(url)"}
   }
   
   // Return whichever completes first
@@ -543,7 +543,7 @@ let safe_network_call = {url: String} -> do
     }
     race [result_future, timeout_future]
   } catch {
-    error -> Error ("Network call failed: " ++ error.message)
+    error -> Error ("Network call failed: $(error.message)")
   }
 ```
 

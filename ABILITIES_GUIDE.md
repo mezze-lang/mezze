@@ -100,7 +100,7 @@ Available for `Bool`:
 - **LogicalNot** - `!`
 
 ### String Operations
-- **StringConcat** - Concatenation (`++`)
+- **StringConcat** - Strings can be concatenated using string interpolation: `"$(a)$(b)"`
 
 ### Universal Operations
 - **Inspect** - Available for ALL types (including type variables)
@@ -180,7 +180,7 @@ pub ability Show 'a where {
 
 pub impl Show Person where {
     show : {val: Person} -> String = {val} ->
-        val.name ++ " (" ++ Inspect.to_str {val = val.age} ++ ")"
+        "$(val.name) ($(Inspect.to_str {val = val.age}))"
 }
 
 // Module B: use the type
@@ -776,7 +776,7 @@ validateConstraints(constraints: Set<AbilityConstraint>, substitutions: Map<Type
 
    impl Show {x: Int, y: Int} where {
      show : {val: {x: Int, y: Int}} -> String = {val} ->
-       "Record {x = " ++ Inspect.to_str {val = val.x} ++ ", y = " ++ Inspect.to_str {val = val.y} ++ "}"
+       "Record {x = $(Inspect.to_str {val = val.x}), y = $(Inspect.to_str {val = val.y})}"
    }
    ```
    **Why:** Better developer experience, easier learning curve

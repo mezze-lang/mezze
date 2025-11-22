@@ -292,9 +292,9 @@ let result = 5 |> f {x = @} |> g {x = @} |> h {x = @}
     }
 
     @Test
-    fun `test pipe with string concatenation`() {
+    fun `test pipe with string interpolation`() {
         val source = """
-let greet = {name} -> "Hello, " ++ name
+let greet = {name} -> "Hello, $(name)"
 let result = "World" |> greet {name = @}
 """.trim()
 

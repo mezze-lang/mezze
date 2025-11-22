@@ -26,11 +26,11 @@ class PerformerConflictTest {
             }
 
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"}
             }
 
             impl Log for EnhancedLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] $(msg)"}
             }
 
             perform BasicLogger, EnhancedLogger in Log.info {msg = "Test"}
@@ -51,26 +51,26 @@ class PerformerConflictTest {
             effect Log {
               info : {msg: String} -> {}
             }
-            
+
             effect Database {
               save : {data: String} -> {}
             }
-            
+
             impl Log for Logger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[LOG] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "[LOG] $(msg)"}
             }
-            
+
             impl Database for DbHandler where {
-              save : {data: String} -> {} = {data} -> native_print {msg = "[DB] " ++ data}
+              save : {data: String} -> {} = {data} -> native_print {msg = "[DB] $(data)"}
             }
-            
+
             perform DbHandler, Logger in do
               Log.info {msg = "Starting"}
               Database.save {data = "test"}
         """.trimIndent()
 
         val program = parser.parse(source)
-        
+
         // This should succeed - different effects, no conflict
         typeChecker.typeCheck(program)
     }
@@ -82,16 +82,16 @@ class PerformerConflictTest {
             effect Log {
               info : {msg: String} -> {}
             }
-            
+
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"}
             }
-            
+
             perform BasicLogger in Log.info {msg = "Test"}
         """.trimIndent()
 
         val program = parser.parse(source)
-        
+
         // This should succeed
         typeChecker.typeCheck(program)
     }
@@ -103,26 +103,26 @@ class PerformerConflictTest {
             effect Log {
               info : {msg: String} -> {}
             }
-            
+
             effect Database {
               save : {data: String} -> {}
             }
-            
+
             impl Log for Logger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[LOG] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "[LOG] $(msg)"}
             }
-            
+
             impl Database for DbHandler where {
-              save : {data: String} -> {} = {data} -> native_print {msg = "[DB] " ++ data}
+              save : {data: String} -> {} = {data} -> native_print {msg = "[DB] $(data)"}
             }
-            
+
             perform DbHandler, Logger in do
               Log.info {msg = "Starting"}
               Database.save {data = "test"}
         """.trimIndent()
 
         val program = parser.parse(source)
-        
+
         // This should succeed - different effects, no conflict
         typeChecker.typeCheck(program)
     }

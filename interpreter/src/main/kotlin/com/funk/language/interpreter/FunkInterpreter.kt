@@ -373,7 +373,21 @@ class FunkInterpreter {
             }
         }
     }
-    
+
+    /**
+     * Convert a FunkValue to a string for use in string interpolation.
+     * Only FunkString values are allowed - other types must be explicitly converted first.
+     */
+    private fun valueToStringForInterpolation(value: FunkValue, context: MutableMap<String, FunkValue>): String {
+        return when (value) {
+            is FunkString -> value.value
+            else -> throw RuntimeException(
+                "String interpolation requires a String value, but got ${value::class.simpleName}. " +
+                "Use to_str{val = ...} to convert other types to String first."
+            )
+        }
+    }
+
     /**
      * Evaluate an expression (simplified version)
      */
@@ -382,7 +396,24 @@ class FunkInterpreter {
         return when (expr) {
             is IntLiteral -> FunkInt(expr.value)
             is FloatLiteral -> FunkFloat(expr.value)
-            is StringLiteral -> FunkString(expr.value)
+            is StringLiteral -> {
+                if (expr.isInterpolated && expr.parts != null) {
+                    // Build interpolated string using StringBuilder
+                    val builder = StringBuilder()
+                    for (part in expr.parts) {
+                        when (part) {
+                            is StringPart -> builder.append(part.value)
+                            is ExpressionPart -> {
+                                val value = evaluateExpression(part.expression, context)
+                                builder.append(valueToStringForInterpolation(value, context))
+                            }
+                        }
+                    }
+                    FunkString(builder.toString())
+                } else {
+                    FunkString(expr.value)
+                }
+            }
             is BooleanLiteral -> FunkBool(expr.value)
             is ArrayLiteral -> {
                 val elements = expr.elements.map { evaluateExpression(it, context) }
@@ -409,11 +440,6 @@ class FunkInterpreter {
                     // Desugar: replace @ placeholders in right side with leftValue
                     val desugaredRight = replaceAtPlaceholder(expr.right, leftValue, context)
                     evaluateExpression(desugaredRight, context)
-                } else if (expr.operator == "++") {
-                    // String concatenation is still special (not an ability yet)
-                    val left = evaluateExpression(expr.left, context)
-                    val right = evaluateExpression(expr.right, context)
-                    evaluateBinaryOperation(left, expr.operator, right)
                 } else {
                     // Desugar operator to ability method call
                     // e.g., x + y becomes NumAdd.num_add { l = x, r = y }
@@ -1264,10 +1290,6 @@ class FunkInterpreter {
                 left is FunkFloat && right is FunkFloat -> FunkFloat(left.value + right.value)
                 // TODO: Add support for user-defined NumAdd implementations
                 else -> throw ArithmeticException("+", left::class.simpleName ?: "Unknown", right::class.simpleName ?: "Unknown")
-            }
-            "++" -> when {
-                left is FunkString && right is FunkString -> FunkString(left.value + right.value)
-                else -> throw ArithmeticException("++", left::class.simpleName ?: "Unknown", right::class.simpleName ?: "Unknown")
             }
             "-" -> when {
                 left is FunkInt && right is FunkInt -> FunkInt(left.value - right.value)
@@ -2667,26 +2689,6 @@ class FunkInterpreter {
                     mulFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
                 }
                 else -> throw RuntimeException("Unsupported types for (*): ${left::class.simpleName}, ${right::class.simpleName}")
-            }
-        }
-        
-        // String concatenation operator
-        context["(++)"] = NativeFunkFunction("(++)") { args ->
-            if (args.size != 1) {
-                throw RuntimeException("(++) expects exactly 1 record argument, got ${args.size}")
-            }
-            
-            val record = args[0] as? FunkRecord ?: throw RuntimeException("(++) expects a record argument, got ${args[0]::class.simpleName}")
-            val left = record.fields["left"] ?: throw RuntimeException("Missing 'left' argument for (++)")
-            val right = record.fields["right"] ?: throw RuntimeException("Missing 'right' argument for (++)")
-            
-            when {
-                left is FunkString && right is FunkString -> {
-                    val concatFn = context["__native_string_concat"] as? NativeFunkFunction
-                        ?: throw RuntimeException("__native_string_concat not found")
-                    concatFn.call(listOf(FunkRecord(mapOf("l" to left, "r" to right))))
-                }
-                else -> throw RuntimeException("Unsupported types for (++): ${left::class.simpleName}, ${right::class.simpleName}")
             }
         }
         

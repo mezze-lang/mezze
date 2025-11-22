@@ -478,7 +478,7 @@ class AbilityValidationTest {
 
             let compare: {x: 'a, y: 'a} -> String with Show 'a, Eq 'a = {x, y} ->
               if Eq.eq {l = x, r = y} then
-                "Equal: " ++ Show.show {val = x}
+                "Equal: $(Show.show {val = x})"
               else
                 "Not equal"
 
@@ -510,7 +510,7 @@ class AbilityValidationTest {
 
             let compare: {x: String, y: String} -> String with Show String, Eq String = {x, y} ->
               if Eq.eq {l = x, r = y} then
-                "Equal: " ++ Show.show {val = x}
+                "Equal: $(Show.show {val = x})"
               else
                 "Not equal"
 
@@ -541,7 +541,7 @@ class AbilityValidationTest {
               Show.show {val = val}
 
             let format: {x: 'a} -> String with Show 'a = {x} ->
-              "[" ++ display {val = x} ++ "]"
+              "[$(display {val = x})]"
 
             format {x = 42}
         """.trimIndent()

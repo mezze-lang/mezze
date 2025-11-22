@@ -52,7 +52,7 @@ class SimpleFunctionTest {
     @Test
     fun `test function with record parameter`() {
         val source = """
-            let getFullName = {person} -> person.firstName ++ " " ++ person.lastName
+            let getFullName = {person} -> "$(person.firstName) $(person.lastName)"
             let person = {firstName = "John", lastName = "Smith"}
             let fullName = getFullName {person = person}
         """.trimIndent()
@@ -108,7 +108,7 @@ class SimpleFunctionTest {
     @Test
     fun `test function with string operations`() {
         val source = """
-            let greet = {name} -> "Hello, " ++ name ++ "!"
+            let greet = {name} -> "Hello, $(name)!"
             let greeting = greet {name = "World"}
         """.trimIndent()
 

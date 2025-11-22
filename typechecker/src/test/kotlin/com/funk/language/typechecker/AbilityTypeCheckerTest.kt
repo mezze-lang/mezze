@@ -71,7 +71,7 @@ class AbilityTypeCheckerTest {
             
             impl Show String where {
               show : {val: String} -> String = {val} -> val
-              debug : {val: String} -> String = {val} -> "\"" ++ val ++ "\""
+              debug : {val: String} -> String = {val} -> "\"$(val)\""
             }
         """.trimIndent()
         

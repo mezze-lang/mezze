@@ -53,7 +53,7 @@ class CompleteTypeInferenceTest {
             let rectangleArea = calculateArea { shape = rectangle }
             let triangleArea = calculateArea { shape = triangle }
 
-            "Circle: " ++ int::to_string { n = circleArea } ++ ", Rectangle: " ++ int::to_string { n = rectangleArea } ++ ", Triangle: " ++ int::to_string { n = triangleArea }
+            "Circle: $(int::to_string { n = circleArea }), Rectangle: $(int::to_string { n = rectangleArea }), Triangle: $(int::to_string { n = triangleArea })"
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -188,7 +188,7 @@ class CompleteTypeInferenceTest {
             type Temperature = | Hot { degrees: Int }, Cold { degrees: Int } |
 
             let describe = {temp} -> match temp is
-              Hot { degrees } | Cold { degrees } -> "Temperature is " ++ int::to_string { n = degrees }
+              Hot { degrees } | Cold { degrees } -> "Temperature is $(int::to_string { n = degrees })"
 
             let result = describe { temp = Hot { degrees = 80 } }
         """.trimIndent()

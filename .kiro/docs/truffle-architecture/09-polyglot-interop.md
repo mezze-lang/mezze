@@ -220,7 +220,7 @@ let javascript_basic = do
   let result = JavaScript.eval {code = "Math.sqrt(16) + Math.PI"}
   let number = Polyglot.to_funk_float {value = result}
   
-  Console.print {message = "JavaScript result: " ++ floatToString {val = number}}
+  Console.print {message = "JavaScript result: $(floatToString {val = number})"}
   number
 
 // Working with JavaScript objects and functions
@@ -288,7 +288,7 @@ let python_basic = do
   let result = Python.eval {code = "import math; math.sqrt(25) + math.pi"}
   let number = Polyglot.to_funk_float {value = result}
   
-  Console.print {message = "Python result: " ++ floatToString {val = number}}
+  Console.print {message = "Python result: $(floatToString {val = number})"}
   number
 
 // Working with Python modules
@@ -488,9 +488,9 @@ let safe_computation = do
   match python_result is
     Success {value} ->
       let number = Polyglot.to_funk_float {value = value}
-      Console.print {message = "Result: " ++ floatToString {val = number}}
+      Console.print {message = "Result: $(floatToString {val = number})"}
     Error {message, language} ->
-      Console.print {message = "Error in " ++ language ++ ": " ++ message}
+      Console.print {message = "Error in $(language): $(message)"}
 ```
 
 ### 2. Shared State Between Languages
@@ -731,7 +731,7 @@ let test_error_handling = do
   
   match python_error is
     Error {message, language} ->
-      Console.print {message = "✓ Error correctly caught: " ++ message}
+      Console.print {message = "Error correctly caught: $(message)"}
     Success {value} ->
       Console.print {message = "✗ Expected error but got success"}
 ```

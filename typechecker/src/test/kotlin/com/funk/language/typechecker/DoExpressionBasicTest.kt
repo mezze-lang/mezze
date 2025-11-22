@@ -95,7 +95,7 @@ class DoExpressionBasicTest {
             let stringOp = do
               let greeting = "Hello"
               let name = "World"
-              greeting ++ " " ++ name
+              "$(greeting) $(name)"
 
             let message = stringOp
         """.trimIndent()

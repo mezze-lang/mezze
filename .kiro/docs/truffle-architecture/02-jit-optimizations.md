@@ -293,7 +293,7 @@ let process_ints = {list: [Int]} ->
 
 // ✅ Good: Specialized functions
 let process_strings = {list: [String]} ->
-  list |> map {s -> s ++ "!"} |> filter {s -> length {str = s} > 3}
+  list |> map {s -> "$(s)!"} |> filter {s -> length {str = s} > 3}
 
 // ❌ Less optimal: Polymorphic operations
 let process_mixed = {list} -> 
@@ -343,7 +343,7 @@ let benchmark_arithmetic = do
     fold {list = numbers, init = 0, f = {acc, x} -> acc + x}
   }
   
-  Console.print {message = "Sum calculated in " ++ intToString {val = result.time_ms} ++ "ms"}
+  Console.print {message = "Sum calculated in $(intToString {val = result.time_ms})ms"}
   result.result
 ```
 
@@ -359,7 +359,7 @@ let performance_test = do
     repeat {count = 1000, action = {() -> heavy_computation {}}}
   }
   
-  Console.print {message = "Compiled performance: " ++ intToString {val = compiled_time.time_ms} ++ "ms"}
+  Console.print {message = "Compiled performance: $(intToString {val = compiled_time.time_ms})ms"}
 ```
 
 ## Advanced Optimizations

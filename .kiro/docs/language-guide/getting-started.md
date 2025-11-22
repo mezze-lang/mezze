@@ -53,7 +53,7 @@ let isActive = true
 
 # Expressions
 let sum = 10 + 20
-let message = "Hello, " ++ name
+let message = "Hello, $(name)"
 ```
 
 ### Functions
@@ -68,7 +68,7 @@ let result = add {x = 5, y = 3}
 ### Types
 ```funk
 # Type annotations (optional but helpful)
-let greet: {name: String} -> String = {name} -> "Hello, " ++ name
+let greet: {name: String} -> String = {name} -> "Hello, $(name)"
 
 # Custom types
 type Color = | Red, Green, Blue |
@@ -98,8 +98,8 @@ let area = {shape: Shape} -> match shape is
 type Result = | Success { value: String }, Error { message: String } |
 
 let processResult = {result: Result} -> match result is
-  Success { value } -> "Got: " ++ value
-  Error { message } -> "Error: " ++ message
+  Success { value } -> "Got: $(value)"
+  Error { message } -> "Error: $(message)"
 ```
 
 ### Working with Lists (when available)

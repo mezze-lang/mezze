@@ -46,9 +46,7 @@ let inspectVariantData = {v} -> match v is
 
 # Multiple inspect calls with same type variable
 let multiInspect = {a, b, c} ->
-  Inspect.to_str {val = a} ++
-  Inspect.to_str {val = b} ++
-  Inspect.to_str {val = c}                                            # expected: multiInspect : { a: 'a, b: 'a, c: 'a } with Inspect 'a -> String
+  "$(Inspect.to_str {val = a})$(Inspect.to_str {val = b})$(Inspect.to_str {val = c})"  # expected: multiInspect : { a: 'a, b: 'a, c: 'a } with Inspect 'a -> String
 
 # Inspect with list elements (assuming list type exists)
 let inspectListHead = {lst} -> match lst is

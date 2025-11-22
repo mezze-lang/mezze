@@ -21,7 +21,7 @@ impl Show Bool where {
 
 # Generic function that works with any type that has Show
 let display = { value: 'a } with Show 'a ->
-    "Value: " ++ Show.show { val = value }
+    "Value: $(Show.show { val = value })"
 
 # Use with different types
 let int_display = display { value = 42 }
@@ -47,9 +47,9 @@ let main = {} ->
         Log.println { msg = "" }
 
         Log.println { msg = "Show ability:" }
-        Log.println { msg = "  " ++ int_display }
-        Log.println { msg = "  " ++ bool_display }
+        Log.println { msg = "  $(int_display)" }
+        Log.println { msg = "  $(bool_display)" }
         Log.println { msg = "" }
 
         Log.println { msg = "NumOps ability:" }
-        Log.println { msg = "  sum_of_squares(3, 4) = " ++ int::to_string { val = sum_of_squares { x = 3, y = 4 } } }
+        Log.println { msg = "  sum_of_squares(3, 4) = $(int::to_string { val = sum_of_squares { x = 3, y = 4 } })" }

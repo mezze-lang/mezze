@@ -80,12 +80,12 @@ class BasicLanguageFeaturesTest {
     }
 
     @Test
-    fun `test string concatenation`() {
+    fun `test string interpolation`() {
         val source = """
             let firstName = "John"
             let lastName = "Doe"
-            let fullName = firstName ++ " " ++ lastName
-            let greeting = "Hello, " ++ fullName ++ "!"
+            let fullName = "$(firstName) $(lastName)"
+            let greeting = "Hello, $(fullName)!"
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
@@ -236,8 +236,8 @@ class BasicLanguageFeaturesTest {
         val source = """
             let person = {name = "David", age = 35, salary = 75000.50}
             let isAdult = person.age > 17
-            let greeting = "Hello " ++ person.name
-            let salaryInfo = person.name ++ " earns " ++ "a lot"
+            let greeting = "Hello $(person.name)"
+            let salaryInfo = "$(person.name) earns a lot"
             let ageNextYear = person.age + 1
         """.trimIndent()
 

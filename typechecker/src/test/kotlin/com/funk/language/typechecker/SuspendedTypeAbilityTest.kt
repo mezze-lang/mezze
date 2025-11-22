@@ -204,7 +204,7 @@ class SuspendedTypeAbilityTest {
     // ===== String Abilities on SuspendedType =====
 
     @Test
-    fun `test String suspended type supports StringConcat`() {
+    fun `test String suspended type supports string interpolation`() {
         assertTypeChecks(
             """
             effect Log {
@@ -219,7 +219,7 @@ class SuspendedTypeAbilityTest {
                 Log.println { msg = "Getting text" }
                 "Hello"
 
-            let result = getText {} ++ " World"
+            let result = "$(getText {}) World"
             result
             """.trimIndent(),
             "result",
@@ -428,10 +428,8 @@ class SuspendedTypeAbilityTest {
     }
 
     @Test
-    fun `test suspended Int type does not support StringConcat`() {
-        // Note: This test currently doesn't fail because type inference
-        // may coerce types. The important thing is that SuspendedType
-        // properly checks abilities on the value type.
+    fun `test suspended Int type used with string interpolation`() {
+        // Note: String interpolation works with any type that can be converted to string
         assertTypeChecks(
             """
             effect Log {
@@ -446,8 +444,7 @@ class SuspendedTypeAbilityTest {
                 Log.println { msg = "Getting number" }
                 42
 
-            # This will work because + is polymorphic and accepts both Int and String
-            # The actual type mismatch would be caught at runtime or with stricter checking
+            # String interpolation converts values to strings
             getNumber
             """.trimIndent(),
             "getNumber",

@@ -42,7 +42,7 @@ let example2 = add_ten_then_double { x = 5 }
 # ============================================================================
 
 let to_upper = { s } -> string::to_upper { s = s }
-let add_prefix = { s } -> ">>> " ++ s
+let add_prefix = { s } -> ">>> $(s)"
 
 let example3_step1 = to_upper { s = "hello" }
 let example3 = add_prefix { s = example3_step1 }
@@ -74,23 +74,20 @@ let main = {} -> do
     Log.println { msg = "" }
 
     Log.println { msg = "Example 1 - Nested composition:" }
-    Log.println { msg = "  square(multiply_by_two(add_ten(5))) = " ++
-        int::to_string { val = example1 } }
+    Log.println { msg = "  square(multiply_by_two(add_ten(5))) = $(int::to_string { val = example1 })" }
     Log.println { msg = "" }
 
     Log.println { msg = "Example 2 - Generic compose function:" }
-    Log.println { msg = "  compose(multiply_by_two, add_ten)(5) = " ++
-        int::to_string { val = example2 } }
+    Log.println { msg = "  compose(multiply_by_two, add_ten)(5) = $(int::to_string { val = example2 })" }
     Log.println { msg = "" }
 
     Log.println { msg = "Example 3 - String transformation:" }
-    Log.println { msg = "  \"hello\" -> to_upper -> add_prefix = " ++ example3 }
+    Log.println { msg = "  \"hello\" -> to_upper -> add_prefix = $(example3)" }
     Log.println { msg = "" }
 
     Log.println { msg = "Example 4 - Array transformation:" }
     Log.println { msg = "  [3,5,7,9,11] -> double -> filter>10 -> add5" }
-    Log.println { msg = "  Result length: " ++
-        int::to_string { val = array::length { xs = example4 } } ++ " elements" }
+    Log.println { msg = "  Result length: $(int::to_string { val = array::length { xs = example4 } }) elements" }
     Log.println { msg = "" }
 
     Log.println { msg = "Key patterns:" }

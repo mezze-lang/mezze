@@ -15,7 +15,7 @@ let complex_numeric = {a, b} -> (a + b) * (a / b) - (a % b)
 // Expected: {a: 'a, b: 'a} with NumAdd 'a, NumMul 'a, NumDiv 'a, NumMod 'a -> 'a
 
 // Test: multiple type variables with different ability sets
-let mixed_abilities = {x, y, z} -> (x + y) ++ (z > y)
+let mixed_abilities = {x, y, z} -> "$(x + y)$(z > y)"
 // Expected: should fail - incompatible constraint combinations
 
 // Test: ability constraint propagation through nested calls
@@ -43,7 +43,7 @@ let use_both = {f, x} -> {
 // Test: contravariant ability constraints (should fail)
 let impossible = {x} -> {
   let a = x + 1        // requires NumAdd
-  let b = x ++ "test"  // requires StringConcat
+  let b = "$(x)test"  // uses string interpolation
   a
 }
 // Expected: Type error - Int doesn't have StringConcat
@@ -163,7 +163,7 @@ let same = f {}
 # expected: same : {x: 'a, y: 'a} with NumAdd 'a -> 'a
 
 # Nested partial application with different types
-let combine = {a, b, c, d} -> a ++ (b + c) ++ d
+let combine = {a, b, c, d} -> "$(a)$(b + c)$(d)"
 let with_str = combine {a = "Result: ", d = " done"}
 # expected: with_str : {b: Int, c: Int} -> String
 let result = with_str {b = 5, c = 10}
@@ -199,7 +199,7 @@ p3 {d = 4}
 
 // Test: partial application with mixed types
 """
-let make_message = {num, str, flag} -> if flag then str ++ num else num ++ str
+let make_message = {num, str, flag} -> if flag then "$(str)$(num)" else "$(num)$(str)"
 let with_num = make_message {num = "42"}
 let with_str = with_num {str = " is the answer"}
 with_str {flag = true}
@@ -230,9 +230,9 @@ let result = 5 |> f {x = @}
 
 // Test: pipe chain with type transformations
 let square = {x} -> x * x
-let to_string = {x} -> "Result: " ++ x
+let to_string = {x} -> "Result: $(x)"
 let result = 5 |> square {x = @} |> to_string {x = @}
-// Expected: Type error - can't convert Int to String for ++
+// Expected: String (string interpolation handles Int -> String conversion)
 
 // Test: pipe with open records
 let add_field = {rec, val} -> {x = rec.x + val, ...rec}
@@ -383,8 +383,8 @@ let safe_div = {x, y} -> if y == 0 then None else Some {val = x / y}
 type Animal = | Dog {name: String}, Cat {name: String}, ... |
 
 let greet = {animal: Animal} -> match animal is
-  Dog {name} -> "Woof, " ++ name
-  Cat {name} -> "Meow, " ++ name
+  Dog {name} -> "Woof, $(name)"
+  Cat {name} -> "Meow, $(name)"
   _ -> "Hello, creature"
 # expected: greet : {animal: Animal} -> String
 
@@ -604,7 +604,7 @@ let make_adder = {x} -> {y} -> {z} -> x + y + z
 // Test: inference failure with ambiguous constraints
 let ambiguous = {x, y} -> {
   let a = x + 1
-  let b = y ++ "text"
+  let b = "$(y)text"
   {a, b}
 }
 // Expected: {x: Int, y: String} -> {a: Int, b: String}

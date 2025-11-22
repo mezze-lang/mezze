@@ -104,7 +104,7 @@ class BuiltinEffectsTest {
               do
                 Log.print {msg = "Generating random number..."}
                 let num = Random.nextInt {min = 1, max = 100}
-                Log.print {msg = "Generated: " ++ intToString {val = num}}
+                Log.print {msg = "Generated: $(intToString {val = num})"}
                 num
             
             # Execute with both handlers

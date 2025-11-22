@@ -9,7 +9,7 @@ type Message = | Text { content: String }, Number { value: Int }, ... |
 # Process known message types with wildcard for unknown
 let process_message = { msg: Message } ->
     match msg is
-      Text { content } -> "Got text: " ++ content
+      Text { content } -> "Got text: $(content)"
       Number { value } -> "Got number"
       _ -> "Unknown message type"
 
@@ -40,10 +40,10 @@ let main = {} ->
         Log.println { msg = "" }
 
         Log.println { msg = "Message processing:" }
-        Log.println { msg = "  " ++ result1 }
-        Log.println { msg = "  " ++ result2 }
+        Log.println { msg = "  $(result1)" }
+        Log.println { msg = "  $(result2)" }
         Log.println { msg = "" }
 
         Log.println { msg = "Status checks:" }
-        Log.println { msg = "  Active: " ++ (if check1 then "true" else "false") }
-        Log.println { msg = "  Inactive: " ++ (if check2 then "true" else "false") }
+        Log.println { msg = "  Active: $(if check1 then "true" else "false")" }
+        Log.println { msg = "  Inactive: $(if check2 then "true" else "false")" }

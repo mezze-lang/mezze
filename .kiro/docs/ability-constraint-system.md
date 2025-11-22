@@ -29,7 +29,7 @@ An **ability** is a named collection of operations that a type can support. Funk
 - **`LogicalAnd`**: Logical AND (`&&`)
 - **`LogicalOr`**: Logical OR (`||`)
 - **`LogicalNot`**: Logical NOT (`!`)
-- **`StringConcat`**: String concatenation (`++`)
+- **`StringConcat`**: String interpolation (via `$()` syntax)
 
 ### Built-in Type Abilities
 
@@ -216,7 +216,7 @@ The type checker automatically generates ability constraints when it encounters:
 
 - Binary operators (`+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`)
 - Logical operators (`&&`, `||`, `!`)
-- String concatenation (`++`)
+- String interpolation (`$()`)
 - Any operation that requires specific type capabilities
 
 ### Constraint Solving

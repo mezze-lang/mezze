@@ -115,17 +115,17 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show Int where {
-              show : {val: Int} -> String = {val} -> "INT:" ++ int::to_string {n = val}
+              show : {val: Int} -> String = {val} -> "INT:$(int::to_string {n = val})"
             }
 
             impl Show String where {
-              show : {val: String} -> String = {val} -> "STR:" ++ val
+              show : {val: String} -> String = {val} -> "STR:$(val)"
             }
 
             let displayInt = Show.show {val = 42}
             let displayStr = Show.show {val = "hello"}
 
-            displayInt ++ " | " ++ displayStr
+            "$(displayInt) | $(displayStr)"
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -149,15 +149,15 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
             
             impl Database for MockDB where {
-              query : {sql: String} -> String = {sql} -> "mock_result_for_" ++ sql
+              query : {sql: String} -> String = {sql} -> "mock_result_for_$(sql)"
             }
-            
+
             impl Log for ConsoleLogger where {
               log : {message: String} -> {} = {message} -> {}
             }
-            
+
             let fetchData: {table: String} -> String <Database, Log> = {table} ->
-              Database.query {sql = "SELECT * FROM " ++ table}
+              Database.query {sql = "SELECT * FROM $(table)"}
             
             perform ConsoleLogger, MockDB in fetchData {table = "users"}
         """.trimIndent()
@@ -195,7 +195,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
             
             impl Database for MockDB where {
-              query : {sql: String} -> String = {sql} -> "db:" ++ sql
+              query : {sql: String} -> String = {sql} -> "db:$(sql)"
             }
             
             impl Log for MockLogger where {
@@ -244,8 +244,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             
             perform MockLogger in do
               let str = Show.show {val = 123}
-              Log.log {message = "Showing: " ++ str}
-              "logged_" ++ str
+              Log.log {message = "Showing: $(str)"}
+              "logged_$(str)"
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -286,7 +286,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
               let xStr = Show.show {val = 5}
               let yStr = Show.show {val = 5}
               let resultStr = Show.show {val = isEqual}
-              xStr ++ " == " ++ yStr ++ " is " ++ resultStr
+              "$(xStr) == $(yStr) is $(resultStr)"
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -306,20 +306,20 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
             
             impl Log for PrefixLogger where {
-              log : {message: String} -> String = {message} -> "PREFIX: " ++ message
+              log : {message: String} -> String = {message} -> "PREFIX: $(message)"
             }
-            
+
             impl Log for SuffixLogger where {
-              log : {message: String} -> String = {message} -> message ++ " :SUFFIX"
+              log : {message: String} -> String = {message} -> "$(message) :SUFFIX"
             }
-            
+
             let logMessage: {msg: String} -> String <Log> = {msg} ->
               Log.log {message = msg}
-            
+
             let prefixResult = perform PrefixLogger in logMessage {msg = "hello"}
             let suffixResult = perform SuffixLogger in logMessage {msg = "world"}
-            
-            prefixResult ++ " | " ++ suffixResult
+
+            "$(prefixResult) | $(suffixResult)"
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -343,7 +343,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             impl StringContainer for TestContainer where {
               empty : {} -> String = {} -> ""
               add : {container: String, item: String} -> String = {container, item} ->
-                if container == "" then item else container ++ "," ++ item
+                if container == "" then item else "$(container),$(item)"
               size : {container: String} -> Int = {container} ->
                 if container == "" then 0 else 1
             }

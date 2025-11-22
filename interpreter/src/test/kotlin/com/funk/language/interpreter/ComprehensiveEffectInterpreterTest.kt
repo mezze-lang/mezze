@@ -95,7 +95,7 @@ class ComprehensiveEffectInterpreterTest {
             perform MathRandom, Console in do
               Log.print {msg = "Generating random number"}
               let num = Random.nextInt {min = 1, max = 10}
-              Log.print {msg = "Generated: " ++ int::to_string {n = num}}
+              Log.print {msg = "Generated: $(int::to_string {n = num})"}
               num
         """.trimIndent()
         
@@ -120,7 +120,7 @@ class ComprehensiveEffectInterpreterTest {
             }
 
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"}
             }
 
             # Computation with effects in do block
@@ -129,9 +129,9 @@ class ComprehensiveEffectInterpreterTest {
                 Log.info {msg = "Starting computation"}
                 let x = 5
                 let y = 10
-                Log.info {msg = "Computing " ++ int::to_string {n = x} ++ " + " ++ int::to_string {n = y}}
+                Log.info {msg = "Computing $(int::to_string {n = x}) + $(int::to_string {n = y})"}
                 let result = x + y
-                Log.info {msg = "Result: " ++ int::to_string {n = result}}
+                Log.info {msg = "Result: $(int::to_string {n = result})"}
                 result
 
             # Execute computation
@@ -232,9 +232,9 @@ class ComprehensiveEffectInterpreterTest {
             }
             
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] " ++ msg}
-              error : {msg: String} -> {} = {msg} -> native_print {msg = "[ERROR] " ++ msg}
-              debug : {msg: String} -> {} = {msg} -> native_print {msg = "[DEBUG] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"}
+              error : {msg: String} -> {} = {msg} -> native_print {msg = "[ERROR] $(msg)"}
+              debug : {msg: String} -> {} = {msg} -> native_print {msg = "[DEBUG] $(msg)"}
             }
             
             # Test function with multiple log operations
@@ -391,11 +391,11 @@ class ComprehensiveEffectInterpreterTest {
             }
             
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = "[LOG] " ++ msg}
+              print : {msg: String} -> {} = {msg} -> native_print {msg = "[LOG] $(msg)"}
             }
-            
+
             impl Debug for DebugConsole where {
-              log : {msg: String} -> {} = {msg} -> native_print {msg = "[DEBUG] " ++ msg}
+              log : {msg: String} -> {} = {msg} -> native_print {msg = "[DEBUG] $(msg)"}
             }
             
             # Direct multiple effect calls
@@ -424,7 +424,7 @@ class ComprehensiveEffectInterpreterTest {
             }
             
             impl Logging for FileLogger {path: String} where {
-              log : {msg: String} -> {} = {msg} -> native_print {msg = "[FILE] " ++ msg}
+              log : {msg: String} -> {} = {msg} -> native_print {msg = "[FILE] $(msg)"}
             }
             
             # For now, this will use empty parameters

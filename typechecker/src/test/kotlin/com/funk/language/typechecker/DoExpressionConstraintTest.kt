@@ -64,10 +64,10 @@ class DoExpressionConstraintTest {
     }
 
     @Test
-    fun testDoExpressionWithStringConcatenation() {
+    fun testDoExpressionWithStringInterpolation() {
         val source = """
             let concat = {a, b} -> do
-              let result = a ++ b
+              let result = "$(a)$(b)"
               result
         """.trimIndent()
 
@@ -92,7 +92,7 @@ class DoExpressionConstraintTest {
             let complex = {x, y, z} -> do
               let sum = x + y
               let product = sum * z
-              let message = "Result: " ++ int::to_string {n = product}
+              let message = "Result: $(int::to_string {n = product})"
               message
         """.trimIndent()
 
@@ -107,7 +107,7 @@ class DoExpressionConstraintTest {
         assertNotNull(paramType.fields["x"], "x should have a type")
         assertNotNull(paramType.fields["y"], "y should have a type")
         assertNotNull(paramType.fields["z"], "z should have a type")
-        
+
         // Return type should exist
         assertNotNull(complexType.returnType)
     }
@@ -176,7 +176,7 @@ class DoExpressionConstraintTest {
         assertNotNull(withDoType.paramType)
         assertNotNull(directType.returnType)
         assertNotNull(withDoType.returnType)
-        
+
         // For now, just verify both are function types with reasonable structure
         assertTrue(directType.paramType is FunkType.RecordType)
         assertTrue(withDoType.paramType is FunkType.RecordType)
@@ -189,7 +189,7 @@ class DoExpressionConstraintTest {
 
             let mixed = {num, text} -> do
               let doubled = num * 2
-              let message = text ++ " = " ++ int::to_string {n = doubled}
+              let message = "$(text) = $(int::to_string {n = doubled})"
               message
         """.trimIndent()
 

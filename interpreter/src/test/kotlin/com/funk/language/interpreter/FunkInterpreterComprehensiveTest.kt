@@ -239,12 +239,12 @@ class FunkInterpreterComprehensiveTest {
         val source = """
             let greeting = "Hello"
             let name = "World"
-            let message = greeting ++ ", " ++ name ++ "!"
+            let message = "$(greeting), $(name)!"
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast)
-        
+
         assertDoesNotThrow {
             val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
             interpreter.execute(typedProgram, projectRoot)

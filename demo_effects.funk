@@ -6,12 +6,12 @@ use std::int
 
 # Create a greeting message
 let create_greeting = { name } ->
-    "Hello, " ++ name ++ "! Welcome to Funk programming."
+    "Hello, $(name)! Welcome to Funk programming."
 
 # Process and log a greeting
 let process_greeting = { name } -> do
     # Log the start
-    Log.info { msg = "Proc essing greeting..." }
+    Log.info { msg = "Processing greeting..." }
 
     # Create the greeting
     let greeting = create_greeting { name = name }
@@ -27,12 +27,12 @@ let process_greeting = { name } -> do
 let calculate_sum = { a, b } -> do
     Log.debug { msg = "Starting calculation..." }
     let result = a + b
-    Log.info { msg = "Result: " ++ int::to_string { val = result } }
+    Log.info { msg = "Result: $(int::to_string { val = result })" }
     result
 
 # Write to a file (demonstrates FileSystem effect)
 let write_greeting_to_file = { filename, content } -> do
-    Log.info { msg = "Writing to file: " ++ filename }
+    Log.info { msg = "Writing to file: $(filename)" }
     FileSystem.write_file { path = filename, content = content }
     Log.info { msg = "File written successfully!" }
 
@@ -72,5 +72,5 @@ let demo = {} -> do
 # Run the demo with Console handler for Log and LocalDisk for FileSystem
 # Main must be a function so exec can call it after loading all modules
 let main = {} ->
-    perform LocalDisk in 
+    perform LocalDisk in
         perform Console in demo {}

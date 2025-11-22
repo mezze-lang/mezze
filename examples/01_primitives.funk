@@ -19,7 +19,7 @@ let area = pi * radius * radius
 # String operations
 let greeting = "Hello"
 let name = "Funk"
-let message = greeting ++ ", " ++ name ++ "!"
+let message = "$(greeting), $(name)!"
 
 # Bool operations
 let is_valid = true
@@ -32,18 +32,18 @@ let main = {} ->
         Log.println { msg = "" }
 
         Log.println { msg = "Integers:" }
-        Log.println { msg = "  age: " ++ int::to_string { val = age } }
-        Log.println { msg = "  doubled: " ++ int::to_string { val = doubled } }
+        Log.println { msg = "  age: $(int::to_string { val = age })" }
+        Log.println { msg = "  doubled: $(int::to_string { val = doubled })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Floats:" }
-        Log.println { msg = "  area: " ++ float::to_string { val = area } }
+        Log.println { msg = "  area: $(float::to_string { val = area })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Strings:" }
-        Log.println { msg = "  " ++ message }
+        Log.println { msg = "  $(message)" }
         Log.println { msg = "" }
 
         Log.println { msg = "Bools:" }
-        Log.println { msg = "  is_adult: " ++ (if is_adult then "true" else "false") }
-        Log.println { msg = "  can_proceed: " ++ (if can_proceed then "true" else "false") }
+        Log.println { msg = "  is_adult: $(if is_adult then "true" else "false")" }
+        Log.println { msg = "  can_proceed: $(if can_proceed then "true" else "false")" }

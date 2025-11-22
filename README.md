@@ -22,9 +22,9 @@ Funk is designed around **powerful pattern matching** with a clean, modern synta
 type Result = | Success { data: String }, Error { code: Int, message: String } |
 
 let handleResult = {result: Result} -> match result is
-  Success { data } -> "✅ Got: " ++ data
-  Error { code, message } if code >= 500 -> "🚨 Server error: " ++ message
-  Error { code, message } -> "⚠️  Client error (" ++ intToString {val = code} ++ "): " ++ message
+  Success { data } -> "✅ Got: $(data)"
+  Error { code, message } if code >= 500 -> "🚨 Server error: $(message)"
+  Error { code, message } -> "⚠️  Client error ($(intToString {val = code})): $(message)"
 ```
 
 ### 🔥 Key Features
@@ -61,7 +61,7 @@ Create `hello.funk`:
 # Welcome to Funk!
 let greeting = "Hello, Funk!"
 let audience = "World"
-let message = greeting ++ ", " ++ audience ++ "! 🎉"
+let message = "$(greeting), $(audience)! 🎉"
 
 message
 ```

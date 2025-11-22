@@ -30,5 +30,5 @@ let main = {} ->
         Log.println { msg = "Performing file operations..." }
         let result = file_operations { }
 
-        Log.println { msg = "File content: " ++ result.content }
-        Log.println { msg = "File exists: " ++ (if result.exists then "true" else "false") }
+        Log.println { msg = "File content: $(result.content)" }
+        Log.println { msg = "File exists: $(if result.exists then "true" else "false")" }

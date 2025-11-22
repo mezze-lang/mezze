@@ -130,8 +130,8 @@ class EffectHandlerUsageValidationTest {
             }
             
             impl Log for EnhancedLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] " ++ msg}
-              debug : {msg: String} -> {} = {msg} -> BasicLogger.debug {msg = "[DEBUG] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] $(msg)"}
+              debug : {msg: String} -> {} = {msg} -> BasicLogger.debug {msg = "[DEBUG] $(msg)"}
             }
         """.trimIndent()
 
@@ -194,7 +194,7 @@ class EffectHandlerUsageValidationTest {
             }
             
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }
         """.trimIndent()
 
@@ -298,8 +298,8 @@ class EffectHandlerUsageValidationTest {
             
             impl Log for CompositeLogger where {
               info : {msg: String} -> {} = {msg} -> do
-                BasicLogger.info {msg = "[BASIC] " ++ msg}
-                FileLogger.info {msg = "[FILE] " ++ msg}
+                BasicLogger.info {msg = "[BASIC] $(msg)"}
+                FileLogger.info {msg = "[FILE] $(msg)"}
             }
         """.trimIndent()
 

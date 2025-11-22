@@ -71,7 +71,7 @@ class RobustEffectSystemTest {
             }
 
             impl Log for SimpleLogger where {
-              info : {msg: String} -> {} <Console> = {msg} -> Console.print {msg = "[LOG] " ++ msg}
+              info : {msg: String} -> {} <Console> = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }
 
             perform Terminal, SimpleLogger in Log.info {msg = "Processing test"}
@@ -216,12 +216,12 @@ class RobustEffectSystemTest {
             
             # Test new syntax: impl Effect for Performer where { ... }
             impl Database for PostgresDB where {
-              query : {sql: String} -> String = {sql} -> "postgres:" ++ sql
+              query : {sql: String} -> String = {sql} -> "postgres:$(sql)"
             }
-            
+
             # Test parameterized performer syntax
             impl Database for MySQLDB {host: String, port: Int} where {
-              query : {sql: String} -> String = {sql} -> host ++ ":" ++ intToString {val = port} ++ ":" ++ sql
+              query : {sql: String} -> String = {sql} -> "$(host):$(intToString {val = port}):$(sql)"
             }
         """.trimIndent()
 
@@ -296,7 +296,7 @@ class RobustEffectSystemTest {
             }
             
             impl Database for TestDB {connectionString: String} where {
-              query : {sql: String} -> String = {sql} -> connectionString ++ ":" ++ sql
+              query : {sql: String} -> String = {sql} -> "$(connectionString):$(sql)"
             }
             
             # Test with correct parameter types

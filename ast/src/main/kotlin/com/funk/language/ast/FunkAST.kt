@@ -861,12 +861,44 @@ data class FloatLiteral(
     override val sourceLocation: SourceLocation? = null
 ) : Expression
 
+/**
+ * String literal expression, supporting both simple strings and interpolated strings.
+ *
+ * For simple strings: parts is null and value contains the string content.
+ * For interpolated strings: parts contains the list of StringPart/ExpressionPart segments.
+ *
+ * Example interpolated string: "Hello, $(name)! You have $(count) messages."
+ * Would have parts: [StringPart("Hello, "), ExpressionPart(name), StringPart("! You have "), ExpressionPart(count), StringPart(" messages.")]
+ */
 @Serializable
 data class StringLiteral(
     val value: String,
+    val parts: List<StringInterpolationPart>? = null,  // null for simple strings, non-null for interpolated
     override val inferredType: FunkType? = null,
     override val sourceLocation: SourceLocation? = null
-) : Expression
+) : Expression {
+    val isInterpolated: Boolean get() = parts != null
+}
+
+/**
+ * A part of an interpolated string - either a literal string segment or an expression to interpolate.
+ */
+@Serializable
+@JsonClassDiscriminator("interpolationPartKind")
+sealed interface StringInterpolationPart
+
+/**
+ * A literal string segment in an interpolated string.
+ */
+@Serializable
+data class StringPart(val value: String) : StringInterpolationPart
+
+/**
+ * An expression to be interpolated. The expression must evaluate to a String type.
+ * No automatic conversion is performed - use to_str{val = ...} to convert other types explicitly.
+ */
+@Serializable
+data class ExpressionPart(val expression: Expression) : StringInterpolationPart
 
 @Serializable
 data class BooleanLiteral(

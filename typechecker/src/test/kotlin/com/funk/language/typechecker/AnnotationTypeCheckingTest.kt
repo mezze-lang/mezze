@@ -148,7 +148,7 @@ class AnnotationTypeCheckingTest {
     fun `test function annotation with String concatenation`() {
         assertTypeChecks(
             """
-            let concat: { a: String, b: String } -> String = {a, b} -> a ++ b
+            let concat: { a: String, b: String } -> String = {a, b} -> "$(a)$(b)"
             concat {a = "hello", b = "world"}
             """.trimIndent(),
             "concat",
@@ -448,7 +448,7 @@ class AnnotationTypeCheckingTest {
     fun `test string concat result with String annotation`() {
         assertTypeChecks(
             """
-            let result: String = "hello" ++ "world"
+            let result: String = "$("hello")$("world")"
             result
             """.trimIndent(),
             "result",

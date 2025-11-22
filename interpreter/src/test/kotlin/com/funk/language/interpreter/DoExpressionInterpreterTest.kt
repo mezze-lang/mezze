@@ -146,7 +146,7 @@ class DoExpressionInterpreterTest {
         val source = """
             let createPerson = {name, age} -> do
                 let validated = if age < 0 then 0 else age
-                let formatted = name ++ " (age " ++ validated ++ ")"
+                let formatted = "$(name) (age $(validated))"
                 {name = name, age = validated, description = formatted}
                 
             let person = createPerson {name = "Alice", age = 25}
@@ -164,11 +164,11 @@ class DoExpressionInterpreterTest {
     fun `test do expression with string operations`() {
         val source = """
             let formatMessage = {prefix, value, suffix} -> do
-                let prefixed = prefix ++ ": "
-                let withValue = prefixed ++ value
-                let complete = withValue ++ " " ++ suffix
+                let prefixed = "$(prefix): "
+                let withValue = "$(prefixed)$(value)"
+                let complete = "$(withValue) $(suffix)"
                 complete
-                
+
             let message = formatMessage {prefix = "Result", value = "42", suffix = "items"}
         """.trimIndent()
 

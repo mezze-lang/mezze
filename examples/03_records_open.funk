@@ -6,7 +6,7 @@ use std::effects::log::{Log, Console}
 
 # Function that works with any record that has 'name' field
 let greet = { person: { name: String, ... } } ->
-    "Hello, " ++ person.name ++ "!"
+    "Hello, $(person.name)!"
 
 # Works with records that have extra fields
 let alice = { name = "Alice", age = 30 }
@@ -33,10 +33,10 @@ let main = {} ->
         Log.println { msg = "" }
 
         Log.println { msg = "Greetings (works with any record with 'name'):" }
-        Log.println { msg = "  " ++ alice_greeting }
-        Log.println { msg = "  " ++ bob_greeting }
+        Log.println { msg = "  $(alice_greeting)" }
+        Log.println { msg = "  $(bob_greeting)" }
         Log.println { msg = "" }
 
         Log.println { msg = "Extracted common fields:" }
-        Log.println { msg = "  " ++ extracted1.name ++ ": " ++ int::to_string { val = extracted1.age } }
-        Log.println { msg = "  " ++ extracted2.name ++ ": " ++ int::to_string { val = extracted2.age } }
+        Log.println { msg = "  $(extracted1.name): $(int::to_string { val = extracted1.age })" }
+        Log.println { msg = "  $(extracted2.name): $(int::to_string { val = extracted2.age })" }

@@ -131,8 +131,8 @@ let v2 = { x = 3, y = 4 }
 let dotProduct = math::vec::dot { v1, v2 }
 
 do
-  print { text = "Circle area: " ++ floatToString { val = circleArea } }
-  print { text = "Dot product: " ++ intToString { val = dotProduct } }
+  print { text = "Circle area: $(floatToString { val = circleArea })" }
+  print { text = "Dot product: $(intToString { val = dotProduct })" }
 ```
 
 ### Example 4: Internal Helpers

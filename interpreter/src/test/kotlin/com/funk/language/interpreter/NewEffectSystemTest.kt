@@ -53,7 +53,7 @@ class NewEffectSystemTest {
             }
             
             impl Log for FileLogger {path: String} where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = path ++ ": " ++ msg}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "$(path): $(msg)"}
             }
             
             perform FileLogger {path = "app.log"} in Log.info {msg = "Test message"}
@@ -82,7 +82,7 @@ class NewEffectSystemTest {
             }
             
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[INFO] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[INFO] $(msg)"}
             }
             
             let myFunction : {msg: String} -> {} <Log> = {msg} -> Log.info {msg = msg}
@@ -117,13 +117,13 @@ class NewEffectSystemTest {
             }
             
             impl Log for ConsoleLogger where {
-              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] " ++ msg}
+              info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }
-            
+
             impl App for MyApp where {
               run : {name: String} -> String = {name} -> do
-                Log.info {msg = "Starting app for " ++ name}
-                "App result for " ++ name
+                Log.info {msg = "Starting app for $(name)"}
+                "App result for $(name)"
             }
             
             perform Terminal, ConsoleLogger, MyApp in App.run {name = "TestApp"}

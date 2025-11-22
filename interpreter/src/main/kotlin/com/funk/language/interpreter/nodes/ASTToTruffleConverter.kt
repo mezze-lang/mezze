@@ -66,7 +66,21 @@ class ASTToTruffleConverter {
         return when (expr) {
             is IntLiteral -> IntLiteralNode(expr.value)
             is FloatLiteral -> FloatLiteralNode(expr.value)
-            is StringLiteral -> StringLiteralNode(expr.value)
+            is StringLiteral -> {
+                val parts = expr.parts
+                if (expr.isInterpolated && parts != null) {
+                    // Convert to InterpolatedStringNode with part nodes
+                    val partNodes = parts.map { part ->
+                        when (part) {
+                            is StringPart -> StringLiteralNode(part.value)
+                            is ExpressionPart -> convertExpression(part.expression)
+                        }
+                    }.toTypedArray()
+                    InterpolatedStringNode(partNodes)
+                } else {
+                    StringLiteralNode(expr.value)
+                }
+            }
             is BooleanLiteral -> BooleanLiteralNode(expr.value)
             is Identifier -> convertIdentifier(expr)
             is BinaryOperation -> convertBinaryOperation(expr)

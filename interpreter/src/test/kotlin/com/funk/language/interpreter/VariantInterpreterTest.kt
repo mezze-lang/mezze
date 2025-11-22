@@ -51,8 +51,8 @@ class VariantInterpreterTest {
     fun `test variant pattern matching`() {
         val source = """
         let handleResult = {result} -> match result {
-            | Success {value} -> "Got value: " ++ "success"
-            | Failure {error} -> "Error: " ++ error
+            | Success {value} -> "Got value: success"
+            | Failure {error} -> "Error: $(error)"
             | Loading -> "Still loading..."
         }
             
@@ -196,11 +196,11 @@ class VariantInterpreterTest {
         val source = """
             let processResponse = {response} -> match response {
                 | Ok {data} -> match data {
-                    | User {name} -> "User: " ++ name
-                    | Message {text} -> "Message: " ++ text
+                    | User {name} -> "User: $(name)"
+                    | Message {text} -> "Message: $(text)"
                     | Empty -> "No data"
                 }
-                | Error {code} -> "Error code: " ++ "failed"
+                | Error {code} -> "Error code: failed"
         }
         
         let userResponse = Ok {data = User {name = "Charlie"}}

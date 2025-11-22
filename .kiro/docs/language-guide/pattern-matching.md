@@ -43,7 +43,7 @@ Destructure record data:
 type Person = | Person { name: String, age: Int } |
 
 let greet = {person: Person} -> match person is
-  Person { name, age } -> "Hello " ++ name ++ ", age " ++ intToString {val = age}
+  Person { name, age } -> "Hello $(name), age $(intToString {val = age})"
 ```
 
 ### 3. Wildcard Patterns
@@ -162,9 +162,9 @@ type Result = | Success { data: { value: Int } }, Error { code: Int } |
 
 let process = {result: Result} -> match result is
   Success { data } -> match data is
-    { value } if value > 0 -> "Positive: " ++ intToString {val = value}
-    { value } -> "Non-positive: " ++ intToString {val = value}
-  Error { code } -> "Error code: " ++ intToString {val = code}
+    { value } if value > 0 -> "Positive: $(intToString {val = value})"
+    { value } -> "Non-positive: $(intToString {val = value})"
+  Error { code } -> "Error code: $(intToString {val = code})"
 ```
 
 ### Pattern Matching in Function Parameters
@@ -182,9 +182,9 @@ type Event = | Click { x: Int, y: Int }, Drag { startX: Int, startY: Int, endX: 
 
 let eventType = {event: Event} -> match event is
   Click { x, y } if x >= 0 && y >= 0 && x <= 100 && y <= 100 -> "Button click"
-  Click { x, y } -> "Click at (" ++ intToString {val = x} ++ ", " ++ intToString {val = y} ++ ")"
+  Click { x, y } -> "Click at ($(intToString {val = x}), $(intToString {val = y}))"
   Drag { startX, startY, endX, endY } if startX == endX && startY == endY -> "No movement"
-  Drag { startX, startY, endX, endY } -> "Dragged from (" ++ intToString {val = startX} ++ ", " ++ intToString {val = startY} ++ ")"
+  Drag { startX, startY, endX, endY } -> "Dragged from ($(intToString {val = startX}), $(intToString {val = startY}))"
 ```
 
 ## Best Practices
@@ -250,8 +250,8 @@ type State = | Idle, Loading, Success { data: String }, Error { message: String 
 let render = {state: State} -> match state is
   Idle -> "Ready to start"
   Loading -> "Please wait..."
-  Success { data } -> "Data: " ++ data
-  Error { message } -> "Error: " ++ message
+  Success { data } -> "Data: $(data)"
+  Error { message } -> "Error: $(message)"
 ```
 
 ### Validation Pattern
@@ -259,8 +259,8 @@ let render = {state: State} -> match state is
 type Validation = | Valid { value: String }, Invalid { errors: String } |
 
 let process = {validation: Validation} -> match validation is
-  Valid { value } -> "Processing: " ++ value
-  Invalid { errors } -> "Validation failed: " ++ errors
+  Valid { value } -> "Processing: $(value)"
+  Invalid { errors } -> "Validation failed: $(errors)"
 ```
 
 Pattern matching makes your code more readable, safer, and more expressive. Master these patterns and you'll write better Funk code! 🎯

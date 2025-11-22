@@ -52,7 +52,6 @@ class AbilityConstraintTest {
         // Test String type abilities
         assertTrue(abilityRegistry.hasAbility(FunkType.StringType, "Eq"))
         assertTrue(abilityRegistry.hasAbility(FunkType.StringType, "Ord"))
-        assertTrue(abilityRegistry.hasAbility(FunkType.StringType, "StringConcat"))
         assertFalse(abilityRegistry.hasAbility(FunkType.StringType, "NumAdd"))
     }
     

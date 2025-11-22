@@ -45,21 +45,21 @@ let main = {} ->
         Log.println { msg = "" }
 
         Log.println { msg = "Basic operations:" }
-        Log.println { msg = "  add(3, 4) = " ++ int::to_string { val = add { x = 3, y = 4 } } }
-        Log.println { msg = "  multiply(3, 4) = " ++ int::to_string { val = multiply { x = 3, y = 4 } } }
+        Log.println { msg = "  add(3, 4) = $(int::to_string { val = add { x = 3, y = 4 } })" }
+        Log.println { msg = "  multiply(3, 4) = $(int::to_string { val = multiply { x = 3, y = 4 } })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Currying:" }
-        Log.println { msg = "  add_five(10) = " ++ int::to_string { val = result1 } }
+        Log.println { msg = "  add_five(10) = $(int::to_string { val = result1 })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Higher-order functions:" }
-        Log.println { msg = "  apply_twice(double, 3) = " ++ int::to_string { val = result2 } }
+        Log.println { msg = "  apply_twice(double, 3) = $(int::to_string { val = result2 })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Function composition:" }
-        Log.println { msg = "  (add_one ∘ times_two)(5) = " ++ int::to_string { val = result3 } }
+        Log.println { msg = "  (add_one . times_two)(5) = $(int::to_string { val = result3 })" }
         Log.println { msg = "" }
 
         Log.println { msg = "Recursion:" }
-        Log.println { msg = "  factorial(5) = " ++ int::to_string { val = fact5 } }
+        Log.println { msg = "  factorial(5) = $(int::to_string { val = fact5 })" }
