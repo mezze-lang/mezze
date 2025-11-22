@@ -2817,6 +2817,25 @@ class FunkParser {
                         is ParseResult.Failure -> break  // Not a member access
                     }
                 }
+                TokenType.IDENTIFIER -> {
+                    // BUG #10 FIX: Check for function call without {} syntax
+                    // Only check when the previous expression is a simple identifier (like `my_func x`)
+                    // For complex expressions (like `Show.show {val = @}` followed by newline and identifier),
+                    // skip this check as the identifier is likely a separate statement
+                    val funcExpr = (result as ParseResult.Success).value
+                    if (funcExpr is Identifier) {
+                        val funcName = funcExpr.name
+                        val argName = token.text
+                        // Throw exception directly to ensure the error message is shown
+                        throw ParseException(
+                            "Function calls must use {} syntax. Instead of '$funcName $argName', " +
+                            "use '$funcName { ... }' with named arguments.",
+                            currentStream.getSourcePosition()
+                        )
+                    }
+                    // For non-identifier expressions, treat following identifier as separate statement
+                    break
+                }
                 else -> break  // No more postfix operators
             }
         }

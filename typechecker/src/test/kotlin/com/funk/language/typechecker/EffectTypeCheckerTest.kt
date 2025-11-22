@@ -194,11 +194,11 @@ class EffectTypeCheckerTest {
                 Log.log {msg = "Logging"}
                 42
             
-            # Function that can handle both Log and Random effects  
+            # Function that can handle both Log and Random effects
             let handler = {f} -> 42
-            
+
             # This should work due to effect row subtyping
-            let result = handler logOnly
+            let result = handler { f = logOnly }
         """.trimIndent()
         
         val program = parser.parse(source)

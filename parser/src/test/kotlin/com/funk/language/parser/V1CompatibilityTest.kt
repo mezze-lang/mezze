@@ -79,7 +79,12 @@ class V1CompatibilityTest {
 
     @Test
     fun `match expressions should parse correctly`() {
-        val source = "let result = match value is Some x -> x None -> 0"
+        // Updated to current match syntax with proper newlines between cases
+        val source = """
+            let result = match value is
+                Some {val} -> val
+                None -> 0
+        """.trimIndent()
 
         val result = parser.parse(source)
         assertNotNull(result)
