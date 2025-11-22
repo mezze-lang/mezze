@@ -608,13 +608,51 @@ sealed interface ProgramItem
 
 @Serializable
 data class LetBinding(
-    val variableName: String,
+    val pattern: Pattern,                         // Pattern for destructuring (VariablePattern for simple bindings)
     val visibility: Visibility = Visibility.PRIVATE,
     val typeAnnotation: TypeAnnotation? = null,  // From parser
     val inferredType: FunkType? = null,          // From typechecker (monomorphic, instantiated type)
     val typeScheme: TypeScheme? = null,          // From typechecker (polymorphic type with constraints)
     val expression: Expression
-) : ProgramItem
+) : ProgramItem {
+    /**
+     * For backward compatibility - returns the variable name if pattern is a simple VariablePattern.
+     * For complex patterns (RecordPattern), this throws. Use pattern directly for full support.
+     */
+    val variableName: String
+        get() = (pattern as? VariablePattern)?.name
+            ?: throw IllegalStateException(
+                "LetBinding has a complex pattern (${pattern.kindDescription()}). " +
+                "Use pattern directly for destructuring support."
+            )
+
+    /**
+     * Check if this is a simple variable binding (not a destructuring pattern)
+     */
+    val isSimpleBinding: Boolean
+        get() = pattern is VariablePattern
+
+    companion object {
+        /**
+         * Create a simple let binding with just a variable name (backward compatibility)
+         */
+        fun simple(
+            name: String,
+            expression: Expression,
+            visibility: Visibility = Visibility.PRIVATE,
+            typeAnnotation: TypeAnnotation? = null,
+            inferredType: FunkType? = null,
+            typeScheme: TypeScheme? = null
+        ) = LetBinding(
+            VariablePattern(name),
+            visibility,
+            typeAnnotation,
+            inferredType,
+            typeScheme,
+            expression
+        )
+    }
+}
 
 @Serializable
 data class TypeDeclaration(
@@ -1180,6 +1218,86 @@ data class RecordPatternEntry(
     val pattern: Pattern? = null  // null for shorthand {x} instead of {x = x}
 )
 
+/**
+ * Literal pattern for matching exact values (Int, String, Boolean)
+ * Examples: 0 -> "zero", "hello" -> "greeting", true -> "yes"
+ */
+@Serializable
+data class LiteralPattern(
+    val value: LiteralValue
+) : Pattern
+
+/**
+ * Represents literal values that can appear in patterns
+ */
+@Serializable
+@JsonClassDiscriminator("literalKind")
+sealed interface LiteralValue
+
+@Serializable
+data class IntLiteralValue(val value: Long) : LiteralValue
+
+@Serializable
+data class FloatLiteralValue(val value: Double) : LiteralValue
+
+@Serializable
+data class StringLiteralValue(val value: String) : LiteralValue
+
+@Serializable
+data class BooleanLiteralValue(val value: Boolean) : LiteralValue
+
+// ============================================================================
+// PATTERN UTILITIES
+// ============================================================================
+
+/**
+ * Check if a pattern is irrefutable (always matches).
+ *
+ * Irrefutable patterns:
+ * - VariablePattern: always matches and binds the value
+ * - WildcardPattern: always matches but doesn't bind
+ * - RecordPattern: always matches if all nested patterns are irrefutable
+ *
+ * Refutable patterns (can fail to match):
+ * - ConstructorPattern: may not match if wrong constructor
+ * - LiteralPattern: may not match if wrong value
+ */
+fun Pattern.isIrrefutable(): Boolean = when (this) {
+    is VariablePattern -> true
+    is WildcardPattern -> true
+    is RecordPattern -> entries.all { entry ->
+        entry.pattern?.isIrrefutable() ?: true  // null pattern = shorthand binding, always irrefutable
+    }
+    is ConstructorPattern -> false  // Variant constructors can fail to match
+    is LiteralPattern -> false      // Literal values can fail to match
+}
+
+/**
+ * Extract all variable bindings from a pattern.
+ * Returns list of (name, nested_path) pairs where nested_path is used for record access.
+ */
+fun Pattern.extractBindings(): List<String> = when (this) {
+    is VariablePattern -> listOf(name)
+    is WildcardPattern -> emptyList()
+    is RecordPattern -> entries.flatMap { entry ->
+        val nested = entry.pattern?.extractBindings() ?: listOf(entry.name)
+        nested
+    }
+    is ConstructorPattern -> recordPattern?.extractBindings() ?: emptyList()
+    is LiteralPattern -> emptyList()
+}
+
+/**
+ * Get a human-readable description of the pattern kind for error messages.
+ */
+fun Pattern.kindDescription(): String = when (this) {
+    is VariablePattern -> "variable pattern"
+    is WildcardPattern -> "wildcard pattern"
+    is RecordPattern -> "record pattern"
+    is ConstructorPattern -> "constructor pattern"
+    is LiteralPattern -> "literal pattern"
+}
+
 // ============================================================================
 // STATEMENTS
 // ============================================================================
@@ -1190,10 +1308,42 @@ sealed interface Statement
 
 @Serializable
 data class LetStatement(
-    val variableName: String,
+    val pattern: Pattern,                         // Pattern for destructuring (VariablePattern for simple bindings)
     val typeAnnotation: TypeAnnotation? = null,
     val expression: Expression
-) : Statement
+) : Statement {
+    /**
+     * For backward compatibility - returns the variable name if pattern is a simple VariablePattern.
+     * Throws for complex patterns to ensure callers handle destructuring explicitly.
+     */
+    val variableName: String
+        get() = (pattern as? VariablePattern)?.name
+            ?: throw IllegalStateException(
+                "LetStatement has a complex pattern (${pattern.kindDescription()}). " +
+                "Use pattern directly for destructuring support."
+            )
+
+    /**
+     * Check if this is a simple variable binding (not destructuring)
+     */
+    val isSimpleBinding: Boolean
+        get() = pattern is VariablePattern
+
+    companion object {
+        /**
+         * Create a simple let statement with just a variable name (backward compatibility)
+         */
+        fun simple(
+            name: String,
+            expression: Expression,
+            typeAnnotation: TypeAnnotation? = null
+        ) = LetStatement(
+            VariablePattern(name),
+            typeAnnotation,
+            expression
+        )
+    }
+}
 
 @Serializable
 data class ExpressionStatement(

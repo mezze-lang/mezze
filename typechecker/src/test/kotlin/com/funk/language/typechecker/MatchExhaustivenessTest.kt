@@ -109,74 +109,86 @@ class MatchExhaustivenessTest {
     fun `test non-exhaustive match missing constructor`() {
         val code = """
             type Color = | Red, Blue, Green |
-            
+
             let test: {color: Color} -> String = {color} -> match color is
               Red -> "red"
               Blue -> "blue"
         """.trimIndent()
 
-        // Our permissive type checker handles missing constructors gracefully
-        val typedProgram = parseAndTypeCheck(code)
-        assertNotNull(typedProgram)
+        // Strict exhaustiveness: missing Green should cause error
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("Green"))
     }
 
     @Test
     fun `test non-exhaustive match with multiple patterns missing constructor`() {
         val code = """
             type Color = | Red, Blue, Green, Yellow |
-            
+
             let test: {color: Color} -> String = {color} -> match color is
               Red | Blue -> "primary"
               Green -> "secondary"
         """.trimIndent()
 
-        // Our permissive type checker handles missing constructors gracefully
-        val typedProgram = parseAndTypeCheck(code)
-        assertNotNull(typedProgram)
+        // Strict exhaustiveness: missing Yellow should cause error
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("Yellow"))
     }
 
     @Test
     fun `test non-exhaustive match with guards only`() {
         val code = """
             type Temp = | Hot { degrees: Int } |
-            
+
             let test: {temp: Temp} -> String = {temp} -> match temp is
               Hot { degrees } if degrees > 80 -> "very hot"
         """.trimIndent()
 
-        // Our permissive type checker handles conditional coverage gracefully
-        val typedProgram = parseAndTypeCheck(code)
-        assertNotNull(typedProgram)
+        // Strict exhaustiveness: Hot with guard only, needs wildcard or unconditional pattern
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
     }
 
     @Test
     fun `test non-exhaustive match with guards missing cases`() {
         val code = """
             type Temp = | Hot { degrees: Int }, Cold { degrees: Int } |
-            
+
             let test: {temp: Temp} -> String = {temp} -> match temp is
               Hot { degrees } if degrees > 100 -> "very hot"
               Cold { degrees } if degrees < -20 -> "very cold"
         """.trimIndent()
 
-        // Our permissive type checker handles incomplete guard coverage gracefully
-        val typedProgram = parseAndTypeCheck(code)
-        assertNotNull(typedProgram)
+        // Strict exhaustiveness: guards don't cover all cases
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
     }
 
     @Test
     fun `test non-exhaustive match with multiple patterns and incomplete guards`() {
         val code = """
             type Weather = | Sunny { temp: Int }, Rainy { temp: Int }, Cloudy |
-            
+
             let test: {weather: Weather} -> String = {weather} -> match weather is
               Sunny { temp } | Rainy { temp } if temp > 25 -> "warm weather"
               Cloudy -> "cloudy"
         """.trimIndent()
 
-        // Our permissive type checker handles incomplete coverage gracefully
-        val typedProgram = parseAndTypeCheck(code)
-        assertNotNull(typedProgram)
+        // Strict exhaustiveness: Sunny and Rainy only covered with guard
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
     }
 
     // ========== OPEN VARIANTS (SHOULD ALLOW WILDCARDS) ==========
@@ -201,15 +213,18 @@ class MatchExhaustivenessTest {
     fun `test open variant without wildcard should fail`() {
         val code = """
             type Color = | Red, Blue, Green |
-            
+
             let test: {color: Color} -> String = {color} -> match color is
               Red -> "red"
               Blue -> "blue"
         """.trimIndent()
 
-        // Our permissive type checker handles missing cases in open variants gracefully
-        val typedProgram = parseAndTypeCheck(code)
-        assertNotNull(typedProgram)
+        // Strict exhaustiveness: closed variant missing Green should fail
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("Green"))
     }
 
     // ========== COMPLEX EXHAUSTIVENESS SCENARIOS ==========
@@ -253,7 +268,7 @@ class MatchExhaustivenessTest {
     fun `test exhaustiveness with logical operators in guards`() {
         val code = """
             type Grade = | Score { value: Int } |
-            
+
             let test: {grade: Grade} -> String = {grade} -> match grade is
               Score { value } if value >= 90 && value <= 100 -> "A"
               Score { value } if value >= 80 && value < 90 -> "B"
@@ -262,9 +277,11 @@ class MatchExhaustivenessTest {
               Score { value } if value >= 0 && value < 60 -> "F"
         """.trimIndent()
 
-        // Our permissive type checker handles range coverage gracefully
-        val typedProgram = parseAndTypeCheck(code)
-        assertNotNull(typedProgram)
+        // Strict exhaustiveness: guards only, no unconditional pattern or wildcard
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
     }
 
     @Test
@@ -324,14 +341,17 @@ class MatchExhaustivenessTest {
     fun `test single constructor with guard requires wildcard`() {
         val code = """
             type Single = | Only { value: Int } |
-            
+
             let test: {single: Single} -> String = {single} -> match single is
               Only { value } if value > 0 -> "positive"
         """.trimIndent()
 
-        // Our permissive type checker handles conditional guard coverage gracefully
-        val typedProgram = parseAndTypeCheck(code)
-        assertNotNull(typedProgram)
+        // Strict exhaustiveness: guard only, no unconditional pattern or wildcard
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("Only"))
     }
 
     // Note: Empty variant types (| |) represent uninhabited types.

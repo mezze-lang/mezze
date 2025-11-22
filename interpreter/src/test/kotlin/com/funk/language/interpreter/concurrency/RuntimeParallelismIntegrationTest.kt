@@ -35,9 +35,9 @@ class RuntimeParallelismIntegrationTest {
     fun `test simple parallel do expression execution`() {
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("x", null, IntLiteral(10)),
-                LetStatement("y", null, IntLiteral(20)),
-                LetStatement("z", null, StringLiteral("hello"))
+                LetStatement.simple("x", IntLiteral(10)),
+                LetStatement.simple("y", IntLiteral(20)),
+                LetStatement.simple("z", StringLiteral("hello"))
             ),
             result = BinaryOperation(
                 left = Identifier("x"),
@@ -65,19 +65,19 @@ class RuntimeParallelismIntegrationTest {
     fun `test parallel execution with dependencies`() {
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("a", null, IntLiteral(5)),
-                LetStatement("b", null, IntLiteral(10)),
-                LetStatement("c", null, BinaryOperation(
+                LetStatement.simple("a", IntLiteral(5)),
+                LetStatement.simple("b", IntLiteral(10)),
+                LetStatement.simple("c", BinaryOperation(
                     left = Identifier("a"),
                     operator = "*",
                     right = IntLiteral(2)
                 )),
-                LetStatement("d", null, BinaryOperation(
+                LetStatement.simple("d", BinaryOperation(
                     left = Identifier("b"),
                     operator = "*",
                     right = IntLiteral(3)
                 )),
-                LetStatement("result", null, BinaryOperation(
+                LetStatement.simple("result", BinaryOperation(
                     left = Identifier("c"),
                     operator = "+",
                     right = Identifier("d")
@@ -106,22 +106,22 @@ class RuntimeParallelismIntegrationTest {
         
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("file1", null, EffectCallExpression(
+                LetStatement.simple("file1", EffectCallExpression(
                     effectName = "IO",
                     operationName = "read",
                     arguments = StringLiteral("file1.txt")
                 )),
-                LetStatement("file2", null, EffectCallExpression(
+                LetStatement.simple("file2", EffectCallExpression(
                     effectName = "IO",
                     operationName = "read",
                     arguments = StringLiteral("file2.txt")
                 )),
-                LetStatement("file3", null, EffectCallExpression(
+                LetStatement.simple("file3", EffectCallExpression(
                     effectName = "IO",
                     operationName = "read",
                     arguments = StringLiteral("file3.txt")
                 )),
-                LetStatement("combined", null, BinaryOperation(
+                LetStatement.simple("combined", BinaryOperation(
                     left = BinaryOperation(
                         left = Identifier("file1"),
                         operator = "++",
@@ -152,8 +152,8 @@ class RuntimeParallelismIntegrationTest {
     fun `test nested do expressions with parallelism`() {
         val innerDo = DoExpression(
             statements = listOf(
-                LetStatement("inner1", null, IntLiteral(5)),
-                LetStatement("inner2", null, IntLiteral(10))
+                LetStatement.simple("inner1", IntLiteral(5)),
+                LetStatement.simple("inner2", IntLiteral(10))
             ),
             result = BinaryOperation(
                 left = Identifier("inner1"),
@@ -164,9 +164,9 @@ class RuntimeParallelismIntegrationTest {
         
         val outerDo = DoExpression(
             statements = listOf(
-                LetStatement("outer1", null, IntLiteral(100)),
-                LetStatement("nested", null, innerDo),
-                LetStatement("outer2", null, StringLiteral("result"))
+                LetStatement.simple("outer1", IntLiteral(100)),
+                LetStatement.simple("nested", innerDo),
+                LetStatement.simple("outer2", StringLiteral("result"))
             ),
             result = BinaryOperation(
                 left = Identifier("outer1"),
@@ -191,10 +191,10 @@ class RuntimeParallelismIntegrationTest {
         // Create a do expression where not all variables are used in the result
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("used", null, IntLiteral(42)),
-                LetStatement("unused1", null, IntLiteral(100)),
-                LetStatement("unused2", null, StringLiteral("not needed")),
-                LetStatement("derived", null, BinaryOperation(
+                LetStatement.simple("used", IntLiteral(42)),
+                LetStatement.simple("unused1", IntLiteral(100)),
+                LetStatement.simple("unused2", StringLiteral("not needed")),
+                LetStatement.simple("derived", BinaryOperation(
                     left = Identifier("used"),
                     operator = "*",
                     right = IntLiteral(2)
@@ -218,15 +218,15 @@ class RuntimeParallelismIntegrationTest {
     fun `test error propagation in parallel do expression`() {
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("good1", null, IntLiteral(10)),
-                LetStatement("good2", null, IntLiteral(20)),
+                LetStatement.simple("good1", IntLiteral(10)),
+                LetStatement.simple("good2", IntLiteral(20)),
                 // This would cause an error in a real implementation
-                LetStatement("bad", null, BinaryOperation(
+                LetStatement.simple("bad", BinaryOperation(
                     left = IntLiteral(1),
                     operator = "/",
                     right = IntLiteral(0) // Division by zero
                 )),
-                LetStatement("dependent", null, BinaryOperation(
+                LetStatement.simple("dependent", BinaryOperation(
                     left = Identifier("good1"),
                     operator = "+",
                     right = Identifier("bad")
@@ -250,11 +250,11 @@ class RuntimeParallelismIntegrationTest {
         // Create a do expression with multiple independent slow operations
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("slow1", null, IntLiteral(1)),
-                LetStatement("slow2", null, IntLiteral(2)),
-                LetStatement("slow3", null, IntLiteral(3)),
-                LetStatement("slow4", null, IntLiteral(4)),
-                LetStatement("sum", null, BinaryOperation(
+                LetStatement.simple("slow1", IntLiteral(1)),
+                LetStatement.simple("slow2", IntLiteral(2)),
+                LetStatement.simple("slow3", IntLiteral(3)),
+                LetStatement.simple("slow4", IntLiteral(4)),
+                LetStatement.simple("sum", BinaryOperation(
                     left = BinaryOperation(
                         left = Identifier("slow1"),
                         operator = "+",

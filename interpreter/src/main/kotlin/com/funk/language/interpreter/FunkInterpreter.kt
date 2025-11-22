@@ -253,34 +253,51 @@ class FunkInterpreter {
     private fun executeItem(item: ProgramItem, context: MutableMap<String, FunkValue>): FunkValue {
         return when (item) {
             is LetBinding -> {
-                // Handle recursive functions by pre-declaring the variable
-                if (item.expression is LambdaExpression) {
-                    // For lambda expressions, create a placeholder first for recursion
-                    val recursivePlaceholder = RecursiveFunctionPlaceholder(item.variableName)
-                    context[item.variableName] = recursivePlaceholder
-                    
-                    // Now evaluate the lambda with the placeholder in context
-                    val value = evaluateExpression(item.expression, context)
-                    
-                    // Replace the placeholder with the actual function
-                    context[item.variableName] = value
-                    
-                    // If it's a user function, set up recursive reference
-                    if (value is SimpleFunkFunction) {
-                        value.setupRecursiveReference(item.variableName, value)
+                // Check if this is a simple binding or a destructuring pattern
+                if (item.isSimpleBinding) {
+                    // SIMPLE BINDING: let x = expr
+                    // Handle recursive functions by pre-declaring the variable
+                    if (item.expression is LambdaExpression) {
+                        // For lambda expressions, create a placeholder first for recursion
+                        val recursivePlaceholder = RecursiveFunctionPlaceholder(item.variableName)
+                        context[item.variableName] = recursivePlaceholder
+
+                        // Now evaluate the lambda with the placeholder in context
+                        val value = evaluateExpression(item.expression, context)
+
+                        // Replace the placeholder with the actual function
+                        context[item.variableName] = value
+
+                        // If it's a user function, set up recursive reference
+                        if (value is SimpleFunkFunction) {
+                            value.setupRecursiveReference(item.variableName, value)
+                        }
+
+                        value
+                    } else {
+                        // Non-function case: check for self-reference (which should be forbidden)
+                        if (containsSelfReference(item.expression, item.variableName)) {
+                            throw RuntimeException("Variable '${item.variableName}' cannot reference itself in its own definition. Self-reference is only allowed for functions.")
+                        }
+
+                        // Evaluate normally without the variable in context
+                        val value = evaluateExpression(item.expression, context)
+                        context[item.variableName] = value
+                        value
                     }
-                    
-                    value
                 } else {
-                    // Non-function case: check for self-reference (which should be forbidden)
-                    if (containsSelfReference(item.expression, item.variableName)) {
-                        throw RuntimeException("Variable '${item.variableName}' cannot reference itself in its own definition. Self-reference is only allowed for functions.")
-                    }
-                    
-                    // Evaluate normally without the variable in context
+                    // DESTRUCTURING PATTERN: let { x, y } = expr or let Constructor { x } = expr
                     val value = evaluateExpression(item.expression, context)
-                    context[item.variableName] = value
-                    value
+
+                    // Use pattern matching to extract bindings
+                    val bindings = mutableMapOf<String, FunkValue>()
+                    if (matchesPattern(value, item.pattern, bindings)) {
+                        // Add all bindings to context
+                        context.putAll(bindings)
+                        value
+                    } else {
+                        throw RuntimeException("Pattern match failed in let destructuring: value $value does not match pattern ${item.pattern}")
+                    }
                 }
             }
             is TypeDeclaration -> {
@@ -1210,7 +1227,20 @@ class FunkInterpreter {
         return when (stmt) {
             is LetStatement -> {
                 val value = evaluateExpression(stmt.expression, context)
-                context[stmt.variableName] = value
+
+                // Check if this is a simple binding or a destructuring pattern
+                if (stmt.isSimpleBinding) {
+                    // SIMPLE BINDING: let x = expr
+                    context[stmt.variableName] = value
+                } else {
+                    // DESTRUCTURING PATTERN: let { x, y } = expr
+                    val bindings = mutableMapOf<String, FunkValue>()
+                    if (matchesPattern(value, stmt.pattern, bindings)) {
+                        context.putAll(bindings)
+                    } else {
+                        throw RuntimeException("Pattern match failed in let destructuring: value $value does not match pattern ${stmt.pattern}")
+                    }
+                }
                 value
             }
             is ExpressionStatement -> {
@@ -1403,7 +1433,7 @@ class FunkInterpreter {
                     expr.statements.map { stmt ->
                         when (stmt) {
                             is LetStatement -> LetStatement(
-                                stmt.variableName,
+                                stmt.pattern,
                                 stmt.typeAnnotation,
                                 replaceAtPlaceholder(stmt.expression, value, context)
                             )

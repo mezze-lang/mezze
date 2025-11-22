@@ -27,9 +27,9 @@ class RuntimeParallelismDetectorTest {
         // Create a do expression with independent let statements
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("x", null, IntLiteral(10)),
-                LetStatement("y", null, IntLiteral(20)),
-                LetStatement("z", null, StringLiteral("hello"))
+                LetStatement.simple("x", IntLiteral(10)),
+                LetStatement.simple("y", IntLiteral(20)),
+                LetStatement.simple("z", StringLiteral("hello"))
             ),
             result = BinaryOperation(
                 left = Identifier("x"),
@@ -53,13 +53,13 @@ class RuntimeParallelismDetectorTest {
         // Create a do expression with dependent operations
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("x", null, IntLiteral(10)),
-                LetStatement("y", null, BinaryOperation(
+                LetStatement.simple("x", IntLiteral(10)),
+                LetStatement.simple("y", BinaryOperation(
                     left = Identifier("x"),
                     operator = "*",
                     right = IntLiteral(2)
                 )),
-                LetStatement("z", null, BinaryOperation(
+                LetStatement.simple("z", BinaryOperation(
                     left = Identifier("y"),
                     operator = "+",
                     right = IntLiteral(5)
@@ -83,15 +83,15 @@ class RuntimeParallelismDetectorTest {
         // Create a do expression with both independent and dependent operations
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("a", null, IntLiteral(1)),      // Independent
-                LetStatement("b", null, IntLiteral(2)),      // Independent
-                LetStatement("c", null, BinaryOperation(     // Depends on a
+                LetStatement.simple("a", IntLiteral(1)),      // Independent
+                LetStatement.simple("b", IntLiteral(2)),      // Independent
+                LetStatement.simple("c", BinaryOperation(     // Depends on a
                     left = Identifier("a"),
                     operator = "*",
                     right = IntLiteral(3)
                 )),
-                LetStatement("d", null, StringLiteral("test")), // Independent
-                LetStatement("e", null, BinaryOperation(     // Depends on b and c
+                LetStatement.simple("d", StringLiteral("test")), // Independent
+                LetStatement.simple("e", BinaryOperation(     // Depends on b and c
                     left = Identifier("b"),
                     operator = "+",
                     right = Identifier("c")
@@ -119,17 +119,17 @@ class RuntimeParallelismDetectorTest {
         // Create a do expression with effect calls
         val doExpr = DoExpression(
             statements = listOf(
-                LetStatement("x", null, EffectCallExpression(
+                LetStatement.simple("x", EffectCallExpression(
                     effectName = "IO",
                     operationName = "read",
                     arguments = StringLiteral("file1.txt")
                 )),
-                LetStatement("y", null, EffectCallExpression(
+                LetStatement.simple("y", EffectCallExpression(
                     effectName = "IO", 
                     operationName = "read",
                     arguments = StringLiteral("file2.txt")
                 )),
-                LetStatement("z", null, BinaryOperation(
+                LetStatement.simple("z", BinaryOperation(
                     left = Identifier("x"),
                     operator = "++",
                     right = Identifier("y")
@@ -153,8 +153,8 @@ class RuntimeParallelismDetectorTest {
         // Create nested do expressions
         val innerDo = DoExpression(
             statements = listOf(
-                LetStatement("inner1", null, IntLiteral(5)),
-                LetStatement("inner2", null, IntLiteral(10))
+                LetStatement.simple("inner1", IntLiteral(5)),
+                LetStatement.simple("inner2", IntLiteral(10))
             ),
             result = BinaryOperation(
                 left = Identifier("inner1"),
@@ -165,9 +165,9 @@ class RuntimeParallelismDetectorTest {
         
         val outerDo = DoExpression(
             statements = listOf(
-                LetStatement("outer1", null, IntLiteral(100)),
-                LetStatement("nested", null, innerDo),
-                LetStatement("outer2", null, StringLiteral("result"))
+                LetStatement.simple("outer1", IntLiteral(100)),
+                LetStatement.simple("nested", innerDo),
+                LetStatement.simple("outer2", StringLiteral("result"))
             ),
             result = BinaryOperation(
                 left = Identifier("outer1"),
@@ -187,7 +187,7 @@ class RuntimeParallelismDetectorTest {
     
     @Test
     fun `test lazy operation creation`() {
-        val letStatement = LetStatement("x", null, IntLiteral(42))
+        val letStatement = LetStatement.simple("x", IntLiteral(42))
         val variableDependencies = emptyMap<String, Set<String>>()
         
         // Use reflection to access private method for testing

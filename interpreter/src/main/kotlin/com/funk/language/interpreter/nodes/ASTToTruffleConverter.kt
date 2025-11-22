@@ -186,6 +186,16 @@ class ASTToTruffleConverter {
         return when (pattern) {
             is VariablePattern -> VariablePatternNode(pattern.name)
             is WildcardPattern -> WildcardPatternNode()
+            is LiteralPattern -> {
+                // Convert literal patterns to LiteralPatternNode with the appropriate FunkValue
+                val value = when (val lit = pattern.value) {
+                    is IntLiteralValue -> FunkInt(lit.value)
+                    is FloatLiteralValue -> FunkFloat(lit.value)
+                    is StringLiteralValue -> FunkString(lit.value)
+                    is BooleanLiteralValue -> FunkBool(lit.value)
+                }
+                LiteralPatternNode(value)
+            }
             is ConstructorPattern -> {
                 // For now, treat constructor patterns as literal patterns
                 // This is a simplified implementation
@@ -196,7 +206,6 @@ class ASTToTruffleConverter {
                 // This is a simplified implementation
                 WildcardPatternNode()
             }
-            else -> throw RuntimeException("Unsupported pattern: ${pattern::class.simpleName}")
         }
     }
     

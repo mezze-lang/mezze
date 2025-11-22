@@ -107,7 +107,7 @@ class FunkParser {
     private fun desugarStatement(stmt: Statement): Statement {
         return when (stmt) {
             is ExpressionStatement -> ExpressionStatement(desugarExpression(stmt.expression))
-            is LetStatement -> LetStatement(stmt.variableName, stmt.typeAnnotation, desugarExpression(stmt.expression))
+            is LetStatement -> LetStatement(stmt.pattern, stmt.typeAnnotation, desugarExpression(stmt.expression))
         }
     }
 
@@ -153,17 +153,34 @@ class FunkParser {
     }
 
     private fun parseLetBindingWithVisibility(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
-        // Parse: let <name> : <type> = <expression>
-        //    or: let <name> = <expression>
+        // Parse: let <pattern> : <type> = <expression>
+        //    or: let <pattern> = <expression>
+        // Where <pattern> can be:
+        //   - identifier (simple binding): let x = ...
+        //   - record pattern (destructuring): let { x, y } = ...
+        //   - wildcard: let _ = ... (discard value)
         val letToken = tok(TokenType.LET)(stream)
         return when (letToken) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(letToken.remaining)
-                val ident = identifierParser(stream1)
 
-                when (ident) {
+                // Try to parse an irrefutable pattern
+                val patternResult = letBindingPattern(stream1)
+
+                when (patternResult) {
                     is ParseResult.Success -> {
-                        val stream2 = skipNewlines(ident.remaining)
+                        val pattern = patternResult.value
+                        val stream2 = skipNewlines(patternResult.remaining)
+
+                        // Validate that the pattern is irrefutable
+                        if (!pattern.isIrrefutable()) {
+                            return ParseResult.Failure(
+                                "Let bindings only support irrefutable patterns. " +
+                                "${pattern.kindDescription()} can fail to match. " +
+                                "Use 'match' expression for refutable patterns.",
+                                stream1.getSourcePosition()
+                            )
+                        }
 
                         // Check for optional type annotation
                         val colonToken = tok(TokenType.COLON)(stream2)
@@ -194,7 +211,7 @@ class FunkParser {
                                 when (expr) {
                                     is ParseResult.Success -> ParseResult.Success(
                                         LetBinding(
-                                            ident.value.text,
+                                            pattern,
                                             visibility,
                                             typeAnnotation,
                                             null, // inferredType filled by typechecker
@@ -209,10 +226,29 @@ class FunkParser {
                             is ParseResult.Failure -> assign
                         }
                     }
-                    is ParseResult.Failure -> ident
+                    is ParseResult.Failure -> patternResult
                 }
             }
             is ParseResult.Failure -> letToken
+        }
+    }
+
+    // Parser for irrefutable patterns in let bindings
+    // Supports: variable, wildcard, record pattern (with nested irrefutable patterns)
+    private val letBindingPattern: Parser<Pattern> = { stream ->
+        Parsers.oneOf(
+            wildcardPattern,
+            standaloneRecordPattern,
+            variablePatternForLet
+        )(stream)
+    }
+
+    // Variable pattern for let bindings - simple identifier becomes VariablePattern
+    private val variablePatternForLet: Parser<Pattern> = { stream ->
+        val ident = identifierParser(stream)
+        when (ident) {
+            is ParseResult.Success -> ParseResult.Success(VariablePattern(ident.value.text), ident.remaining)
+            is ParseResult.Failure -> ident
         }
     }
 
@@ -2010,13 +2046,20 @@ class FunkParser {
                     // Try to parse a let statement
                     val letToken = tok(TokenType.LET)(currentStream)
                     if (letToken is ParseResult.Success) {
-                        // Parse let statement
+                        // Parse let statement with pattern support
                         val stream2 = skipNewlines(letToken.remaining)
-                        val ident = identifierParser(stream2)
+                        val patternResult = letBindingPattern(stream2)
 
-                        when (ident) {
+                        when (patternResult) {
                             is ParseResult.Success -> {
-                                val stream3 = skipNewlines(ident.remaining)
+                                val pattern = patternResult.value
+                                val stream3 = skipNewlines(patternResult.remaining)
+
+                                // Validate that the pattern is irrefutable
+                                if (!pattern.isIrrefutable()) {
+                                    // Skip this - refutable patterns not allowed in let statements
+                                    break
+                                }
 
                                 // Optional type annotation
                                 val colonToken = tok(TokenType.COLON)(stream3)
@@ -2044,7 +2087,7 @@ class FunkParser {
                                             is ParseResult.Success -> {
                                                 statements.add(
                                                     LetStatement(
-                                                        ident.value.text,
+                                                        pattern,
                                                         typeAnnotation,
                                                         expr.value
                                                     )
@@ -2286,9 +2329,62 @@ class FunkParser {
     private val patternParser: Parser<Pattern> = { stream ->
         Parsers.oneOf(
             wildcardPattern,
+            literalPattern,
+            standaloneRecordPattern,
             constructorPattern,
             variablePattern
         )(stream)
+    }
+
+    // Standalone record pattern for matching on records directly (not wrapped in a constructor)
+    // Example: { name, age } -> ...
+    private val standaloneRecordPattern: Parser<Pattern> = { stream ->
+        // Only parse if we see a LBRACE that's not preceded by an uppercase identifier
+        // Since this is tried after wildcard and literal patterns, we can safely try parsing
+        val lbrace = tok(TokenType.LBRACE)(stream)
+        when (lbrace) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(lbrace.remaining)
+                val entries = sepByWithNewlines(
+                    recordPatternEntryParser,
+                    tok(TokenType.COMMA)
+                )(stream1)
+
+                when (entries) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(entries.remaining)
+
+                        // Check for optional comma before ellipsis
+                        val afterComma = if (stream2.current()?.type == TokenType.COMMA) {
+                            skipNewlines(stream2.advance())
+                        } else {
+                            stream2
+                        }
+
+                        // Check for ellipsis (open record marker: ...)
+                        val isOpen = afterComma.current()?.type == TokenType.ELLIPSIS
+
+                        val stream3 = if (isOpen) {
+                            skipNewlines(afterComma.advance())
+                        } else {
+                            afterComma
+                        }
+
+                        val rbrace = tok(TokenType.RBRACE)(stream3)
+
+                        when (rbrace) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                RecordPattern(entries.value, isOpen),
+                                rbrace.remaining
+                            )
+                            is ParseResult.Failure -> rbrace
+                        }
+                    }
+                    is ParseResult.Failure -> entries
+                }
+            }
+            is ParseResult.Failure -> lbrace
+        }
     }
 
     private val wildcardPattern: Parser<Pattern> = { stream ->
@@ -2296,6 +2392,55 @@ class FunkParser {
         when (placeholder) {
             is ParseResult.Success -> ParseResult.Success(WildcardPattern(), placeholder.remaining)
             is ParseResult.Failure -> placeholder
+        }
+    }
+
+    private val literalPattern: Parser<Pattern> = { stream ->
+        val token = stream.current()
+        when (token?.type) {
+            TokenType.INTEGER -> {
+                val value = token.text.toLongOrNull()
+                if (value != null) {
+                    ParseResult.Success(
+                        LiteralPattern(IntLiteralValue(value)),
+                        stream.advance()
+                    )
+                } else {
+                    ParseResult.Failure("Invalid integer literal: ${token.text}", stream.getSourcePosition())
+                }
+            }
+            TokenType.STRING -> {
+                // String token includes quotes, strip them
+                val text = token.text
+                val value = if (text.length >= 2 && text.startsWith("\"") && text.endsWith("\"")) {
+                    text.substring(1, text.length - 1)
+                } else {
+                    text
+                }
+                ParseResult.Success(
+                    LiteralPattern(StringLiteralValue(value)),
+                    stream.advance()
+                )
+            }
+            TokenType.BOOLEAN -> {
+                val value = token.text == "true"
+                ParseResult.Success(
+                    LiteralPattern(BooleanLiteralValue(value)),
+                    stream.advance()
+                )
+            }
+            TokenType.FLOAT -> {
+                val value = token.text.toDoubleOrNull()
+                if (value != null) {
+                    ParseResult.Success(
+                        LiteralPattern(FloatLiteralValue(value)),
+                        stream.advance()
+                    )
+                } else {
+                    ParseResult.Failure("Invalid float literal: ${token.text}", stream.getSourcePosition())
+                }
+            }
+            else -> ParseResult.Failure("Expected literal (integer, string, boolean, or float)", stream.getSourcePosition())
         }
     }
 
