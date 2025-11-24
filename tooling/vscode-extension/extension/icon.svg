@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="funkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7C3AED;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4F46E5;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect x="8" y="8" width="112" height="112" rx="20" ry="20" fill="url(#funkGradient)"/>
+  <!-- Letter F -->
+  <path d="M 40 32 L 88 32 L 88 44 L 56 44 L 56 58 L 82 58 L 82 70 L 56 70 L 56 96 L 40 96 Z" fill="white"/>
+  <!-- Decorative dot (representing lambda/function) -->
+  <circle cx="92" cy="88" r="8" fill="white" opacity="0.9"/>
+</svg>

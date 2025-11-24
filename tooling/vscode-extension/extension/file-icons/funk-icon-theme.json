@@ -1,0 +1,10 @@
+{
+  "iconDefinitions": {
+    "funk-file": {
+      "iconPath": "./funk-file-icon.svg"
+    }
+  },
+  "fileExtensions": {
+    "funk": "funk-file"
+  }
+}

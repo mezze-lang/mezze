@@ -139,9 +139,23 @@ let piped = 10
 let area = geo::area {width = 10, height = 20}
 let result = math::operations::multiply {x = 5, y = 6}
 
+# String interpolation
+let firstName = "John"
+let lastName = "Doe"
+let fullName = "$(firstName) $(lastName)"
+let greeting = "Hello, $(firstName)!"
+let escaped = "Use \$(var) for interpolation"
+let nested = "outer: $("inner $(firstName)")"
+let multiInterp = "$(firstName) is $(lastName)"
+
+# Let destructuring
+let point = {x = 10, y = 20}
+let { x, y } = point
+let { x = px, y = py } = point
+let { x, ... } = {x = 1, y = 2, z = 3}
+
 # Operators showcase
 let arithmetic = 1 + 2 - 3 * 4 / 2 % 3
-let concatenation = "Hello World"  # String interpolation: "$(name)!"
 let comparison = 5 == 5 && 10 != 20 || 3 < 4 && 7 >= 6 && 8 <= 9 && 9 > 8
 let logical = true && false || !true
 let spread = {...record, ...otherRecord}
@@ -182,10 +196,17 @@ let falsy = false
 let integer = 42
 let float = 3.14159
 let scientific = 1.5e10
+let fraction = 1//2
+let anotherFrac = 3//4
 
 # String literals with escapes
 let greeting = "Hello, \"World\"!\n"
 let path = "C:\\Users\\funk\\file.txt"
+
+# Ability method calls
+let showInt = Show.show { val = 42 }
+let addResult = NumOps.add { l = 1, r = 2 }
+let logMsg = Log.println { msg = "Hello" }
 
 # Type variables in different contexts
 type Functor 'f where {

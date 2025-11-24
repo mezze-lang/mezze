@@ -40,21 +40,37 @@ tooling/
 - **Rich IDE Features**: Completion, diagnostics, hover, go-to-definition
 - **Multi-editor**: Works with any LSP-compatible editor
 
-## Development Commands
+## Installing the VSCode Extension
 
 ```bash
-# Generate TextMate grammar from ANTLR
-gradle :tooling:syntax-generators:generateTextMate
+# Navigate to the extension folder
+cd tooling/vscode-extension/extension
 
-# Generate Tree-sitter grammar from ANTLR  
-gradle :tooling:syntax-generators:generateTreeSitter
+# Install vsce if needed
+npm install -g @vscode/vsce
 
-# Build VSCode extension
-gradle :tooling:buildVSCodeExtension
+# Package the extension
+npx vsce package
 
-# Test syntax highlighting
-gradle :tooling:testSyntaxHighlighting
+# Install the generated .vsix file
+code --install-extension funk-language-0.3.1.vsix
 ```
+
+**For development (live reload):**
+1. Open `tooling/vscode-extension/extension` in VSCode
+2. Press `F5` to launch Extension Development Host
+3. Open any `.funk` file to test highlighting
+
+## Current Status
+
+The TextMate grammar (`syntaxes/funk.tmLanguage.json`) is **manually maintained** and covers all Funk language features including:
+- String interpolation (`$()` syntax)
+- Let destructuring patterns
+- Ability method calls (`Show.show`)
+- Fraction literals (`1//2`)
+- Effect rows, ability constraints, and more
+
+See `vscode-extension/extension/test-syntax.funk` for comprehensive examples.
 
 ## Why This Approach?
 

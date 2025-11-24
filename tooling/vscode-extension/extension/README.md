@@ -13,11 +13,13 @@ This extension provides rich syntax highlighting for all Funk language features:
 - **Types and Constructors**: Capitalized identifiers like `Option`, `Result`, `Some`, `None`
 - **Effect Rows**: `<State, IO, Network>`
 - **Ability Constraints**: `with NumAdd 'a, Eq 'b`
+- **Ability Method Calls**: `Show.show`, `NumOps.add` (Ability.method syntax)
 - **Module Paths**: `math::geometry::area`
 - **Operators**: `|>`, `->`, `==`, `&&`, `||`, `...`, `@`, etc.
-- **String Interpolation**: `"Hello, $(name)!"` syntax
+- **String Interpolation**: `"Hello, $(name)!"` syntax with nested expression highlighting
 - **Comments**: Line comments with `#`
-- **Literals**: Strings, numbers, booleans, arrays, records
+- **Literals**: Strings, integers, floats, fractions (`1//2`), booleans, arrays, records
+- **Record Destructuring**: `let { x, y } = point` and `let { x, ... } = record`
 
 ### Language Features
 
@@ -29,14 +31,17 @@ This extension provides rich syntax highlighting for all Funk language features:
 
 ### Code Snippets
 
-Over 25 built-in snippets for common Funk patterns:
+Over 35 built-in snippets for common Funk patterns:
 
-- **Declarations**: `let`, `publet`, `type`, `effect`, `ability`, `impl`
+- **Declarations**: `let`, `lett`, `publet`, `letd`, `letdp` (destructuring)
+- **Types**: `type`, `typeg`, `record`, `recordo`, `variant`, `variantd`, `varianto`
 - **Functions**: `lambda`, `lambdap`, `lambdat`, `funeffect`, `funability`
-- **Control Flow**: `match`, `matchg`, `if`, `do`, `perform`
-- **Data Structures**: `variant`, `record`, `rec`, `recspread`, `arr`
-- **Modules**: `use`, `useas`, `pubuse`
-- **Utilities**: `pipe`, `section`
+- **Effects & Abilities**: `effect`, `ability`, `ability2`, `impl`, `implability`
+- **Control Flow**: `match`, `matchg`, `matchm`, `if`, `do`, `perform`
+- **Data Structures**: `rec`, `recspread`, `arr`, `frac`
+- **Modules**: `use`, `useas`, `usesel`, `pubuse`
+- **Calls**: `abcall` (ability method), `modcall` (module function)
+- **Utilities**: `pipe`, `section`, `interp` (string interpolation)
 
 ## Funk Language Overview
 
@@ -118,7 +123,7 @@ npm install
 npx vsce package
 
 # Install locally
-code --install-extension funk-language-0.2.0.vsix
+code --install-extension funk-language-0.3.1.vsix
 ```
 
 ## Supported File Extensions
@@ -130,6 +135,28 @@ code --install-extension funk-language-0.2.0.vsix
 Please report any issues on the [GitHub repository](https://github.com/funk-lang/funk/issues).
 
 ## Release Notes
+
+### 0.3.1
+
+- **Extension Icon**: Purple "F" logo displayed in VSCode marketplace and extension panel
+- **File Icons**: `.funk` files now display with a custom icon in the file explorer
+- **Fixed `perform` Highlighting**: `perform Handler in` expressions now highlight correctly
+- **Fixed Record Literal Highlighting**: Record literals like `{x = 10, y = 20}` now have proper field highlighting
+- Updated package version
+
+### 0.3.0
+
+- **String Interpolation Support**: Full syntax highlighting for `$()` expressions inside strings
+  - Nested strings inside interpolation: `"outer: $("inner $(x)")"`
+  - Escape sequence: `\$()` to prevent interpolation
+  - Expression highlighting within interpolation blocks
+- **Let Destructuring**: Support for record destructuring patterns
+  - `let { x, y } = point`
+  - `let { x, ... } = record` (partial matching)
+- **Ability Method Calls**: Highlighting for `Ability.method` syntax (e.g., `Show.show`, `NumOps.add`)
+- **Fraction Literals**: Support for `1//2` fraction syntax
+- **15+ New Snippets**: Added snippets for destructuring, open types, ability calls, module calls, and more
+- Removed deprecated `++` operator (replaced by string interpolation)
 
 ### 0.2.0
 

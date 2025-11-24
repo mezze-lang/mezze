@@ -37,6 +37,7 @@ in
     graalvm-oracle-linux-prebuilt
     pkgs.zlib
     pkgs.gcc
+    pkgs.nodejs
   ];
 
   languages = {
@@ -107,6 +108,21 @@ in
         exit 1
       fi
     '';
+
+    vscode-install.exec = ''
+      echo "📦 Packaging VSCode extension..."
+      cd tooling/vscode-extension/extension
+      npx vsce package --allow-missing-repository
+      VSIX=$(ls -t *.vsix | head -1)
+      if [ -f "$VSIX" ]; then
+        echo "📥 Installing $VSIX..."
+        code --install-extension "$VSIX" --force
+        echo "✅ Extension installed! Reload VSCode to activate."
+      else
+        echo "❌ Failed to package extension"
+        exit 1
+      fi
+    '';
   };
 
   enterShell = ''
@@ -121,6 +137,9 @@ in
     echo "  funk-dev     - Development CLI (JAR, faster builds)"
     echo "  funk         - Native binary CLI (production)"
     echo "  build-native - Build native binary"
+    echo ""
+    echo "🛠️  Tooling:"
+    echo "  vscode-install - Package and install VSCode extension"
     echo ""
     echo "📝 Examples:"
     echo "  funk-dev parse examples/basic/hello_world.funk"

@@ -1,8 +1,8 @@
 {
   "name": "funk-language",
   "displayName": "Funk Language Support",
-  "description": "Syntax highlighting and language support for the Funk programming language",
-  "version": "0.1.0",
+  "description": "Comprehensive syntax highlighting and language support for the Funk functional programming language with algebraic effects",
+  "version": "0.3.1",
   "publisher": "funk-lang",
   "engines": {
     "vscode": "^1.74.0"
@@ -13,7 +13,11 @@
   "keywords": [
     "funk",
     "functional",
-    "effects"
+    "effects",
+    "algebraic-effects",
+    "type-inference",
+    "pattern-matching",
+    "string-interpolation"
   ],
   "contributes": {
     "languages": [
@@ -35,12 +39,22 @@
         "scopeName": "source.funk",
         "path": "./syntaxes/funk.tmLanguage.json"
       }
+    ],
+    "snippets": [
+      {
+        "language": "funk",
+        "path": "./snippets/funk.json"
+      }
     ]
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/funk-lang/funk"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/funk-lang/funk/issues"
+  },
+  "homepage": "https://github.com/funk-lang/funk#readme"
 }
 

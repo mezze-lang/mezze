@@ -2,8 +2,9 @@
   "name": "funk-language",
   "displayName": "Funk Language Support",
   "description": "Comprehensive syntax highlighting and language support for the Funk functional programming language with algebraic effects",
-  "version": "0.2.0",
+  "version": "0.3.3",
   "publisher": "funk-lang",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.74.0"
   },
@@ -16,7 +17,8 @@
     "effects",
     "algebraic-effects",
     "type-inference",
-    "pattern-matching"
+    "pattern-matching",
+    "string-interpolation"
   ],
   "contributes": {
     "languages": [
@@ -29,7 +31,11 @@
         "extensions": [
           ".funk"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./file-icons/funk-file-icon.svg",
+          "dark": "./file-icons/funk-file-icon.svg"
+        }
       }
     ],
     "grammars": [
@@ -43,6 +49,13 @@
       {
         "language": "funk",
         "path": "./snippets/funk.json"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "funk-icons",
+        "label": "Funk File Icons",
+        "path": "./file-icons/funk-icon-theme.json"
       }
     ]
   },
