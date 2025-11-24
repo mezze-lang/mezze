@@ -1,12 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <defs>
     <linearGradient id="funkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#7C3AED;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#4F46E5;stop-opacity:1" />
+      <stop offset="0%" style="stop-color:#0D0520;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#3B0D7D;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#EC4899;stop-opacity:1" />
     </linearGradient>
   </defs>
-  <!-- Background -->
+  <!-- Background rounded square -->
   <rect x="2" y="2" width="28" height="28" rx="4" ry="4" fill="url(#funkGradient)"/>
-  <!-- Letter F -->
-  <path d="M 9 7 L 23 7 L 23 10 L 13 10 L 13 14 L 21 14 L 21 17 L 13 17 L 13 25 L 9 25 Z" fill="white"/>
+  <!-- Stylized italic f (like mathematical 𝑓) -->
+  <text x="16" y="14"
+        font-family="Georgia, Times, serif"
+        font-size="22"
+        font-style="italic"
+        font-weight="400"
+        fill="white"
+        text-anchor="middle"
+        dominant-baseline="central">f</text>
 </svg>

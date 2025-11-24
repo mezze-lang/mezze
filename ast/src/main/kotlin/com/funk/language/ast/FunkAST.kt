@@ -969,7 +969,8 @@ data class BinaryOperation(
 data class UnaryOperation(
     val operator: String,
     val operand: Expression,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 // PipeExpression removed - pipe operator is now desugared during parsing
@@ -979,7 +980,8 @@ data class UnaryOperation(
 data class RecordLiteral(
     val entries: List<RecordLiteralEntry>,
     val restField: String? = null,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression {
     // Thread-local to track nesting depth to prevent infinite recursion
     companion object {
@@ -1077,21 +1079,24 @@ data class RecordEntry(
 data class MemberAccess(
     val receiver: Expression,
     val member: String,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
 data class RecordUpdate(
     val record: Expression,
     val updates: List<RecordEntry>,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
 data class RecordUpdateExpression(
     val baseRecord: Expression,
     val updates: List<RecordUpdateEntry>,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
@@ -1116,7 +1121,8 @@ data class LambdaExpression(
     val body: Expression,
     val returnType: TypeAnnotation? = null,  // Explicit return type annotation
     val abilityConstraints: List<FunctionAbilityConstraint> = emptyList(),  // Ability constraints
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 
@@ -1165,7 +1171,8 @@ data class IfExpression(
     val condition: Expression,
     val thenBranch: Expression,
     val elseBranch: Expression,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
@@ -1188,7 +1195,8 @@ data class MatchCase(
 data class DoExpression(
     val statements: List<Statement>,
     val result: Expression,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 // Effect handling
@@ -1196,7 +1204,8 @@ data class DoExpression(
 data class PerformExpression(
     val expression: Expression,
     val handlers: List<PerformHandler>,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 @Serializable
@@ -1211,7 +1220,8 @@ data class EffectCallExpression(
     val effectName: String,
     val operationName: String,
     val arguments: Expression,
-    override val inferredType: FunkType? = null
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
 ) : Expression
 
 // ============================================================================

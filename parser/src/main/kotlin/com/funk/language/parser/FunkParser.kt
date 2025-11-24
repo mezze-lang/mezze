@@ -16,6 +16,20 @@ class FunkParser {
     private var currentSource: String? = null
     private var currentFile: String? = null
 
+    /**
+     * Create a SourceLocation from a token
+     */
+    private fun tokenLocation(token: Token): SourceLocation {
+        return SourceLocation(token.line, token.column, currentFile)
+    }
+
+    /**
+     * Create a SourceLocation from a token stream's current position
+     */
+    private fun streamLocation(stream: TokenStream): SourceLocation {
+        return SourceLocation(stream.getSourceLine(), stream.getSourceColumn(), currentFile)
+    }
+
     fun parse(source: String, desugar: Boolean = true, file: String? = null): Program {
         // Store for error reporting in nested parser methods
         currentSource = source
@@ -1549,7 +1563,9 @@ class FunkParser {
         if (lbrace is ParseResult.Failure) {
             lbrace
         } else {
-            val stream1 = skipNewlines((lbrace as ParseResult.Success).remaining)
+            val lbraceSuccess = lbrace as ParseResult.Success
+            val lambdaLocation = tokenLocation(lbraceSuccess.value)
+            val stream1 = skipNewlines(lbraceSuccess.remaining)
 
             // Parse parameters - could be typed or untyped
             val paramsResult = lambdaParameters(stream1)
@@ -1571,7 +1587,7 @@ class FunkParser {
 
                                     when (body) {
                                         is ParseResult.Success -> ParseResult.Success(
-                                            LambdaExpression(paramsResult.value, (body as ParseResult.Success).value),
+                                            LambdaExpression(paramsResult.value, (body as ParseResult.Success).value, sourceLocation = lambdaLocation),
                                             body.remaining
                                         )
                                         is ParseResult.Failure -> body
@@ -1653,6 +1669,7 @@ class FunkParser {
         val lbrace = tok(TokenType.LBRACE)(stream)
         when (lbrace) {
             is ParseResult.Success -> {
+                val recordLocation = tokenLocation(lbrace.value)
                 val stream1 = skipNewlines((lbrace as ParseResult.Success).remaining)
 
                 // Use custom sepBy that skips newlines after commas
@@ -1683,7 +1700,7 @@ class FunkParser {
 
                         when (rbrace) {
                             is ParseResult.Success -> ParseResult.Success(
-                                RecordLiteral(entries.value, if (isOpen) "..." else null), // Set restField if open
+                                RecordLiteral(entries.value, if (isOpen) "..." else null, sourceLocation = recordLocation),
                                 (rbrace as ParseResult.Success).remaining
                             )
                             is ParseResult.Failure -> rbrace
@@ -1816,6 +1833,7 @@ class FunkParser {
     private val arrayLiteral: Parser<Expression> = { stream ->
         // Parse: [element1, element2, ...]
         // Also supports spread: [1, ...rest, 3]
+        val arrayLocation = stream.current()?.let { tokenLocation(it) }  // Capture [ token location
         val lbracket = tok(TokenType.LBRACKET)(stream)
         when (lbracket) {
             is ParseResult.Success -> {
@@ -1825,7 +1843,7 @@ class FunkParser {
                 val rbracket = tok(TokenType.RBRACKET)(stream1)
                 if (rbracket is ParseResult.Success) {
                     ParseResult.Success(
-                        ArrayLiteral(emptyList()),
+                        ArrayLiteral(emptyList(), sourceLocation = arrayLocation),
                         rbracket.remaining
                     )
                 } else {
@@ -1842,7 +1860,7 @@ class FunkParser {
 
                             when (rbracket2) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    ArrayLiteral(elements.value),
+                                    ArrayLiteral(elements.value, sourceLocation = arrayLocation),
                                     rbracket2.remaining
                                 )
                                 is ParseResult.Failure -> rbracket2
@@ -1896,6 +1914,7 @@ class FunkParser {
 
     private val ifExpression: Parser<Expression> = { stream ->
         // Parse: if <condition> then <thenBranch> else <elseBranch>
+        val ifLocation = stream.current()?.let { tokenLocation(it) }  // Capture 'if' location
         val ifToken = tok(TokenType.IF)(stream)
         when (ifToken) {
             is ParseResult.Success -> {
@@ -1927,7 +1946,8 @@ class FunkParser {
                                                         IfExpression(
                                                             condition.value,
                                                             thenBranch.value,
-                                                            elseBranch.value
+                                                            elseBranch.value,
+                                                            sourceLocation = ifLocation
                                                         ),
                                                         elseBranch.remaining
                                                     )
@@ -1956,6 +1976,7 @@ class FunkParser {
         // Parse two forms:
         // 1. perform operation {args} - simple effect call
         // 2. perform Handler1, Handler2 in expression - perform with handlers
+        val performLocation = stream.current()?.let { tokenLocation(it) }  // Capture perform keyword location
         val performToken = tok(TokenType.PERFORM)(stream)
         when (performToken) {
             is ParseResult.Success -> {
@@ -2023,7 +2044,7 @@ class FunkParser {
                                         val expr = expression(stream6)
                                         when (expr) {
                                             is ParseResult.Success -> ParseResult.Success(
-                                                PerformExpression(expr.value, handlers),
+                                                PerformExpression(expr.value, handlers, sourceLocation = performLocation),
                                                 expr.remaining
                                             )
                                             is ParseResult.Failure -> expr
@@ -2037,7 +2058,7 @@ class FunkParser {
                             val argsResult = recordLiteral(stream2)
                             when (argsResult) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    EffectCallExpression("", firstId.value.text, argsResult.value as RecordLiteral),
+                                    EffectCallExpression("", firstId.value.text, argsResult.value as RecordLiteral, sourceLocation = performLocation),
                                     argsResult.remaining
                                 )
                                 is ParseResult.Failure -> argsResult
@@ -2055,6 +2076,7 @@ class FunkParser {
 
     private val doExpression: Parser<Expression> = { stream ->
         // Parse: do <statement>* <result-expression>
+        val doLocation = stream.current()?.let { tokenLocation(it) }  // Capture do keyword location
         val doToken = tok(TokenType.DO)(stream)
         when (doToken) {
             is ParseResult.Success -> {
@@ -2166,7 +2188,7 @@ class FunkParser {
                 // Use the final result expression we found
                 if (finalResult != null) {
                     ParseResult.Success(
-                        DoExpression(statements, finalResult.first),
+                        DoExpression(statements, finalResult.first, sourceLocation = doLocation),
                         finalResult.second
                     )
                 } else {
@@ -2183,6 +2205,7 @@ class FunkParser {
 
     private val matchExpression: Parser<Expression> = { stream ->
         // Parse: match <expr> is <case1> <case2> ...
+        val matchLocation = stream.current()?.let { tokenLocation(it) }  // Capture match keyword location
         val matchToken = tok(TokenType.MATCH)(stream)
         when (matchToken) {
             is ParseResult.Success -> {
@@ -2239,7 +2262,8 @@ class FunkParser {
                                         ParseResult.Success(
                                             MatchExpression(
                                                 expr.value,
-                                                cases
+                                                cases,
+                                                sourceLocation = matchLocation
                                             ),
                                             currentStream
                                         )
@@ -2653,7 +2677,8 @@ class FunkParser {
                         BinaryOperation(
                             result.value,
                             op.text,
-                            right.value
+                            right.value,
+                            sourceLocation = result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -2682,7 +2707,8 @@ class FunkParser {
                         BinaryOperation(
                             result.value,
                             op.text,
-                            right.value
+                            right.value,
+                            sourceLocation = result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -2803,7 +2829,10 @@ class FunkParser {
                     is ParseResult.Success -> {
                         // Keep pipe operator in AST - will be desugared later
                         ParseResult.Success(
-                            BinaryOperation(result.value, "|>", right.value),
+                            BinaryOperation(
+                                result.value, "|>", right.value,
+                                sourceLocation = result.value.sourceLocation
+                            ),
                             right.remaining
                         )
                     }
@@ -2834,7 +2863,8 @@ class FunkParser {
                         BinaryOperation(
                             result.value,
                             op.text,
-                            right.value
+                            right.value,
+                            sourceLocation = result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -2863,7 +2893,8 @@ class FunkParser {
                         BinaryOperation(
                             result.value,
                             op.text,
-                            right.value
+                            right.value,
+                            sourceLocation = result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -2892,7 +2923,8 @@ class FunkParser {
                         BinaryOperation(
                             result.value,
                             op.text,
-                            right.value
+                            right.value,
+                            sourceLocation = result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -2910,11 +2942,12 @@ class FunkParser {
         val token = stream.current()
 
         if (token?.type == TokenType.MINUS || token?.type == TokenType.NOT) {
+            val opLocation = tokenLocation(token)  // Capture operator location
             val opStream = stream.advance()
             val operand = unaryExpression(opStream) // Right-associative: -(-5) is valid
             when (operand) {
                 is ParseResult.Success -> ParseResult.Success(
-                    UnaryOperation(token.text, operand.value),
+                    UnaryOperation(token.text, operand.value, sourceLocation = opLocation),
                     operand.remaining
                 )
                 is ParseResult.Failure -> operand
@@ -2950,7 +2983,8 @@ class FunkParser {
                                         ParseResult.Success(
                                             VariantConstruction(
                                                 constructor = expr.name,
-                                                value = args.value
+                                                value = args.value,
+                                                sourceLocation = expr.sourceLocation  // Use identifier's location
                                             ),
                                             args.remaining
                                         )
@@ -2967,7 +3001,8 @@ class FunkParser {
                                         ParseResult.Success(
                                             FunctionCall(
                                                 result.value,
-                                                args.value
+                                                args.value,
+                                                sourceLocation = result.value.sourceLocation  // Use function expr's location
                                             ),
                                             args.remaining
                                         )
@@ -2988,7 +3023,8 @@ class FunkParser {
                         is ParseResult.Success -> ParseResult.Success(
                             MemberAccess(
                                 result.value,
-                                member.value.text
+                                member.value.text,
+                                sourceLocation = result.value.sourceLocation  // Use receiver's location
                             ),
                             member.remaining
                         )
@@ -3027,10 +3063,12 @@ class FunkParser {
 
     // @ placeholder for pipe operator
     private val atPlaceholderExpression: Parser<Expression> = { stream ->
+        val atToken = stream.current()
+        val location = atToken?.let { tokenLocation(it) }
         val token = tok(TokenType.AT)(stream)
         when (token) {
             is ParseResult.Success -> ParseResult.Success(
-                Identifier("@"),  // Parse @ as identifier for now, desugar later
+                Identifier("@", sourceLocation = location),  // Parse @ as identifier for now, desugar later
                 token.remaining
             )
             is ParseResult.Failure -> token
@@ -3042,6 +3080,7 @@ class FunkParser {
         val first = identifierParser(stream)
         when (first) {
             is ParseResult.Success -> {
+                val startLocation = tokenLocation(first.value)  // Capture location of first token
                 var name = first.value.text
                 var currentStream = first.remaining
                 var failed: ParseResult.Failure? = null
@@ -3070,10 +3109,13 @@ class FunkParser {
                     // Only for simple names (not qualified names with ::)
                     if (!name.contains("::") && name.firstOrNull()?.isUpperCase() == true) {
                         // This is a variant construction without payload: None, True, False, etc.
-                        ParseResult.Success(VariantConstruction(constructor = name, value = null), currentStream)
+                        ParseResult.Success(
+                            VariantConstruction(constructor = name, value = null, sourceLocation = startLocation),
+                            currentStream
+                        )
                     } else {
                         // Regular identifier
-                        ParseResult.Success(Identifier(name), currentStream)
+                        ParseResult.Success(Identifier(name, sourceLocation = startLocation), currentStream)
                     }
                 }
             }
@@ -3083,13 +3125,14 @@ class FunkParser {
 
     private val literalExpression: Parser<Expression> = { stream ->
         val token = stream.current()
+        val location = token?.let { tokenLocation(it) }
         when (token?.type) {
             TokenType.INTEGER -> ParseResult.Success(
-                IntLiteral(token.text.toLong()),
+                IntLiteral(token.text.toLong(), sourceLocation = location),
                 stream.advance()
             )
             TokenType.FLOAT -> ParseResult.Success(
-                FloatLiteral(token.text.toDouble()),
+                FloatLiteral(token.text.toDouble(), sourceLocation = location),
                 stream.advance()
             )
             TokenType.FRACTION -> {
@@ -3097,7 +3140,7 @@ class FunkParser {
                 val parts = token.text.split("//")
                 if (parts.size == 2) {
                     ParseResult.Success(
-                        FractionLiteral(parts[0].toLong(), parts[1].toLong()),
+                        FractionLiteral(parts[0].toLong(), parts[1].toLong(), sourceLocation = location),
                         stream.advance()
                     )
                 } else {
@@ -3109,19 +3152,19 @@ class FunkParser {
 
                 // Check if this is an interpolated string (has unescaped $()
                 if (hasUnescapedInterpolation(stringContent)) {
-                    // Parse as interpolated string
-                    parseInterpolatedString(stringContent, stream.advance())
+                    // Parse as interpolated string - location will be set there
+                    parseInterpolatedString(stringContent, stream.advance(), location)
                 } else {
                     // Simple string literal - process escape sequences
                     val processedContent = processEscapeSequences(stringContent)
                     ParseResult.Success(
-                        StringLiteral(processedContent),
+                        StringLiteral(processedContent, sourceLocation = location),
                         stream.advance()
                     )
                 }
             }
             TokenType.BOOLEAN -> ParseResult.Success(
-                BooleanLiteral(token.text == "true"),
+                BooleanLiteral(token.text == "true", sourceLocation = location),
                 stream.advance()
             )
             else -> ParseResult.Failure("Expected literal", stream.getSourcePosition())
@@ -3641,7 +3684,7 @@ class FunkParser {
      * Parse an interpolated string, extracting string parts and expression parts.
      * The input is the raw string content (escape sequences not yet processed).
      */
-    private fun parseInterpolatedString(content: String, stream: TokenStream): ParseResult<Expression> {
+    private fun parseInterpolatedString(content: String, stream: TokenStream, location: SourceLocation? = null): ParseResult<Expression> {
         val parts = mutableListOf<StringInterpolationPart>()
         var i = 0
         val currentStringPart = StringBuilder()
@@ -3738,13 +3781,13 @@ class FunkParser {
         // If we only have one StringPart, it's actually not interpolated (edge case after escape processing)
         if (parts.size == 1 && parts[0] is StringPart) {
             return ParseResult.Success(
-                StringLiteral((parts[0] as StringPart).value),
+                StringLiteral((parts[0] as StringPart).value, sourceLocation = location),
                 stream
             )
         }
 
         return ParseResult.Success(
-            StringLiteral(value = "", parts = parts),
+            StringLiteral(value = "", parts = parts, sourceLocation = location),
             stream
         )
     }
