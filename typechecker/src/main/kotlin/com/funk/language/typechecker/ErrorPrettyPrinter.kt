@@ -106,13 +106,6 @@ object ErrorPrettyPrinter {
         val message = error.message ?: ""
         
         when {
-            message.contains("not found") && message.contains("ability") -> {
-                sb.appendLine()
-                sb.appendLine("💡 Built-in Abilities Available:")
-                sb.appendLine("   ${BuiltinAbilities.ALL.joinToString(", ")}")
-                sb.appendLine("   These abilities are automatically implemented for built-in types.")
-            }
-            
             message.contains("Missing ability implementation") -> {
                 sb.appendLine()
                 sb.appendLine("💡 Ability Implementation Help:")
