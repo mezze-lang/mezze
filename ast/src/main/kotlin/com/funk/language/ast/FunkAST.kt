@@ -916,13 +916,6 @@ data class FractionLiteral(
 ) : Expression
 
 @Serializable
-data class ArrayListLiteral(
-    val elements: List<Expression>,
-    override val inferredType: FunkType? = null,
-    override val sourceLocation: SourceLocation? = null
-) : Expression
-
-@Serializable
 data class ArrayLiteral(
     val elements: List<Expression>,
     override val inferredType: FunkType? = null,

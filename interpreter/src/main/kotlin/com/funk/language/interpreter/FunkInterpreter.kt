@@ -419,10 +419,6 @@ class FunkInterpreter {
                 val elements = expr.elements.map { evaluateExpression(it, context) }
                 FunkArrayList(elements.toMutableList())
             }
-            is ArrayListLiteral -> {
-                val elements = expr.elements.map { evaluateExpression(it, context) }
-                FunkArrayList(elements.toMutableList())
-            }
             is Identifier -> {
                 context[expr.name] ?: run {
                     // If it's an uppercase identifier, treat it as a variant constructor
@@ -1509,7 +1505,7 @@ class FunkInterpreter {
 
             // Literals and other expressions don't contain placeholders
             is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral,
-            is ArrayListLiteral, is TypeDeclaration, is EffectCallExpression -> expr
+            is TypeDeclaration, is EffectCallExpression -> expr
 
             else -> expr
         }
