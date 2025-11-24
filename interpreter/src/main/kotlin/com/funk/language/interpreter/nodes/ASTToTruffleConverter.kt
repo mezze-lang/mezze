@@ -66,6 +66,7 @@ class ASTToTruffleConverter {
         return when (expr) {
             is IntLiteral -> IntLiteralNode(expr.value)
             is FloatLiteral -> FloatLiteralNode(expr.value)
+            is FractionLiteral -> FractionLiteralNode(expr.numerator, expr.denominator)
             is StringLiteral -> {
                 val parts = expr.parts
                 if (expr.isInterpolated && parts != null) {

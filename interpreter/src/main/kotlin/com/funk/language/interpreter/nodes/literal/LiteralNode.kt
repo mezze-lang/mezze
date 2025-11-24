@@ -9,6 +9,7 @@ import com.funk.language.interpreter.FunkInt
 import com.funk.language.interpreter.FunkFloat
 import com.funk.language.interpreter.FunkString
 import com.funk.language.interpreter.FunkBool
+import com.funk.language.interpreter.FunkFrac
 import com.funk.language.interpreter.FunkNull
 
 /**
@@ -70,12 +71,25 @@ class StringLiteralNode(private val value: String) : LiteralNode() {
  */
 @NodeInfo(shortName = "boolean-literal")
 class BooleanLiteralNode(private val value: Boolean) : LiteralNode() {
-    
+
     override fun getValue(): FunkValue {
         return FunkBool(value)
     }
-    
+
     override fun toString(): String = "BooleanLiteral($value)"
+}
+
+/**
+ * Fraction literal node
+ */
+@NodeInfo(shortName = "fraction-literal")
+class FractionLiteralNode(private val numerator: Long, private val denominator: Long) : LiteralNode() {
+
+    override fun getValue(): FunkValue {
+        return FunkFrac(numerator, denominator)
+    }
+
+    override fun toString(): String = "FractionLiteral($numerator/$denominator)"
 }
 
 /**

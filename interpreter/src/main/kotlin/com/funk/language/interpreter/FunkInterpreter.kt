@@ -415,6 +415,7 @@ class FunkInterpreter {
                 }
             }
             is BooleanLiteral -> FunkBool(expr.value)
+            is FractionLiteral -> FunkFrac(expr.numerator, expr.denominator)
             is ArrayLiteral -> {
                 val elements = expr.elements.map { evaluateExpression(it, context) }
                 FunkArrayList(elements.toMutableList())
@@ -1504,7 +1505,7 @@ class FunkInterpreter {
             }
 
             // Literals and other expressions don't contain placeholders
-            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral,
+            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral, is FractionLiteral,
             is TypeDeclaration, is EffectCallExpression -> expr
 
             else -> expr
@@ -3167,7 +3168,7 @@ class FunkInterpreter {
             is PerformExpression -> containsSelfReference(expr.expression, variableName)
             is LambdaExpression -> containsSelfReference(expr.body, variableName)
             // Literals don't contain references
-            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral -> false
+            is IntLiteral, is FloatLiteral, is StringLiteral, is BooleanLiteral, is FractionLiteral -> false
             // Other expressions we don't need to check
             else -> false
         }
