@@ -2300,6 +2300,7 @@ class FunkInterpreter {
         context["NumSub_ability"] = FunkRecord(mapOf("num_sub" to FunkNull))
         context["NumMul_ability"] = FunkRecord(mapOf("num_mul" to FunkNull))
         context["NumDiv_ability"] = FunkRecord(mapOf("num_div" to FunkNull))
+        context["NumMod_ability"] = FunkRecord(mapOf("num_mod" to FunkNull))
         context["Eq_ability"] = FunkRecord(mapOf("eq" to FunkNull))
         context["Inspect_ability"] = FunkRecord(mapOf("to_str" to FunkNull))
 
@@ -2315,6 +2316,9 @@ class FunkInterpreter {
         ))
         context["NumDiv_Int"] = FunkRecord(mapOf(
             "num_div" to context["__native_int_divide"]!!
+        ))
+        context["NumMod_Int"] = FunkRecord(mapOf(
+            "num_mod" to context["__native_int_modulo"]!!
         ))
         context["Eq_Int"] = FunkRecord(mapOf(
             "eq" to context["__native_int_equals"]!!
@@ -2341,6 +2345,46 @@ class FunkInterpreter {
         ))
         context["Inspect_Float"] = FunkRecord(mapOf(
             "to_str" to context["__native_float_to_string"]!!
+        ))
+
+        // Register implementations for Frac
+        context["NumAdd_Frac"] = FunkRecord(mapOf(
+            "num_add" to context["__native_frac_add"]!!
+        ))
+        context["NumSub_Frac"] = FunkRecord(mapOf(
+            "num_sub" to context["__native_frac_subtract"]!!
+        ))
+        context["NumMul_Frac"] = FunkRecord(mapOf(
+            "num_mul" to context["__native_frac_multiply"]!!
+        ))
+        context["NumDiv_Frac"] = FunkRecord(mapOf(
+            "num_div" to context["__native_frac_divide"]!!
+        ))
+        context["Eq_Frac"] = FunkRecord(mapOf(
+            "eq" to context["__native_frac_equals"]!!
+        ))
+        context["Inspect_Frac"] = FunkRecord(mapOf(
+            "to_str" to context["__native_frac_to_string"]!!
+        ))
+
+        // Register implementations for Nat (no NumSub since Nat - Nat can go negative)
+        context["NumAdd_Nat"] = FunkRecord(mapOf(
+            "num_add" to context["__native_nat_add"]!!
+        ))
+        context["NumMul_Nat"] = FunkRecord(mapOf(
+            "num_mul" to context["__native_nat_multiply"]!!
+        ))
+        context["NumDiv_Nat"] = FunkRecord(mapOf(
+            "num_div" to context["__native_nat_divide"]!!
+        ))
+        context["NumMod_Nat"] = FunkRecord(mapOf(
+            "num_mod" to context["__native_nat_modulo"]!!
+        ))
+        context["Eq_Nat"] = FunkRecord(mapOf(
+            "eq" to context["__native_nat_equals"]!!
+        ))
+        context["Inspect_Nat"] = FunkRecord(mapOf(
+            "to_str" to context["__native_nat_to_string"]!!
         ))
 
         // Register implementations for String
