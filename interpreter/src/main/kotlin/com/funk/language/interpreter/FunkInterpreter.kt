@@ -1594,12 +1594,12 @@ class FunkInterpreter {
      */
     private fun evaluateUnaryOperation(operator: String, operand: FunkValue): FunkValue {
         if (operator == "-") {
-            if (operand is FunkInt) {
-                return FunkInt(-operand.value)
-            } else if (operand is FunkFloat) {
-                return FunkFloat(-operand.value)
-            } else {
-                throw RuntimeException("Cannot negate ${operand::class.simpleName}")
+            return when (operand) {
+                is FunkInt -> FunkInt(-operand.value)
+                is FunkFloat -> FunkFloat(-operand.value)
+                is FunkFrac -> FunkFrac(-operand.numerator, operand.denominator)
+                is FunkNat -> FunkInt(-operand.value.toLong())  // Nat negation produces Int
+                else -> throw RuntimeException("Cannot negate ${operand::class.simpleName}")
             }
         } else if (operator == "!") {
             return FunkBool(!isTruthy(operand))
