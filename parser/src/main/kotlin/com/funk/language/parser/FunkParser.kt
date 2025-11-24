@@ -12,16 +12,49 @@ import com.funk.language.ast.*
  * By using explicit lookahead for the arrow token.
  */
 class FunkParser {
+    // Store source and file during parsing for better error messages
+    private var currentSource: String? = null
+    private var currentFile: String? = null
 
-    fun parse(source: String, desugar: Boolean = true): Program {
-        val lexer = Lexer(source)
-        val tokens = lexer.tokenize()
-        val stream = TokenStream(tokens)
+    fun parse(source: String, desugar: Boolean = true, file: String? = null): Program {
+        // Store for error reporting in nested parser methods
+        currentSource = source
+        currentFile = file
 
-        return when (val result = programParser(stream)) {
-            is ParseResult.Success -> if (desugar) desugarProgram(result.value) else result.value
-            is ParseResult.Failure -> throw ParseException(result.message, result.position)
+        try {
+            val lexer = Lexer(source)
+            val tokens = lexer.tokenize()
+            val stream = TokenStream(tokens)
+
+            return when (val result = programParser(stream)) {
+                is ParseResult.Success -> if (desugar) desugarProgram(result.value) else result.value
+                is ParseResult.Failure -> throw ParseException(
+                    result.message,
+                    result.position,
+                    result.line,
+                    result.column,
+                    source,
+                    file
+                )
+            }
+        } finally {
+            currentSource = null
+            currentFile = null
         }
+    }
+
+    /**
+     * Create a ParseException with full context
+     */
+    private fun createParseException(message: String, stream: TokenStream): ParseException {
+        return ParseException(
+            message,
+            stream.getSourcePosition(),
+            stream.getSourceLine(),
+            stream.getSourceColumn(),
+            currentSource,
+            currentFile
+        )
     }
 
     // Desugar pipe operators in the entire program
@@ -2972,10 +3005,10 @@ class FunkParser {
                         val funcName = funcExpr.name
                         val argName = token.text
                         // Throw exception directly to ensure the error message is shown
-                        throw ParseException(
+                        throw createParseException(
                             "Function calls must use {} syntax. Instead of '$funcName $argName', " +
                             "use '$funcName { ... }' with named arguments.",
-                            currentStream.getSourcePosition()
+                            currentStream
                         )
                     }
                     // For non-identifier expressions, treat following identifier as separate statement
@@ -3717,4 +3750,56 @@ class FunkParser {
     }
 }
 
-class ParseException(message: String, position: Int) : Exception("Parse error at position $position: $message")
+/**
+ * Enhanced parse exception with detailed location and source context
+ */
+class ParseException(
+    val errorMessage: String,
+    val position: Int,
+    val line: Int = 0,
+    val column: Int = 0,
+    val sourceCode: String? = null,
+    val file: String? = null
+) : Exception(formatParseError(errorMessage, position, line, column, sourceCode, file)) {
+
+    companion object {
+        private fun formatParseError(
+            message: String,
+            position: Int,
+            line: Int,
+            column: Int,
+            sourceCode: String?,
+            file: String?
+        ): String {
+            val sb = StringBuilder()
+
+            sb.appendLine("Parse error: $message")
+
+            // Add location info
+            if (line > 0) {
+                val fileInfo = file ?: "<input>"
+                sb.appendLine("   --> $fileInfo:$line:$column")
+            }
+
+            // Add code snippet if available
+            if (sourceCode != null && line > 0) {
+                val lines = sourceCode.lines()
+                if (line in 1..lines.size) {
+                    val errorLineContent = lines[line - 1]
+                    val lineNumStr = line.toString()
+                    val padding = " ".repeat(lineNumStr.length)
+
+                    sb.appendLine("$padding |")
+                    sb.appendLine("$lineNumStr | $errorLineContent")
+
+                    // Show error pointer
+                    val pointer = " ".repeat(maxOf(0, column - 1)) + "^"
+                    sb.appendLine("$padding | $pointer")
+                    sb.appendLine("$padding |")
+                }
+            }
+
+            return sb.toString().trim()
+        }
+    }
+}

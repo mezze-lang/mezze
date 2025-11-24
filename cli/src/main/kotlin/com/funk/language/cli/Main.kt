@@ -214,15 +214,23 @@ private fun handleParseCommand(args: List<String>) {
         }
     }
 
+    val fileName = if (args.size == 1) args[0] else null
+
     try {
         val parser = FunkParser()
-        val ast = parser.parse(source)
+        val ast = parser.parse(source, file = fileName)
         println("✅ Parsing successful!")
         println()
         println(prettyPrintAST(ast))
+    } catch (e: com.funk.language.parser.ParseException) {
+        println("❌ Parse Error")
+        println("━".repeat(50))
+        println(e.message)
+        kotlin.system.exitProcess(1)
     } catch (e: Exception) {
-        println("❌ Parse error:")
+        println("❌ Error:")
         println(e.message ?: "Unknown error")
+        kotlin.system.exitProcess(1)
     }
 }
 
@@ -250,8 +258,9 @@ private fun handleCheckCommand(args: List<String>) {
 
     try {
         val parser = FunkParser()
-        val ast = parser.parse(source)
-        
+        val fileName = filePath?.fileName?.toString()
+        val ast = parser.parse(source, file = fileName)
+
         // Use improved type checker (92% test success rate)
         val typeChecker = TypeChecker()
         val result = if (filePath != null) {
@@ -260,16 +269,17 @@ private fun handleCheckCommand(args: List<String>) {
             typeChecker.typeCheck(ast)
         }
         val typeAliases = typeChecker.getTypeAliases()
-        
+
         printTypeCheckSuccess(result, typeAliases)
     } catch (e: TypeCheckError) {
-        // For demonstration, show both simple and detailed error formats
-        println(ErrorPrettyPrinter.prettyPrint(e))
-        
-        // Uncomment the line below to see the detailed error format:
-        // println("\n" + ErrorPrettyPrinter.prettyPrintError(e))
-        
-        // Exit with error code for type errors
+        // Pass source code and file for enhanced error messages with code snippets
+        val fileName = filePath?.fileName?.toString()
+        println(ErrorPrettyPrinter.prettyPrint(e, source, fileName))
+        kotlin.system.exitProcess(1)
+    } catch (e: com.funk.language.parser.ParseException) {
+        println("❌ Parse Error")
+        println("━".repeat(50))
+        println(e.message)
         kotlin.system.exitProcess(1)
     } catch (e: Exception) {
         println("❌ Error:")
@@ -379,8 +389,9 @@ private fun handleExecCommand(args: List<String>) {
     try {
         // Parse the source code
         val parser = FunkParser()
-        val program = parser.parse(source)
-        
+        val fileName = filePath?.fileName?.toString()
+        val program = parser.parse(source, file = fileName)
+
         // Type check the program with module resolution
         val projectRoot = filePath?.parent ?: java.nio.file.Paths.get(".")
         val typeChecker = TypeChecker()
@@ -468,8 +479,14 @@ private fun handleExecCommand(args: List<String>) {
         }
         
     } catch (e: TypeCheckError) {
-        println("❌ Type Error:")
-        println(ErrorPrettyPrinter.prettyPrint(e))
+        // Pass source code and file for enhanced error messages with code snippets
+        val fileName = filePath?.fileName?.toString()
+        println(ErrorPrettyPrinter.prettyPrint(e, source, fileName))
+        kotlin.system.exitProcess(1)
+    } catch (e: com.funk.language.parser.ParseException) {
+        println("❌ Parse Error")
+        println("━".repeat(50))
+        println(e.message)
         kotlin.system.exitProcess(1)
     } catch (e: FunkException) {
         println("❌ Runtime Error:")
@@ -515,13 +532,15 @@ private fun handleCompileCommand(args: List<String>) {
         val inputName = inputFile.nameWithoutExtension
         File(inputFile.parent ?: ".", "$inputName.jar")
     }
-    
+
+    // Read source code before try block so it's available in catch for error messages
+    val source = inputFile.readText()
+
     try {
         println("🔨 Compiling ${inputFile.name} to ${outputFile.name}...")
         println()
-        
+
         // Parse and type check the source
-        val source = inputFile.readText()
         val parser = FunkParser()
         val ast = parser.parse(source)
         
@@ -542,8 +561,8 @@ private fun handleCompileCommand(args: List<String>) {
         println("   (Pre-compiled AST, smaller size, faster startup)")
         
     } catch (e: TypeCheckError) {
-        println("❌ Type Error:")
-        println(ErrorPrettyPrinter.prettyPrint(e))
+        // Pass source code and file for enhanced error messages with code snippets
+        println(ErrorPrettyPrinter.prettyPrint(e, source, inputFile.name))
         kotlin.system.exitProcess(1)
     } catch (e: Exception) {
         println("❌ Compilation Error:")

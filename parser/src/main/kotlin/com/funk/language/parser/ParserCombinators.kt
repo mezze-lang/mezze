@@ -10,7 +10,12 @@ package com.funk.language.parser
 // Result of parsing
 sealed class ParseResult<out T> {
     data class Success<T>(val value: T, val remaining: TokenStream) : ParseResult<T>()
-    data class Failure(val message: String, val position: Int) : ParseResult<Nothing>()
+    data class Failure(
+        val message: String,
+        val position: Int,
+        val line: Int = 0,
+        val column: Int = 0
+    ) : ParseResult<Nothing>()
 }
 
 // Token stream with position tracking
@@ -24,6 +29,18 @@ data class TokenStream(
     fun isAtEnd(): Boolean = position >= tokens.size
 
     fun getSourcePosition(): Int = current()?.position ?: tokens.lastOrNull()?.position ?: 0
+    fun getSourceLine(): Int = current()?.line ?: tokens.lastOrNull()?.line ?: 1
+    fun getSourceColumn(): Int = current()?.column ?: tokens.lastOrNull()?.column ?: 1
+
+    /**
+     * Create a ParseResult.Failure with full location info
+     */
+    fun failure(message: String): ParseResult.Failure = ParseResult.Failure(
+        message,
+        getSourcePosition(),
+        getSourceLine(),
+        getSourceColumn()
+    )
 }
 
 // Parser type
@@ -39,7 +56,7 @@ object Parsers {
 
     // Always fails
     fun <T> fail(message: String): Parser<T> = { stream ->
-        ParseResult.Failure(message, stream.getSourcePosition())
+        stream.failure(message)
     }
 
     // Match a specific token type
@@ -48,7 +65,7 @@ object Parsers {
         if (current != null && predicate(current)) {
             ParseResult.Success(current, stream.advance())
         } else {
-            ParseResult.Failure("Expected $description but got ${current?.type}", stream.getSourcePosition())
+            stream.failure("Expected $description but got ${current?.type}")
         }
     }
 
@@ -84,7 +101,7 @@ object Parsers {
                 is ParseResult.Failure -> lastFailure = r
             }
         }
-        result ?: (lastFailure ?: ParseResult.Failure("No alternatives matched", stream.getSourcePosition()))
+        result ?: (lastFailure ?: stream.failure("No alternatives matched"))
     }
 
     // Map: transform the result

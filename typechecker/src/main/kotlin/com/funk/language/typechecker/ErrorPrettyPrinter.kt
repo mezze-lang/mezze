@@ -5,13 +5,17 @@ import com.funk.language.ast.BuiltinAbilities
 
 /**
  * Enhanced error pretty printer for spread syntax and other errors
+ * Now includes source code context for better error localization
  */
 object ErrorPrettyPrinter {
-    fun prettyPrint(error: Exception): String {
+    /**
+     * Pretty print an error with optional source code context
+     */
+    fun prettyPrint(error: Exception, sourceCode: String? = null, file: String? = null): String {
         return when (error) {
-            is SpreadSyntaxError -> prettyPrintSpreadError(error)
+            is SpreadSyntaxError -> prettyPrintSpreadError(error, sourceCode, file)
             is ModuleError -> prettyPrintModuleError(error)
-            is TypeCheckError -> prettyPrintTypeCheckError(error)
+            is TypeCheckError -> prettyPrintTypeCheckError(error, sourceCode, file)
             else -> error.message ?: "Unknown error"
         }
     }
@@ -95,35 +99,146 @@ object ErrorPrettyPrinter {
         return sb.toString().trim()
     }
     
-    private fun prettyPrintTypeCheckError(error: TypeCheckError): String {
+    private fun prettyPrintTypeCheckError(error: TypeCheckError, sourceCode: String? = null, file: String? = null): String {
         val sb = StringBuilder()
-        
+
         sb.appendLine("❌ Type Error")
         sb.appendLine("━".repeat(50))
-        sb.appendLine(error.message ?: "Unknown type error")
-        
-        // Add helpful suggestions based on error content
+
+        // Add location info if available
+        val location = error.sourceLocation
+        if (location != null) {
+            val fileInfo = file ?: location.file ?: "<input>"
+            sb.appendLine("   --> $fileInfo:${location.line}:${location.column}")
+        }
+
+        // Add code snippet if source is available
+        if (sourceCode != null && location != null) {
+            sb.append(formatCodeSnippet(sourceCode, location.line, location.column))
+        }
+
+        // Add error message
+        sb.appendLine()
+        sb.appendLine("Error: ${extractErrorMessage(error.message ?: "Unknown type error")}")
+
+        // Add helpful suggestions based on error type
         val message = error.message ?: ""
-        
-        when {
-            message.contains("Missing ability implementation") -> {
-                sb.appendLine()
-                sb.appendLine("💡 Ability Implementation Help:")
-                sb.appendLine("   - Built-in types automatically implement common abilities")
-                sb.appendLine("   - For custom types, you need to provide implementations")
-                sb.appendLine("   - Check if you're using the correct type constraints")
-            }
-            
-            message.contains("Type unification failed") -> {
+
+        when (error.errorType) {
+            ErrorType.TYPE_MISMATCH -> {
                 sb.appendLine()
                 sb.appendLine("💡 Type Mismatch Help:")
-                sb.appendLine("   - Ensure function arguments match expected types")
-                sb.appendLine("   - Built-in types: ${BuiltinTypes.allBuiltinTypeNames.joinToString(", ")}")
-                sb.appendLine("   - Use type annotations if inference is unclear")
+                sb.appendLine("   - Check that function arguments match expected types")
+                sb.appendLine("   - Verify that return values match declared types")
+                sb.appendLine("   - Consider adding explicit type annotations")
+            }
+
+            ErrorType.UNDEFINED_VARIABLE -> {
+                sb.appendLine()
+                sb.appendLine("💡 Undefined Variable Help:")
+                sb.appendLine("   - Check the variable name for typos")
+                sb.appendLine("   - Ensure the variable is declared before use")
+                sb.appendLine("   - For imported functions, use 'use module_name'")
+            }
+
+            ErrorType.MISSING_FIELD -> {
+                sb.appendLine()
+                sb.appendLine("💡 Missing Field Help:")
+                sb.appendLine("   - Check the field name for typos")
+                sb.appendLine("   - Verify the record type has this field")
+            }
+
+            ErrorType.CONSTRAINT_VIOLATION -> {
+                sb.appendLine()
+                sb.appendLine("💡 Constraint Violation Help:")
+                sb.appendLine("   - Built-in types (Int, String, etc.) have common abilities")
+                sb.appendLine("   - Custom types need 'impl' declarations")
+                sb.appendLine("   - Check that your type implements the required ability")
+            }
+
+            ErrorType.INEXHAUSTIVE_MATCH -> {
+                sb.appendLine()
+                sb.appendLine("💡 Pattern Match Help:")
+                sb.appendLine("   - Add cases for all missing patterns")
+                sb.appendLine("   - Use '_ ->' for a catch-all pattern")
+            }
+
+            else -> {
+                // Generic suggestions based on message content
+                when {
+                    message.contains("Missing ability implementation") -> {
+                        sb.appendLine()
+                        sb.appendLine("💡 Ability Implementation Help:")
+                        sb.appendLine("   - Built-in types automatically implement common abilities")
+                        sb.appendLine("   - For custom types, you need to provide implementations")
+                    }
+
+                    message.contains("Type unification failed") -> {
+                        sb.appendLine()
+                        sb.appendLine("💡 Type Unification Help:")
+                        sb.appendLine("   - Ensure both sides of an expression have compatible types")
+                        sb.appendLine("   - Built-in types: ${BuiltinTypes.allBuiltinTypeNames.take(5).joinToString(", ")}...")
+                    }
+                }
             }
         }
-        
+
         return sb.toString().trim()
+    }
+
+    /**
+     * Extract the core error message (strip location prefix if present)
+     */
+    private fun extractErrorMessage(message: String): String {
+        // Strip "Type Error at line X, column Y: " prefix if present
+        val prefix = Regex("^Type Error at line \\d+, column \\d+: ")
+        return message.replace(prefix, "")
+    }
+
+    /**
+     * Format a code snippet with line numbers and error pointer
+     */
+    private fun formatCodeSnippet(sourceCode: String, errorLine: Int, errorColumn: Int, contextLines: Int = 2): String {
+        val lines = sourceCode.lines()
+
+        // Validate line number
+        if (errorLine < 1 || errorLine > lines.size) {
+            return ""
+        }
+
+        val sb = StringBuilder()
+
+        // Calculate range of lines to show
+        val startLine = maxOf(1, errorLine - contextLines)
+        val endLine = minOf(lines.size, errorLine + contextLines)
+
+        // Calculate the width needed for line numbers
+        val lineNumberWidth = endLine.toString().length
+
+        sb.appendLine("    |")
+
+        // Show lines with context
+        for (lineNum in startLine..endLine) {
+            val lineContent = lines[lineNum - 1]
+            val lineNumStr = lineNum.toString().padStart(lineNumberWidth)
+
+            if (lineNum == errorLine) {
+                // Error line - show with marker
+                sb.appendLine(" $lineNumStr | $lineContent")
+
+                // Show error pointer
+                val padding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
+                val pointer = " ".repeat(maxOf(0, errorColumn - 1)) + "^"
+                sb.appendLine("$padding$pointer")
+            } else {
+                // Context line
+                sb.appendLine(" $lineNumStr | $lineContent")
+            }
+        }
+
+        sb.appendLine("    |")
+
+        return sb.toString()
     }
     
     private fun isBuiltinModuleName(moduleName: String): Boolean {
@@ -151,9 +266,9 @@ object ErrorPrettyPrinter {
         }
     }
     
-    private fun prettyPrintSpreadError(error: SpreadSyntaxError): String {
+    private fun prettyPrintSpreadError(error: SpreadSyntaxError, sourceCode: String? = null, file: String? = null): String {
         val sb = StringBuilder()
-        
+
         sb.appendLine("❌ Spread Syntax Error")
         sb.appendLine("━".repeat(50))
         

@@ -97,12 +97,10 @@ class Lexer(private val source: String) {
         val char = current()
 
         // Handle newlines explicitly
+        // Note: advance() already increments line and resets column for newlines
         if (char == '\n') {
             advance()
-            return Token(TokenType.NEWLINE, "\n", start, startLine, startColumn).also {
-                line++
-                column = 1
-            }
+            return Token(TokenType.NEWLINE, "\n", start, startLine, startColumn)
         }
 
         // Numbers
