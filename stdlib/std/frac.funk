@@ -3,6 +3,8 @@
 # Fraction type is implemented natively as a ratio of two integers
 # Fractions are automatically reduced to lowest terms
 
+# Built-in ability implementations (NumAdd, NumSub, NumMul, NumDiv, Eq, Inspect) are automatically available
+
 # === ARITHMETIC OPERATIONS ===
 
 # Add two fractions

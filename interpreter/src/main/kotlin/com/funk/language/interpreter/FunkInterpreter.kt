@@ -705,6 +705,8 @@ class FunkInterpreter {
                                             is FunkString -> "String"
                                             is FunkBool -> "Bool"
                                             is FunkFloat -> "Float"
+                                            is FunkFrac -> "Frac"
+                                            is FunkNat -> "Nat"
                                             is FunkNull -> "Null"
                                             is FunkRecord -> "Record"
                                             is FunkVariant -> "Variant"
@@ -725,6 +727,8 @@ class FunkInterpreter {
                                         is FunkString -> "String"
                                         is FunkBool -> "Bool"
                                         is FunkFloat -> "Float"
+                                        is FunkFrac -> "Frac"
+                                        is FunkNat -> "Nat"
                                         is FunkNull -> "Null"
                                         is FunkRecord -> "Record"
                                         is FunkVariant -> "Variant"
@@ -3219,6 +3223,7 @@ class FunkInterpreter {
                         is FunkString -> "String"
                         is FunkFloat -> "Float"
                         is FunkBool -> "Boolean"
+                        is FunkFrac -> "Frac"
                         else -> "Unknown"
                     }
                 }.distinct()
@@ -3227,6 +3232,8 @@ class FunkInterpreter {
             is FunkString -> listOf("String")
             is FunkFloat -> listOf("Float")
             is FunkBool -> listOf("Boolean")
+            is FunkFrac -> listOf("Frac")
+            is FunkNat -> listOf("Nat")
             else -> listOf("Unknown")
         }
     }
@@ -3304,6 +3311,8 @@ data class SimpleFunkFunction(
             is FunkFloat -> "Float"
             is FunkString -> "String"
             is FunkBool -> "Boolean"
+            is FunkFrac -> "Frac"
+            is FunkNat -> "Nat"
             is FunkNull -> "Null"
             is FunkRecord -> "Record"
             is FunkVariant -> "Variant"
