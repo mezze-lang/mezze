@@ -30,8 +30,8 @@ let either = {choice, left, right} -> match choice is
 
 # Exhaustive with nested data
 let handleResult = {res} -> match res is
-  Ok {value} -> value
-  Err {error} -> 0                                              # expected: handleResult : { res: Result 'unknown 'a } -> Int
+  Ok {val} -> val
+  Err {error} -> 0                                              # expected: handleResult : { res: Result Int 'a } -> Int
 
 # Multiple fields exhaustive
 let handlePair = {p} -> match p is

@@ -19,10 +19,10 @@ let boolToResult = {b} -> match b is
 
 # Both open
 let partialMatch = {x, y} -> match x is
-  Some {a} -> match y is
-    Some {b} -> a + b
-    _ -> a
-  _ -> 0                                                        # expected: partialMatch : { x: | Some { a: Int }, ... |, y: | Some { b: Int }, ... | } -> Int
+  Some {val} -> match y is
+    Some {val = b} -> val + b
+    _ -> val
+  _ -> 0                                                        # expected: partialMatch : { x: | Some { val: Int }, ... |, y: | Some { val: Int }, ... | } -> Int
 
 # Closed input, multiple open outputs
 let branch = {choice} -> match choice is
@@ -32,9 +32,9 @@ let branch = {choice} -> match choice is
 
 # Function that closes over open variant
 let handleWithDefault = {opt} -> match opt is
-  Some {x} -> x
+  Some {val} -> val
   None -> 42
-  _ -> 0                                                        # expected: handleWithDefault : { opt: | Some { x: Int }, None, ... | } -> Int
+  _ -> 0                                                        # expected: handleWithDefault : { opt: | Some { val: Int }, None, ... | } -> Int
 
 # Closed variant with polymorphic operations
 let closedMath = {op, x, y} -> match op is

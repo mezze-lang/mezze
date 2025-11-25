@@ -2,7 +2,7 @@
 
 pub effect FileSystem {
     read_file: { path: String } -> Result String | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, IOError { path: String, message: String } | <FileSystem>,
-    write_file: { path: String, content: String } -> Result {} | PermissionDenied { path: String, operation: String }, IOError { path: String, message: String }, DiskFull { path: String, bytes_needed: Int } | <FileSystem>,
+    write_file: { path: String, content: String } -> Result {} | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, IOError { path: String, message: String }, DiskFull { path: String, bytes_needed: Int } | <FileSystem>,
     exists: { path: String } -> Result Bool | PermissionDenied { path: String, operation: String }, IOError { path: String, message: String } | <FileSystem>,
     delete: { path: String } -> Result {} | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, DirectoryNotEmpty { path: String }, IOError { path: String, message: String } | <FileSystem>,
     list_directory: { path: String } -> Result [String] | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, NotADirectory { path: String }, IOError { path: String, message: String } | <FileSystem>,

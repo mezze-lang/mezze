@@ -67,7 +67,7 @@ let withWildcard = {opt, x, y} -> match opt is
 
 # Guard with operations
 let guardedOp = {val, x, y} -> match val is
-  Some {v} if v > 0 -> x + y
-  _ -> x - y                                                    # expected: guardedOp : { val: | Some { v: Int }, ... |, x: 'a, y: 'a } with NumAdd 'a, NumSub 'a -> 'a
+  Some {val} if val > 0 -> x + y
+  _ -> x - y                                                    # expected: guardedOp : { val: | Some { val: Int }, ... |, x: 'a, y: 'a } with NumAdd 'a, NumSub 'a -> 'a
 
 addOrSub {flag = True, x = 5, y = 3}

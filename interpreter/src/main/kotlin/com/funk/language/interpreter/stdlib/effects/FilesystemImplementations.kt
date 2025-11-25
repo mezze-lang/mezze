@@ -50,13 +50,31 @@ object FilesystemImplementations {
 
             try {
                 val file = java.io.File(path.value)
-                // Check if we have permission to write
+
+                // Check if the file exists and we can't write to it
                 if (file.exists() && !file.canWrite()) {
                     return@NativeFunkFunction createFileSystemError("PermissionDenied", mapOf(
                         "path" to FunkString(path.value),
                         "operation" to FunkString("write")
                     ))
                 }
+
+                // Check if parent directory exists and is writable
+                val parentDir = file.parentFile
+                if (parentDir != null) {
+                    if (!parentDir.exists()) {
+                        return@NativeFunkFunction createFileSystemError("FileNotFound", mapOf(
+                            "path" to FunkString(path.value)
+                        ))
+                    }
+                    if (!parentDir.canWrite()) {
+                        return@NativeFunkFunction createFileSystemError("PermissionDenied", mapOf(
+                            "path" to FunkString(path.value),
+                            "operation" to FunkString("write")
+                        ))
+                    }
+                }
+
                 file.writeText(content.value)
                 createOk(FunkRecord(emptyMap()))
             } catch (e: FileNotFoundException) {

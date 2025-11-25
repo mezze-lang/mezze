@@ -295,7 +295,7 @@ class ComprehensivePatternMatchingTest {
             let is_ok = {result} ->
                 match result is
                   Ok { val } -> true
-                  Err { err } -> false
+                  Err { error } -> false
 
             let result = is_ok { result = Ok { val = 42 } }
         """.trimIndent()
@@ -975,7 +975,7 @@ class ComprehensivePatternMatchingTest {
                   Ok { val } -> match val is
                                   Some { val = x } -> x
                                   None -> 0
-                  Err { msg } -> 0
+                  Err { error } -> 0
             let result = handle_result { res = Ok { val = Some { val = 42 } } }
         """.trimIndent()
 
@@ -1047,7 +1047,7 @@ class ComprehensivePatternMatchingTest {
                 match data is
                   Ok { val = { status = 200 } } -> "success"
                   Ok { val } -> "ok but not 200"
-                  Err { code } -> "error"
+                  Err { error } -> "error"
                   _ -> "unknown"
             let result = handle { data = Ok { val = { status = 200 } } }
         """.trimIndent()
