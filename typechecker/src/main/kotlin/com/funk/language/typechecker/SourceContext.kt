@@ -91,25 +91,61 @@ object SourceContext {
         // Show lines with context
         for (lineNum in startLine..endLine) {
             val lineContent = lines[lineNum - 1]
+            // Expand tabs to spaces for consistent alignment (tabs = 4 spaces)
+            val displayContent = expandTabs(lineContent)
             val lineNumStr = lineNum.toString().padStart(lineNumberWidth)
 
             if (lineNum == errorLine) {
                 // Error line - show with marker
-                sb.appendLine(" $lineNumStr | $lineContent")
+                sb.appendLine(" $lineNumStr | $displayContent")
 
-                // Show error pointer
+                // Show error pointer - calculate visual column accounting for tabs
                 val padding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
-                val pointer = " ".repeat(maxOf(0, errorColumn - 1)) + "^"
+                val visualColumn = calculateVisualColumn(lineContent, errorColumn)
+                val pointer = " ".repeat(maxOf(0, visualColumn - 1)) + "^"
                 sb.appendLine("$padding$pointer")
             } else {
                 // Context line
-                sb.appendLine(" $lineNumStr | $lineContent")
+                sb.appendLine(" $lineNumStr | $displayContent")
             }
         }
 
         sb.appendLine("    |")
 
         return sb.toString()
+    }
+
+    /**
+     * Expand tab characters to spaces (4 spaces per tab)
+     */
+    private fun expandTabs(line: String, tabWidth: Int = 4): String {
+        val result = StringBuilder()
+        for (char in line) {
+            if (char == '\t') {
+                // Add spaces to next tab stop
+                val spacesToAdd = tabWidth - (result.length % tabWidth)
+                result.append(" ".repeat(spacesToAdd))
+            } else {
+                result.append(char)
+            }
+        }
+        return result.toString()
+    }
+
+    /**
+     * Calculate the visual column position accounting for tab characters
+     */
+    private fun calculateVisualColumn(line: String, column: Int, tabWidth: Int = 4): Int {
+        var visualCol = 1
+        for (i in 0 until minOf(column - 1, line.length)) {
+            if (line[i] == '\t') {
+                // Move to next tab stop
+                visualCol += tabWidth - ((visualCol - 1) % tabWidth)
+            } else {
+                visualCol++
+            }
+        }
+        return visualCol
     }
 
     /**
@@ -144,19 +180,22 @@ object SourceContext {
         // Show lines with context
         for (lineNum in startLine..endLine) {
             val lineContent = lines[lineNum - 1]
+            // Expand tabs to spaces for consistent alignment (tabs = 4 spaces)
+            val displayContent = expandTabs(lineContent)
             val lineNumStr = lineNum.toString().padStart(lineNumberWidth)
 
             if (lineNum == errorLine) {
                 // Error line - show with marker
-                sb.appendLine(" $lineNumStr | $lineContent")
+                sb.appendLine(" $lineNumStr | $displayContent")
 
-                // Show error underline
+                // Show error underline - calculate visual column accounting for tabs
                 val padding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
-                val underline = " ".repeat(maxOf(0, errorColumn - 1)) + "^".repeat(maxOf(1, spanLength))
+                val visualColumn = calculateVisualColumn(lineContent, errorColumn)
+                val underline = " ".repeat(maxOf(0, visualColumn - 1)) + "^".repeat(maxOf(1, spanLength))
                 sb.appendLine("$padding$underline")
             } else {
                 // Context line
-                sb.appendLine(" $lineNumStr | $lineContent")
+                sb.appendLine(" $lineNumStr | $displayContent")
             }
         }
 

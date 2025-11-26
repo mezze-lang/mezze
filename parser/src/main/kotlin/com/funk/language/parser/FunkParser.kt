@@ -30,6 +30,72 @@ class FunkParser {
         return SourceLocation(stream.getSourceLine(), stream.getSourceColumn(), currentFile)
     }
 
+    /**
+     * Fix source locations for expressions parsed from string interpolations.
+     * This recursively updates sourceLocation fields to reflect the actual position in the original file.
+     */
+    private fun fixInterpolationSourceLocation(expr: Expression, lineOffset: Int, columnOffset: Int, file: String?): Expression {
+        return when (expr) {
+            is Identifier -> {
+                val newLoc = expr.sourceLocation?.let { loc ->
+                    if (loc.line == 1) {
+                        SourceLocation(lineOffset, columnOffset + loc.column - 1, file)
+                    } else {
+                        SourceLocation(lineOffset + loc.line - 1, loc.column, file)
+                    }
+                }
+                expr.copy(sourceLocation = newLoc)
+            }
+            is FunctionCall -> {
+                val newFunc = fixInterpolationSourceLocation(expr.function, lineOffset, columnOffset, file)
+                val newArgs = fixInterpolationSourceLocation(expr.arguments, lineOffset, columnOffset, file)
+                val newLoc = expr.sourceLocation?.let { loc ->
+                    if (loc.line == 1) {
+                        SourceLocation(lineOffset, columnOffset + loc.column - 1, file)
+                    } else {
+                        SourceLocation(lineOffset + loc.line - 1, loc.column, file)
+                    }
+                }
+                expr.copy(function = newFunc, arguments = newArgs, sourceLocation = newLoc)
+            }
+            is RecordLiteral -> {
+                val newEntries = expr.entries.map { entry ->
+                    when (entry) {
+                        is RecordFieldEntry -> {
+                            entry.value?.let { v ->
+                                RecordFieldEntry(entry.name, fixInterpolationSourceLocation(v, lineOffset, columnOffset, file))
+                            } ?: entry
+                        }
+                        is RecordSpreadEntry -> {
+                            RecordSpreadEntry(fixInterpolationSourceLocation(entry.expression, lineOffset, columnOffset, file))
+                        }
+                    }
+                }
+                val newLoc = expr.sourceLocation?.let { loc ->
+                    if (loc.line == 1) {
+                        SourceLocation(lineOffset, columnOffset + loc.column - 1, file)
+                    } else {
+                        SourceLocation(lineOffset + loc.line - 1, loc.column, file)
+                    }
+                }
+                expr.copy(entries = newEntries, sourceLocation = newLoc)
+            }
+            is MemberAccess -> {
+                val newReceiver = fixInterpolationSourceLocation(expr.receiver, lineOffset, columnOffset, file)
+                val newLoc = expr.sourceLocation?.let { loc ->
+                    if (loc.line == 1) {
+                        SourceLocation(lineOffset, columnOffset + loc.column - 1, file)
+                    } else {
+                        SourceLocation(lineOffset + loc.line - 1, loc.column, file)
+                    }
+                }
+                expr.copy(receiver = newReceiver, sourceLocation = newLoc)
+            }
+            // For other expression types, just update the top-level location
+            else -> expr
+        }
+    }
+
     fun parse(source: String, desugar: Boolean = true, file: String? = null): Program {
         // Store for error reporting in nested parser methods
         currentSource = source
@@ -1034,7 +1100,17 @@ class FunkParser {
                                                 ),
                                                 rbrace.remaining
                                             )
-                                            is ParseResult.Failure -> rbrace
+                                            is ParseResult.Failure -> {
+                                                // If we parsed no operations and see an identifier, try parsing an operation to get a better error
+                                                if (operations.isEmpty() && stream6.current()?.type == TokenType.IDENTIFIER) {
+                                                    when (val opError = abilityOperationParser(stream6)) {
+                                                        is ParseResult.Failure -> opError  // Return the more specific operation parsing error
+                                                        is ParseResult.Success -> rbrace  // Shouldn't happen, but return generic error
+                                                    }
+                                                } else {
+                                                    rbrace
+                                                }
+                                            }
                                         }
                                     }
                                     is ParseResult.Failure -> lbrace
@@ -3195,7 +3271,23 @@ class FunkParser {
                             is ParseResult.Failure -> typeAnnotation
                         }
                     }
-                    is ParseResult.Failure -> colon
+                    is ParseResult.Failure -> {
+                        // Provide a helpful error message when type annotation is missing
+                        val fieldName = ident.value.text
+                        val nextToken = ident.remaining.current()
+                        val message = when (nextToken?.type) {
+                            TokenType.RBRACE ->
+                                "Record type field '$fieldName' is missing a type annotation.\n" +
+                                "Expected format: { $fieldName: Type }"
+                            TokenType.COMMA ->
+                                "Record type field '$fieldName' is missing a type annotation.\n" +
+                                "Expected format: { $fieldName: Type, ... }"
+                            else ->
+                                "Record type field '$fieldName' is missing a type annotation.\n" +
+                                "Expected ':' followed by a type, but got ${nextToken?.type}"
+                        }
+                        ident.remaining.failure(message)
+                    }
                 }
             }
             is ParseResult.Failure -> ident
@@ -3458,34 +3550,67 @@ class FunkParser {
                     is ParseResult.Success -> {
                         val stream2 = skipNewlines(entries.remaining)
 
-                        // Check for optional comma before ellipsis
-                        val afterComma = if (stream2.current()?.type == TokenType.COMMA) {
-                            skipNewlines(stream2.advance())
+                        // If we parsed zero entries but see an identifier, it means we failed to parse a record type entry
+                        // This happens when someone writes { fieldName } instead of { fieldName: Type }
+                        if (entries.value.isEmpty() && stream2.current()?.type == TokenType.IDENTIFIER) {
+                            val fieldName = stream2.current()?.text ?: "field"
+                            val message = "Record type field '$fieldName' is missing a type annotation.\n" +
+                                         "Expected format: { $fieldName: Type }"
+                            stream2.failure(message)
                         } else {
-                            stream2
-                        }
+                            // Check for optional comma before ellipsis
+                            val afterComma = if (stream2.current()?.type == TokenType.COMMA) {
+                                skipNewlines(stream2.advance())
+                            } else {
+                                stream2
+                            }
 
-                        // Check for ellipsis (open record marker: ...)
-                        val restField = if (afterComma.current()?.type == TokenType.ELLIPSIS) {
-                            "..."  // Marker for open record
-                        } else {
-                            null  // Closed record
-                        }
+                            // Check for ellipsis (open record marker: ...)
+                            val restField = if (afterComma.current()?.type == TokenType.ELLIPSIS) {
+                                "..."  // Marker for open record
+                            } else {
+                                null  // Closed record
+                            }
 
-                        val stream3 = if (restField != null) {
-                            skipNewlines(afterComma.advance())  // Skip the ellipsis token
-                        } else {
-                            afterComma
-                        }
+                            val stream3 = if (restField != null) {
+                                skipNewlines(afterComma.advance())  // Skip the ellipsis token
+                            } else {
+                                afterComma
+                            }
 
-                        val rbrace = tok(TokenType.RBRACE)(stream3)
+                            val rbrace = tok(TokenType.RBRACE)(stream3)
 
-                        when (rbrace) {
-                            is ParseResult.Success -> ParseResult.Success(
-                                RecordTypeAnnotation(entries.value, restField),
-                                rbrace.remaining
-                            )
-                            is ParseResult.Failure -> rbrace
+                            when (rbrace) {
+                                is ParseResult.Success -> ParseResult.Success(
+                                    RecordTypeAnnotation(entries.value, restField),
+                                    rbrace.remaining
+                                )
+                                is ParseResult.Failure -> {
+                                    // Provide helpful error when closing brace is not found
+                                    val currentToken = stream3.current()
+                                    when (currentToken?.type) {
+                                        TokenType.IDENTIFIER -> {
+                                            // Most likely a field without type annotation
+                                            val fieldName = currentToken.text
+                                            val message = "Record type field '$fieldName' is missing a type annotation.\n" +
+                                                         "Expected format: { $fieldName: Type }"
+                                            stream3.failure(message)
+                                        }
+                                        TokenType.COMMA -> {
+                                            // Trailing comma or malformed entry after comma
+                                            val message = "Unexpected comma in record type. " +
+                                                         "Record type fields must have format: { field: Type }"
+                                            stream3.failure(message)
+                                        }
+                                        else -> {
+                                            // Generic error
+                                            val message = "Expected closing '}' for record type, but got ${currentToken?.type}.\n" +
+                                                         "Record type fields must have format: { field: Type }"
+                                            stream3.failure(message)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     is ParseResult.Failure -> entries
@@ -3747,11 +3872,26 @@ class FunkParser {
                 val exprContent = content.substring(exprStart, i)
                 if (i < content.length) i++  // Skip the closing )
 
+                // Calculate line and column offset for error reporting
+                var lineOffset = location?.line ?: 1
+                var columnOffset = (location?.column ?: 1) + 1  // +1 for opening quote
+
+                // Count newlines and track column before the interpolation
+                for (j in 0 until exprStart) {
+                    if (content[j] == '\n') {
+                        lineOffset++
+                        columnOffset = 1
+                    } else {
+                        columnOffset++
+                    }
+                }
+                columnOffset += 2  // Add 2 for "$("
+
                 // Parse the expression content
                 val exprParser = FunkParser()
                 try {
                     // We need to parse just the expression, so wrap it to make it a valid program
-                    val exprProgram = exprParser.parse(exprContent, desugar = true)
+                    val exprProgram = exprParser.parse(exprContent, desugar = true, file = location?.file)
                     val expr = when (val firstItem = exprProgram.items.firstOrNull()) {
                         is TopLevelExpression -> firstItem.expression
                         is LetBinding -> firstItem.expression
@@ -3760,7 +3900,10 @@ class FunkParser {
                             stream.getSourcePosition()
                         )
                     }
-                    parts.add(ExpressionPart(expr))
+
+                    // Fix source locations for better error reporting
+                    val fixedExpr = fixInterpolationSourceLocation(expr, lineOffset, columnOffset, location?.file)
+                    parts.add(ExpressionPart(fixedExpr))
                 } catch (e: ParseException) {
                     return ParseResult.Failure(
                         "Failed to parse interpolated expression '$exprContent': ${e.message}",

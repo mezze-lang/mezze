@@ -89,8 +89,9 @@ object Parsers {
     }
 
     // Choice with multiple alternatives
+    // Returns the error from the parser that made the most progress (consumed most input)
     fun <T> oneOf(vararg parsers: Parser<T>): Parser<T> = { stream ->
-        var lastFailure: ParseResult.Failure? = null
+        var bestFailure: ParseResult.Failure? = null
         var result: ParseResult<T>? = null
         for (parser in parsers) {
             when (val r = parser(stream)) {
@@ -98,10 +99,15 @@ object Parsers {
                     result = r
                     break
                 }
-                is ParseResult.Failure -> lastFailure = r
+                is ParseResult.Failure -> {
+                    // Keep the failure that made the most progress
+                    if (bestFailure == null || r.position > bestFailure.position) {
+                        bestFailure = r
+                    }
+                }
             }
         }
-        result ?: (lastFailure ?: stream.failure("No alternatives matched"))
+        result ?: (bestFailure ?: stream.failure("No alternatives matched"))
     }
 
     // Map: transform the result
