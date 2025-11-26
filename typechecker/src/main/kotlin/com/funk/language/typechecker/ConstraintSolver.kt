@@ -443,6 +443,91 @@ class ConstraintSolver(
 
         return substitution
     }
+
+    /**
+     * Solve constraints with bidirectional type flow from usage constraints
+     *
+     * This is the main entry point for bidirectional type inference. It takes both
+     * regular constraints (from forward type inference) and usage constraints (from
+     * backward type propagation) and solves them together.
+     *
+     * Example:
+     *   let parse = {str} -> Decode.decode {value = str}
+     *   let x = parse {str = "123"}
+     *   let y = x + 10
+     *
+     * Regular constraints: parse returns 'a with Decode 'a
+     * Usage constraints: x (which has type 'a) is used with +, so 'a = Int
+     * Result: parse : {str: String} -> Int with Decode Int
+     *
+     * @param regularConstraints Constraints from forward type inference
+     * @param usageConstraints Constraints from usage patterns (bidirectional)
+     * @return The most general unifier incorporating both constraint types
+     */
+    fun solveWithUsageFlow(
+        regularConstraints: List<Constraint>,
+        usageConstraints: List<com.funk.language.ast.UsageConstraint>
+    ): Substitution {
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("\n🔄 BIDIRECTIONAL SOLVING:")
+            println("   Regular constraints: ${regularConstraints.size}")
+            println("   Usage constraints: ${usageConstraints.size}")
+        }
+
+        // Step 1: Solve regular constraints first (forward inference)
+        var substitution = solve(regularConstraints)
+
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("   After forward solving: ${substitution.mapping.size} mappings")
+        }
+
+        // Step 2: Apply usage constraints (backward propagation)
+        val additionalConstraints = mutableListOf<Constraint>()
+
+        for (usageConstraint in usageConstraints) {
+            // Apply current substitution to get the most up-to-date types
+            val typeVarType = substitution.apply(FunkType.VarType(usageConstraint.typeVar))
+            val inferredType = substitution.apply(usageConstraint.inferredType)
+
+            // Only create constraint if the type variable is still unresolved
+            if (typeVarType is FunkType.VarType) {
+                // Check for circular constraint (would create infinite type)
+                if (!occursCheck(typeVarType.variable, inferredType)) {
+                    additionalConstraints.add(Constraint.Equality(typeVarType, inferredType))
+
+                    if (System.getProperty("funk.typecheck.debug") == "true") {
+                        println("   Usage: ${typeVarType.variable.name} = ${prettyPrintType(inferredType)}")
+                        println("     Context: ${usageConstraint.usageContext::class.simpleName}")
+                    }
+                } else {
+                    if (System.getProperty("funk.typecheck.debug") == "true") {
+                        println("   Skipping circular usage constraint: ${typeVarType.variable.name} occurs in ${prettyPrintType(inferredType)}")
+                    }
+                }
+            } else {
+                if (System.getProperty("funk.typecheck.debug") == "true") {
+                    println("   Skipping already resolved type variable: ${usageConstraint.typeVar.name} = ${prettyPrintType(typeVarType)}")
+                }
+            }
+        }
+
+        // Step 3: Solve the additional constraints if any were created
+        if (additionalConstraints.isNotEmpty()) {
+            val additionalSubstitution = solve(additionalConstraints)
+            val combinedSubstitution = substitution.compose(additionalSubstitution)
+
+            if (System.getProperty("funk.typecheck.debug") == "true") {
+                println("   After bidirectional solving: ${combinedSubstitution.mapping.size} mappings")
+                for ((typeVar, type) in combinedSubstitution.mapping) {
+                    println("     ${typeVar.name} -> ${prettyPrintType(type)}")
+                }
+            }
+
+            return combinedSubstitution
+        }
+
+        return substitution
+    }
     
     /**
      * Apply aggressive constraint propagation to ensure related type variables get unified
