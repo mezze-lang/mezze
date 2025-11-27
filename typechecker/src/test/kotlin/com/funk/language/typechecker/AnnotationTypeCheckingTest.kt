@@ -970,10 +970,10 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test function missing required ability fails`() {
-        // Annotation says it requires Inspect but implementation doesn't use it
+        // Annotation says it requires NumAdd but implementation doesn't use it
         assertTypeCheckFails(
             """
-            let wrong: { x: 'a } with Inspect 'a -> String = {x} -> "hello"
+            let wrong: { x: 'a } with NumAdd 'a -> 'a = {x} -> x
             wrong {x = 42}
             """.trimIndent()
         )
@@ -981,10 +981,10 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test function using ability not in annotation fails`() {
-        // Implementation uses Inspect but annotation doesn't declare it
+        // Implementation uses NumAdd but annotation doesn't declare it
         assertTypeCheckFails(
             """
-            let wrong: { x: 'a } -> String = {x} -> Inspect.to_str {val = x}
+            let wrong: { x: 'a } -> 'a = {x} -> x + x
             wrong {x = 42}
             """.trimIndent()
         )
@@ -1006,12 +1006,10 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test function with ability on wrong type variable fails`() {
-        // Annotation says Inspect 'b but implementation uses it on 'a
+        // Annotation says NumAdd 'b but implementation uses it on 'a
         assertTypeCheckFails(
             """
-            let wrong: { a: 'a, b: 'b } with Inspect 'b -> 'a = {a, b} -> do
-              Inspect.to_str {val = a}
-              a
+            let wrong: { a: 'a, b: 'b } with NumAdd 'b -> 'a = {a, b} -> a + a
             wrong {a = 1, b = "hello"}
             """.trimIndent()
         )

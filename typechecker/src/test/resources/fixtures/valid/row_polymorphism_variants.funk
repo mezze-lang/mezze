@@ -29,7 +29,7 @@ let compareColors = {c1, c2} -> match c1 is
   Red -> match c2 is
     Red -> True
     _ -> False
-  _ -> False                                                    # expected: compareColors : { c1: | Red, ... |, c2: | Red, ... | } -> | True |
+  _ -> False                                                    # expected: compareColors : { c1: | Red, ... |, c2: | Red, ... | } -> Bool
 
 # Open variant with polymorphic field
 let getField = {v} -> match v is

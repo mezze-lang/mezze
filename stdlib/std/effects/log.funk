@@ -7,7 +7,8 @@ pub effect Log {
     debug: { msg: String } -> {},
     trace: { msg: String } -> {},
     print: { msg: String } -> {},
-    println: { msg: String } -> {} }
+    println: { msg: String } -> {} 
+}
 
 # Console-based logging implementation (runs in virtual threads)
 pub impl Log for Console where {

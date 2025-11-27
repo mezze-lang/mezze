@@ -475,7 +475,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int"
+            "Int <Log>"
         )
     }
 

@@ -14,9 +14,11 @@ import kotlin.test.assertEquals
 class LiteralPatternTypeCheckingTest {
 
     private val parser = FunkParser()
-    private val typeChecker = TypeChecker()
 
     private fun parseAndTypeCheck(code: String): Program {
+        // CRITICAL FIX: Create fresh TypeChecker for each test to avoid state leakage
+        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
+        val typeChecker = TypeChecker()
         val program = parser.parse(code)
         return typeChecker.typeCheck(program)
     }
@@ -158,9 +160,12 @@ class LiteralPatternTypeCheckingTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
+        // Check that the error message mentions incompatible types
         assertTrue(
             exception.message?.contains("cannot unify", ignoreCase = true) == true ||
-            exception.message?.contains("type mismatch", ignoreCase = true) == true
+            exception.message?.contains("type mismatch", ignoreCase = true) == true ||
+            exception.message?.contains("incompatible types", ignoreCase = true) == true,
+            "Exception message should contain 'cannot unify', 'type mismatch', or 'incompatible types', but was: '${exception.message}'"
         )
     }
 

@@ -3360,7 +3360,7 @@ class FunkParser {
 
             if (arrow?.type == TokenType.ARROW) {
                 val arrowStream = currentStream.advance()
-                val returnType = primaryTypeAnnotation(arrowStream)
+                val returnType = functionTypeAnnotation(arrowStream)
 
                 result = when (returnType) {
                     is ParseResult.Success -> {

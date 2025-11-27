@@ -115,15 +115,27 @@ class TypeCheckerComprehensiveTest {
                         "function_parameter_inference" -> {
                             val bindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
                             val addBinding = bindings.find { it.variableName == "add" }
-                            val concatBinding = bindings.find { it.variableName == "concat" }
-                            
-                            assertTrue(addBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType)
-                            assertTrue(concatBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType)
+                            val getAgeBinding = bindings.find { it.variableName == "getAge" }
+                            val processUserBinding = bindings.find { it.variableName == "processUser" }
 
-                            val addType = addBinding?.inferredType as com.funk.language.ast.FunkType.FunctionType
+                            // Check that functions have function types
+                            assertTrue(addBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType,
+                                "add should be a function type")
+                            assertTrue(getAgeBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType,
+                                "getAge should be a function type")
+                            assertTrue(processUserBinding?.inferredType is com.funk.language.ast.FunkType.FunctionType,
+                                "processUser should be a function type")
+
                             // add = {x, y} -> x + y should infer some numeric type (VarType or concrete IntType)
+                            val addType = addBinding?.inferredType as com.funk.language.ast.FunkType.FunctionType
                             assertTrue(addType.returnType is com.funk.language.ast.FunkType.IntType ||
-                                      addType.returnType is com.funk.language.ast.FunkType.VarType)
+                                      addType.returnType is com.funk.language.ast.FunkType.VarType,
+                                "add return type should be Int or VarType, but was: ${addType.returnType}")
+
+                            // processUser returns String
+                            val processUserType = processUserBinding?.inferredType as com.funk.language.ast.FunkType.FunctionType
+                            assertEquals(com.funk.language.ast.FunkType.StringType, processUserType.returnType,
+                                "processUser should return String")
                         }
                         
                         "variant_inference_from_match" -> {
