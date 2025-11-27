@@ -2244,7 +2244,17 @@ class FunkParser {
                                 // If the next token is within the do block scope (higher column), it's a statement
                                 // Otherwise, this expression is the final result
                                 val nextToken = streamAfterExpr.current()
-                                if (nextToken != null && nextToken.type != TokenType.EOF && doBlockColumn != null && nextToken.column >= doBlockColumn) {
+
+                                // Tokens that terminate a do block even if they're at the right indentation
+                                // (e.g., comma in impl blocks, closing braces, etc.)
+                                val isTerminatingToken = nextToken?.type in setOf(
+                                    TokenType.COMMA,
+                                    TokenType.RBRACE,
+                                    TokenType.RPAREN,
+                                    TokenType.RBRACKET
+                                )
+
+                                if (nextToken != null && nextToken.type != TokenType.EOF && doBlockColumn != null && nextToken.column >= doBlockColumn && !isTerminatingToken) {
                                     // Next token is still inside the do block, so current expression is a statement
                                     statements.add(ExpressionStatement(expr.value))
                                     currentStream = streamAfterExpr
