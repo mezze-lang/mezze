@@ -162,7 +162,7 @@ class FixtureBasedTypeCheckerTest {
     @Test fun `valid - edge_cases`() = testValidFixture("edge_cases.funk")
     @Test fun `valid - exhaustive_match`() = testValidFixture("exhaustive_match.funk")
     @Test fun `valid - fraction_arithmetic`() = testValidFixture("fraction_arithmetic.funk")
-    @Disabled @Test fun `valid - inspect_ability`() = testValidFixture("inspect_ability.funk")
+    @Test fun `valid - inspect_ability`() = testValidFixture("inspect_ability.funk")
     @Test fun `valid - int_type_constraints`() = testValidFixture("int_type_constraints.funk")
     @Test fun `valid - match_ability_constraints`() = testValidFixture("match_ability_constraints.funk")
     @Test fun `valid - match_constraint_unification`() = testValidFixture("match_constraint_unification.funk")

@@ -33,7 +33,8 @@ let unifyAll = {v, r, x, y} -> match v is
 
 # Multiple operations same variables
 let multiOp = {x, y} -> match True is
-  True -> x + y - x * y                                         # expected: multiOp : { x: 'a, y: 'a } with NumSub 'a, NumAdd 'a, NumMul 'a -> 'a
+  True -> x + y - x * y
+  False -> x                                                    # expected: multiOp : { x: 'a, y: 'a } with NumSub 'a, NumAdd 'a, NumMul 'a -> 'a
 
 # Transitive unification through operations
 let transitive = {a, b, c} -> match True is

@@ -135,9 +135,13 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
         "$valueTypeStr <$effectList>"
     }
     is FunkType.FunctionType -> {
-        // Build parameter type string
-        val paramTypeStr = prettyPrintTypeWithMapping(type.paramType, typeVarMapping)
-        
+        // Build parameter type string - add parentheses if parameter is also a function type
+        val paramTypeStr = if (type.paramType is FunkType.FunctionType) {
+            "(${prettyPrintTypeWithMapping(type.paramType, typeVarMapping)})"
+        } else {
+            prettyPrintTypeWithMapping(type.paramType, typeVarMapping)
+        }
+
         // Add ability constraints after parameter type but before arrow
         val abilityConstraints = if (type.abilityConstraints.isNotEmpty()) {
             " with " + type.abilityConstraints.joinToString(", ") { constraint ->
@@ -151,7 +155,7 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
         } else {
             ""
         }
-        
+
         // Build return type string
         val returnTypeStr = prettyPrintTypeWithMapping(type.returnType, typeVarMapping)
         
@@ -445,8 +449,12 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is FunkType.MapType -> "Map ${prettyPrintWithAliasCheck(type.keyType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
     is FunkType.SetType -> "Set ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
     is FunkType.FunctionType -> {
-        // Build parameter type string
-        val paramTypeStr = prettyPrintWithAliasCheck(type.paramType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+        // Build parameter type string - add parentheses if parameter is also a function type
+        val paramTypeStr = if (type.paramType is FunkType.FunctionType) {
+            "(${prettyPrintWithAliasCheck(type.paramType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)})"
+        } else {
+            prettyPrintWithAliasCheck(type.paramType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+        }
 
         // Add ability constraints after parameter type but before arrow
         val abilityConstraints = if (type.abilityConstraints.isNotEmpty()) {

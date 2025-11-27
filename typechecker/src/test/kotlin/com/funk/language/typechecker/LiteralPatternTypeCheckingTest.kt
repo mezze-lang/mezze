@@ -145,7 +145,7 @@ class LiteralPatternTypeCheckingTest {
     // ========== Mixed Literal and Variable Patterns ==========
 
     @Test
-    fun `should accept mixed literal and variable patterns`() {
+    fun `should reject mixed literal and variable patterns with incompatible types`() {
         val code = """
             let process = {n} ->
                 match n is
@@ -154,8 +154,14 @@ class LiteralPatternTypeCheckingTest {
             let result = process { n = 5 }
         """.trimIndent()
 
-        val program = parseAndTypeCheck(code)
-        assertNotNull(program)
+        // This should fail because branches return incompatible types: String vs Int
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(
+            exception.message?.contains("cannot unify", ignoreCase = true) == true ||
+            exception.message?.contains("type mismatch", ignoreCase = true) == true
+        )
     }
 
     // ========== Nested Match with Literal Patterns ==========

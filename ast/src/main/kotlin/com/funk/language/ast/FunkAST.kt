@@ -301,30 +301,36 @@ object BuiltinAbilityDefinitions {
 @Serializable
 @JsonClassDiscriminator("typeKind")
 sealed interface FunkType {
+    companion object {
+        // Thread-local to track nesting depth to prevent infinite recursion in toString()
+        internal val toStringDepth = ThreadLocal.withInitial { 0 }
+        internal const val MAX_DEPTH = 10
+    }
+
     // Primitive types
     @Serializable
     object IntType : FunkType
-    
+
     @Serializable
-    object FloatType : FunkType 
-    
+    object FloatType : FunkType
+
     @Serializable
     object StringType : FunkType
-    
+
     @Serializable
     object BooleanType : FunkType
-    
+
     // Enhanced numeric types
     @Serializable
     object NatType : FunkType
-    
+
     @Serializable
     object FracType : FunkType
-    
+
     // Type variables (for inference)
     @Serializable
     data class VarType(val variable: TypeVar) : FunkType
-    
+
     // Record types
     @Serializable
     data class RecordType(
@@ -333,9 +339,29 @@ sealed interface FunkType {
     ) : FunkType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
+
+        override fun toString(): String {
+            val depth = FunkType.toStringDepth.get()
+            if (depth > MAX_DEPTH) {
+                return "RecordType{<max depth>}"
+            }
+            return try {
+                FunkType.toStringDepth.set(depth + 1)
+                if (depth > 3) {
+                    "RecordType{${fields.size} fields}"
+                } else {
+                    "RecordType(${fields.keys.take(3)}${if (fields.size > 3) "..." else ""})"
+                }
+            } catch (e: StackOverflowError) {
+                "RecordType{<StackOverflowError>}"
+            } finally {
+                FunkType.toStringDepth.set(depth)
+                if (depth == 0) FunkType.toStringDepth.remove()
+            }
+        }
     }
     
-    // Variant types  
+    // Variant types
     @Serializable
     data class VariantType(
         val constructors: Map<String, FunkType?>, // null = no data, FunkType = constructor data
@@ -343,6 +369,26 @@ sealed interface FunkType {
     ) : FunkType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
+
+        override fun toString(): String {
+            val depth = FunkType.toStringDepth.get()
+            if (depth > MAX_DEPTH) {
+                return "VariantType{<max depth>}"
+            }
+            return try {
+                FunkType.toStringDepth.set(depth + 1)
+                if (depth > 3) {
+                    "VariantType{${constructors.size} constructors}"
+                } else {
+                    "VariantType(${constructors.keys.take(3)}${if (constructors.size > 3) "..." else ""})"
+                }
+            } catch (e: StackOverflowError) {
+                "VariantType{<StackOverflowError>}"
+            } finally {
+                FunkType.toStringDepth.set(depth)
+                if (depth == 0) FunkType.toStringDepth.remove()
+            }
+        }
     }
     
     // Built-in core types (always available)
@@ -363,7 +409,27 @@ sealed interface FunkType {
     // Generic type application (e.g., Option Int, Result String Error, MyType 'a 'b)
     // This represents applying type arguments to a type constructor
     @Serializable
-    data class TypeApplication(val constructor: String, val args: List<FunkType>) : FunkType
+    data class TypeApplication(val constructor: String, val args: List<FunkType>) : FunkType {
+        override fun toString(): String {
+            val depth = FunkType.toStringDepth.get()
+            if (depth > MAX_DEPTH) {
+                return "TypeApplication{<max depth>}"
+            }
+            return try {
+                FunkType.toStringDepth.set(depth + 1)
+                if (depth > 3) {
+                    "TypeApplication($constructor, ${args.size} args)"
+                } else {
+                    "TypeApplication($constructor)"
+                }
+            } catch (e: StackOverflowError) {
+                "TypeApplication{<StackOverflowError>}"
+            } finally {
+                FunkType.toStringDepth.set(depth)
+                if (depth == 0) FunkType.toStringDepth.remove()
+            }
+        }
+    }
 
     // Built-in ordering type for comparisons
     @Serializable
@@ -384,7 +450,34 @@ sealed interface FunkType {
         val returnType: FunkType,
         val effects: EffectRow? = null,  // null = pure function, non-null = effectful function
         val abilityConstraints: List<FunctionAbilityConstraint> = emptyList()  // Ability constraints for this function
-    ) : FunkType
+    ) : FunkType {
+        override fun toString(): String {
+            val depth = FunkType.toStringDepth.get()
+            if (depth > MAX_DEPTH) {
+                return "FunctionType{<max depth>}"
+            }
+            return try {
+                FunkType.toStringDepth.set(depth + 1)
+                if (depth > 3) {
+                    "FunctionType{...}"
+                } else {
+                    val effectsStr = if (effects != null) {
+                        val effectList = effects.effects.take(3).joinToString(", ")
+                        val suffix = if (effects.effects.size > 3) ", ..." else ""
+                        " <$effectList$suffix>"
+                    } else {
+                        ""
+                    }
+                    "FunctionType(${if (effects != null) "effectful" else "pure"}$effectsStr)"
+                }
+            } catch (e: StackOverflowError) {
+                "FunctionType{<StackOverflowError>}"
+            } finally {
+                FunkType.toStringDepth.set(depth)
+                if (depth == 0) FunkType.toStringDepth.remove()
+            }
+        }
+    }
 
     // Suspended computation types (values with unhandled effects)
     // This represents a value of type valueType that has unhandled effects
@@ -394,7 +487,25 @@ sealed interface FunkType {
     data class SuspendedType(
         val valueType: FunkType,
         val effects: EffectRow
-    ) : FunkType
+    ) : FunkType {
+        override fun toString(): String {
+            val depth = FunkType.toStringDepth.get()
+            if (depth > MAX_DEPTH) {
+                return "SuspendedType{<max depth>}"
+            }
+            return try {
+                FunkType.toStringDepth.set(depth + 1)
+                val effectList = effects.effects.take(3).joinToString(", ")
+                val suffix = if (effects.effects.size > 3) ", ..." else ""
+                "SuspendedType($effectList$suffix)"
+            } catch (e: StackOverflowError) {
+                "SuspendedType{<StackOverflowError>}"
+            } finally {
+                FunkType.toStringDepth.set(depth)
+                if (depth == 0) FunkType.toStringDepth.remove()
+            }
+        }
+    }
 
     // Effect rows
     @Serializable
@@ -404,6 +515,24 @@ sealed interface FunkType {
     ) : FunkType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
+
+        override fun toString(): String {
+            val depth = FunkType.toStringDepth.get()
+            if (depth > MAX_DEPTH) {
+                return "EffectRow{<max depth>}"
+            }
+            return try {
+                FunkType.toStringDepth.set(depth + 1)
+                val effectList = effects.take(5).joinToString(", ")
+                val suffix = if (effects.size > 5) ", ..." else ""
+                "EffectRow($effectList$suffix)"
+            } catch (e: StackOverflowError) {
+                "EffectRow{<StackOverflowError>}"
+            } finally {
+                FunkType.toStringDepth.set(depth)
+                if (depth == 0) FunkType.toStringDepth.remove()
+            }
+        }
     }
     
     // Function-level ability constraints
@@ -580,7 +709,7 @@ data class TypeVar(val name: String, val level: Int = 0) {
 data class RowVar(val name: String) {
     companion object {
         private var counter = 0
-        
+
         fun fresh(): RowVar {
             val name = "row${counter}"
             counter++
@@ -588,6 +717,120 @@ data class RowVar(val name: String) {
         }
     }
 }
+
+// ============================================================================
+// BIDIRECTIONAL TYPE INFERENCE - USAGE CONSTRAINTS
+// ============================================================================
+
+/**
+ * Usage context - represents how a value is used in the program
+ *
+ * This is used for bidirectional type inference to propagate type information
+ * from usage sites back to definitions. For example, if we have:
+ *
+ *   let x = parse {str = "123"}
+ *   let y = x + 10
+ *
+ * The usage `x + 10` creates a UsageContext.BinaryOp that tells us
+ * x must be Int (because + requires NumAdd ability).
+ */
+@Serializable
+@JsonClassDiscriminator("usageContextKind")
+sealed interface UsageContext {
+    /**
+     * Type annotation usage - the value is annotated with an explicit type
+     * Example: let x: Int = ...
+     */
+    @Serializable
+    data class TypeAnnotation(val annotatedType: FunkType) : UsageContext
+
+    /**
+     * Binary operator usage - the value is used with a binary operator
+     * Example: x + 10 (x is left operand, operator is +, right operand type is Int)
+     */
+    @Serializable
+    data class BinaryOp(
+        val operator: String,
+        val position: OperandPosition,  // LEFT or RIGHT
+        val otherOperandType: FunkType
+    ) : UsageContext
+
+    /**
+     * Field access usage - a specific field is accessed on the value
+     * Example: user.name (implies user must be a record with a `name` field)
+     */
+    @Serializable
+    data class FieldAccess(
+        val fieldName: String,
+        val expectedFieldType: FunkType
+    ) : UsageContext
+
+    /**
+     * Function call usage - the value is called as a function
+     * Example: f {x = 10} (implies f must be a function taking {x: Int})
+     */
+    @Serializable
+    data class FunctionCall(
+        val argumentType: FunkType,
+        val expectedReturnType: FunkType? = null
+    ) : UsageContext
+
+    /**
+     * Match pattern usage - the value is matched against a pattern
+     * Example: match x { Some {val} -> ... } (implies x must be Option type)
+     */
+    @Serializable
+    data class MatchPattern(
+        val constructorName: String,
+        val constructorDataType: FunkType?
+    ) : UsageContext
+
+    /**
+     * Function return usage - the value is returned from a function
+     * This propagates the expected return type into the expression
+     */
+    @Serializable
+    data class FunctionReturn(
+        val expectedReturnType: FunkType
+    ) : UsageContext
+}
+
+/**
+ * Position of an operand in a binary operation
+ */
+@Serializable
+enum class OperandPosition {
+    LEFT,   // Left operand (e.g., x in `x + 10`)
+    RIGHT   // Right operand (e.g., x in `10 + x`)
+}
+
+/**
+ * Usage constraint - links a type variable to how it's used
+ *
+ * These constraints are collected during type inference and used to
+ * propagate type information backwards from usage sites to definitions.
+ *
+ * Example:
+ *   let parse = {str} -> Decode.decode {value = str}
+ *   let x = parse {str = "123"}
+ *   let y = x + 10
+ *
+ * This generates a UsageConstraint:
+ *   - typeVar: the type variable for 'x'
+ *   - usageContext: BinaryOp("+", LEFT, Int)
+ *   - inferredType: Int
+ *   - sourceLocation: location of `x + 10`
+ *
+ * The constraint solver can then use this to infer that x : Int,
+ * and therefore parse must return Int, and therefore Decode Int is needed.
+ */
+@Serializable
+data class UsageConstraint(
+    val typeVar: TypeVar,
+    val usageContext: UsageContext,
+    val inferredType: FunkType,
+    val sourceLocation: SourceLocation? = null
+)
 
 // ============================================================================
 // PROGRAM STRUCTURE

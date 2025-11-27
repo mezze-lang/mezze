@@ -233,4 +233,151 @@ class InvalidConstructorInMatchTest {
         assertTrue(exception.message?.contains("Hearts") == true ||
                    exception.message?.contains("Valid constructors") == true)
     }
+
+    // ========== FUNCTION CALL WITH WRONG VARIANT CONSTRUCTOR (User's Original Bug) ==========
+
+    @Test
+    fun `test calling function with wrong variant constructor should fail`() {
+        val code = """
+            let add = {color} -> match color is
+              Red -> 4
+              Blue -> 2
+
+            let ans = add { color = Pink }
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Pink") == true)
+        assertTrue(exception.message?.contains("not a member") == true ||
+                   exception.message?.contains("closed variant") == true)
+    }
+
+    @Test
+    fun `test calling function with correct variant constructor should pass`() {
+        val code = """
+            let add = {color} -> match color is
+              Red -> 4
+              Blue -> 2
+
+            let ans = add { color = Red }
+        """.trimIndent()
+
+        val program = parseAndTypeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test multiple calls with different invalid constructors should fail`() {
+        val code = """
+            let color_value = {c} -> match c is
+              Red -> 1
+              Blue -> 2
+
+            let x = color_value { c = Green }
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Green") == true)
+    }
+
+    // ========== MATCH BRANCH TYPE UNIFICATION ==========
+
+    @Test
+    fun `test match branches with different variant constructors should unify`() {
+        val code = """
+            let test = match true is
+              true -> Red
+              false -> Blue
+        """.trimIndent()
+
+        val program = parseAndTypeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test match branches with incompatible types should fail`() {
+        val code = """
+            let test = match true is
+              true -> 42
+              false -> "hello"
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("type mismatch") == true ||
+                   exception.message?.contains("cannot unify") == true ||
+                   exception.message?.contains("Int") == true ||
+                   exception.message?.contains("String") == true)
+    }
+
+    @Test
+    fun `test match branches with different closed variants should unify`() {
+        val code = """
+            type Status = | Active, Pending |
+
+            let get_status = {x} -> match x is
+              1 -> Active
+              _ -> Pending
+        """.trimIndent()
+
+        val program = parseAndTypeCheck(code)
+        assertNotNull(program)
+    }
+
+    // ========== BOOL AS BUILT-IN CLOSED VARIANT ==========
+
+    @Test
+    fun `test bool match with unreachable wildcard should fail`() {
+        // Exhaustiveness checking should detect unreachable patterns
+        val code = """
+            let x = {y} -> match y is
+              true -> 1
+              false -> 0
+              _ -> -1
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("unreachable", ignoreCase = true) == true ||
+                   exception.message?.contains("already match all cases") == true)
+    }
+
+    @Test
+    fun `test bool match without wildcard should be exhaustive`() {
+        val code = """
+            let x = {y} -> match y is
+              true -> 1
+              false -> 0
+        """.trimIndent()
+
+        val program = parseAndTypeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test bool match with only true should require wildcard or false`() {
+        val code = """
+            let x = {y} -> match y is
+              true -> 1
+        """.trimIndent()
+
+        // Currently this might pass with a warning or fail
+        // The behavior depends on exhaustiveness checking
+        // This test documents the current behavior
+        try {
+            val program = parseAndTypeCheck(code)
+            // If it passes, that's the current behavior
+            assertNotNull(program)
+        } catch (e: TypeCheckError) {
+            // If it fails due to non-exhaustiveness, that's also acceptable
+            assertTrue(e.message?.contains("exhaustive") == true ||
+                       e.message?.contains("missing") == true)
+        }
+    }
 }

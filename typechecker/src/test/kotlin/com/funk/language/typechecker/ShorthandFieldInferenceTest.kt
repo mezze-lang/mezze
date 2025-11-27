@@ -189,7 +189,6 @@ class ShorthandFieldInferenceTest {
 
     // ===== Tree Map Test =====
 
-    @Disabled("TODO: Fix tree_map return type - currently returns Tree 'd instead of Tree 'b")
     @Test
     fun `test tree_map type inference`() {
         val code = """

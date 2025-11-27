@@ -79,7 +79,6 @@ class TypeCheckerComprehensiveTest {
             } ?: emptyList()
     }
     
-    @Disabled
     @TestFactory
     fun `type inference should work correctly`(): List<DynamicTest> {
         val inferenceFixturesDir = File(getFixturesPath(), "inference")

@@ -194,27 +194,55 @@ data class ConstraintContext(
  * Represents a type substitution (mapping from type variables to types)
  */
 data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
-    
+
+    companion object {
+        /**
+         * Create a substitution with a single mapping
+         */
+        fun single(typeVar: TypeVar, type: FunkType): Substitution {
+            return Substitution(mapOf(typeVar to type))
+        }
+
+        /**
+         * Create an empty substitution
+         */
+        fun empty(): Substitution {
+            return Substitution()
+        }
+    }
+
     /**
-     * Apply this substitution to a type
+     * Apply this substitution to a type with proper cycle detection
      */
     fun apply(type: FunkType): FunkType {
         return applyWithVisited(type, mutableSetOf())
     }
-    
+
+    /**
+     * Apply substitution with cycle detection via visited set
+     *
+     * The visited set tracks type variables currently being processed in this path.
+     * If we encounter a variable that's already in the visited set, we've found a cycle
+     * and return the variable unchanged to prevent infinite recursion.
+     *
+     * After processing a variable, we remove it from visited to allow the same variable
+     * to be substituted in independent branches (e.g., both fields in {x: 'a, y: 'a}).
+     */
     private fun applyWithVisited(type: FunkType, visited: MutableSet<TypeVar>): FunkType {
+
         return when (type) {
             is FunkType.VarType -> {
                 // Cycle detection: if we've already visited this type variable, return it as-is
                 if (type.variable in visited) {
                     return type
                 }
-                
+
                 val substituted = mapping[type.variable]
                 if (substituted != null) {
                     // Add this type variable to visited set to detect cycles
                     visited.add(type.variable)
                     val result = applyWithVisited(substituted, visited)
+                    // Remove from visited after processing to allow this variable in independent branches
                     visited.remove(type.variable)
                     result
                 } else {
@@ -294,7 +322,7 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
             rowVar = effectRow.rowVar // Row variables handled separately
         )
     }
-    
+
     private fun applyToEffectRowWithVisited(effectRow: FunkType.EffectRow, visited: MutableSet<TypeVar>): FunkType.EffectRow {
         return FunkType.EffectRow(
             effects = effectRow.effects.toSet(),
@@ -307,42 +335,24 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
      */
     fun compose(other: Substitution): Substitution {
         val newMapping = mutableMapOf<TypeVar, FunkType>()
-        
+
         // Apply this substitution to the other's mappings
         for ((typeVar, type) in other.mapping) {
             newMapping[typeVar] = apply(type)
         }
-        
+
         // Add our own mappings, applying the other substitution to them
         for ((typeVar, type) in mapping) {
             if (!newMapping.containsKey(typeVar)) {
                 newMapping[typeVar] = other.apply(type)
             }
         }
-        
-        // Create the result and apply it to itself to ensure transitivity
-        val result = Substitution(newMapping)
-        
-        // Apply the substitution to itself to resolve chains like 'a -> 'b, 'b -> Int => 'a -> Int
-        val finalMapping = mutableMapOf<TypeVar, FunkType>()
-        for ((typeVar, type) in result.mapping) {
-            finalMapping[typeVar] = result.apply(type)
-        }
-        
-        return Substitution(finalMapping)
-    }
-    
-    /**
-     * Create a substitution with a single mapping
-     */
-    companion object {
-        fun single(typeVar: TypeVar, type: FunkType): Substitution {
-            return Substitution(mapOf(typeVar to type))
-        }
-        
-        fun empty(): Substitution {
-            return Substitution()
-        }
+
+        // Return the composed substitution
+        // Note: We don't apply the result to itself because that can create circular references
+        // when the two input substitutions reference each other's type variables.
+        // The transitive resolution is already handled by applying each substitution to the other's mappings above.
+        return Substitution(newMapping)
     }
 }
 
@@ -1177,17 +1187,12 @@ class ConstraintSolver(
         val isVariant2Open = variant2.rowVar != null
         
         return when {
-            // Both closed - require exact match
+            // Both closed - unify common constructors
+            // PERMISSIVE: Allow unifying closed variants with different constructors
+            // This is needed for match branches that return different variant constructors
+            // e.g., match x is Red -> Blue; _ -> Yellow should give type | Blue, Yellow |
             !isVariant1Open && !isVariant2Open -> {
-                if (variant1.constructors.keys.toSet() != variant2.constructors.keys.toSet()) {
-                    if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("Warning: Closed variant types have different constructors: ${variant1.constructors.keys} vs ${variant2.constructors.keys} - using common constructors only")
-                    }
-                    // Only unify common constructors instead of throwing
-                    unifyVariantConstructors(variant1, variant2, onlyCommon = true)
-                } else {
-                    unifyVariantConstructors(variant1, variant2)
-                }
+                unifyVariantConstructors(variant1, variant2, onlyCommon = true)
             }
             
             // One open, one closed - check if closed is subset of open
@@ -1303,7 +1308,15 @@ private fun prettyPrintType(type: FunkType): String {
         is FunkType.BooleanType -> "Bool"
         is FunkType.StringType -> "String"
         is FunkType.VarType -> type.variable.name
-        is FunkType.FunctionType -> "${prettyPrintType(type.paramType)} -> ${prettyPrintType(type.returnType)}"
+        is FunkType.FunctionType -> {
+            // Add parentheses around function types when they appear as parameter types
+            val paramStr = if (type.paramType is FunkType.FunctionType) {
+                "(${prettyPrintType(type.paramType)})"
+            } else {
+                prettyPrintType(type.paramType)
+            }
+            "$paramStr -> ${prettyPrintType(type.returnType)}"
+        }
         is FunkType.RecordType -> "{${type.fields.map { "${it.key}: ${prettyPrintType(it.value)}" }.joinToString(", ")}}"
         else -> type.toString()
     }

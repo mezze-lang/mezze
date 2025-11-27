@@ -358,4 +358,99 @@ class MatchExhaustivenessTest {
     // You cannot write a match expression on an uninhabited type because
     // no value of that type can ever exist. The test was removed as it
     // tested an impossible/invalid scenario.
+
+    // ========== BUGS TO CATCH ==========
+
+    @Test
+    fun `BUGGY - test should reject undefined variant constructor Pink not in Red or Blue`() {
+        val code = """
+            type Color = | Red, Blue |
+
+            let add = {color: Color} -> match color is
+              Red -> 1
+              Blue -> 2
+
+            let ans = add {color = Pink}
+        """.trimIndent()
+
+        // SHOULD FAIL: Pink is not a valid constructor of Color type
+        // This test documents the bug where undefined constructors are accepted
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(
+            exception.message!!.contains("Pink") || exception.message!!.contains("Undefined")
+        )
+    }
+
+    @Test
+    fun `BUGGY - test should reject non-exhaustive match with undefined constructor usage`() {
+        val code = """
+            type Color = | Red, Blue, Green |
+
+            let add = {color: Color} -> match color is
+              Red -> 1
+              Blue -> 2
+
+            let ans = add {color = Yellow}
+        """.trimIndent()
+
+        // SHOULD FAIL FOR TWO REASONS:
+        // 1. Match is non-exhaustive (missing Green)
+        // 2. Yellow is not a valid constructor of Color
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        // Should mention either non-exhaustive or undefined constructor
+        kotlin.test.assertTrue(
+            exception.message!!.contains("Non-exhaustive") ||
+            exception.message!!.contains("Yellow") ||
+            exception.message!!.contains("Undefined")
+        )
+    }
+
+    @Test
+    fun `BUGGY - test match with inconsistent branch types should fail`() {
+        val code = """
+            type Color = | Red, Blue, Green |
+
+            let test: {color: Color} -> Int = {color} -> match color is
+              Red -> 1
+              Blue -> "two"
+              Green -> 3
+        """.trimIndent()
+
+        // SHOULD FAIL: Branch returns String but function expects Int
+        // This tests branch type consistency
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(
+            exception.message!!.contains("mismatch") ||
+            exception.message!!.contains("String") ||
+            exception.message!!.contains("Int")
+        )
+    }
+
+    @Test
+    fun `BUGGY - test match with all branches returning wrong type should fail`() {
+        val code = """
+            type Color = | Red, Blue, Green |
+
+            let test: {color: Color} -> Int = {color} -> match color is
+              Red -> "one"
+              Blue -> "two"
+              Green -> "three"
+        """.trimIndent()
+
+        // SHOULD FAIL: All branches return String but function expects Int
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        kotlin.test.assertTrue(
+            exception.message!!.contains("mismatch") ||
+            exception.message!!.contains("String") ||
+            exception.message!!.contains("Int")
+        )
+    }
 }
