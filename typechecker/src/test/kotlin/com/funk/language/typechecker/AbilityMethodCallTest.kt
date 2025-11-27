@@ -365,4 +365,32 @@ class AbilityMethodCallTest {
         assertNotNull(letBinding)
         assertEquals(FunkType.StringType, letBinding!!.inferredType)
     }
+
+    @Test
+    fun `test ability constraint propagation from usage site should error`() {
+        val source = """
+            ability Parse 'a where {
+              decode: { str: String } -> 'a
+            }
+
+            impl Parse Int where {
+              decode = { str } -> 42
+            }
+
+            let f = Parse.decode {str = "2332"}
+            let t = f + 10.5
+
+            t
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        // Should fail because:
+        // 1. f = Parse.decode {str = "2332"} has type 'a with Parse 'a constraint
+        // 2. f + 10.5 requires f to be Float (10.5 is Float)
+        // 3. No impl Parse Float exists
+        assertThrows(TypeCheckError::class.java) {
+            typeChecker.typeCheck(program)
+        }
+    }
 }
