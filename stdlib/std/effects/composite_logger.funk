@@ -1,0 +1,43 @@
+# std/effects/composite_logger.funk - Composite logging that writes to both console and file
+
+use std::effects::log::{Log}
+use std::effects::filesystem::{FileSystem}
+
+# Composite logging implementation (writes to both console and file)
+# Composes console output (via native calls) and FileSystem effects together
+pub impl Log for CompositeLogger { log_file_path: String } where {
+    info: { msg: String } -> {} = { msg } -> do
+        __native_log_info { msg = msg }
+        let content = "[INFO] $(msg)\n"
+        let _ = FileSystem.write_file { path = log_file_path, content = content }
+        {},
+    warn: { msg: String } -> {} = { msg } -> do
+        __native_log_warn { msg = msg }
+        let content = "[WARN] $(msg)\n"
+        let _ = FileSystem.write_file { path = log_file_path, content = content }
+        {},
+    error: { msg: String } -> {} = { msg } -> do
+        __native_log_error { msg = msg }
+        let content = "[ERROR] $(msg)\n"
+        let _ = FileSystem.write_file { path = log_file_path, content = content }
+        {},
+    debug: { msg: String } -> {} = { msg } -> do
+        __native_log_debug { msg = msg }
+        let content = "[DEBUG] $(msg)\n"
+        let _ = FileSystem.write_file { path = log_file_path, content = content }
+        {},
+    trace: { msg: String } -> {} = { msg } -> do
+        __native_log_trace { msg = msg }
+        let content = "[TRACE] $(msg)\n"
+        let _ = FileSystem.write_file { path = log_file_path, content = content }
+        {},
+    print: { msg: String } -> {} = { msg } -> do
+        __native_console_print { msg = msg }
+        let _ = FileSystem.write_file { path = log_file_path, content = msg }
+        {},
+    println: { msg: String } -> {} = { msg } -> do
+        __native_console_println { msg = msg }
+        let content = "$(msg)\n"
+        let _ = FileSystem.write_file { path = log_file_path, content = content }
+        {}
+}
