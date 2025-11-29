@@ -12,7 +12,7 @@ class StdlibTest {
     @Test
     fun `test parse effect declaration from stdlib`() {
         val source = """
-pub effect Log {
+pub effect Log where {
     info: { msg: String } -> {},
     warn: { msg: String } -> {},
     error: { msg: String } -> {}

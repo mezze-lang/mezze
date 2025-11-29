@@ -432,7 +432,6 @@ class FunkParser {
 
     private fun parseEffectDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
         // Parse: effect Name where { op1: Type1 -> Type2, op2: Type3 -> Type4 }
-        // Also supports legacy: effect Name { ... } (without where)
         val effectToken = tok(TokenType.EFFECT)(stream)
         return when (effectToken) {
             is ParseResult.Success -> {
@@ -443,60 +442,61 @@ class FunkParser {
                     is ParseResult.Success -> {
                         val stream2 = skipNewlines(name.remaining)
 
-                        // Try to parse optional 'where' keyword
+                        // Parse required 'where' keyword
                         val whereToken = tok(TokenType.WHERE)(stream2)
-                        val stream3 = when (whereToken) {
-                            is ParseResult.Success -> skipNewlines(whereToken.remaining)
-                            is ParseResult.Failure -> stream2  // No 'where', proceed without it
-                        }
-
-                        val lbrace = tok(TokenType.LBRACE)(stream3)
-
-                        when (lbrace) {
+                        when (whereToken) {
                             is ParseResult.Success -> {
-                                val stream4 = skipNewlines(lbrace.remaining)
-                                // Parse operations separated by newlines or commas (both supported)
-                                val operations = mutableListOf<EffectOperation>()
-                                var currentStream = stream4
+                                val stream3 = skipNewlines(whereToken.remaining)
+                                val lbrace = tok(TokenType.LBRACE)(stream3)
 
-                                while (true) {
-                                    when (val op = effectOperationParser(currentStream)) {
-                                        is ParseResult.Success -> {
-                                            operations.add(op.value)
-                                            currentStream = skipNewlines(op.remaining)
+                                when (lbrace) {
+                                    is ParseResult.Success -> {
+                                        val stream4 = skipNewlines(lbrace.remaining)
+                                        // Parse operations separated by newlines or commas (both supported)
+                                        val operations = mutableListOf<EffectOperation>()
+                                        var currentStream = stream4
 
-                                            // Optionally consume a comma
-                                            when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                        while (true) {
+                                            when (val op = effectOperationParser(currentStream)) {
                                                 is ParseResult.Success -> {
-                                                    currentStream = skipNewlines(comma.remaining)
+                                                    operations.add(op.value)
+                                                    currentStream = skipNewlines(op.remaining)
+
+                                                    // Optionally consume a comma
+                                                    when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                        is ParseResult.Success -> {
+                                                            currentStream = skipNewlines(comma.remaining)
+                                                        }
+                                                        is ParseResult.Failure -> {
+                                                            // No comma, that's fine - continue to next operation or end
+                                                        }
+                                                    }
                                                 }
-                                                is ParseResult.Failure -> {
-                                                    // No comma, that's fine - continue to next operation or end
-                                                }
+                                                is ParseResult.Failure -> break
                                             }
                                         }
-                                        is ParseResult.Failure -> break
-                                    }
-                                }
 
-                                val stream5 = skipNewlines(currentStream)
-                                val rbrace = tok(TokenType.RBRACE)(stream5)
+                                        val stream5 = skipNewlines(currentStream)
+                                        val rbrace = tok(TokenType.RBRACE)(stream5)
 
-                                when (rbrace) {
-                                    is ParseResult.Success -> {
-                                        ParseResult.Success(
-                                            EffectDeclaration(
-                                                name.value.text,
-                                                visibility,
-                                                operations
-                                            ),
-                                            rbrace.remaining
-                                        )
+                                        when (rbrace) {
+                                            is ParseResult.Success -> {
+                                                ParseResult.Success(
+                                                    EffectDeclaration(
+                                                        name.value.text,
+                                                        visibility,
+                                                        operations
+                                                    ),
+                                                    rbrace.remaining
+                                                )
+                                            }
+                                            is ParseResult.Failure -> rbrace
+                                        }
                                     }
-                                    is ParseResult.Failure -> rbrace
+                                    is ParseResult.Failure -> lbrace
                                 }
                             }
-                            is ParseResult.Failure -> lbrace
+                            is ParseResult.Failure -> whereToken
                         }
                     }
                     is ParseResult.Failure -> name

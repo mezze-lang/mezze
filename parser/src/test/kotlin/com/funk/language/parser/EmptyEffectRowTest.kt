@@ -12,7 +12,7 @@ class EmptyEffectRowTest {
     @Test
     fun testEffectOperationWithoutEffectRow() {
         val source = """
-            effect Log {
+            effect Log where {
               log : {message: String} -> Unit
             }
         """.trimIndent()
@@ -32,7 +32,7 @@ class EmptyEffectRowTest {
     @Test
     fun testEffectOperationWithEmptyEffectRow() {
         val source = """
-            effect Log {
+            effect Log where {
               log : {message: String} -> Unit <>
             }
         """.trimIndent()
@@ -52,7 +52,7 @@ class EmptyEffectRowTest {
     @Test
     fun testEffectOperationWithNonEmptyEffectRow() {
         val source = """
-            effect Database {
+            effect Database where {
               query : {sql: String} -> String <Log>
             }
         """.trimIndent()
@@ -72,7 +72,7 @@ class EmptyEffectRowTest {
     @Test
     fun testMixedEffectOperations() {
         val source = """
-            effect Mixed {
+            effect Mixed where {
               pureOp : {x: Int} -> Int,
               logOp : {msg: String} -> Unit <Log>,
               multiOp : {data: String} -> String <Log, Database>

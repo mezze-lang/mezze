@@ -94,7 +94,7 @@ class V1CompatibilityTest {
     @Test
     fun `effect declarations should parse`() {
         val source = """
-            effect Log {
+            effect Log where {
                 info: { msg: String } -> {} <>
             }
         """.trimIndent()
@@ -183,7 +183,7 @@ class V1CompatibilityTest {
     @Test
     fun `complete stdlib effect and impl should parse`() {
         val source = """
-pub effect Log {
+pub effect Log where {
     info: { msg: String } -> {},
     warn: { msg: String } -> {},
     error: { msg: String } -> {} }
