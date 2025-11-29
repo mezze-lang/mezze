@@ -490,13 +490,26 @@ class FunkParser {
                                                     rbrace.remaining
                                                 )
                                             }
-                                            is ParseResult.Failure -> rbrace
+                                            is ParseResult.Failure -> ParseResult.Failure(
+                                                "Expected '}' to close effect declaration '${name.value.text}'. " +
+                                                "Make sure all effect operations are properly formatted: operationName: { params } -> ReturnType <${name.value.text}>",
+                                                stream5.getSourcePosition()
+                                            )
                                         }
                                     }
-                                    is ParseResult.Failure -> lbrace
+                                    is ParseResult.Failure -> ParseResult.Failure(
+                                        "Expected '{' after 'where' in effect declaration '${name.value.text}'. " +
+                                        "Syntax: effect ${name.value.text} where { operations }",
+                                        stream3.getSourcePosition()
+                                    )
                                 }
                             }
-                            is ParseResult.Failure -> whereToken
+                            is ParseResult.Failure -> ParseResult.Failure(
+                                "Effect declarations require 'where' keyword. " +
+                                "Expected: effect ${name.value.text} where { operations }. " +
+                                "Each operation must declare the effect in its type signature: operationName: { params } -> ReturnType <${name.value.text}>",
+                                stream2.getSourcePosition()
+                            )
                         }
                     }
                     is ParseResult.Failure -> name
@@ -507,7 +520,7 @@ class FunkParser {
     }
 
     private val effectOperationParser: Parser<EffectOperation> = { stream ->
-        // Parse: operationName: ParamType -> ReturnType
+        // Parse: operationName: ParamType -> ReturnType <EffectName>
         val name = identifierParser(stream)
         when (name) {
             is ParseResult.Success -> {
@@ -536,13 +549,26 @@ class FunkParser {
                                         functionType.remaining
                                     )
                                 } else {
-                                    ParseResult.Failure("Expected function type for effect operation", stream2.getSourcePosition())
+                                    ParseResult.Failure(
+                                        "Expected function type for effect operation '${name.value.text}'. " +
+                                        "Effect operations must have the format: operationName: { params } -> ReturnType <EffectName>",
+                                        stream2.getSourcePosition()
+                                    )
                                 }
                             }
-                            is ParseResult.Failure -> functionType
+                            is ParseResult.Failure -> ParseResult.Failure(
+                                "Invalid type annotation for effect operation '${name.value.text}'. " +
+                                "Expected format: ${name.value.text}: { params } -> ReturnType <EffectName>. " +
+                                "Error: ${functionType.message}",
+                                functionType.position
+                            )
                         }
                     }
-                    is ParseResult.Failure -> colon
+                    is ParseResult.Failure -> ParseResult.Failure(
+                        "Expected ':' after effect operation name '${name.value.text}'. " +
+                        "Effect operations must have the format: ${name.value.text}: { params } -> ReturnType <EffectName>",
+                        stream1.getSourcePosition()
+                    )
                 }
             }
             is ParseResult.Failure -> name
