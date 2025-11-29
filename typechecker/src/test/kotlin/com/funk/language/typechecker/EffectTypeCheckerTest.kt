@@ -13,8 +13,8 @@ class EffectTypeCheckerTest {
     @Test
     fun testEffectDeclarationTyping() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
         """.trimIndent()
         
@@ -29,8 +29,8 @@ class EffectTypeCheckerTest {
     @Test
     fun testImplDeclarationTyping() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
             
             impl Log for Console where {
@@ -49,8 +49,8 @@ class EffectTypeCheckerTest {
     @Test
     fun testEffectfulFunctionTyping() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
             
             let noisyAdd : {x: Int, y: Int} -> Int <Log> = {x, y} ->
@@ -91,8 +91,8 @@ class EffectTypeCheckerTest {
     @Test
     fun testEffectCallTyping() {
         val source = """
-            effect Random {
-              randInt : {min: Int, max: Int} -> Int
+            effect Random where {
+              randInt : {min: Int, max: Int} -> Int <Random>
             }
             
             impl Random for JVM where {
@@ -120,8 +120,8 @@ class EffectTypeCheckerTest {
     @Test
     fun testHandleExpressionTyping() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
             
             impl Log for Console where {
@@ -149,12 +149,12 @@ class EffectTypeCheckerTest {
     @Test
     fun testMultipleEffectsTyping() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
             
-            effect Random {
-              randInt : {min: Int, max: Int} -> Int
+            effect Random where {
+              randInt : {min: Int, max: Int} -> Int <Random>
             }
             
             let multiEffect : {} -> Int <Log, Random> = {} ->
@@ -180,12 +180,12 @@ class EffectTypeCheckerTest {
     @Test
     fun testEffectRowSubtyping() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
             
-            effect Random {
-              randInt : {min: Int, max: Int} -> Int
+            effect Random where {
+              randInt : {min: Int, max: Int} -> Int <Random>
             }
             
             # Function that uses only Log effect
@@ -211,8 +211,8 @@ class EffectTypeCheckerTest {
     @Test
     fun testEffectMismatchError() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
             
             # Function with effect annotation

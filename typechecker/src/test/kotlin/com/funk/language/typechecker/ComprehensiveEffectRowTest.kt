@@ -22,8 +22,8 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test single effect call returns effectful computation type`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             let program = Log.info {msg = "Hello"}
@@ -45,8 +45,8 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test do block with single effect propagates effect`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             let program = do
@@ -70,12 +70,12 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test do block with multiple different effects accumulates all effects`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
             
             let program = do
@@ -101,12 +101,12 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test nested do blocks accumulate effects`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
-            effect Error {
-              throw : {msg: String} -> 'a
+            effect Error where {
+              throw : {msg: String} -> 'a <Error>
             }
             
             let nestedProgram = do
@@ -140,8 +140,8 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test perform expression with all effects handled returns result type`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for Logger where {
@@ -179,12 +179,12 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test perform expression with partial effect handling`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
             
             impl Log for Logger where {
@@ -221,12 +221,12 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test sequential effect handling`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
             
             impl Log for Logger where {
@@ -277,8 +277,8 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test multiple performers for same effect`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -330,16 +330,16 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test complex effect composition with let bindings`() {
         val source = """
-            effect Database {
-              query : {sql: String} -> String
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
             
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
-            effect Cache {
-              get : {key: String} -> String
+            effect Cache where {
+              get : {key: String} -> String <Cache>
             }
             
             let fetchUser = {id: String} -> do
@@ -409,8 +409,8 @@ class ComprehensiveEffectRowTest {
     @Test
     fun `test mixed pure and effectful statements`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             let mixedProgram = do

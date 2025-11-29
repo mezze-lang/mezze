@@ -101,8 +101,8 @@ class AbilityEffectNameCollisionTest {
     @Test
     fun `test user-defined effect cannot be used as value`() {
         val code = """
-            effect Console {
-                print: {msg: String} -> {}
+            effect Console where {
+                print: {msg: String} -> {} <Console>
             }
 
             let x = Console
@@ -219,8 +219,8 @@ class AbilityEffectNameCollisionTest {
     @Test
     fun `test type name cannot conflict with user-defined effect`() {
         val code = """
-            effect Logger {
-                log: {msg: String} -> {}
+            effect Logger where {
+                log: {msg: String} -> {} <Logger>
             }
 
             type Logger = { level: String }

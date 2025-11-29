@@ -1,32 +1,32 @@
 # std/effects/environment.funk - Environment and system information effects
 
-pub effect Environment {
+pub effect Environment where {
     # Get environment variable
-    get_env: { name: String } -> Option String,
-    
+    get_env: { name: String } -> Option String <Environment>,
+
     # Set environment variable (for current process)
-    set_env: { name: String, value: String } -> {},
-    
+    set_env: { name: String, value: String } -> {} <Environment>,
+
     # Get all environment variables
-    get_all_env: {} -> [{ key: String, value: String }],
-    
+    get_all_env: {} -> [{ key: String, value: String }] <Environment>,
+
     # Get current working directory
-    current_dir: {} -> String,
-    
+    current_dir: {} -> String <Environment>,
+
     # Change current working directory
-    change_dir: { path: String } -> {},
-    
+    change_dir: { path: String } -> {} <Environment>,
+
     # Get system information
-    os_name: {} -> String,
-    os_version: {} -> String,
-    arch: {} -> String,
-    
+    os_name: {} -> String <Environment>,
+    os_version: {} -> String <Environment>,
+    arch: {} -> String <Environment>,
+
     # Get process information
-    process_id: {} -> Int,
-    process_args: {} -> [String],
-    
+    process_id: {} -> Int <Environment>,
+    process_args: {} -> [String] <Environment>,
+
     # Exit the process
-    exit: { code: Int } -> {}
+    exit: { code: Int } -> {} <Environment>
 }
 
 # System environment implementation

@@ -4,11 +4,11 @@ use std::math::core
 use std::math::trig
 
 # Random effect definition
-pub effect Random {
-    random_float: {} -> Float,
-    random_int: { min: Int, max: Int } -> Int,
-    random_nat: { max: Nat } -> Nat,
-    seed: { seed: Int } -> {}
+pub effect Random where {
+    random_float: {} -> Float <Random>,
+    random_int: { min: Int, max: Int } -> Int <Random>,
+    random_nat: { max: Nat } -> Nat <Random>,
+    seed: { seed: Int } -> {} <Random>
 }
 
 # Seeded random implementation with deterministic behavior

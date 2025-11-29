@@ -21,8 +21,8 @@ class PerformerConflictTest {
     fun `test performer conflict - right to left consumption should fail`() {
         // This should FAIL: BasicLogger (rightmost) expects to handle Log, but EnhancedLogger (leftmost) already consumed it
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
             impl Log for BasicLogger where {
@@ -48,12 +48,12 @@ class PerformerConflictTest {
     fun `test performer no conflict - different effects should pass`() {
         // This should PASS: Different effects, no conflict
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
-            effect Database {
-              save : {data: String} -> {}
+            effect Database where {
+              save : {data: String} -> {} <Database>
             }
 
             impl Log for Logger where {
@@ -79,8 +79,8 @@ class PerformerConflictTest {
     fun `test single performer should always pass`() {
         // Single performer should always work
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
             impl Log for BasicLogger where {
@@ -100,12 +100,12 @@ class PerformerConflictTest {
     fun `test multiple performers different effects should pass`() {
         // Multiple performers handling different effects should work
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
-            effect Database {
-              save : {data: String} -> {}
+            effect Database where {
+              save : {data: String} -> {} <Database>
             }
 
             impl Log for Logger where {

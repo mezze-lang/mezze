@@ -431,7 +431,8 @@ class FunkParser {
     // ===== EFFECT DECLARATION =====
 
     private fun parseEffectDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
-        // Parse: effect Name { op1: Type1 -> Type2, op2: Type3 -> Type4 }
+        // Parse: effect Name where { op1: Type1 -> Type2, op2: Type3 -> Type4 }
+        // Also supports legacy: effect Name { ... } (without where)
         val effectToken = tok(TokenType.EFFECT)(stream)
         return when (effectToken) {
             is ParseResult.Success -> {
@@ -441,14 +442,22 @@ class FunkParser {
                 when (name) {
                     is ParseResult.Success -> {
                         val stream2 = skipNewlines(name.remaining)
-                        val lbrace = tok(TokenType.LBRACE)(stream2)
+
+                        // Try to parse optional 'where' keyword
+                        val whereToken = tok(TokenType.WHERE)(stream2)
+                        val stream3 = when (whereToken) {
+                            is ParseResult.Success -> skipNewlines(whereToken.remaining)
+                            is ParseResult.Failure -> stream2  // No 'where', proceed without it
+                        }
+
+                        val lbrace = tok(TokenType.LBRACE)(stream3)
 
                         when (lbrace) {
                             is ParseResult.Success -> {
-                                val stream3 = skipNewlines(lbrace.remaining)
+                                val stream4 = skipNewlines(lbrace.remaining)
                                 // Parse operations separated by newlines or commas (both supported)
                                 val operations = mutableListOf<EffectOperation>()
-                                var currentStream = stream3
+                                var currentStream = stream4
 
                                 while (true) {
                                     when (val op = effectOperationParser(currentStream)) {
@@ -470,8 +479,8 @@ class FunkParser {
                                     }
                                 }
 
-                                val stream4 = skipNewlines(currentStream)
-                                val rbrace = tok(TokenType.RBRACE)(stream4)
+                                val stream5 = skipNewlines(currentStream)
+                                val rbrace = tok(TokenType.RBRACE)(stream5)
 
                                 when (rbrace) {
                                     is ParseResult.Success -> {

@@ -13,10 +13,10 @@ class DebugEffectTest {
     @Test
     fun debugSimpleEffectCall() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
-            
+
             let logSomething : {msg: String} -> {} <Log> = {msg} ->
               Log.log {msg = msg}
         """.trimIndent()

@@ -186,32 +186,32 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val source = """
             use std::int
 
-            effect Database {
-              query : {sql: String} -> String <Log>
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
 
-            effect Log {
-              log : {message: String} -> Unit <>
+            effect Log where {
+              log : {message: String} -> Unit <Log>
             }
 
-            let fetchUser: {id: Int} -> String <Database, Log> = {id} ->
+            let fetchUser: {id: Int} -> String <Database> = {id} ->
               Database.query {sql = "SELECT * FROM users WHERE id = $(int::to_string {n = id})"}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        // Verify fetchUser function has both Database and Log effects
-        val fetchUserBinding = typedProgram.items.find { 
-            it is LetBinding && it.variableName == "fetchUser" 
+        // Verify fetchUser function has only Database effect
+        val fetchUserBinding = typedProgram.items.find {
+            it is LetBinding && it.variableName == "fetchUser"
         } as LetBinding?
         assertNotNull(fetchUserBinding)
-        
+
         val functionType = fetchUserBinding.inferredType as? FunkType.FunctionType
         assertNotNull(functionType)
         assertNotNull(functionType.effects)
         assertTrue(functionType.effects!!.effects.contains("Database"))
-        assertTrue(functionType.effects!!.effects.contains("Log"))
+        assertEquals(1, functionType.effects!!.effects.size, "Should have exactly 1 effect")
     }
 
     @Test
@@ -219,44 +219,42 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val source = """
             use std::int
 
-            effect Auth {
-              authenticate : {token: String} -> Boolean <>
+            effect Auth where {
+              authenticate : {token: String} -> Boolean <Auth>
             }
 
-            effect Database {
-              query : {sql: String} -> String <Log>
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
 
-            effect Log {
-              log : {message: String} -> Unit <>
+            effect Log where {
+              log : {message: String} -> Unit <Log>
             }
 
-            effect SecureDatabase {
-              secureQuery : {sql: String, token: String} -> String <Database, Auth, Log>
+            effect SecureDatabase where {
+              secureQuery : {sql: String, token: String} -> String <SecureDatabase>
             }
 
-            let secureUserFetch: {id: Int, token: String} -> String <SecureDatabase, Database, Auth, Log> = {id, token} ->
+            let secureUserFetch: {id: Int, token: String} -> String <SecureDatabase> = {id, token} ->
               SecureDatabase.secureQuery {sql = "SELECT * FROM users WHERE id = $(int::to_string {n = id})", token = token}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        // Verify all effects are propagated
-        val fetchBinding = typedProgram.items.find { 
-            it is LetBinding && it.variableName == "secureUserFetch" 
+        // Verify only SecureDatabase effect is used
+        val fetchBinding = typedProgram.items.find {
+            it is LetBinding && it.variableName == "secureUserFetch"
         } as LetBinding?
         assertNotNull(fetchBinding)
-        
+
         val functionType = fetchBinding.inferredType as? FunkType.FunctionType
         assertNotNull(functionType)
         assertNotNull(functionType.effects)
-        
+
         val effects = functionType.effects!!.effects
         assertTrue(effects.contains("SecureDatabase"))
-        assertTrue(effects.contains("Database"))
-        assertTrue(effects.contains("Auth"))
-        assertTrue(effects.contains("Log"))
+        assertEquals(1, effects.size, "Should have exactly 1 effect")
     }
 
     @Test
@@ -264,8 +262,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val source = """
             use std::int
 
-            effect Log {
-              log : {message: String} -> Unit <>
+            effect Log where {
+              log : {message: String} -> Unit <Log>
             }
 
             impl Log for ConsoleLogger where {
@@ -338,8 +336,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
               show : {val: 'a} -> String
             }
 
-            effect Log {
-              log : {message: String} -> Unit <>
+            effect Log where {
+              log : {message: String} -> Unit <Log>
             }
 
             impl Show Int where {

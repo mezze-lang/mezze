@@ -21,9 +21,9 @@ class ComprehensiveEffectTypeCheckerTest {
     @Test
     fun testEffectDeclarationTypeChecking() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {},
-              debug : {msg: String, level: Int} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>,
+              debug : {msg: String, level: Int} -> {} <Log>
             }
         """.trimIndent()
 
@@ -53,8 +53,8 @@ class ComprehensiveEffectTypeCheckerTest {
     @Test
     fun testSimpleImplDeclarationTypeChecking() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -86,8 +86,8 @@ class ComprehensiveEffectTypeCheckerTest {
     @Test
     fun testPerformExpressionTypeChecking() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -115,8 +115,8 @@ class ComprehensiveEffectTypeCheckerTest {
     @Test
     fun testEffectCallTypeChecking() {
         val source = """
-            effect Random {
-              nextInt : {min: Int, max: Int} -> Int
+            effect Random where {
+              nextInt : {min: Int, max: Int} -> Int <Random>
             }
 
             impl Random for MathRandom where {
@@ -157,12 +157,12 @@ class ComprehensiveEffectTypeCheckerTest {
     @Test
     fun testMultipleEffectsTypeChecking() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
-            effect Random {
-              nextInt : {min: Int, max: Int} -> Int
+            effect Random where {
+              nextInt : {min: Int, max: Int} -> Int <Random>
             }
 
             impl Log for Console where {
@@ -216,12 +216,12 @@ class ComprehensiveEffectTypeCheckerTest {
     @Test
     fun testDoBlockWithEffectsTypeChecking() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
-            effect Random {
-              nextInt : {min: Int, max: Int} -> Int
+            effect Random where {
+              nextInt : {min: Int, max: Int} -> Int <Random>
             }
 
             impl Log for Console where {
@@ -268,9 +268,9 @@ class ComprehensiveEffectTypeCheckerTest {
     @Test
     fun testEffectOperationParameterMatching() {
         val source = """
-            effect FileSystem {
-              readFile : {path: String} -> String,
-              writeFile : {path: String, content: String} -> {}
+            effect FileSystem where {
+              readFile : {path: String} -> String <FileSystem>,
+              writeFile : {path: String, content: String} -> {} <FileSystem>
             }
 
             impl FileSystem for MockFS where {
@@ -302,8 +302,8 @@ class ComprehensiveEffectTypeCheckerTest {
     @Test
     fun testEffectRowInferenceInFunctions() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -339,9 +339,9 @@ class ComprehensiveEffectTypeCheckerTest {
     @Test
     fun testNestedEffectCallsTypeChecking() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {},
-              debug : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>,
+              debug : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {

@@ -28,12 +28,12 @@ class SuspendedTypeTest {
     @Test
     fun `perform with partial effect handling creates SuspendedType`() {
         val source = """
-            effect Log {
-                info: {msg: String} -> {}
+            effect Log where {
+                info: {msg: String} -> {} <Log>
             }
 
-            effect FileSystem {
-                write: {path: String, content: String} -> {}
+            effect FileSystem where {
+                write: {path: String, content: String} -> {} <FileSystem>
             }
 
             impl Log for Console where {
@@ -73,8 +73,8 @@ class SuspendedTypeTest {
     @Test
     fun `perform with all effects handled returns plain value`() {
         val source = """
-            effect Log {
-                info: {msg: String} -> {}
+            effect Log where {
+                info: {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -102,12 +102,12 @@ class SuspendedTypeTest {
     @Test
     fun `perform on SuspendedType handles remaining effects`() {
         val source = """
-            effect Log {
-                info: {msg: String} -> {}
+            effect Log where {
+                info: {msg: String} -> {} <Log>
             }
 
-            effect FileSystem {
-                write: {path: String, content: String} -> {}
+            effect FileSystem where {
+                write: {path: String, content: String} -> {} <FileSystem>
             }
 
             impl Log for Console where {
@@ -148,8 +148,8 @@ class SuspendedTypeTest {
     @Test
     fun `perform on function reference removes effects from function type`() {
         val source = """
-            effect Log {
-                info: {msg: String} -> {}
+            effect Log where {
+                info: {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -180,12 +180,12 @@ class SuspendedTypeTest {
     @Test
     fun `SuspendedType vs FunctionType distinction`() {
         val source = """
-            effect Log {
-                info: {msg: String} -> {}
+            effect Log where {
+                info: {msg: String} -> {} <Log>
             }
 
-            effect FileSystem {
-                write: {path: String, content: String} -> {}
+            effect FileSystem where {
+                write: {path: String, content: String} -> {} <FileSystem>
             }
 
             impl Log for Console where {
@@ -223,9 +223,9 @@ class SuspendedTypeTest {
     @Test
     fun `multiple handlers can be applied to SuspendedType`() {
         val source = """
-            effect A { op: {} -> {} }
-            effect B { op: {} -> {} }
-            effect C { op: {} -> {} }
+            effect A where { op: {} -> {} <A> }
+            effect B where { op: {} -> {} <B> }
+            effect C where { op: {} -> {} <C> }
 
             impl A for HandlerA where { op = {} -> {} }
             impl B for HandlerB where { op = {} -> {} }

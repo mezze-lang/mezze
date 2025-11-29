@@ -1,6 +1,6 @@
 # std/effects/filesystem.funk - File system effects (async by default)
 
-pub effect FileSystem {
+pub effect FileSystem where {
     read_file: { path: String } -> Result String | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, IOError { path: String, message: String } | <FileSystem>,
     write_file: { path: String, content: String } -> Result {} | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, IOError { path: String, message: String }, DiskFull { path: String, bytes_needed: Int } | <FileSystem>,
     exists: { path: String } -> Result Bool | PermissionDenied { path: String, operation: String }, IOError { path: String, message: String } | <FileSystem>,

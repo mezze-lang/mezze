@@ -144,7 +144,7 @@ class ErrorReportingTest {
     @Test
     fun testEffectHandlerError() {
         val source = """
-            effect Log {
+            effect Log where {
               log: {message: String} -> {} <Log>
             }
 

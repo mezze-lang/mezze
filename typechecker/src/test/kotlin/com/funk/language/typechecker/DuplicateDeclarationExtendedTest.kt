@@ -75,12 +75,12 @@ class DuplicateDeclarationExtendedTest {
     @Test
     fun `test duplicate effect declaration should fail`() {
         val code = """
-            effect Logger {
-                log: {msg: String} -> {}
+            effect Logger where {
+                log: {msg: String} -> {} <Logger>
             }
 
-            effect Logger {
-                debug: {msg: String} -> {}
+            effect Logger where {
+                debug: {msg: String} -> {} <Logger>
             }
         """.trimIndent()
 
@@ -94,12 +94,12 @@ class DuplicateDeclarationExtendedTest {
     @Test
     fun `test different effect names should pass`() {
         val code = """
-            effect Logger {
-                log: {msg: String} -> {}
+            effect Logger where {
+                log: {msg: String} -> {} <Logger>
             }
 
-            effect Console {
-                print: {msg: String} -> {}
+            effect Console where {
+                print: {msg: String} -> {} <Console>
             }
         """.trimIndent()
 
@@ -112,8 +112,8 @@ class DuplicateDeclarationExtendedTest {
     @Test
     fun `test duplicate performer declaration should fail`() {
         val code = """
-            effect Log {
-                log: {msg: String} -> {}
+            effect Log where {
+                log: {msg: String} -> {} <Log>
             }
 
             impl Log for SilentLogger where {
@@ -135,8 +135,8 @@ class DuplicateDeclarationExtendedTest {
     @Test
     fun `test different performer names should pass`() {
         val code = """
-            effect Log {
-                log: {msg: String} -> {}
+            effect Log where {
+                log: {msg: String} -> {} <Log>
             }
 
             impl Log for SilentLogger where {

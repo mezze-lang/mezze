@@ -28,8 +28,8 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test direct effect handler call in expression should fail`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -51,8 +51,8 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test effect handler call in do block should fail`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -76,8 +76,8 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test effect handler call in function should fail`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -99,8 +99,8 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test effect handler call inside perform should succeed`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -119,9 +119,9 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test effect handler call inside same type impl should succeed`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
-              debug : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
+              debug : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -144,12 +144,12 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test cross-effect handler call inside impl should fail`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
             
             impl Log for BasicLogger where {
@@ -181,12 +181,12 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test abstract effect call inside impl should succeed`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
             
             impl Console for Terminal where {
@@ -208,8 +208,8 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test nested effect handler calls should fail`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -233,8 +233,8 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test effect handler in conditional should fail`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -257,8 +257,8 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test effect handler in match expression should fail`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -284,8 +284,8 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test multiple effect handlers of same type should succeed`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -313,8 +313,8 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test effect handler call with perform syntax should succeed`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
             impl Log for BasicLogger where {
@@ -338,12 +338,12 @@ class EffectHandlerUsageValidationTest {
     @Test
     fun `test complex nested perform should succeed`() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
             
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
             
             impl Log for BasicLogger where {

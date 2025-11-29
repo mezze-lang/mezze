@@ -13,12 +13,12 @@ class EffectPropagationTest {
     @Test
     fun testBasicEffectPropagation() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
 
-            effect Database {
-              query : {sql: String} -> String <Log>
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
 
             impl Log for Console where {
@@ -31,8 +31,8 @@ class EffectPropagationTest {
                 "result"
             }
 
-            # This function should have type: {query: String} -> String <Database, Log>
-            let useDatabase : {query: String} -> String <Database, Log> = {query} ->
+            # This function should have type: {query: String} -> String <Database>
+            let useDatabase : {query: String} -> String <Database> = {query} ->
               Database.query {sql = query}
         """.trimIndent()
 
@@ -48,25 +48,25 @@ class EffectPropagationTest {
         val functionType = useDatabaseDecl.inferredType as FunkType.FunctionType
         assertNotNull(functionType.effects)
 
-        // Should have both Database and Log effects
+        // Should have only Database effect (Log is internal to the implementation)
         val effects = functionType.effects!!.effects
         assertTrue(effects.contains("Database"), "Should contain Database effect")
-        assertTrue(effects.contains("Log"), "Should contain Log effect due to propagation")
+        assertEquals(1, effects.size, "Should have exactly 1 effect")
     }
 
     @Test
     fun testNestedEffectPropagation() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
 
-            effect Auth {
-              checkPermission : {resource: String} -> Boolean <Log>
+            effect Auth where {
+              checkPermission : {resource: String} -> Boolean <Auth>
             }
 
-            effect Database {
-              query : {sql: String} -> String <Auth, Log>
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
 
             impl Log for Console where {
@@ -86,8 +86,8 @@ class EffectPropagationTest {
                 "secure_result"
             }
 
-            # This should propagate all three effects: Database, Auth, Log
-            let secureQuery : {sql: String} -> String <Database, Auth, Log> = {sql} ->
+            # This should propagate only Database effect
+            let secureQuery : {sql: String} -> String <Database> = {sql} ->
               Database.query {sql = sql}
         """.trimIndent()
 
@@ -106,20 +106,18 @@ class EffectPropagationTest {
 
         val effects = functionType.effects!!.effects
         assertTrue(effects.contains("Database"), "Should contain Database effect")
-        assertTrue(effects.contains("Auth"), "Should contain Auth effect")
-        assertTrue(effects.contains("Log"), "Should contain Log effect")
-        assertEquals(3, effects.size, "Should have exactly 3 effects")
+        assertEquals(1, effects.size, "Should have exactly 1 effect")
     }
 
     @Test
     fun testEffectPropagationInDoExpressions() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
 
-            effect Random {
-              nextInt : {max: Int} -> Int <Log>
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
 
             impl Log for Console where {
@@ -161,17 +159,17 @@ class EffectPropagationTest {
     @Test
     fun testEffectPropagationWithMultipleReturnTypes() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
 
-            effect Error {
-              throw : {msg: String} -> {}
+            effect Error where {
+              throw : {msg: String} -> {} <Error>
             }
 
-            effect FileSystem {
-              readFile : {path: String} -> String <Log, Error>,
-              writeFile : {path: String, content: String} -> {} <Log>
+            effect FileSystem where {
+              readFile : {path: String} -> String <FileSystem>,
+              writeFile : {path: String, content: String} -> {} <FileSystem>
             }
 
             impl Log for Console where {
@@ -197,9 +195,9 @@ class EffectPropagationTest {
             }
 
             # Function that uses both operations with different effect signatures
-            let copyFile : {from: String, to: String} -> {} <FileSystem, Log, Error> = {from, to} -> do
-              let content = FileSystem.readFile {path = from}  # <Log, Error>
-              FileSystem.writeFile {path = to, content = content}  # <Log>
+            let copyFile : {from: String, to: String} -> {} <FileSystem> = {from, to} -> do
+              let content = FileSystem.readFile {path = from}
+              FileSystem.writeFile {path = to, content = content}
               {}
         """.trimIndent()
 
@@ -218,19 +216,18 @@ class EffectPropagationTest {
 
         val effects = functionType.effects!!.effects
         assertTrue(effects.contains("FileSystem"), "Should contain FileSystem effect")
-        assertTrue(effects.contains("Log"), "Should contain Log effect")
-        assertTrue(effects.contains("Error"), "Should contain Error effect")
+        assertEquals(1, effects.size, "Should have exactly 1 effect")
     }
 
     @Test
     fun testEffectPropagationWithHandlers() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
 
-            effect Database {
-              query : {sql: String} -> String <Log>
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
 
             impl Log for Console where {
@@ -243,12 +240,12 @@ class EffectPropagationTest {
                 "test_result"
             }
 
-            # Function that calls Database.query which declares <Log> effect
-            let queryWithLog : {sql: String} -> String <Database, Log> = {sql} ->
+            # Function that calls Database.query
+            let queryWithLog : {sql: String} -> String <Database> = {sql} ->
               Database.query {sql = sql}
 
-            # Function that handles Database effect, but Log effect should remain
-            let partiallyHandledQuery : {sql: String} -> String <Log> = {sql} ->
+            # Function that handles Database effect completely
+            let partiallyHandledQuery : {sql: String} -> String <> = {sql} ->
               perform TestDB in queryWithLog {sql = sql}
         """.trimIndent()
 
@@ -264,18 +261,17 @@ class EffectPropagationTest {
 
         val functionType = partiallyHandledDecl.inferredType as FunkType.FunctionType
 
-        // After handling Database with TestDB, Database effect should be removed
-        // but Log effect should remain because Database.query declares <Log> in its signature
+        // After handling Database with TestDB, all effects should be removed
         val effects = functionType.effects?.effects ?: emptySet()
         assertFalse(effects.contains("Database"), "Database effect should be handled")
-        assertTrue(effects.contains("Log"), "Log effect should still be present from effect signature")
+        assertTrue(effects.isEmpty(), "All effects should be handled")
     }
 
     @Test
     fun testNoEffectPropagationForPureFunctions() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
 
             ability Math 'a where {

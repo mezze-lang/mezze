@@ -53,8 +53,8 @@ class SuspendedTypeAbilityTest {
     fun `test Int suspended type supports NumAdd`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -77,8 +77,8 @@ class SuspendedTypeAbilityTest {
     fun `test Int suspended type supports NumMul`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -101,8 +101,8 @@ class SuspendedTypeAbilityTest {
     fun `test Int suspended type supports NumSub`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -125,8 +125,8 @@ class SuspendedTypeAbilityTest {
     fun `test Int suspended type supports NumDiv`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -149,8 +149,8 @@ class SuspendedTypeAbilityTest {
     fun `test nested effectful arithmetic operations`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -178,8 +178,8 @@ class SuspendedTypeAbilityTest {
         // This is the CRITICAL test case from the interpreter bug
         assertTypeChecks(
             """
-            effect Log {
-              print: {msg: String} -> {}
+            effect Log where {
+              print: {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -207,8 +207,8 @@ class SuspendedTypeAbilityTest {
     fun `test String suspended type supports string interpolation`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -231,8 +231,8 @@ class SuspendedTypeAbilityTest {
     fun `test String suspended type supports Eq`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -257,8 +257,8 @@ class SuspendedTypeAbilityTest {
     fun `test Bool suspended type supports LogicalAnd`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -281,8 +281,8 @@ class SuspendedTypeAbilityTest {
     fun `test Bool suspended type supports LogicalOr`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -307,8 +307,8 @@ class SuspendedTypeAbilityTest {
     fun `test Int suspended type supports Eq`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -331,8 +331,8 @@ class SuspendedTypeAbilityTest {
     fun `test comparing two suspended Ints`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -361,8 +361,8 @@ class SuspendedTypeAbilityTest {
     fun `test Int suspended type supports Ord`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -409,8 +409,8 @@ class SuspendedTypeAbilityTest {
     fun `test suspended String type does not support NumAdd`() {
         assertTypeCheckFails(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -432,8 +432,8 @@ class SuspendedTypeAbilityTest {
         // Note: String interpolation works with any type that can be converted to string
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -458,8 +458,8 @@ class SuspendedTypeAbilityTest {
     fun `test nested suspended types with arithmetic`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {
@@ -483,8 +483,8 @@ class SuspendedTypeAbilityTest {
     fun `test suspended type in conditional`() {
         assertTypeChecks(
             """
-            effect Log {
-              println: { msg: String } -> {}
+            effect Log where {
+              println: { msg: String } -> {} <Log>
             }
 
             impl Log for Console where {

@@ -252,8 +252,8 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test effect call result in interpolation`() {
         assertTypeChecks("""
-            effect FileSystem {
-                readFile : {path: String} -> String
+            effect FileSystem where {
+                readFile : {path: String} -> String <FileSystem>
             }
 
             impl FileSystem for MockFS where {
@@ -270,8 +270,8 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test log effect with interpolated message`() {
         assertTypeChecks("""
-            effect Log {
-                print : {msg: String} -> {}
+            effect Log where {
+                print : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -288,8 +288,8 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test effect call in interpolation without annotation`() {
         assertTypeChecks("""
-            effect FileSystem {
-                readFile : {path: String} -> String
+            effect FileSystem where {
+                readFile : {path: String} -> String <FileSystem>
             }
 
             impl FileSystem for MockFS where {
@@ -306,8 +306,8 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test log effect in interpolation without annotation`() {
         assertTypeChecks("""
-            effect Log {
-                print : {msg: String} -> {}
+            effect Log where {
+                print : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -553,8 +553,8 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test effectful string in interpolation`() {
         assertTypeChecks("""
-            effect FileSystem {
-                readFile : {path: String} -> String
+            effect FileSystem where {
+                readFile : {path: String} -> String <FileSystem>
             }
 
             impl FileSystem for MockFS where {
@@ -583,8 +583,8 @@ class StringInterpolationTypeCheckerTest {
 
             type Result = | Ok { value: Int }, Err { message: String } |
 
-            effect Log {
-                print : {msg: String} -> {}
+            effect Log where {
+                print : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {

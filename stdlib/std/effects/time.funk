@@ -1,32 +1,32 @@
 # std/effects/time.funk - Time and date effects
 
 # Time effect definition
-pub effect Time {
+pub effect Time where {
     # Get current timestamp in milliseconds since epoch
-    now: {} -> Int,
-    
+    now: {} -> Int <Time>,
+
     # Get current timestamp in nanoseconds (high precision)
-    now_nanos: {} -> Int,
-    
+    now_nanos: {} -> Int <Time>,
+
     # Sleep for specified milliseconds
-    sleep: { millis: Int } -> {},
-    
+    sleep: { millis: Int } -> {} <Time>,
+
     # Sleep for specified nanoseconds (high precision)
-    sleep_nanos: { nanos: Int } -> {},
-    
+    sleep_nanos: { nanos: Int } -> {} <Time>,
+
     # Get current date/time components
-    current_year: {} -> Int,
-    current_month: {} -> Int,
-    current_day: {} -> Int,
-    current_hour: {} -> Int,
-    current_minute: {} -> Int,
-    current_second: {} -> Int,
-    
+    current_year: {} -> Int <Time>,
+    current_month: {} -> Int <Time>,
+    current_day: {} -> Int <Time>,
+    current_hour: {} -> Int <Time>,
+    current_minute: {} -> Int <Time>,
+    current_second: {} -> Int <Time>,
+
     # Format timestamp to string
-    format_timestamp: { timestamp: Int, format: String } -> String,
-    
+    format_timestamp: { timestamp: Int, format: String } -> String <Time>,
+
     # Parse string to timestamp
-    parse_timestamp: { date_string: String, format: String } -> Int
+    parse_timestamp: { date_string: String, format: String } -> Int <Time>
 }
 
 # System time implementation using system clock

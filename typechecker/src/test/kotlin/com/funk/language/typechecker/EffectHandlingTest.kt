@@ -33,8 +33,8 @@ class EffectHandlingTest {
     @Test
     fun testSingleEffectHandling() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
             
             impl Log for Console where {
@@ -66,16 +66,16 @@ class EffectHandlingTest {
         val source = """
             use std::int
 
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
-            effect Random {
-              nextInt : {max: Int} -> Int
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
 
-            effect FileIO {
-              writeFile : {path: String, content: String} -> {}
+            effect FileIO where {
+              writeFile : {path: String, content: String} -> {} <FileIO>
             }
 
             impl Log for Console where {
@@ -120,12 +120,12 @@ class EffectHandlingTest {
     @Test
     fun testProgressiveEffectHandling() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
             
-            effect Random {
-              nextInt : {max: Int} -> Int
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
             
             impl Log for Console where {
@@ -171,12 +171,12 @@ class EffectHandlingTest {
     @Test
     fun testHandleMultipleEffectsAtOnce() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
             
-            effect Random {
-              nextInt : {max: Int} -> Int
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
             
             impl Log for Console where {
@@ -213,12 +213,12 @@ class EffectHandlingTest {
     @Test
     fun testPartialEffectHandling() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
             
-            effect Random {
-              nextInt : {max: Int} -> Int
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
             
             impl Log for Console where {
@@ -253,8 +253,8 @@ class EffectHandlingTest {
     @Test
     fun testEffectHandlingWithDoExpressionConstraints() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
             
             impl Log for Console where {
@@ -297,12 +297,12 @@ class EffectHandlingTest {
     @Test
     fun testUnhandledEffectRemains() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
             
-            effect Random {
-              nextInt : {max: Int} -> Int
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
             
             impl Log for Console where {
@@ -334,12 +334,12 @@ class EffectHandlingTest {
     @Test
     fun testEffectComposition() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
             
-            effect Random {
-              nextInt : {max: Int} -> Int
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
             
             impl Log for Console where {

@@ -1044,9 +1044,9 @@ class AnnotationTypeCheckingTest {
     fun `test function with effect annotation`() {
         val program = parseAndTypeCheck(
             """
-            effect State {
-              get: {} -> Int
-              put: { val: Int } -> {}
+            effect State where {
+              get: {} -> Int <State>
+              put: { val: Int } -> {} <State>
             }
 
             let increment: {} -> Int <State> = {} -> do
@@ -1064,12 +1064,12 @@ class AnnotationTypeCheckingTest {
     fun `test function with multiple effects annotation`() {
         val program = parseAndTypeCheck(
             """
-            effect State {
-              get: {} -> Int
+            effect State where {
+              get: {} -> Int <State>
             }
 
-            effect Log {
-              log: { msg: String } -> {}
+            effect Log where {
+              log: { msg: String } -> {} <Log>
             }
 
             let logState: {} -> Int <State, Log> = {} -> do
@@ -1087,8 +1087,8 @@ class AnnotationTypeCheckingTest {
         // Annotation says it has State effect but doesn't use it
         assertTypeCheckFails(
             """
-            effect State {
-              get: {} -> Int
+            effect State where {
+              get: {} -> Int <State>
             }
 
             let wrong: {} -> Int <State> = {} -> 42
@@ -1102,8 +1102,8 @@ class AnnotationTypeCheckingTest {
         // Uses State effect but annotation doesn't declare it
         assertTypeCheckFails(
             """
-            effect State {
-              get: {} -> Int
+            effect State where {
+              get: {} -> Int <State>
             }
 
             let wrong: {} -> Int = {} -> State.get {}
@@ -1117,12 +1117,12 @@ class AnnotationTypeCheckingTest {
         // Annotation declares Log but doesn't use it
         assertTypeCheckFails(
             """
-            effect State {
-              get: {} -> Int
+            effect State where {
+              get: {} -> Int <State>
             }
 
-            effect Log {
-              log: { msg: String } -> {}
+            effect Log where {
+              log: { msg: String } -> {} <Log>
             }
 
             let wrong: {} -> Int <State, Log> = {} -> perform get {}

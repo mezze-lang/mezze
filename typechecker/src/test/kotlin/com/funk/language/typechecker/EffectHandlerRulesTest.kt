@@ -32,8 +32,8 @@ class EffectHandlerRulesTest {
     @Test
     fun `test handler types must match effect declaration exactly`() {
         val source = """
-            effect Database {
-              query: { sql: String } -> [String]
+            effect Database where {
+              query: { sql: String } -> [String] <Database>
             }
 
             impl Database for PostgresDB where {
@@ -54,12 +54,12 @@ class EffectHandlerRulesTest {
     @Test
     fun `test handler can add effects that propagate`() {
         val source = """
-            effect Log {
-              info: { msg: String } -> {}
+            effect Log where {
+              info: { msg: String } -> {} <Log>
             }
 
-            effect FileSystem {
-              write: { path: String, content: String } -> {}
+            effect FileSystem where {
+              write: { path: String, content: String } -> {} <FileSystem>
             }
 
             impl FileSystem for DiskFS where {
@@ -85,10 +85,10 @@ class EffectHandlerRulesTest {
     @Test
     fun `test all methods must be implemented`() {
         val source = """
-            effect Cache {
-              get: { key: String } -> String,
-              set: { key: String, value: String } -> {},
-              delete: { key: String } -> {}
+            effect Cache where {
+              get: { key: String } -> String <Cache>,
+              set: { key: String, value: String } -> {} <Cache>,
+              delete: { key: String } -> {} <Cache>
             }
 
             impl Cache for MemCache where {
@@ -115,12 +115,12 @@ class EffectHandlerRulesTest {
     @Test
     fun `test handler can use other effects`() {
         val source = """
-            effect Database {
-              query: { sql: String } -> [String]
+            effect Database where {
+              query: { sql: String } -> [String] <Database>
             }
 
-            effect Auth {
-              check: { token: String } -> Boolean
+            effect Auth where {
+              check: { token: String } -> Boolean <Auth>
             }
 
             impl Database for PostgresDB where {
@@ -147,12 +147,12 @@ class EffectHandlerRulesTest {
     @Test
     fun `test partial effect handling`() {
         val source = """
-            effect Log {
-              info: { msg: String } -> {}
+            effect Log where {
+              info: { msg: String } -> {} <Log>
             }
 
-            effect Cache {
-              get: { key: String } -> String
+            effect Cache where {
+              get: { key: String } -> String <Cache>
             }
 
             impl Log for Console where {
@@ -182,16 +182,16 @@ class EffectHandlerRulesTest {
     @Test
     fun `test handler adds multiple effects`() {
         val source = """
-            effect Log {
-              info: { msg: String } -> {}
+            effect Log where {
+              info: { msg: String } -> {} <Log>
             }
 
-            effect FileSystem {
-              write: { path: String, content: String } -> {}
+            effect FileSystem where {
+              write: { path: String, content: String } -> {} <FileSystem>
             }
 
-            effect Network {
-              send: { endpoint: String, data: String } -> {}
+            effect Network where {
+              send: { endpoint: String, data: String } -> {} <Network>
             }
 
             impl FileSystem for DiskFS where {
@@ -224,8 +224,8 @@ class EffectHandlerRulesTest {
     @Test
     fun `test output type mismatch should fail`() {
         val source = """
-            effect Database {
-              query: { sql: String } -> [String]
+            effect Database where {
+              query: { sql: String } -> [String] <Database>
             }
 
             impl Database for BadDB where {
@@ -264,12 +264,12 @@ class EffectHandlerRulesTest {
     @Test
     fun `test wrong effect handler should fail`() {
         val source = """
-            effect Log {
-              info: { msg: String } -> {}
+            effect Log where {
+              info: { msg: String } -> {} <Log>
             }
 
-            effect Database {
-              query: { sql: String } -> [String]
+            effect Database where {
+              query: { sql: String } -> [String] <Database>
             }
 
             impl Log for Logger where {
@@ -295,8 +295,8 @@ class EffectHandlerRulesTest {
     @Test
     fun `test double handler for same effect should fail`() {
         val source = """
-            effect Log {
-              info: { msg: String } -> {}
+            effect Log where {
+              info: { msg: String } -> {} <Log>
             }
 
             impl Log for BasicLogger where {

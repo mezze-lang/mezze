@@ -1,13 +1,13 @@
 # std/effects/log.funk - Logging effects
 
-pub effect Log {
-    info: { msg: String } -> {},
-    warn: { msg: String } -> {},
-    error: { msg: String } -> {},
-    debug: { msg: String } -> {},
-    trace: { msg: String } -> {},
-    print: { msg: String } -> {},
-    println: { msg: String } -> {} 
+pub effect Log where {
+    info: { msg: String } -> {} <Log>,
+    warn: { msg: String } -> {} <Log>,
+    error: { msg: String } -> {} <Log>,
+    debug: { msg: String } -> {} <Log>,
+    trace: { msg: String } -> {} <Log>,
+    print: { msg: String } -> {} <Log>,
+    println: { msg: String } -> {} <Log>
 }
 
 # Console-based logging implementation (runs in virtual threads)

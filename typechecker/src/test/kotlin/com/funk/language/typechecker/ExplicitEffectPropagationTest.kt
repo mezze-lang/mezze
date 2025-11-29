@@ -13,16 +13,16 @@ class ExplicitEffectPropagationTest {
     @Test
     fun testExplicitEffectPropagation() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
             
-            effect Database {
-              query : {sql: String} -> String <Log>
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
             
-            # Explicit effect annotation - should include both Database and Log
-            let useDatabase : {query: String} -> String <Database, Log> = {query} ->
+            # Explicit effect annotation - should include only Database
+            let useDatabase : {query: String} -> String <Database> = {query} ->
               Database.query {sql = query}
         """.trimIndent()
         
@@ -38,18 +38,17 @@ class ExplicitEffectPropagationTest {
         val functionType = useDatabaseDecl.inferredType as FunkType.FunctionType
         assertNotNull(functionType.effects)
         
-        // Should have both Database and Log effects
+        // Should have only Database effect
         val effects = functionType.effects!!.effects
         assertTrue(effects.contains("Database"), "Should contain Database effect")
-        assertTrue(effects.contains("Log"), "Should contain Log effect")
-        assertEquals(2, effects.size, "Should have exactly 2 effects")
+        assertEquals(1, effects.size, "Should have exactly 1 effect")
     }
     
     @Test
     fun testInferredEffectPropagation() {
         val source = """
-            effect Log {
-              log : {msg: String} -> {}
+            effect Log where {
+              log : {msg: String} -> {} <Log>
             }
             
             # Function with explicit effect annotation
