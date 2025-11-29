@@ -138,4 +138,21 @@ class ArithmeticConstraintTest {
             fail("Type checking should succeed for valid Int arithmetic: ${e.message}")
         }
     }
+
+    @Test
+    fun `test Int and Float cannot unify in function call`() {
+        // Regression test for type unification bug
+        // { x: 'a, y: 'a } should NOT accept { x: Int, y: Float }
+        val code = """
+            let my_func = { x, y } -> x + y
+            let ans = my_func { x = 5, y = 8.6 }
+        """.trimIndent()
+
+        // This should fail because my_func requires both parameters to be the same type
+        // but we're passing Int (5) and Float (8.6)
+        assertThrows(TypeCheckError::class.java) {
+            val program = parser.parse(code)
+            typeChecker.typeCheck(program)
+        }
+    }
 }

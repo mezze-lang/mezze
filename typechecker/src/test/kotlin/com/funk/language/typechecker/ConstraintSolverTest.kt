@@ -145,36 +145,21 @@ class ConstraintSolverTest {
             returnType = FunkType.IntType,
             effects = null
         )
-        
+
         val constraint = Constraint.Equality(FunkType.VarType(typeVar), funcType)
-        
-        // Enable permissive mode for this test
-        System.setProperty("funk.typecheck.permissive", "true")
-        
-        try {
-            // Our permissive constraint solver handles occurs check gracefully
-            val result = solver.solve(listOf(constraint))
-            // Should return empty substitution (ignoring the constraint)
-            assertTrue(result.mapping.isEmpty())
-        } finally {
-            System.clearProperty("funk.typecheck.permissive")
-        }
+
+        // Occurs check should return empty substitution (ignoring the constraint)
+        val result = solver.solve(listOf(constraint))
+        assertTrue(result.mapping.isEmpty())
     }
-    
+
     @Test
     fun `test incompatible base types fail`() {
         val constraint = Constraint.Equality(FunkType.IntType, FunkType.StringType)
-        
-        // Enable permissive mode for this test
-        System.setProperty("funk.typecheck.permissive", "true")
-        
-        try {
-            // Our permissive constraint solver handles incompatible types gracefully
-            val result = solver.solve(listOf(constraint))
-            // Should return empty substitution (ignoring the constraint)
-            assertTrue(result.mapping.isEmpty())
-        } finally {
-            System.clearProperty("funk.typecheck.permissive")
+
+        // Int and String are incompatible and should throw error
+        assertThrows<ConstraintConflictError> {
+            solver.solve(listOf(constraint))
         }
     }
     
@@ -417,19 +402,33 @@ class ConstraintSolverTest {
             ),
             rowVar = com.funk.language.ast.RowVar("r1") // Open variant
         )
-        
+
         val closedVariant = FunkType.VariantType(
             constructors = mapOf(
                 "Error" to FunkType.StringType // Different constructor
             )
             // No rowVar - closed variant
         )
-        
+
         val constraint = Constraint.Equality(openVariant, closedVariant)
-        
+
         // Our permissive constraint solver handles incompatible variant subtyping gracefully
         val result = solver.solve(listOf(constraint))
         // Should return empty substitution (ignoring the constraint)
         assertTrue(result.mapping.isEmpty())
+    }
+
+    @Test
+    fun `test Int and Float are always incompatible`() {
+        // This test verifies the fix for the type unification bug where
+        // Int and Float could incorrectly unify to the same type variable.
+        // Example: { x: 'a, y: 'a } should NOT accept { x: Int, y: Float }
+
+        val constraint = Constraint.Equality(FunkType.IntType, FunkType.FloatType)
+
+        // Int and Float should ALWAYS be incompatible
+        assertThrows<ConstraintConflictError> {
+            solver.solve(listOf(constraint))
+        }
     }
 }

@@ -1008,51 +1008,41 @@ class ConstraintSolver(
                 unifyVariants(type1, type2)
             }
             
-            // Base types must be identical - enhanced error handling
+            // Base types must be identical - strict type checking
             else -> {
-                // Check if we should be permissive (only when explicitly enabled)
-                val isPermissive = System.getProperty("funk.typecheck.permissive", "false") == "true"
-
-                if (isPermissive) {
-                    // Be permissive and just warn
-                    if (System.getProperty("funk.typecheck.debug") == "true") {
-                        println("Warning: Cannot unify ${prettyPrintType(type1)} with ${prettyPrintType(type2)} - ignoring constraint")
+                // Check for common type conflicts and provide helpful error messages
+                when {
+                    type1 is FunkType.IntType && type2 is FunkType.FloatType -> {
+                        throw ConstraintConflictError(
+                            "Type conflict: Cannot unify Int and Float. Consider using explicit type conversion.",
+                            listOf(type1, type2)
+                        )
                     }
-                    Substitution.empty()
-                } else {
-                    // Check for common type conflicts and provide helpful error messages
-                    when {
-                        type1 is FunkType.IntType && type2 is FunkType.FloatType -> {
-                            throw ConstraintConflictError(
-                                "Type conflict: Cannot unify Int and Float. Consider using explicit type conversion.",
-                                listOf(type1, type2)
-                            )
+                    type1 is FunkType.FloatType && type2 is FunkType.IntType -> {
+                        throw ConstraintConflictError(
+                            "Type conflict: Cannot unify Float and Int. Consider using explicit type conversion.",
+                            listOf(type1, type2)
+                        )
+                    }
+                    type1 is FunkType.StringType && (type2 is FunkType.IntType || type2 is FunkType.FloatType || type2 is FunkType.BooleanType) -> {
+                        throw ConstraintConflictError(
+                            "Type conflict: Cannot unify String with ${prettyPrintType(type2)}. Consider using string conversion functions.",
+                            listOf(type1, type2)
+                        )
+                    }
+                    (type1 is FunkType.IntType || type1 is FunkType.FloatType || type1 is FunkType.BooleanType) && type2 is FunkType.StringType -> {
+                        throw ConstraintConflictError(
+                            "Type conflict: Cannot unify ${prettyPrintType(type1)} with String. Consider using string conversion functions.",
+                            listOf(type1, type2)
+                        )
+                    }
+                    else -> {
+                        // For other cases (like different variant/record types), just return empty substitution
+                        // This allows structural subtyping to work
+                        if (System.getProperty("funk.typecheck.debug") == "true") {
+                            println("Warning: Cannot unify ${prettyPrintType(type1)} with ${prettyPrintType(type2)} - ignoring constraint")
                         }
-                        type1 is FunkType.FloatType && type2 is FunkType.IntType -> {
-                            throw ConstraintConflictError(
-                                "Type conflict: Cannot unify Float and Int. Consider using explicit type conversion.",
-                                listOf(type1, type2)
-                            )
-                        }
-                        type1 is FunkType.StringType && (type2 is FunkType.IntType || type2 is FunkType.FloatType || type2 is FunkType.BooleanType) -> {
-                            throw ConstraintConflictError(
-                                "Type conflict: Cannot unify String with ${prettyPrintType(type2)}. Consider using string conversion functions.",
-                                listOf(type1, type2)
-                            )
-                        }
-                        (type1 is FunkType.IntType || type1 is FunkType.FloatType || type1 is FunkType.BooleanType) && type2 is FunkType.StringType -> {
-                            throw ConstraintConflictError(
-                                "Type conflict: Cannot unify ${prettyPrintType(type1)} with String. Consider using string conversion functions.",
-                                listOf(type1, type2)
-                            )
-                        }
-                        else -> {
-                            // For other cases, be more permissive and just warn
-                            if (System.getProperty("funk.typecheck.debug") == "true") {
-                                println("Warning: Cannot unify ${prettyPrintType(type1)} with ${prettyPrintType(type2)} - ignoring constraint")
-                            }
-                            Substitution.empty()
-                        }
+                        Substitution.empty()
                     }
                 }
             }
