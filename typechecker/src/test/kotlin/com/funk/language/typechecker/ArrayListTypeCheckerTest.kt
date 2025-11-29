@@ -5,6 +5,7 @@ import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.assertThrows
 
 class ArrayListTypeCheckerTest {
     
@@ -123,10 +124,11 @@ class ArrayListTypeCheckerTest {
     fun `test ArrayList type mismatch error`() {
         val source = """let mixed = [1, "hello", true]"""
         val program = parser.parse(source)
-        
-        // Our permissive type checker handles mixed types gracefully
-        val typedProgram = typeChecker.typeCheck(program)
-        assertNotNull(typedProgram)
+
+        // Arrays must have homogeneous element types - this should fail
+        assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(program)
+        }
     }
     
     @Test

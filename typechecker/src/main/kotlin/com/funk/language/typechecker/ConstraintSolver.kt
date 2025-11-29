@@ -1010,10 +1010,9 @@ class ConstraintSolver(
             
             // Base types must be identical - enhanced error handling
             else -> {
-                // Check if we should be permissive (for tests or lenient mode)
-                val isPermissive = System.getProperty("funk.typecheck.permissive", "false") == "true" ||
-                                 System.getProperty("funk.typecheck.strict", "false") == "false"
-                
+                // Check if we should be permissive (only when explicitly enabled)
+                val isPermissive = System.getProperty("funk.typecheck.permissive", "false") == "true"
+
                 if (isPermissive) {
                     // Be permissive and just warn
                     if (System.getProperty("funk.typecheck.debug") == "true") {
