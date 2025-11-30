@@ -3171,6 +3171,39 @@ class FunkParser {
                     // For non-identifier expressions, treat following identifier as separate statement
                     break
                 }
+                TokenType.STRING, TokenType.INTEGER, TokenType.FLOAT, TokenType.FRACTION, TokenType.BOOLEAN -> {
+                    // Function call with literal argument without {} syntax
+                    val funcExpr = (result as ParseResult.Success).value
+                    if (funcExpr is Identifier || funcExpr is MemberAccess) {
+                        val funcName = when (funcExpr) {
+                            is Identifier -> funcExpr.name
+                            is MemberAccess -> {
+                                // Extract clean name for member access like Parse.decode
+                                val receiverName = when (val receiver = funcExpr.receiver) {
+                                    is Identifier -> receiver.name
+                                    is VariantConstruction -> receiver.constructor
+                                    else -> "..."
+                                }
+                                "$receiverName.${funcExpr.member}"
+                            }
+                            else -> "function"
+                        }
+                        val literalType = when (token.type) {
+                            TokenType.STRING -> "string ${token.text}"
+                            TokenType.INTEGER -> "number ${token.text}"
+                            TokenType.FLOAT -> "number ${token.text}"
+                            TokenType.FRACTION -> "fraction ${token.text}"
+                            TokenType.BOOLEAN -> "boolean ${token.text}"
+                            else -> "value"
+                        }
+                        throw createParseException(
+                            "Function calls must use {} syntax. Instead of '$funcName $literalType', " +
+                            "use '$funcName { <field> = $literalType }' with named arguments.",
+                            currentStream
+                        )
+                    }
+                    break
+                }
                 else -> break  // No more postfix operators
             }
         }

@@ -24,8 +24,8 @@ class SimplePerformerTest {
     fun testVerySimplePerformer() {
         // This is the exact same code that works in CLI
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
 
             impl Console for Terminal where {

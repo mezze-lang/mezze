@@ -23,10 +23,10 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testBasicEffectExecution() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -48,10 +48,10 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testRandomEffectExecution() {
         val source = """
-            effect Random {
-              nextInt : {min: Int, max: Int} -> Int
+            effect Random where {
+              nextInt : {min: Int, max: Int} -> Int <Random>
             }
-            
+
             impl Random for MathRandom where {
               nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
             }
@@ -75,12 +75,12 @@ class ComprehensiveEffectInterpreterTest {
         val source = """
             use std::int
 
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
-            effect Random {
-              nextInt : {min: Int, max: Int} -> Int
+            effect Random where {
+              nextInt : {min: Int, max: Int} -> Int <Random>
             }
 
             impl Log for Console where {
@@ -115,8 +115,8 @@ class ComprehensiveEffectInterpreterTest {
         val source = """
             use std::int
 
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -151,10 +151,10 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testUseExpressionExecution() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -176,9 +176,9 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testEffectDeclarationRegistration() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {},
-              debug : {msg: String, level: Int} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>,
+              debug : {msg: String, level: Int} -> {} <Log>
             }
             
             # Just declare the effect, don't use it
@@ -199,10 +199,10 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testImplDeclarationRegistration() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -225,10 +225,10 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testMultipleImplOperationsExecution() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {},
-              error : {msg: String} -> {},
-              debug : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>,
+              error : {msg: String} -> {} <Log>,
+              debug : {msg: String} -> {} <Log>
             }
             
             impl Log for Console where {
@@ -262,10 +262,10 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testNestedEffectCallsExecution() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -293,9 +293,9 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testEffectCallWithComplexArguments() {
         val source = """
-            effect Math {
-              add : {x: Int, y: Int} -> Int,
-              multiply : {x: Int, y: Int} -> Int
+            effect Math where {
+              add : {x: Int, y: Int} -> Int <Math>,
+              multiply : {x: Int, y: Int} -> Int <Math>
             }
             
             impl Math for Calculator where {
@@ -329,8 +329,8 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testEffectCallErrorHandling() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
             # No implementation declared - this should cause an error
@@ -382,12 +382,12 @@ class ComprehensiveEffectInterpreterTest {
     @Test
     fun testHandlerMappingCorrectness() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
-            
-            effect Debug {
-              log : {msg: String} -> {}
+
+            effect Debug where {
+              log : {msg: String} -> {} <Debug>
             }
             
             impl Log for Console where {
@@ -419,8 +419,8 @@ class ComprehensiveEffectInterpreterTest {
     fun testParameterizedImplExecution() {
         // Note: This test will work once parameterized handler instantiation is implemented
         val source = """
-            effect Logging {
-              log : {msg: String} -> {}
+            effect Logging where {
+              log : {msg: String} -> {} <Logging>
             }
             
             impl Logging for FileLogger {path: String} where {

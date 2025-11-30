@@ -25,18 +25,18 @@ class BuiltinEffectsTest {
     fun testBuiltinLogEffect() {
         val source = """
             # Declare Log effect
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
-            
+
             # Use native implementation
             impl Log for NativeConsole where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             # Test the effect
             let result = perform NativeConsole in Log.print {msg = "Hello World!"}
-            
+
             result
         """.trimIndent()
 
@@ -54,18 +54,18 @@ class BuiltinEffectsTest {
     fun testBuiltinRandomEffect() {
         val source = """
             # Declare Random effect
-            effect Random {
-              nextInt : {min: Int, max: Int} -> Int
+            effect Random where {
+              nextInt : {min: Int, max: Int} -> Int <Random>
             }
-            
+
             # Use native implementation
             impl Random for NativeRandom where {
               nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
             }
-            
+
             # Test the effect
             let result = perform NativeRandom in Random.nextInt {min = 1, max = 10}
-            
+
             result
         """.trimIndent()
 
@@ -82,23 +82,23 @@ class BuiltinEffectsTest {
     fun testCombinedLogAndRandomEffects() {
         val source = """
             # Declare both effects
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
-            
-            effect Random {
-              nextInt : {min: Int, max: Int} -> Int
+
+            effect Random where {
+              nextInt : {min: Int, max: Int} -> Int <Random>
             }
-            
+
             # Implementations
             impl Log for NativeConsole where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             impl Random for NativeRandom where {
               nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
             }
-            
+
             # Function using both effects
             let randomGreeting = {name} ->
               do
@@ -106,10 +106,10 @@ class BuiltinEffectsTest {
                 let num = Random.nextInt {min = 1, max = 100}
                 Log.print {msg = "Generated: $(intToString {val = num})"}
                 num
-            
+
             # Execute with both handlers
             let result = perform NativeRandom, NativeConsole in randomGreeting {name = "Test"}
-            
+
             result
         """.trimIndent()
 
@@ -134,18 +134,18 @@ class BuiltinEffectsTest {
     fun testParameterExtractionImprovement() {
         val source = """
             # Test that parameter names are correctly extracted
-            effect TestEffect {
-              multiParam : {first: String, second: Int, third: Float} -> String
+            effect TestEffect where {
+              multiParam : {first: String, second: Int, third: Float} -> String <TestEffect>
             }
-            
+
             impl TestEffect for TestHandler where {
-              multiParam : {first: String, second: Int, third: Float} -> String = 
+              multiParam : {first: String, second: Int, third: Float} -> String =
                 {first, second, third} -> first + " " + intToString {val = second}
             }
-            
+
             # This should work with proper parameter extraction
             let result = perform TestHandler in TestEffect.multiParam {first = "Hello", second = 42, third = 3.14}
-            
+
             result
         """.trimIndent()
 

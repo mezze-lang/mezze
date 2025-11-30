@@ -23,8 +23,8 @@ class RuntimeEffectValidationTest {
     @Test
     fun testUnhandledEffectPreventsExecution() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -67,10 +67,10 @@ class RuntimeEffectValidationTest {
     @Test
     fun testHandledEffectAllowsExecution() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -95,12 +95,12 @@ class RuntimeEffectValidationTest {
     @Test
     fun testMultipleUnhandledEffectsPreventsExecution() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
-            effect Random {
-              nextInt : {max: Int} -> Int
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
 
             impl Log for Console where {
@@ -149,12 +149,12 @@ class RuntimeEffectValidationTest {
     @Test
     fun testPartiallyHandledEffectsPreventsExecution() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
-            effect Random {
-              nextInt : {max: Int} -> Int
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
 
             impl Log for Console where {
@@ -204,14 +204,14 @@ class RuntimeEffectValidationTest {
     @Test
     fun testFullyHandledEffectsAllowsExecution() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
-            
-            effect Random {
-              nextInt : {max: Int} -> Int
+
+            effect Random where {
+              nextInt : {max: Int} -> Int <Random>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -257,8 +257,8 @@ class RuntimeEffectValidationTest {
     @Test
     fun testNestedEffectfulFunctionValidation() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {
@@ -305,8 +305,8 @@ class RuntimeEffectValidationTest {
     @Test
     fun testEffectValidationInPartialApplication() {
         val source = """
-            effect Log {
-              print : {msg: String} -> {}
+            effect Log where {
+              print : {msg: String} -> {} <Log>
             }
 
             impl Log for Console where {

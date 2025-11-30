@@ -29,14 +29,14 @@ class PerformerValidationTest {
     @Test
     fun testPerformNotAllowedInPerformerImplementation() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
-            effect Log {
-              info : {msg: String} -> {}
+
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -63,14 +63,14 @@ class PerformerValidationTest {
     @Test
     fun testCrossEffectPerformerReuseNotAllowed() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
-            effect Log {
-              info : {msg: String} -> {}
+
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -97,14 +97,14 @@ class PerformerValidationTest {
     @Test
     fun testEffectTransformationAllowed() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
-            effect Log {
-              info : {msg: String} -> {}
+
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -129,10 +129,10 @@ class PerformerValidationTest {
     @Test
     fun testParameterizedPerformer() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for FileLogger {path: String} where {
               info : {msg: String} -> {} = {msg} -> native_print {msg = "$(path): $(msg)"}
             }
@@ -154,12 +154,12 @@ class PerformerValidationTest {
         val source = """
             use std::int
 
-            effect Database {
-              query : {sql: String} -> String
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
 
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
             impl Database for PostgresDB {host: String, port: Int} where {
@@ -187,14 +187,14 @@ class PerformerValidationTest {
     @Test
     fun testNestedPerformScopes() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
-            effect Log {
-              info : {msg: String} -> {}
+
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> {}
             }

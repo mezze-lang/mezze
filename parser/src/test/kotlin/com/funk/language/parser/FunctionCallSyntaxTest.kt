@@ -665,4 +665,150 @@ class FunctionCallSyntaxTest {
         val program = parser.parse(code)
         assertNotNull(program)
     }
+
+    // ========== LITERAL ARGUMENT SYNTAX ERRORS ==========
+
+    @Test
+    fun `test function call with string literal should fail`() {
+        val code = """
+            let f = {x} -> x
+            let result = f "hello"
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
+        assertTrue(exception.message?.contains("string") == true)
+    }
+
+    @Test
+    fun `test function call with integer literal should fail`() {
+        val code = """
+            let f = {x} -> x
+            let result = f 42
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
+        assertTrue(exception.message?.contains("number") == true)
+    }
+
+    @Test
+    fun `test function call with float literal should fail`() {
+        val code = """
+            let f = {x} -> x
+            let result = f 3.14
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
+        assertTrue(exception.message?.contains("number") == true)
+    }
+
+    @Test
+    fun `test function call with fraction literal should fail`() {
+        val code = """
+            let f = {x} -> x
+            let result = f 1//2
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
+        assertTrue(exception.message?.contains("fraction") == true)
+    }
+
+    @Test
+    fun `test function call with boolean literal true should fail`() {
+        val code = """
+            let f = {x} -> x
+            let result = f true
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
+        assertTrue(exception.message?.contains("boolean") == true)
+    }
+
+    @Test
+    fun `test function call with boolean literal false should fail`() {
+        val code = """
+            let f = {x} -> x
+            let result = f false
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
+        assertTrue(exception.message?.contains("boolean") == true)
+    }
+
+    @Test
+    fun `test member access function call with string literal should fail`() {
+        val code = """
+            ability Parse 'a where {
+              decode: {val: String} -> 'a
+            }
+
+            let result = Parse.decode "1233"
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
+        assertTrue(exception.message?.contains("Parse.decode") == true)
+        assertTrue(exception.message?.contains("string") == true)
+    }
+
+    @Test
+    fun `test member access function call with number literal should fail`() {
+        val code = """
+            use std::int
+
+            let result = int::to_string 42
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
+        assertTrue(exception.message?.contains("number") == true)
+    }
+
+    @Test
+    fun `test error message for literal includes field placeholder`() {
+        val code = """
+            let f = {x} -> x
+            let result = f "test"
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        assertTrue(exception.message?.contains("<field>") == true)
+    }
+
+    @Test
+    fun `test multiple literal arguments should fail on first`() {
+        val code = """
+            let f = {x, y} -> x + y
+            let result = f 1 2
+        """.trimIndent()
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(code)
+        }
+        // Should fail on the first literal argument
+        assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
+    }
 }

@@ -140,14 +140,14 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testBasicEffectExecutionWithPropagation() {
         val source = """
-            effect Database {
-              query : {sql: String} -> String <Log>
+            effect Database where {
+              query : {sql: String} -> String <Database, Log>
             }
-            
-            effect Log {
-              log : {message: String} -> {} <>
+
+            effect Log where {
+              log : {message: String} -> {} <Log>
             }
-            
+
             impl Database for MockDB where {
               query : {sql: String} -> String = {sql} -> "mock_result_for_$(sql)"
             }
@@ -174,22 +174,22 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testNestedEffectPropagationExecution() {
         val source = """
-            effect Auth {
-              authenticate : {token: String} -> Boolean <>
+            effect Auth where {
+              authenticate : {token: String} -> Boolean <Auth>
             }
-            
-            effect Database {
-              query : {sql: String} -> String <Log>
+
+            effect Database where {
+              query : {sql: String} -> String <Database, Log>
             }
-            
-            effect Log {
-              log : {message: String} -> {} <>
+
+            effect Log where {
+              log : {message: String} -> {} <Log>
             }
-            
-            effect SecureDatabase {
-              secureQuery : {sql: String, token: String} -> String <Database, Auth, Log>
+
+            effect SecureDatabase where {
+              secureQuery : {sql: String, token: String} -> String <SecureDatabase, Database, Auth, Log>
             }
-            
+
             impl Auth for MockAuth where {
               authenticate : {token: String} -> Boolean = {token} -> true
             }
@@ -229,11 +229,11 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             ability Show 'a where {
               show : {val: 'a} -> String
             }
-            
-            effect Log {
-              log : {message: String} -> Unit
+
+            effect Log where {
+              log : {message: String} -> Unit <Log>
             }
-            
+
             impl Show Int where {
               show : {val: Int} -> String = {val} -> "123"
             }
@@ -301,10 +301,10 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testEffectHandlerSwitchingExecution() {
         val source = """
-            effect Log {
-              log : {message: String} -> String <>
+            effect Log where {
+              log : {message: String} -> String <Log>
             }
-            
+
             impl Log for PrefixLogger where {
               log : {message: String} -> String = {message} -> "PREFIX: $(message)"
             }
@@ -334,12 +334,12 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     @Test
     fun testPolymorphicAbilityResolutionExecution() {
         val source = """
-            effect StringContainer {
-              empty : {} -> String,
-              add : {container: String, item: String} -> String,
-              size : {container: String} -> Int
+            effect StringContainer where {
+              empty : {} -> String <StringContainer>,
+              add : {container: String, item: String} -> String <StringContainer>,
+              size : {container: String} -> Int <StringContainer>
             }
-            
+
             impl StringContainer for TestContainer where {
               empty : {} -> String = {} -> ""
               add : {container: String, item: String} -> String = {container, item} ->

@@ -24,10 +24,10 @@ class NewEffectSystemTest {
     @Test
     fun testBasicEffectPerformerExecution() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -48,10 +48,10 @@ class NewEffectSystemTest {
     @Test
     fun testParameterizedPerformer() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for FileLogger {path: String} where {
               info : {msg: String} -> {} = {msg} -> native_print {msg = "$(path): $(msg)"}
             }
@@ -69,14 +69,14 @@ class NewEffectSystemTest {
     @Test
     fun testEffectTransformation() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
-            effect Log {
-              info : {msg: String} -> {}
+
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -100,18 +100,18 @@ class NewEffectSystemTest {
     @Test
     fun testMultipleEffectChaining() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
-            effect Log {
-              info : {msg: String} -> {}
+
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
-            effect App {
-              run : {name: String} -> String
+
+            effect App where {
+              run : {name: String} -> String <App>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }

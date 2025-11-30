@@ -36,10 +36,10 @@ class RobustEffectSystemTest {
     @Test
     fun testBasicEffectPerformer() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -58,12 +58,12 @@ class RobustEffectSystemTest {
     @Test
     fun testMultipleEffectTypes() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
 
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
             impl Console for Terminal where {
@@ -92,14 +92,14 @@ class RobustEffectSystemTest {
     @Test
     fun testPerformNotAllowedInPerformerImplementation() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
-            effect Log {
-              info : {msg: String} -> {}
+
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -126,14 +126,14 @@ class RobustEffectSystemTest {
     @Test
     fun testCrossEffectPerformerReuseNotAllowed() {
         val source = """
-            effect Console {
-              print : {msg: String} -> {}
+            effect Console where {
+              print : {msg: String} -> {} <Console>
             }
-            
-            effect Log {
-              info : {msg: String} -> {}
+
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
@@ -164,8 +164,8 @@ class RobustEffectSystemTest {
     @Test
     fun testMissingPerformerError() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
             # No performer defined for Log
@@ -183,8 +183,8 @@ class RobustEffectSystemTest {
     @Test
     fun testMissingEffectOperationError() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
 
             impl Log for TestLogger where {
@@ -210,10 +210,10 @@ class RobustEffectSystemTest {
     @Test
     fun testNewPerformerSyntaxParsing() {
         val source = """
-            effect Database {
-              query : {sql: String} -> String
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
-            
+
             # Test new syntax: impl Effect for Performer where { ... }
             impl Database for PostgresDB where {
               query : {sql: String} -> String = {sql} -> "postgres:$(sql)"
@@ -234,10 +234,10 @@ class RobustEffectSystemTest {
     @Test
     fun testPerformSyntaxParsing() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for TestLogger where {
               info : {msg: String} -> {} = {msg} -> {}
             }
@@ -265,10 +265,10 @@ class RobustEffectSystemTest {
     @Test
     fun testEffectTypeInference() {
         val source = """
-            effect Log {
-              info : {msg: String} -> {}
+            effect Log where {
+              info : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for TestLogger where {
               info : {msg: String} -> {} = {msg} -> {}
             }
@@ -291,10 +291,10 @@ class RobustEffectSystemTest {
     @Test
     fun testPerformerParameterTypeChecking() {
         val source = """
-            effect Database {
-              query : {sql: String} -> String
+            effect Database where {
+              query : {sql: String} -> String <Database>
             }
-            
+
             impl Database for TestDB {connectionString: String} where {
               query : {sql: String} -> String = {sql} -> "$(connectionString):$(sql)"
             }
