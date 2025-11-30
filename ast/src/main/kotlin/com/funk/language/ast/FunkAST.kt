@@ -1678,7 +1678,8 @@ data class ArrayTypeAnnotation(
 
 @Serializable
 data class EffectRowAnnotation(
-    val effects: List<String>
+    val effects: List<String>,
+    val isPolymorphic: Boolean = false  // true when <...> or <Effect1, ...> is used
 ) : TypeAnnotation
 
 @Serializable

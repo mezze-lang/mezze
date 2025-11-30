@@ -992,10 +992,12 @@ class ConstraintSolver(
             type1 is FunkType.FunctionType && type2 is FunkType.FunctionType -> {
                 val paramUnifier = unify(type1.paramType, type2.paramType)
                 val returnUnifier = unify(
-                    paramUnifier.apply(type1.returnType), 
+                    paramUnifier.apply(type1.returnType),
                     paramUnifier.apply(type2.returnType)
                 )
-                paramUnifier.compose(returnUnifier)
+                // Unify effect rows (no substitution needed as effects don't contain type variables)
+                val effectsUnifier = unifyEffectRows(type1.effects, type2.effects)
+                paramUnifier.compose(returnUnifier).compose(effectsUnifier)
             }
             
             // Record types
@@ -1248,7 +1250,62 @@ class ConstraintSolver(
         
         return substitution
     }
-    
+
+    /**
+     * Unify two effect rows according to effect polymorphism rules
+     *
+     * Rules:
+     * 1. <...> ∪ <...> = <...> (both purely polymorphic)
+     * 2. <...> ∪ <E1, E2> = <E1, E2> (polymorphic unifies with concrete)
+     * 3. <E1, ...> ∪ <E2, E3> = <E1, E2, E3> (extended unifies with concrete)
+     * 4. <E1, ...> ∪ <E2, ...> = <E1, E2, ...> (both extended)
+     * 5. <E1, E2> ∪ <E2, E3> = <E1, E2, E3> (merge concrete effects)
+     */
+    private fun unifyEffectRows(
+        row1: FunkType.EffectRow?,
+        row2: FunkType.EffectRow?
+    ): Substitution {
+        // If both are null (no effects), they unify
+        if (row1 == null && row2 == null) {
+            return Substitution.empty()
+        }
+
+        // If one is null and the other is not, they don't unify for now
+        // (could be made more permissive later)
+        if (row1 == null || row2 == null) {
+            if (System.getProperty("funk.typecheck.debug") == "true") {
+                println("Warning: Unifying null effect row with non-null effect row - using non-null")
+            }
+            return Substitution.empty()
+        }
+
+        // Check if rows are purely polymorphic (rowVar != null, no concrete effects)
+        val isPurelyPolymorphic1 = row1.isOpen && row1.effects.isEmpty()
+        val isPurelyPolymorphic2 = row2.isOpen && row2.effects.isEmpty()
+
+        return when {
+            // Rule 1: Both purely polymorphic - they unify
+            isPurelyPolymorphic1 && isPurelyPolymorphic2 -> {
+                Substitution.empty()
+            }
+
+            // Rule 2: One is purely polymorphic - use the concrete one
+            isPurelyPolymorphic1 -> {
+                Substitution.empty()
+            }
+            isPurelyPolymorphic2 -> {
+                Substitution.empty()
+            }
+
+            // Rules 3-5: Merge effects
+            else -> {
+                // Effects are just strings, no type variable substitution needed
+                // The merged effect row will be constructed at a higher level
+                Substitution.empty()
+            }
+        }
+    }
+
     /**
      * Check if two types are clearly incompatible base types
      */

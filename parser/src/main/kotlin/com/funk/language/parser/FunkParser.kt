@@ -3442,45 +3442,65 @@ class FunkParser {
 
                 result = when (returnType) {
                     is ParseResult.Success -> {
-                        // Check for effect row: <> or <EffectName> or <Effect1, Effect2>
+                        // Check for effect row: <> or <EffectName> or <Effect1, Effect2> or <...> or <Effect1, ...>
                         val streamAfterReturn = skipNewlines(returnType.remaining)
                         val ltToken = streamAfterReturn.current()
 
-                        val (effects, finalStream) = if (ltToken?.type == TokenType.LT) {
+                        val (effects, isPolymorphic, finalStream) = if (ltToken?.type == TokenType.LT) {
                             // Parse effect row
                             val afterLt = streamAfterReturn.advance()
                             val gtToken = afterLt.current()
 
                             if (gtToken?.type == TokenType.GT) {
                                 // Empty effect row <>
-                                Pair(emptyList<String>(), afterLt.advance())
+                                Triple(emptyList<String>(), false, afterLt.advance())
                             } else {
-                                // Has effect names <Effect1, Effect2>
-                                val effectNames = mutableListOf<String>()
-                                var current = skipNewlines(afterLt)
-
-                                // Parse comma-separated effect names
-                                while (current.current()?.type == TokenType.IDENTIFIER) {
-                                    effectNames.add(current.current()!!.text)
-                                    current = skipNewlines(current.advance())
-
-                                    // Check for comma
-                                    if (current.current()?.type == TokenType.COMMA) {
-                                        current = skipNewlines(current.advance())
+                                // Check for purely polymorphic <...>
+                                val ellipsisToken = skipNewlines(afterLt).current()
+                                if (ellipsisToken?.type == TokenType.ELLIPSIS) {
+                                    val afterEllipsis = skipNewlines(afterLt.advance())
+                                    if (afterEllipsis.current()?.type == TokenType.GT) {
+                                        // Polymorphic effect row <...>
+                                        Triple(emptyList<String>(), true, afterEllipsis.advance())
                                     } else {
-                                        break
+                                        Triple(emptyList<String>(), false, returnType.remaining)  // Invalid, keep original
                                     }
-                                }
-
-                                // Expect closing >
-                                if (current.current()?.type == TokenType.GT) {
-                                    Pair(effectNames, current.advance())
                                 } else {
-                                    Pair(emptyList<String>(), returnType.remaining)  // No closing >, keep original
+                                    // Has effect names <Effect1, Effect2> or <Effect1, ...>
+                                    val effectNames = mutableListOf<String>()
+                                    var current = skipNewlines(afterLt)
+                                    var foundEllipsis = false
+
+                                    // Parse comma-separated effect names
+                                    while (current.current()?.type == TokenType.IDENTIFIER) {
+                                        effectNames.add(current.current()!!.text)
+                                        current = skipNewlines(current.advance())
+
+                                        // Check for comma
+                                        if (current.current()?.type == TokenType.COMMA) {
+                                            current = skipNewlines(current.advance())
+
+                                            // Check if next is ... (effect extension)
+                                            if (current.current()?.type == TokenType.ELLIPSIS) {
+                                                foundEllipsis = true
+                                                current = skipNewlines(current.advance())
+                                                break
+                                            }
+                                        } else {
+                                            break
+                                        }
+                                    }
+
+                                    // Expect closing >
+                                    if (current.current()?.type == TokenType.GT) {
+                                        Triple(effectNames, foundEllipsis, current.advance())
+                                    } else {
+                                        Triple(emptyList<String>(), false, returnType.remaining)  // No closing >, keep original
+                                    }
                                 }
                             }
                         } else {
-                            Pair(emptyList<String>(), returnType.remaining)
+                            Triple(emptyList<String>(), false, returnType.remaining)
                         }
 
                         // Also check for 'with' keyword AFTER the return type (for backward compatibility)
@@ -3536,7 +3556,7 @@ class FunkParser {
                             FunctionTypeAnnotation(
                                 result.value,
                                 returnType.value,
-                                if (effects.isNotEmpty()) EffectRowAnnotation(effects) else null,
+                                if (effects.isNotEmpty() || isPolymorphic) EffectRowAnnotation(effects, isPolymorphic) else null,
                                 abilityConstraints
                             ),
                             streamAfterWith
