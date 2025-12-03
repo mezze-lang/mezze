@@ -6,22 +6,22 @@
 # Most users should use higher-level effects (Generator, Choice, Async) instead.
 # Only use Continuation directly when implementing new control flow abstractions.
 
-pub effect Continuation {
+pub effect Continuation where {
     # Capture the current continuation as a function { value: 'a } -> 'b
     # The continuation represents "the rest of the computation"
-    capture: {} -> ({ value: 'a } -> 'b),
+    capture: {} -> ({ value: 'a } -> 'b) <Continuation>,
 
     # Resume a continuation with a value
     # Calls the continuation function, continuing execution from where it was captured
-    resume: { cont: { value: 'a } -> 'b, value: 'a } -> 'b,
+    resume: { cont: { value: 'a } -> 'b, value: 'a } -> 'b <Continuation>,
 
     # Suspend the current computation
     # Returns a suspended continuation that can be resumed later
-    suspend: {} -> 'a,
+    suspend: {} -> 'a <Continuation>,
 
     # Abort the current computation
     # Stops execution without resuming
-    abort: {} -> 'b
+    abort: {} -> 'b <Continuation>
 }
 
 # Built-in Delimited performer (always available, no registration needed)

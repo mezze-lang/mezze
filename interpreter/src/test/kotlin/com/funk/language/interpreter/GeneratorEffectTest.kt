@@ -687,9 +687,15 @@ class GeneratorEffectTest {
             let r2 = next { gen = g2 }
             let r3 = next { gen = g3 }
 
-            let v1 = match r1.value is Some { val } -> val None -> 0
-            let v2 = match r2.value is Some { val } -> val None -> 0
-            let v3 = match r3.value is Some { val } -> val None -> 0
+            let v1 = match r1.value is
+                Some { val } -> val
+                None -> 0
+            let v2 = match r2.value is
+                Some { val } -> val
+                None -> 0
+            let v3 = match r3.value is
+                Some { val } -> val
+                None -> 0
 
             v1 + v2 + v3
         """.trimIndent()

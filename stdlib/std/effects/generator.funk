@@ -9,16 +9,18 @@
 use std::effects::continuation::{Continuation, Delimited}
 
 # Generator effect - allows yielding values from a computation
-pub effect Generator {
+# Now with associated types! The 'item type determines what values are yielded
+pub effect Generator having 'item where {
     # Yield a value and suspend execution
     # Returns control to the caller with the yielded value
     # Can be resumed to continue generating more values
-    yield: { value: 'a } -> {}
+    yield: { value: 'item } -> {} <Generator>
 }
 
 # Yieldable performer - implements Generator using continuations
 # When you yield, it suspends the computation and returns the yielded value
-pub impl Generator for Yieldable where {
+# Note: With associated types, each generator implementation specifies its item type
+pub impl Generator for Yieldable having 'item = 'a where {
     yield = { value } -> __native_generator_yield { value = value }
 }
 
