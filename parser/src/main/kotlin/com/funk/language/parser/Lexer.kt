@@ -15,7 +15,7 @@ data class Token(
 
 enum class TokenType {
     // Keywords
-    LET, TYPE, IF, THEN, ELSE, MATCH, IS, DO, EFFECT, IMPL, PERFORM, ABILITY, PUB, FOR, WHERE, WITH, IN, USE,
+    LET, TYPE, IF, THEN, ELSE, MATCH, IS, DO, EFFECT, IMPL, PERFORM, ABILITY, PUB, FOR, WHERE, WITH, IN, USE, HAVING, FORALL,
 
     // Literals
     INTEGER, FLOAT, FRACTION, STRING, BOOLEAN,
@@ -66,6 +66,8 @@ class Lexer(private val source: String) {
         "with" to TokenType.WITH,
         "in" to TokenType.IN,
         "use" to TokenType.USE,
+        "having" to TokenType.HAVING,
+        "forall" to TokenType.FORALL,
         "true" to TokenType.BOOLEAN,
         "false" to TokenType.BOOLEAN
     )

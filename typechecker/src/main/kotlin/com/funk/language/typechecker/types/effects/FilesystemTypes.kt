@@ -103,7 +103,7 @@ object FilesystemTypes {
         context["__native_fs_list_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
             resultType(
-                FunkType.ListType(FunkType.StringType),
+                FunkType.ArrayListType(FunkType.StringType),
                 FunkType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError)
             )
         )
@@ -175,7 +175,7 @@ object FilesystemTypes {
         context["__native_memfs_list_directory"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("path" to FunkType.StringType)),
             resultType(
-                FunkType.ListType(FunkType.StringType),
+                FunkType.ArrayListType(FunkType.StringType),
                 FunkType.VariantType(fileNotFoundError + permissionDeniedError + notADirectoryError + ioError)
             )
         )

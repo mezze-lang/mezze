@@ -95,8 +95,8 @@ class EffectAssociatedTypesTest {
             typeCheck(code)
         }
 
-        assertTrue(exception.message?.contains("declares associated type") == true)
-        assertTrue(exception.message?.contains("does not provide a binding") == true)
+        assertTrue(exception.message?.contains("declares associated types") == true)
+        assertTrue(exception.message?.contains("does not provide bindings") == true)
     }
 
     @Test
@@ -115,8 +115,8 @@ class EffectAssociatedTypesTest {
             typeCheck(code)
         }
 
-        assertTrue(exception.message?.contains("provides associated type binding") == true)
-        assertTrue(exception.message?.contains("does not declare an associated type") == true)
+        assertTrue(exception.message?.contains("provides bindings for") == true)
+        assertTrue(exception.message?.contains("does not declare any associated types") == true)
     }
 
     @Test
@@ -135,9 +135,9 @@ class EffectAssociatedTypesTest {
             typeCheck(code)
         }
 
-        assertTrue(exception.message?.contains("Associated type mismatch") == true)
+        // With multiple associated types support, this is now caught as missing bindings
+        assertTrue(exception.message?.contains("missing bindings for") == true)
         assertTrue(exception.message?.contains("'state") == true)
-        assertTrue(exception.message?.contains("'wrong") == true)
     }
 
     @Test
@@ -429,5 +429,270 @@ class EffectAssociatedTypesTest {
 
         // Should fail because "wrong type" is String but we bound 'state = Int
         assertTrue(exception.message != null)
+    }
+
+    // ===== Tests for Multiple Associated Types =====
+
+    @Test
+    fun `test effect with two associated types type checks`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Result>
+                fail: {error: 'err} -> {} <Result>
+            }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test effect with three associated types type checks`() {
+        val code = """
+            effect Triple having 'a, 'b, 'c where {
+                getFirst: {} -> 'a <Triple>
+                getSecond: {} -> 'b <Triple>
+                getThird: {} -> 'c <Triple>
+            }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test implementation with two associated type bindings type checks`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Result>
+                fail: {error: 'err} -> {} <Result>
+            }
+
+            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+                succeed = {value} -> {}
+                fail = {error} -> {}
+            }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test implementation with three associated type bindings type checks`() {
+        val code = """
+            effect Triple having 'a, 'b, 'c where {
+                getFirst: {} -> 'a <Triple>
+                getSecond: {} -> 'b <Triple>
+                getThird: {} -> 'c <Triple>
+            }
+
+            impl Triple for IntStringBoolTriple having 'a = Int, 'b = String, 'c = Bool where {
+                getFirst = {} -> 42
+                getSecond = {} -> "hello"
+                getThird = {} -> true
+            }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test multiple associated types used in perform block`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            let useResult = perform IntStringResult in do
+                let x = Result.succeed { value = 42 }
+                let y = Result.fail { error = "oops" }
+                x
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "useResult" }
+        assertTrue(binding.inferredType is FunkType.IntType)
+    }
+
+    @Test
+    fun `test type substitution works correctly for each associated type`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            impl Result for BoolFloatResult having 'ok = Bool, 'err = Float where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            let successResult = perform BoolFloatResult in Result.succeed { value = true }
+            let failResult = perform BoolFloatResult in Result.fail { error = 3.14 }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+
+        val successBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "successResult" }
+        assertTrue(successBinding.inferredType is FunkType.BooleanType)
+
+        val failBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "failResult" }
+        assertTrue(failBinding.inferredType is FunkType.FloatType)
+    }
+
+    @Test
+    fun `test error when missing one of multiple associated type bindings`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Result>
+                fail: {error: 'err} -> {} <Result>
+            }
+
+            impl Result for PartialResult having 'ok = Int where {
+                succeed = {value} -> {}
+                fail = {error} -> {}
+            }
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            typeCheck(code)
+        }
+
+        assertTrue(exception.message?.contains("missing bindings for") == true)
+        assertTrue(exception.message?.contains("'err") == true)
+    }
+
+    @Test
+    fun `test error when missing multiple associated type bindings`() {
+        val code = """
+            effect Triple having 'a, 'b, 'c where {
+                getFirst: {} -> 'a <Triple>
+                getSecond: {} -> 'b <Triple>
+                getThird: {} -> 'c <Triple>
+            }
+
+            impl Triple for PartialTriple having 'a = Int where {
+                getFirst = {} -> 42
+                getSecond = {} -> "oops"
+                getThird = {} -> true
+            }
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            typeCheck(code)
+        }
+
+        assertTrue(exception.message?.contains("missing bindings for") == true)
+        // Should mention both 'b and 'c are missing
+        assertTrue(exception.message?.contains("'b") == true)
+        assertTrue(exception.message?.contains("'c") == true)
+    }
+
+    @Test
+    fun `test error when providing wrong binding name with multiple types`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Result>
+            }
+
+            impl Result for BadResult having 'ok = Int, 'wrong = String where {
+                succeed = {value} -> {}
+            }
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            typeCheck(code)
+        }
+
+        // Should catch that 'wrong is not declared and 'err is missing
+        assertTrue(exception.message?.contains("'wrong") == true || exception.message?.contains("'err") == true)
+    }
+
+    @Test
+    fun `test complex types as multiple associated type bindings`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Result>
+                fail: {error: 'err} -> {} <Result>
+            }
+
+            impl Result for ComplexResult having 'ok = [Int], 'err = {code: Int, message: String} where {
+                succeed = {value} -> {}
+                fail = {error} -> {}
+            }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test multiple associated types with performer parameters`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            impl Result for ConfigurableResult {defaultOk: Int, defaultErr: String} having 'ok = Int, 'err = String where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            let result = perform ConfigurableResult {defaultOk = 0, defaultErr = "error"} in Result.succeed { value = 100 }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
+        assertTrue(binding.inferredType is FunkType.IntType)
+    }
+
+    @Test
+    fun `test multiple effects each with multiple associated types`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            effect State having 'state, 'change where {
+                get: {} -> 'state <State>
+                update: {delta: 'change} -> {} <State>
+            }
+
+            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            impl State for IntFloatState having 'state = Int, 'change = Float where {
+                get = {} -> 0
+                update = {delta} -> {}
+            }
+
+            let combined = perform IntStringResult, IntFloatState in do
+                let r = Result.succeed { value = 42 }
+                let s = State.get {}
+                r
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "combined" }
+        assertTrue(binding.inferredType is FunkType.IntType)
     }
 }

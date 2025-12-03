@@ -431,7 +431,7 @@ class FunkParser {
     // ===== EFFECT DECLARATION =====
 
     private fun parseEffectDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
-        // Parse: effect Name where { op1: Type1 -> Type2, op2: Type3 -> Type4 }
+        // Parse: effect Name [having 'state] where { op1: Type1 -> Type2, op2: Type3 -> Type4 }
         val effectToken = tok(TokenType.EFFECT)(stream)
         return when (effectToken) {
             is ParseResult.Success -> {
@@ -442,8 +442,73 @@ class FunkParser {
                     is ParseResult.Success -> {
                         val stream2 = skipNewlines(name.remaining)
 
+                        // Check for optional 'having' keyword for multiple associated types
+                        val associatedTypes = mutableListOf<String>()
+                        val streamAfterHaving = when (val havingToken = tok(TokenType.HAVING)(stream2)) {
+                            is ParseResult.Success -> {
+                                // Parse comma-separated type variables (e.g., 'state, 'error)
+                                val stream2a = skipNewlines(havingToken.remaining)
+                                var currentStream = stream2a
+
+                                // Parse first type variable
+                                when (val typeVar = identifierParser(currentStream)) {
+                                    is ParseResult.Success -> {
+                                        // Validate it's a type variable (starts with ')
+                                        if (!typeVar.value.text.startsWith("'")) {
+                                            return ParseResult.Failure(
+                                                "Associated type must be a type variable starting with '. " +
+                                                "Expected something like 'state, but got: ${typeVar.value.text}",
+                                                currentStream.getSourcePosition()
+                                            )
+                                        }
+                                        associatedTypes.add(typeVar.value.text)
+                                        currentStream = skipNewlines(typeVar.remaining)
+
+                                        // Parse additional type variables separated by commas
+                                        while (true) {
+                                            when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                is ParseResult.Success -> {
+                                                    val streamAfterComma = skipNewlines(comma.remaining)
+                                                    when (val nextTypeVar = identifierParser(streamAfterComma)) {
+                                                        is ParseResult.Success -> {
+                                                            if (!nextTypeVar.value.text.startsWith("'")) {
+                                                                return ParseResult.Failure(
+                                                                    "Associated type must be a type variable starting with '. " +
+                                                                    "Expected something like 'error, but got: ${nextTypeVar.value.text}",
+                                                                    streamAfterComma.getSourcePosition()
+                                                                )
+                                                            }
+                                                            associatedTypes.add(nextTypeVar.value.text)
+                                                            currentStream = skipNewlines(nextTypeVar.remaining)
+                                                        }
+                                                        is ParseResult.Failure -> {
+                                                            return ParseResult.Failure(
+                                                                "Expected type variable after ',' in having clause. " +
+                                                                "Example: effect ${name.value.text} having 'state, 'error where { ... }",
+                                                                streamAfterComma.getSourcePosition()
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                is ParseResult.Failure -> break
+                                            }
+                                        }
+                                        currentStream
+                                    }
+                                    is ParseResult.Failure -> {
+                                        return ParseResult.Failure(
+                                            "Expected type variable after 'having' keyword in effect declaration. " +
+                                            "Example: effect ${name.value.text} having 'state where { ... }",
+                                            stream2a.getSourcePosition()
+                                        )
+                                    }
+                                }
+                            }
+                            is ParseResult.Failure -> stream2
+                        }
+
                         // Parse required 'where' keyword
-                        val whereToken = tok(TokenType.WHERE)(stream2)
+                        val whereToken = tok(TokenType.WHERE)(streamAfterHaving)
                         when (whereToken) {
                             is ParseResult.Success -> {
                                 val stream3 = skipNewlines(whereToken.remaining)
@@ -485,7 +550,8 @@ class FunkParser {
                                                     EffectDeclaration(
                                                         name.value.text,
                                                         visibility,
-                                                        operations
+                                                        operations,
+                                                        associatedTypes  // Pass the list of associated types
                                                     ),
                                                     rbrace.remaining
                                                 )
@@ -508,7 +574,7 @@ class FunkParser {
                                 "Effect declarations require 'where' keyword. " +
                                 "Expected: effect ${name.value.text} where { operations }. " +
                                 "Each operation must declare the effect in its type signature: operationName: { params } -> ReturnType <${name.value.text}>",
-                                stream2.getSourcePosition()
+                                streamAfterHaving.getSourcePosition()
                             )
                         }
                     }
@@ -779,7 +845,123 @@ class FunkParser {
                                         }
 
                                         val stream5 = skipNewlines(streamAfterParams)
-                                        val whereToken = tok(TokenType.WHERE)(stream5)
+
+                                        // Check for optional 'having' keyword for multiple associated type bindings
+                                        val associatedTypeBindings = mutableMapOf<String, TypeAnnotation>()
+                                        val streamAfterHaving = when (val havingToken = tok(TokenType.HAVING)(stream5)) {
+                                            is ParseResult.Success -> {
+                                                val stream5a = skipNewlines(havingToken.remaining)
+                                                var currentStream = stream5a
+
+                                                // Parse first binding: 'state = Int
+                                                when (val typeVar = identifierParser(currentStream)) {
+                                                    is ParseResult.Success -> {
+                                                        // Validate it's a type variable (starts with ')
+                                                        if (!typeVar.value.text.startsWith("'")) {
+                                                            return ParseResult.Failure(
+                                                                "Associated type must be a type variable starting with '. " +
+                                                                "Expected something like 'state, but got: ${typeVar.value.text}",
+                                                                currentStream.getSourcePosition()
+                                                            )
+                                                        }
+                                                        val stream5b = skipNewlines(typeVar.remaining)
+                                                        // Expect = sign
+                                                        when (val eq = tok(TokenType.ASSIGN)(stream5b)) {
+                                                            is ParseResult.Success -> {
+                                                                val stream5c = skipNewlines(eq.remaining)
+                                                                // Parse the type annotation
+                                                                when (val typeAnnotation = typeAnnotationParser(stream5c)) {
+                                                                    is ParseResult.Success -> {
+                                                                        associatedTypeBindings[typeVar.value.text] = typeAnnotation.value
+                                                                        currentStream = skipNewlines(typeAnnotation.remaining)
+
+                                                                        // Parse additional bindings separated by commas
+                                                                        while (true) {
+                                                                            when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                                                is ParseResult.Success -> {
+                                                                                    val streamAfterComma = skipNewlines(comma.remaining)
+                                                                                    when (val nextTypeVar = identifierParser(streamAfterComma)) {
+                                                                                        is ParseResult.Success -> {
+                                                                                            if (!nextTypeVar.value.text.startsWith("'")) {
+                                                                                                return ParseResult.Failure(
+                                                                                                    "Associated type must be a type variable starting with '. " +
+                                                                                                    "Expected something like 'error, but got: ${nextTypeVar.value.text}",
+                                                                                                    streamAfterComma.getSourcePosition()
+                                                                                                )
+                                                                                            }
+                                                                                            val streamAfterVar = skipNewlines(nextTypeVar.remaining)
+                                                                                            when (val nextEq = tok(TokenType.ASSIGN)(streamAfterVar)) {
+                                                                                                is ParseResult.Success -> {
+                                                                                                    val streamAfterEq = skipNewlines(nextEq.remaining)
+                                                                                                    when (val nextTypeAnnotation = typeAnnotationParser(streamAfterEq)) {
+                                                                                                        is ParseResult.Success -> {
+                                                                                                            associatedTypeBindings[nextTypeVar.value.text] = nextTypeAnnotation.value
+                                                                                                            currentStream = skipNewlines(nextTypeAnnotation.remaining)
+                                                                                                        }
+                                                                                                        is ParseResult.Failure -> {
+                                                                                                            return ParseResult.Failure(
+                                                                                                                "Expected type annotation after '=' in having clause. " +
+                                                                                                                "Example: having 'state = Int, 'error = String",
+                                                                                                                streamAfterEq.getSourcePosition()
+                                                                                                            )
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                                is ParseResult.Failure -> {
+                                                                                                    return ParseResult.Failure(
+                                                                                                        "Expected '=' after type variable in having clause. " +
+                                                                                                        "Example: having 'state = Int, 'error = String",
+                                                                                                        streamAfterVar.getSourcePosition()
+                                                                                                    )
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                        is ParseResult.Failure -> {
+                                                                                            return ParseResult.Failure(
+                                                                                                "Expected type variable after ',' in having clause. " +
+                                                                                                "Example: having 'state = Int, 'error = String",
+                                                                                                streamAfterComma.getSourcePosition()
+                                                                                            )
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                                is ParseResult.Failure -> break
+                                                                            }
+                                                                        }
+                                                                        currentStream
+                                                                    }
+                                                                    is ParseResult.Failure -> {
+                                                                        return ParseResult.Failure(
+                                                                            "Expected type annotation after '=' in having clause. " +
+                                                                            "Example: having 'state = Int",
+                                                                            stream5c.getSourcePosition()
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                            is ParseResult.Failure -> {
+                                                                return ParseResult.Failure(
+                                                                    "Expected '=' after type variable in having clause. " +
+                                                                    "Example: having 'state = Int",
+                                                                    stream5b.getSourcePosition()
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    is ParseResult.Failure -> {
+                                                        return ParseResult.Failure(
+                                                            "Expected type variable after 'having' keyword in impl declaration. " +
+                                                            "Example: impl ${effectName.value.text} for ${performerName.value.text} having 'state = Int where { ... }",
+                                                            stream5a.getSourcePosition()
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            is ParseResult.Failure -> stream5
+                                        }
+
+                                        val stream5d = skipNewlines(streamAfterHaving)
+                                        val whereToken = tok(TokenType.WHERE)(stream5d)
 
                                         when (whereToken) {
                                             is ParseResult.Success -> {
@@ -823,6 +1005,7 @@ class FunkParser {
                                                                         effectName = effectName.value.text,
                                                                         performerName = performerName.value.text,
                                                                         performerParams = performerParams,
+                                                                        associatedTypeBindings = associatedTypeBindings,
                                                                         operations = operations,
                                                                         inferredType = null
                                                                     ),
@@ -1026,9 +1209,73 @@ class FunkParser {
                             }
                         }
 
+                        // Check for optional 'having' keyword for multiple associated types
+                        val associatedTypes = mutableListOf<String>()
+                        val streamAfterHaving = when (val havingToken = tok(TokenType.HAVING)(currentStream)) {
+                            is ParseResult.Success -> {
+                                val streamH = skipNewlines(havingToken.remaining)
+                                var havingStream = streamH
+
+                                // Parse first type variable
+                                when (val typeVar = identifierParser(havingStream)) {
+                                    is ParseResult.Success -> {
+                                        // Validate it's a type variable (starts with ')
+                                        if (!typeVar.value.text.startsWith("'")) {
+                                            return ParseResult.Failure(
+                                                "Associated type must be a type variable starting with '. " +
+                                                "Expected something like 'item, but got: ${typeVar.value.text}",
+                                                havingStream.getSourcePosition()
+                                            )
+                                        }
+                                        associatedTypes.add(typeVar.value.text)
+                                        havingStream = skipNewlines(typeVar.remaining)
+
+                                        // Parse additional type variables separated by commas
+                                        while (true) {
+                                            when (val comma = tok(TokenType.COMMA)(havingStream)) {
+                                                is ParseResult.Success -> {
+                                                    val streamAfterComma = skipNewlines(comma.remaining)
+                                                    when (val nextTypeVar = identifierParser(streamAfterComma)) {
+                                                        is ParseResult.Success -> {
+                                                            if (!nextTypeVar.value.text.startsWith("'")) {
+                                                                return ParseResult.Failure(
+                                                                    "Associated type must be a type variable starting with '. " +
+                                                                    "Expected something like 'iter, but got: ${nextTypeVar.value.text}",
+                                                                    streamAfterComma.getSourcePosition()
+                                                                )
+                                                            }
+                                                            associatedTypes.add(nextTypeVar.value.text)
+                                                            havingStream = skipNewlines(nextTypeVar.remaining)
+                                                        }
+                                                        is ParseResult.Failure -> {
+                                                            return ParseResult.Failure(
+                                                                "Expected type variable after ',' in having clause. " +
+                                                                "Example: ability ${name.value.text} having 'item, 'iter where { ... }",
+                                                                streamAfterComma.getSourcePosition()
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                is ParseResult.Failure -> break
+                                            }
+                                        }
+                                        havingStream
+                                    }
+                                    is ParseResult.Failure -> {
+                                        return ParseResult.Failure(
+                                            "Expected type variable after 'having' keyword in ability declaration. " +
+                                            "Example: ability ${name.value.text} 'iter having 'item where { ... }",
+                                            streamH.getSourcePosition()
+                                        )
+                                    }
+                                }
+                            }
+                            is ParseResult.Failure -> currentStream
+                        }
+
                         // Parse optional 'with' clause for dependencies
                         val dependencies = mutableListOf<AbilityDependency>()
-                        val stream3 = skipNewlines(currentStream)
+                        val stream3 = skipNewlines(streamAfterHaving)
                         val withToken = tok(TokenType.WITH)(stream3)
                         val streamAfterWith = when (withToken) {
                             is ParseResult.Success -> {
@@ -1129,6 +1376,7 @@ class FunkParser {
                                                     name.value.text,
                                                     visibility,
                                                     typeParams,
+                                                    associatedTypes,  // list of associated types from 'having' clause
                                                     emptyList(),  // constraints (for function ability constraints)
                                                     dependencies,  // dependencies from 'with' clause
                                                     operations
@@ -1226,11 +1474,11 @@ class FunkParser {
                                 targetTypes.add(firstType.value)
                                 currentStream = skipNewlines(firstType.remaining)
 
-                                // Parse additional types until we hit 'where' keyword
+                                // Parse additional types until we hit 'where' or 'having' keyword
                                 while (true) {
-                                    // Check if next token is 'where' - if so, we're done with types
+                                    // Check if next token is 'where' or 'having' - if so, we're done with types
                                     val nextToken = currentStream.current()
-                                    if (nextToken?.type == TokenType.WHERE) {
+                                    if (nextToken?.type == TokenType.WHERE || nextToken?.type == TokenType.HAVING) {
                                         break
                                     }
 
@@ -1246,7 +1494,123 @@ class FunkParser {
                                 }
 
                                 val stream3 = skipNewlines(currentStream)
-                                val whereToken = tok(TokenType.WHERE)(stream3)
+
+                                // Check for optional 'having' keyword for multiple associated type bindings
+                                val associatedTypeBindings = mutableMapOf<String, TypeAnnotation>()
+                                val streamAfterHaving = when (val havingToken = tok(TokenType.HAVING)(stream3)) {
+                                    is ParseResult.Success -> {
+                                        val stream3a = skipNewlines(havingToken.remaining)
+                                        var havingStream = stream3a
+
+                                        // Parse first binding: 'item = 'a
+                                        when (val typeVar = identifierParser(havingStream)) {
+                                            is ParseResult.Success -> {
+                                                // Validate it's a type variable (starts with ')
+                                                if (!typeVar.value.text.startsWith("'")) {
+                                                    return ParseResult.Failure(
+                                                        "Associated type must be a type variable starting with '. " +
+                                                        "Expected something like 'item, but got: ${typeVar.value.text}",
+                                                        havingStream.getSourcePosition()
+                                                    )
+                                                }
+                                                val stream3b = skipNewlines(typeVar.remaining)
+                                                // Expect = sign
+                                                when (val eq = tok(TokenType.ASSIGN)(stream3b)) {
+                                                    is ParseResult.Success -> {
+                                                        val stream3c = skipNewlines(eq.remaining)
+                                                        // Parse the type annotation
+                                                        when (val typeAnnotation = typeAnnotationParser(stream3c)) {
+                                                            is ParseResult.Success -> {
+                                                                associatedTypeBindings[typeVar.value.text] = typeAnnotation.value
+                                                                havingStream = skipNewlines(typeAnnotation.remaining)
+
+                                                                // Parse additional bindings separated by commas
+                                                                while (true) {
+                                                                    when (val comma = tok(TokenType.COMMA)(havingStream)) {
+                                                                        is ParseResult.Success -> {
+                                                                            val streamAfterComma = skipNewlines(comma.remaining)
+                                                                            when (val nextTypeVar = identifierParser(streamAfterComma)) {
+                                                                                is ParseResult.Success -> {
+                                                                                    if (!nextTypeVar.value.text.startsWith("'")) {
+                                                                                        return ParseResult.Failure(
+                                                                                            "Associated type must be a type variable starting with '. " +
+                                                                                            "Expected something like 'iter, but got: ${nextTypeVar.value.text}",
+                                                                                            streamAfterComma.getSourcePosition()
+                                                                                        )
+                                                                                    }
+                                                                                    val streamAfterVar = skipNewlines(nextTypeVar.remaining)
+                                                                                    when (val nextEq = tok(TokenType.ASSIGN)(streamAfterVar)) {
+                                                                                        is ParseResult.Success -> {
+                                                                                            val streamAfterEq = skipNewlines(nextEq.remaining)
+                                                                                            when (val nextTypeAnnotation = typeAnnotationParser(streamAfterEq)) {
+                                                                                                is ParseResult.Success -> {
+                                                                                                    associatedTypeBindings[nextTypeVar.value.text] = nextTypeAnnotation.value
+                                                                                                    havingStream = skipNewlines(nextTypeAnnotation.remaining)
+                                                                                                }
+                                                                                                is ParseResult.Failure -> {
+                                                                                                    return ParseResult.Failure(
+                                                                                                        "Expected type annotation after '=' in having clause. " +
+                                                                                                        "Example: having 'item = 'a, 'iter = MyIter",
+                                                                                                        streamAfterEq.getSourcePosition()
+                                                                                                    )
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                        is ParseResult.Failure -> {
+                                                                                            return ParseResult.Failure(
+                                                                                                "Expected '=' after type variable in having clause. " +
+                                                                                                "Example: having 'item = 'a, 'iter = MyIter",
+                                                                                                streamAfterVar.getSourcePosition()
+                                                                                            )
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                                is ParseResult.Failure -> {
+                                                                                    return ParseResult.Failure(
+                                                                                        "Expected type variable after ',' in having clause. " +
+                                                                                        "Example: having 'item = 'a, 'iter = MyIter",
+                                                                                        streamAfterComma.getSourcePosition()
+                                                                                    )
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                        is ParseResult.Failure -> break
+                                                                    }
+                                                                }
+                                                                havingStream
+                                                            }
+                                                            is ParseResult.Failure -> {
+                                                                return ParseResult.Failure(
+                                                                    "Expected type annotation after '=' in having clause. " +
+                                                                    "Example: having 'item = 'a",
+                                                                    stream3c.getSourcePosition()
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    is ParseResult.Failure -> {
+                                                        return ParseResult.Failure(
+                                                            "Expected '=' after type variable in having clause. " +
+                                                            "Example: having 'item = 'a",
+                                                            stream3b.getSourcePosition()
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            is ParseResult.Failure -> {
+                                                return ParseResult.Failure(
+                                                    "Expected type variable after 'having' keyword in impl declaration. " +
+                                                    "Example: impl ${abilityName.value.text} (Vec 'a) having 'item = 'a where { ... }",
+                                                    stream3a.getSourcePosition()
+                                                )
+                                            }
+                                        }
+                                    }
+                                    is ParseResult.Failure -> stream3
+                                }
+
+                                val stream3d = skipNewlines(streamAfterHaving)
+                                val whereToken = tok(TokenType.WHERE)(stream3d)
 
                                 when (whereToken) {
                                     is ParseResult.Success -> {
@@ -1289,6 +1653,8 @@ class FunkParser {
                                                         ImplAbilityDeclaration(
                                                             abilityName.value.text,
                                                             targetTypes,
+                                                            emptyList(),  // forallVars - deferred for later
+                                                            associatedTypeBindings,
                                                             operations
                                                         ),
                                                         rbrace.remaining
@@ -3400,9 +3766,12 @@ class FunkParser {
                     abilityStream = skipNewlines(abilityStream.advance())
 
                     // Parse type arguments (space-separated types)
+                    // CRITICAL FIX: Use atomicTypeAnnotation instead of primaryTypeAnnotation
+                    // to avoid parsing type applications (e.g., "Float Int" as a single type)
+                    // We want "Convert Float Int" to be parsed as Convert with 2 args, not 1
                     val typeArgs = mutableListOf<TypeAnnotation>()
                     while (true) {
-                        val typeResult = primaryTypeAnnotation(abilityStream)
+                        val typeResult = atomicTypeAnnotation(abilityStream)
                         when (typeResult) {
                             is ParseResult.Success -> {
                                 typeArgs.add(typeResult.value)
@@ -3518,9 +3887,11 @@ class FunkParser {
                                 abilityStreamAfter = skipNewlines(abilityStreamAfter.advance())
 
                                 // Parse type arguments (space-separated types)
+                                // CRITICAL FIX: Use atomicTypeAnnotation instead of primaryTypeAnnotation
+                                // to avoid parsing type applications (e.g., "Float Int" as a single type)
                                 val typeArgs = mutableListOf<TypeAnnotation>()
                                 while (true) {
-                                    val typeResult = primaryTypeAnnotation(abilityStreamAfter)
+                                    val typeResult = atomicTypeAnnotation(abilityStreamAfter)
                                     when (typeResult) {
                                         is ParseResult.Success -> {
                                             typeArgs.add(typeResult.value)
@@ -3606,6 +3977,20 @@ class FunkParser {
             variantTypeAnnotationParser,
             typeApplicationAnnotation,
             identifierTypeAnnotation
+        )(stream)
+    }
+
+    /**
+     * Parse atomic type annotations (identifiers only, no type applications).
+     * Used for ability constraint type arguments to avoid parsing "Float Int" as a type application.
+     */
+    private val atomicTypeAnnotation: Parser<TypeAnnotation> = { stream ->
+        Parsers.oneOf(
+            arrayTypeAnnotation,      // Allow [Int], [Float], etc.
+            parenTypeAnnotation,       // Allow (Int), (Float), etc.
+            recordTypeAnnotationParser, // Allow {x: Int}, etc.
+            identifierTypeAnnotation   // Allow Int, Float, String, 'a, etc.
+            // NOTE: Deliberately exclude typeApplicationAnnotation to prevent "Float Int" from being parsed as Float(Int)
         )(stream)
     }
 

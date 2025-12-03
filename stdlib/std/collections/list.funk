@@ -13,6 +13,9 @@ pub let empty = {} ->
 pub let cons = { head, tail } ->
     __native_list_cons { head = head, tail = tail }
 
+pub let push = { x, xs } ->
+    __native_list_cons { head = x, tail = xs }
+
 pub let is_empty = { xs } ->
     __native_list_is_empty { xs = xs }
 

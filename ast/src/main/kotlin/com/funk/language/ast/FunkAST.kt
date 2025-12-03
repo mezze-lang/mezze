@@ -911,36 +911,55 @@ data class EffectDeclaration(
     val name: String,
     val visibility: Visibility = Visibility.PRIVATE,
     val operations: List<EffectOperation>,
+    val associatedTypes: List<String> = emptyList(),  // Associated types from 'having 'state, 'error'
     val inferredType: FunkType? = null           // From typechecker
-) : ProgramItem
+) : ProgramItem {
+    // Backward compatibility
+    val associatedType: String? get() = associatedTypes.firstOrNull()
+}
 
 @Serializable
 data class ImplDeclaration(
     val effectName: String,
     val performerName: String,
     val performerParams: List<PerformerParameter> = emptyList(), // For parameterized performers like FileLogger {path: String}
+    val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'state = Int, 'error = String'
     val operations: List<PerformerOperation>,
     val inferredType: FunkType? = null           // From typechecker
-) : ProgramItem
+) : ProgramItem {
+    // Backward compatibility
+    val associatedTypeBinding: Pair<String, TypeAnnotation>?
+        get() = associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
+}
 
 @Serializable
 data class AbilityDeclaration(
     val name: String,
     val visibility: Visibility = Visibility.PRIVATE,
     val typeParams: List<String>,                // Multiple type parameters like ['a, 'b]
+    val associatedTypes: List<String> = emptyList(),  // Associated types from 'having 'item, 'iter'
     val constraints: List<AbilityConstraint> = emptyList(),
     val dependencies: List<AbilityDependency> = emptyList(),  // Ability dependencies (e.g., Ord depends on Eq)
     val operations: List<AbilityOperation>,
     val inferredType: FunkType? = null           // From typechecker
-) : ProgramItem
+) : ProgramItem {
+    // Backward compatibility
+    val associatedType: String? get() = associatedTypes.firstOrNull()
+}
 
 @Serializable
 data class ImplAbilityDeclaration(
     val abilityName: String,
     val targetTypes: List<TypeAnnotation>,       // Multiple concrete types like [String, Int]
+    val forallVars: List<String> = emptyList(),  // Type variables from 'forall 'a 'b.' quantification
+    val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'item = Int, 'iter = MyIter'
     val operations: List<ImplAbilityOperation>,
     val inferredType: FunkType? = null           // From typechecker
-) : ProgramItem
+) : ProgramItem {
+    // Backward compatibility
+    val associatedTypeBinding: Pair<String, TypeAnnotation>?
+        get() = associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }
+}
 
 @Serializable
 data class TopLevelExpression(

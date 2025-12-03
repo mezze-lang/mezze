@@ -112,4 +112,178 @@ class EffectParserTest {
         val functionCall = performExpr.expression as FunctionCall
         assertEquals("someFunction", (functionCall.function as Identifier).name)
     }
+
+    @Test
+    fun testEffectDeclarationWithoutHaving() {
+        val source = """
+            effect Log where {
+                info: {msg: String} -> {} <Log>
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val effectDecl = program.items[0] as EffectDeclaration
+        assertEquals("Log", effectDecl.name)
+        assertNull(effectDecl.associatedType)
+        assertEquals(1, effectDecl.operations.size)
+        assertEquals("info", effectDecl.operations[0].name)
+    }
+
+    @Test
+    fun testEffectDeclarationWithHaving() {
+        val source = """
+            effect State having 'state where {
+                get: {} -> 'state <State>
+                put: {value: 'state} -> {} <State>
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val effectDecl = program.items[0] as EffectDeclaration
+        assertEquals("State", effectDecl.name)
+        assertEquals("'state", effectDecl.associatedType)
+        assertEquals(2, effectDecl.operations.size)
+
+        // Check get operation
+        assertEquals("get", effectDecl.operations[0].name)
+
+        // Check put operation
+        assertEquals("put", effectDecl.operations[1].name)
+    }
+
+    @Test
+    fun testEffectDeclarationWithHavingDifferentTypeVarName() {
+        val source = """
+            effect Reader having 'env where {
+                ask: {} -> 'env <Reader>
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val effectDecl = program.items[0] as EffectDeclaration
+        assertEquals("Reader", effectDecl.name)
+        assertEquals("'env", effectDecl.associatedType)
+        assertEquals(1, effectDecl.operations.size)
+        assertEquals("ask", effectDecl.operations[0].name)
+    }
+
+    @Test
+    fun testEffectDeclarationHavingRequiresTypeVariable() {
+        val source = """
+            effect State having state where {
+                get: {} -> state <State>
+            }
+        """.trimIndent()
+
+        try {
+            parser.parse(source)
+            fail("Should have thrown ParseException for non-type-variable in having")
+        } catch (e: ParseException) {
+            assertTrue(e.message?.contains("must be a type variable starting with '") == true)
+        }
+    }
+
+    @Test
+    fun testEffectImplementationWithoutHaving() {
+        val source = """
+            effect Log where {
+                info: {msg: String} -> {} <Log>
+            }
+
+            impl Log for ConsoleLogger {} where {
+                info = {msg} -> {}
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(2, program.items.size)
+
+        val implDecl = program.items[1] as ImplDeclaration
+        assertEquals("Log", implDecl.effectName)
+        assertEquals("ConsoleLogger", implDecl.performerName)
+        assertNull(implDecl.associatedTypeBinding)
+        assertEquals(1, implDecl.operations.size)
+    }
+
+    @Test
+    fun testEffectImplementationWithHaving() {
+        val source = """
+            effect State having 'state where {
+                get: {} -> 'state <State>
+                put: {value: 'state} -> {} <State>
+            }
+
+            impl State for Counter having 'state = Int where {
+                get = {} -> 42
+                put = {value} -> {}
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(2, program.items.size)
+
+        val implDecl = program.items[1] as ImplDeclaration
+        assertEquals("State", implDecl.effectName)
+        assertEquals("Counter", implDecl.performerName)
+        assertNotNull(implDecl.associatedTypeBinding)
+        assertEquals("'state", implDecl.associatedTypeBinding!!.first)
+
+        val typeAnnotation = implDecl.associatedTypeBinding!!.second
+        assertTrue(typeAnnotation is IdentifierTypeAnnotation)
+        assertEquals("Int", (typeAnnotation as IdentifierTypeAnnotation).name)
+
+        assertEquals(2, implDecl.operations.size)
+        assertEquals("get", implDecl.operations[0].name)
+        assertEquals("put", implDecl.operations[1].name)
+    }
+
+    @Test
+    fun testEffectImplementationWithHavingComplexType() {
+        val source = """
+            effect State having 'state where {
+                get: {} -> 'state <State>
+            }
+
+            impl State for ListState having 'state = (List String) where {
+                get = {} -> []
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(2, program.items.size)
+
+        val implDecl = program.items[1] as ImplDeclaration
+        assertEquals("State", implDecl.effectName)
+        assertEquals("ListState", implDecl.performerName)
+        assertNotNull(implDecl.associatedTypeBinding)
+        assertEquals("'state", implDecl.associatedTypeBinding!!.first)
+
+        val typeAnnotation = implDecl.associatedTypeBinding!!.second
+        assertTrue(typeAnnotation is TypeApplicationAnnotation)
+        val typeApp = typeAnnotation as TypeApplicationAnnotation
+        assertEquals("List", typeApp.constructor)
+        assertEquals(1, typeApp.args.size)
+    }
+
+    @Test
+    fun testEffectImplementationHavingRequiresTypeVariable() {
+        val source = """
+            impl State for Counter having state = Int where {
+                get = {} -> 42
+            }
+        """.trimIndent()
+
+        try {
+            parser.parse(source)
+            fail("Should have thrown ParseException for non-type-variable in impl having")
+        } catch (e: ParseException) {
+            assertTrue(e.message?.contains("must be a type variable starting with '") == true)
+        }
+    }
 }
