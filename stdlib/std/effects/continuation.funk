@@ -19,6 +19,12 @@ pub effect Continuation where {
     # Returns a suspended continuation that can be resumed later
     suspend: {} -> 'a <Continuation>,
 
+    # Suspend with a value attached
+    # Like suspend, but packages the value with the suspended continuation
+    # This enables building generators: suspend_with { value = x } returns
+    # a suspended state containing both x and the continuation
+    suspend_with: { value: 'a } -> 'b <Continuation>,
+
     # Abort the current computation
     # Stops execution without resuming
     abort: {} -> 'b <Continuation>
@@ -31,5 +37,6 @@ pub impl Continuation for Delimited where {
     capture = {} -> __native_continuation_capture {},
     resume = { cont, value } -> __native_continuation_resume { cont = cont, value = value },
     suspend = {} -> __native_continuation_suspend {},
+    suspend_with = { value } -> __native_continuation_suspend_with { value = value },
     abort = {} -> __native_continuation_abort {}
 }

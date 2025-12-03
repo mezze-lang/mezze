@@ -54,6 +54,18 @@ object ContinuationTypes {
             FunkType.VarType(com.funk.language.ast.TypeVar("a"))
         )
 
+        // __native_continuation_suspend_with: { value: 'a } -> 'b
+        // Suspends with a value attached - packages value with the suspended continuation
+        // This is the key primitive for implementing generators in userland
+        context["__native_continuation_suspend_with"] = FunkType.FunctionType(
+            // Parameter type: { value: 'a }
+            FunkType.RecordType(mapOf(
+                "value" to FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+            )),
+            // Return type: 'b (suspended state containing value + continuation)
+            FunkType.VarType(com.funk.language.ast.TypeVar("b"))
+        )
+
         // __native_continuation_abort: {} -> 'b
         // Aborts the current computation without resuming
         context["__native_continuation_abort"] = FunkType.FunctionType(

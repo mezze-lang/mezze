@@ -26,6 +26,7 @@ object ContinuationImplementations {
         registerCapture(context, interpreter)
         registerResume(context, interpreter)
         registerSuspend(context, interpreter)
+        registerSuspendWith(context, interpreter)
         registerAbort(context, interpreter)
     }
 
@@ -150,6 +151,68 @@ object ContinuationImplementations {
 
             // Return suspended continuation to signal suspension
             FunkContinuationSuspended(continuation, FunkNull)
+        }
+    }
+
+    /**
+     * __native_continuation_suspend_with - Suspends with a value attached.
+     *
+     * Like suspend, but packages a value with the suspended continuation.
+     * This is the key primitive for implementing generators in userland.
+     *
+     * Takes: { value: 'a }
+     * Returns: FunkContinuationSuspended containing both the value and continuation
+     *
+     * This enables building generators where:
+     * - The value is what was yielded
+     * - The continuation is how to resume for the next value
+     */
+    private fun registerSuspendWith(
+        context: MutableMap<String, FunkValue>,
+        interpreter: FunkInterpreter?
+    ) {
+        context["__native_continuation_suspend_with"] = NativeFunkFunction("__native_continuation_suspend_with") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_continuation_suspend_with", "expects FunkRecord")
+
+            val value = record.fields["value"]
+                ?: throw NativeFunctionException("__native_continuation_suspend_with", "expects 'value' field")
+
+            // Get interpreter from context
+            val interpreterRef = context["__interpreter_instance"] as? InterpreterReference
+                ?: throw NativeFunctionException("__native_continuation_suspend_with", "Interpreter not available in context")
+            val interpreterInstance = interpreterRef.interpreter
+
+            // Get the current execution state to capture continuation
+            val executionState = interpreterInstance.getCurrentExecutionState()
+                ?: throw FunkException("Continuation.suspend_with can only be called inside a do-block")
+
+            val capturePoint = executionState.location
+
+            // Create a continuation function that resumes from here
+            val resumeFunction = NativeFunkFunction("suspended_with@$capturePoint") { resumeArgs ->
+                val argRecord = resumeArgs.firstOrNull() as? FunkRecord
+                    ?: throw FunkException("Resume expects record argument")
+
+                val resumeValue = argRecord.fields["value"] ?: FunkNull
+
+                // Create context from captured state
+                val resumeContext = executionState.context.toMutableMap()
+
+                // Execute remaining statements
+                for (stmt in executionState.remainingStatements) {
+                    interpreterInstance.executeStatement(stmt, resumeContext)
+                }
+
+                // Execute and return result expression
+                interpreterInstance.evaluateExpression(executionState.resultExpression, resumeContext)
+            }
+
+            val continuation = FunkContinuation(resumeFunction, capturePoint)
+
+            // Return suspended continuation with the value attached
+            // This packages both the yielded value AND the continuation for resumption
+            FunkContinuationSuspended(continuation, value)
         }
     }
 
