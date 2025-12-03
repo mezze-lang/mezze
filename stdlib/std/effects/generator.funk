@@ -51,32 +51,54 @@ pub let take = { gen, n } ->
 # Generator Transformation Functions
 # =============================================================================
 
+# Internal helper for map - accumulates transformed values
+let map_helper = { gen, f, acc } -> do
+    let result = next { gen = gen }
+    match result.value is
+        Some { val } ->
+            map_helper { gen = result.gen, f = f, acc = __native_arraylist_concat { xs = acc, ys = [f { x = val }] } }
+        None -> acc
+
 # Map a function over all values from a generator
 # Consumes the generator and returns a list of transformed values
 # Example: map { gen = int_gen, f = { x } -> x * 2 }
-pub let map = { gen, f } -> do
-    let list = to_list { gen = gen }
-    __native_arraylist_map { xs = list, f = f }
+pub let map = { gen, f } -> map_helper { gen = gen, f = f, acc = [] }
+
+# Internal helper for filter - accumulates filtered values
+let filter_helper = { gen, p, acc } -> do
+    let result = next { gen = gen }
+    match result.value is
+        Some { val } ->
+            if p { x = val }
+            then filter_helper { gen = result.gen, p = p, acc = __native_arraylist_concat { xs = acc, ys = [val] } }
+            else filter_helper { gen = result.gen, p = p, acc = acc }
+        None -> acc
 
 # Filter values from a generator based on a predicate
 # Consumes the generator and returns a list of filtered values
 # Example: filter { gen = int_gen, p = { x } -> x % 2 == 0 }
-pub let filter = { gen, p } -> do
-    let list = to_list { gen = gen }
-    __native_arraylist_filter { xs = list, p = p }
+pub let filter = { gen, p } -> filter_helper { gen = gen, p = p, acc = [] }
 
 # Fold over a generator
 # Consumes the generator and accumulates a value
 # Example: fold { gen = int_gen, init = 0, f = { acc, x } -> acc + x }
 pub let fold = { gen, init, f } -> do
-    let list = to_list { gen = gen }
-    __native_arraylist_fold { xs = list, init = init, f = f }
+    let result = next { gen = gen }
+    match result.value is
+        Some { val } ->
+            fold { gen = result.gen, init = f { acc = init, x = val }, f = f }
+        None -> init
+
+# Internal helper for count - accumulates count
+let count_helper = { gen, cnt } -> do
+    let result = next { gen = gen }
+    match result.value is
+        Some { val } -> count_helper { gen = result.gen, cnt = cnt + 1 }
+        None -> cnt
 
 # Count the number of values in a generator
 # Consumes the generator
-pub let count = { gen } -> do
-    let list = to_list { gen = gen }
-    __native_arraylist_length { xs = list }
+pub let count = { gen } -> count_helper { gen = gen, cnt = 0 }
 
 # Find first value matching predicate
 # Returns Option 'a - Some if found, None otherwise
