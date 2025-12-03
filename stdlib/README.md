@@ -107,37 +107,36 @@ let sum = frac::add { l = half, r = half }  # 1/1
 
 ### Generators
 
-**`std::gen`** - Thunk-based lazy generators (Roc-style CIS pattern)
+**`std::effects::generator`** - Continuation-based generators with associated types
 ```funk
-use std::gen::{fib, take, from, nth, drop}
+use std::effects::generator::{Generator, Yieldable, next, to_list}
 
-# Fibonacci sequence
-let fibs = take { gen = fib {}, n = 10 }  # [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+# Define a generator using the Generator effect
+let fib_gen = { n: Int } -> perform Yieldable in do
+    let value = if n == 0 then 0
+                else if n == 1 then 1
+                else n  # Simplified for example
+    Generator.yield { value = value }
 
-# Get nth Fibonacci number
-let fib_10 = nth { gen = fib {}, n = 10 }  # 55
+# Use next to extract values
+let main = {} -> do
+    let g = fib_gen { n = 5 }
+    let result = next { gen = g }
+    match result.value is
+        Some { val } -> val
+        None -> 0
 
-# Infinite integer sequence
-let nums = take { gen = from { start = 1 }, n = 5 }  # [1, 2, 3, 4, 5]
-
-# Skip first 5, take next 5
-let skipped = take { gen = drop { gen = from { start = 1 }, n = 5 }, n = 5 }  # [6, 7, 8, 9, 10]
+# Or use to_list to consume the generator
+let main2 = {} -> do
+    let g = fib_gen { n = 7 }
+    to_list { gen = g }  # [13]
 ```
 
-**`std::effects::generator`** - Continuation-based generators (effect system)
-```funk
-use std::effects::generator::{Generator, Yieldable, take}
-
-# Define a generator using effects
-let count_up = { start: Int } -> perform Yieldable in do
-    Generator.yield { value = start }
-    count_up { start = start + 1 }
-
-# Use take to get values
-let main = {} -> do
-    let g = count_up { start = 1 }
-    let result = take { gen = g, n = 5 }
-    result.values  # [1, 2, 3, 4, 5]
+**Key Features:**
+- Built on algebraic effects and delimited continuations
+- Type-safe with associated types: `effect Generator having 'item`
+- Composable with other effects (Log, FileSystem, etc.)
+- Supports map, filter, zip operations for generator transformations
 ```
 
 ### Collections (`std::collections`)
@@ -317,7 +316,6 @@ arr::map { xs = [1, 2, 3], f = { x } -> x * 2 }
 - `std::result` - Result/error handling
 - `std::nat` - Natural numbers
 - `std::frac` - Fractions
-- `std::gen` - Thunk-based lazy generators
 
 ### Collections
 - `std::collections::array` - Arrays/lists

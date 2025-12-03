@@ -46,3 +46,65 @@ pub let to_list = { gen } ->
 # - gen is the remaining generator state (can be used to continue)
 pub let take = { gen, n } ->
     __native_generator_take { gen = gen, n = n }
+
+# =============================================================================
+# Generator Transformation Functions
+# =============================================================================
+
+# Map a function over all values from a generator
+# Consumes the generator and returns a list of transformed values
+# Example: map { gen = int_gen, f = { x } -> x * 2 }
+pub let map = { gen, f } -> do
+    let list = to_list { gen = gen }
+    __native_arraylist_map { xs = list, f = f }
+
+# Filter values from a generator based on a predicate
+# Consumes the generator and returns a list of filtered values
+# Example: filter { gen = int_gen, p = { x } -> x % 2 == 0 }
+pub let filter = { gen, p } -> do
+    let list = to_list { gen = gen }
+    __native_arraylist_filter { xs = list, p = p }
+
+# Fold over a generator
+# Consumes the generator and accumulates a value
+# Example: fold { gen = int_gen, init = 0, f = { acc, x } -> acc + x }
+pub let fold = { gen, init, f } -> do
+    let list = to_list { gen = gen }
+    __native_arraylist_fold { xs = list, init = init, f = f }
+
+# Count the number of values in a generator
+# Consumes the generator
+pub let count = { gen } -> do
+    let list = to_list { gen = gen }
+    __native_arraylist_length { xs = list }
+
+# Find first value matching predicate
+# Returns Option 'a - Some if found, None otherwise
+pub let find = { gen, p } -> do
+    let result = next { gen = gen }
+    match result.value is
+        Some { val } ->
+            if p { x = val }
+            then Some { val = val }
+            else find { gen = result.gen, p = p }
+        None -> None
+
+# Check if any value matches predicate
+pub let any = { gen, p } -> do
+    let result = next { gen = gen }
+    match result.value is
+        Some { val } ->
+            if p { x = val }
+            then true
+            else any { gen = result.gen, p = p }
+        None -> false
+
+# Check if all values match predicate
+pub let all = { gen, p } -> do
+    let result = next { gen = gen }
+    match result.value is
+        Some { val } ->
+            if p { x = val }
+            then all { gen = result.gen, p = p }
+            else false
+        None -> true
