@@ -156,33 +156,31 @@ class AbilityValidationTest {
     }
 
     @Test
-    @Disabled("Requires associated types or HKT to properly support generic type constructors like List Int")
-    fun `test ability with generic types`() {
+    fun `test ability with associated types for generic containers`() {
         val source = """
-            ability Show 'a where {
-              show: {val: 'a} -> String
+            ability Container 'c having 'item where {
+              show: {container: 'c} -> String,
+              get: {container: 'c, index: Int} -> 'item
             }
 
-            impl Show (List Int) where {
-              show: {val: List Int} -> String = {val} -> "list"
+            impl Container [Int] having 'item = Int where {
+              show = {container} -> "array of integers",
+              get = {container, index} -> 42
             }
 
-            impl Show (Option String) where {
-              show: {val: Option String} -> String = {val} -> match val is
-                Some {val} -> val
-                None -> "none"
+            impl Container [String] having 'item = String where {
+              show = {container} -> "array of strings",
+              get = {container, index} -> "hello"
             }
 
-            let displayList = {value} -> Show.show {val = value}
-            let displayOpt = {value} -> Show.show {val = value}
-
-            displayList {value = [1, 2, 3]}
+            let intArray = [1, 2, 3]
+            let result = Container.show {container = intArray}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program)
 
-        assertNotNull(typedProgram, "Ability with generic types (List, Option) should pass")
+        assertNotNull(typedProgram, "Ability with associated types for generic containers should pass")
     }
 
     // ========== FAILING TESTS ==========
