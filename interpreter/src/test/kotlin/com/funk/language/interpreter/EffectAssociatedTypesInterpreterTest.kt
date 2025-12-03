@@ -476,4 +476,230 @@ class EffectAssociatedTypesInterpreterTest {
         val context = executeWithContext(code)
         assertEquals(777L, (context["combined"] as FunkInt).value)
     }
+
+    // ===== Tests for Multiple Associated Types =====
+
+    @Test
+    fun `test effect with two associated types executes correctly`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            let successVal = perform IntStringResult in Result.succeed { value = 42 }
+            let failVal = perform IntStringResult in Result.fail { error = "oops" }
+        """.trimIndent()
+
+        val context = executeWithContext(code)
+        assertEquals(42L, (context["successVal"] as FunkInt).value)
+        assertEquals("oops", (context["failVal"] as FunkString).value)
+    }
+
+    @Test
+    fun `test effect with three associated types executes correctly`() {
+        val code = """
+            effect Triple having 'a, 'b, 'c where {
+                getFirst: {} -> 'a <Triple>
+                getSecond: {} -> 'b <Triple>
+                getThird: {} -> 'c <Triple>
+            }
+
+            impl Triple for IntStringBoolTriple having 'a = Int, 'b = String, 'c = Bool where {
+                getFirst = {} -> 100
+                getSecond = {} -> "hello"
+                getThird = {} -> true
+            }
+
+            let a = perform IntStringBoolTriple in Triple.getFirst {}
+            let b = perform IntStringBoolTriple in Triple.getSecond {}
+            let c = perform IntStringBoolTriple in Triple.getThird {}
+        """.trimIndent()
+
+        val context = executeWithContext(code)
+        assertEquals(100L, (context["a"] as FunkInt).value)
+        assertEquals("hello", (context["b"] as FunkString).value)
+        assertTrue((context["c"] as FunkBool).value)
+    }
+
+    @Test
+    fun `test multiple associated types in perform block`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            impl Result for BoolFloatResult having 'ok = Bool, 'err = Float where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            let result = perform BoolFloatResult in do
+                let success = Result.succeed { value = true }
+                let failure = Result.fail { error = 3.14 }
+                success
+        """.trimIndent()
+
+        val context = executeWithContext(code)
+        assertTrue((context["result"] as FunkBool).value)
+    }
+
+    @Test
+    fun `test type substitution for each associated type executes correctly`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            impl Result for StringIntResult having 'ok = String, 'err = Int where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            let s = perform StringIntResult in Result.succeed { value = "success" }
+            let e = perform StringIntResult in Result.fail { error = 404 }
+        """.trimIndent()
+
+        val context = executeWithContext(code)
+        assertEquals("success", (context["s"] as FunkString).value)
+        assertEquals(404L, (context["e"] as FunkInt).value)
+    }
+
+    @Test
+    fun `test complex types as multiple associated type bindings execute correctly`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            impl Result for ComplexResult having 'ok = Int, 'err = {code: Int, message: String} where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            let num = perform ComplexResult in Result.succeed { value = 42 }
+            let err = perform ComplexResult in Result.fail { error = {code = 500, message = "error"} }
+        """.trimIndent()
+
+        val context = executeWithContext(code)
+        assertEquals(42L, (context["num"] as FunkInt).value)
+
+        assertTrue(context["err"] is FunkRecord)
+        val err = context["err"] as FunkRecord
+        assertEquals(500L, (err.fields["code"] as FunkInt).value)
+        assertEquals("error", (err.fields["message"] as FunkString).value)
+    }
+
+    @Test
+    fun `test multiple effects each with multiple associated types execute correctly`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            effect State having 'state, 'change where {
+                get: {} -> 'state <State>
+                update: {delta: 'change} -> 'state <State>
+            }
+
+            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            impl State for IntFloatState having 'state = Int, 'change = Float where {
+                get = {} -> 100
+                update = {delta} -> 100
+            }
+
+            let combined = perform IntStringResult, IntFloatState in do
+                let r = Result.succeed { value = 42 }
+                let s = State.get {}
+                let u = State.update { delta = 3.14 }
+                r
+        """.trimIndent()
+
+        val context = executeWithContext(code)
+        assertEquals(42L, (context["combined"] as FunkInt).value)
+    }
+
+    @Test
+    fun `test multiple associated types with performer parameters execute correctly`() {
+        val code = """
+            effect State having 'state, 'error where {
+                get: {} -> 'state <State>
+                getError: {} -> 'error <State>
+            }
+
+            impl State for ConfigurableState {initialState: Int, defaultError: String} having 'state = Int, 'error = String where {
+                get = {} -> initialState
+                getError = {} -> defaultError
+            }
+
+            let s = perform ConfigurableState {initialState = 100, defaultError = "none"} in State.get {}
+            let e = perform ConfigurableState {initialState = 100, defaultError = "error"} in State.getError {}
+        """.trimIndent()
+
+        val context = executeWithContext(code)
+        assertEquals(100L, (context["s"] as FunkInt).value)
+        assertEquals("none", (context["e"] as FunkString).value)
+    }
+
+    @Test
+    fun `test nested operations with multiple associated types execute correctly`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            let compute = {x: Int} -> perform IntStringResult in do
+                let y = Result.succeed { value = x + 10 }
+                y
+
+            let result = compute { x = 32 }
+        """.trimIndent()
+
+        val context = executeWithContext(code)
+        assertEquals(42L, (context["result"] as FunkInt).value)
+    }
+
+    @Test
+    fun `test multiple associated types in conditional logic execute correctly`() {
+        val code = """
+            effect Result having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Result>
+                fail: {error: 'err} -> 'err <Result>
+            }
+
+            impl Result for BoolStringResult having 'ok = Bool, 'err = String where {
+                succeed = {value} -> value
+                fail = {error} -> error
+            }
+
+            let check = {flag: Bool} -> if flag then
+                perform BoolStringResult in Result.succeed { value = true }
+            else
+                perform BoolStringResult in Result.succeed { value = false }
+
+            let result = check { flag = true }
+        """.trimIndent()
+
+        val context = executeWithContext(code)
+        assertTrue((context["result"] as FunkBool).value)
+    }
 }

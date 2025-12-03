@@ -302,6 +302,28 @@ class AbilityAssociatedTypesTest {
         assertEquals("'item", ability.associatedType)
     }
 
+    @Test
+    fun `test error when impl has binding but ability doesn't`() {
+        val source = """
+            ability Show 't where {
+                show: {value: 't} -> String
+            }
+
+            impl Show Int having 'extra = String where {
+                show = {value} -> "42"
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        val exception = assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(program)
+        }
+
+        assertTrue(exception.message?.contains("provides associated type bindings") == true)
+        assertTrue(exception.message?.contains("does not declare associated types") == true)
+    }
+
     // ===== Tests for Multiple Associated Types =====
 
     @Test

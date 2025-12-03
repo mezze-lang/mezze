@@ -13,18 +13,18 @@ import com.funk.language.interpreter.FunkArrayList
 class ArrayLiteralNode(
     private val elementNodes: Array<FunkNode>
 ) : FunkNode() {
-    
+
     @field:Children
     private val children: Array<FunkNode> = elementNodes
-    
+
     override fun execute(frame: VirtualFrame): FunkValue {
         val elements = ArrayList<FunkValue>(elementNodes.size)
-        
+
         for (elementNode in elementNodes) {
             val elementValue = elementNode.execute(frame)
             elements.add(elementValue)
         }
-        
+
         return FunkArrayList(elements)
     }
 }
