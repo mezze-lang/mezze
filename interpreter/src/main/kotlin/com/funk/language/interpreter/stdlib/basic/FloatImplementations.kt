@@ -165,5 +165,11 @@ object FloatImplementations {
             // TODO: Return proper variant instead of string
             FunkString(result)
         }
+
+        context["__native_float_neg"] = NativeFunkFunction("__native_float_neg") { args ->
+            val record = args[0] as FunkRecord
+            val value = record.fields["n"] as? FunkFloat ?: throw NativeFunctionException("__native_float_neg", "expects 'n' as Float")
+            FunkFloat(-value.value)
+        }
     }
 }

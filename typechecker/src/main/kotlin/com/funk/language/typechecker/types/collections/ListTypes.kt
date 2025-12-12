@@ -3,6 +3,13 @@ package com.funk.language.typechecker.types.collections
 import com.funk.language.ast.FunkType
 
 /**
+ * Helper function to create Option type (as TypeApplication)
+ */
+private fun optionType(elementType: FunkType): FunkType {
+    return FunkType.TypeApplication("Option", listOf(elementType))
+}
+
+/**
  * Type signatures for List (immutable linked list) operations
  *
  * Corresponds to stdlib file:
@@ -39,12 +46,12 @@ object ListTypes {
 
         context["__native_list_head"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("xs" to listType)),
-            listElemType
+            optionType(listElemType)
         )
 
         context["__native_list_tail"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("xs" to listType)),
-            listType
+            optionType(listType)
         )
 
         context["__native_list_length"] = FunkType.FunctionType(
@@ -65,7 +72,7 @@ object ListTypes {
                 "xs" to listType,
                 "index" to FunkType.IntType
             )),
-            listElemType
+            optionType(listElemType)
         )
 
         context["__native_list_take"] = FunkType.FunctionType(
@@ -146,6 +153,7 @@ object ListTypes {
         context["__native_list_reduce"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
                 "xs" to listType,
+                "init" to listElemType,
                 "f" to reduceFuncType
             )),
             listElemType

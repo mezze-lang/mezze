@@ -336,9 +336,7 @@ private fun prettyPrintExpression(expr: Expression): String {
             }
             "$params -> ${prettyPrintExpression(expr.body)}"
         }
-        is BinaryOperation -> {
-            "${prettyPrintExpression(expr.left)} ${expr.operator} ${prettyPrintExpression(expr.right)}"
-        }
+        // BinaryOperation removed - operators are desugared at parse time
         is FunctionCall -> {
             "${prettyPrintExpression(expr.function)} ${prettyPrintExpression(expr.arguments)}"
         }

@@ -470,31 +470,7 @@ class FunkInterpreter {
                     }
                 }
             }
-            is BinaryOperation -> {
-                // Handle pipe operator specially - desugar before evaluation
-                if (expr.operator == "|>") {
-                    val leftValue = evaluateExpression(expr.left, context)
-                    // Desugar: replace @ placeholders in right side with leftValue
-                    val desugaredRight = replaceAtPlaceholder(expr.right, leftValue, context)
-                    evaluateExpression(desugaredRight, context)
-                } else {
-                    // Desugar operator to ability method call
-                    // e.g., x + y becomes NumAdd.num_add { l = x, r = y }
-                    val desugared = desugarOperatorToAbilityCall(expr, context)
-                    if (desugared != null) {
-                        evaluateExpression(desugared, context)
-                    } else {
-                        // Fallback to old behavior for operators without abilities
-                        val left = evaluateExpression(expr.left, context)
-                        val right = evaluateExpression(expr.right, context)
-                        evaluateBinaryOperation(left, expr.operator, right)
-                    }
-                }
-            }
-            is UnaryOperation -> {
-                val operand = evaluateExpression(expr.operand, context)
-                evaluateUnaryOperation(expr.operator, operand)
-            }
+            // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
             is RecordLiteral -> {
                 val fields = mutableMapOf<String, FunkValue>()
                 
@@ -1406,33 +1382,7 @@ class FunkInterpreter {
         }
     }
 
-    /**
-     * Desugar binary operators to ability method calls
-     * e.g., x + y becomes NumAdd.num_add { l = x, r = y }
-     * Returns null if operator doesn't map to an ability
-     */
-    private fun desugarOperatorToAbilityCall(expr: BinaryOperation, context: Map<String, FunkValue>): Expression? {
-        val (abilityName, methodName) = when (expr.operator) {
-            "+" -> Pair("NumAdd", "num_add")
-            "-" -> Pair("NumSub", "num_sub")
-            "*" -> Pair("NumMul", "num_mul")
-            "/" -> Pair("NumDiv", "num_div")
-            "==" -> Pair("Eq", "eq")
-            else -> return null  // Not an ability operator
-        }
-
-        // Create: AbilityName.methodName { l = left, r = right }
-        return FunctionCall(
-            MemberAccess(
-                Identifier(abilityName),
-                methodName
-            ),
-            RecordLiteral(listOf(
-                RecordFieldEntry("l", expr.left),
-                RecordFieldEntry("r", expr.right)
-            ))
-        )
-    }
+    // desugarOperatorToAbilityCall removed - operators are desugared at parse time
 
     /**
      * Replace @ placeholders with the piped value in an expression
@@ -1476,20 +1426,7 @@ class FunkInterpreter {
                 )
             }
 
-            is BinaryOperation -> {
-                BinaryOperation(
-                    replaceAtPlaceholder(expr.left, value, context),
-                    expr.operator,
-                    replaceAtPlaceholder(expr.right, value, context)
-                )
-            }
-
-            is UnaryOperation -> {
-                UnaryOperation(
-                    expr.operator,
-                    replaceAtPlaceholder(expr.operand, value, context)
-                )
-            }
+            // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
 
             is IfExpression -> {
                 IfExpression(
@@ -1865,7 +1802,7 @@ class FunkInterpreter {
             is EffectCallExpression -> true
             is DoExpression -> containsEffectCalls(expr)
             is FunctionCall -> containsEffectCallsInExpression(expr.function) || containsEffectCallsInExpression(expr.arguments)
-            is BinaryOperation -> containsEffectCallsInExpression(expr.left) || containsEffectCallsInExpression(expr.right)
+            // BinaryOperation removed - operators are desugared at parse time
             is IfExpression -> containsEffectCallsInExpression(expr.condition) || 
                                containsEffectCallsInExpression(expr.thenBranch) || 
                                containsEffectCallsInExpression(expr.elseBranch)
@@ -2425,32 +2362,59 @@ class FunkInterpreter {
      */
     private fun registerBuiltInAbilities(context: MutableMap<String, FunkValue>) {
         // Register ability declarations
-        context["NumAdd_ability"] = FunkRecord(mapOf("num_add" to FunkNull))
-        context["NumSub_ability"] = FunkRecord(mapOf("num_sub" to FunkNull))
-        context["NumMul_ability"] = FunkRecord(mapOf("num_mul" to FunkNull))
-        context["NumDiv_ability"] = FunkRecord(mapOf("num_div" to FunkNull))
-        context["NumMod_ability"] = FunkRecord(mapOf("num_mod" to FunkNull))
-        context["Eq_ability"] = FunkRecord(mapOf("eq" to FunkNull))
+        context["NumAdd_ability"] = FunkRecord(mapOf("add" to FunkNull))
+        context["NumSub_ability"] = FunkRecord(mapOf("sub" to FunkNull, "neg" to FunkNull))
+        context["NumMul_ability"] = FunkRecord(mapOf("mul" to FunkNull))
+        context["NumDiv_ability"] = FunkRecord(mapOf("div" to FunkNull))
+        context["NumMod_ability"] = FunkRecord(mapOf("mod" to FunkNull))
+        context["Eq_ability"] = FunkRecord(mapOf("eq" to FunkNull, "neq" to FunkNull))
+        context["Ord_ability"] = FunkRecord(mapOf("lt" to FunkNull, "gt" to FunkNull, "le" to FunkNull, "ge" to FunkNull))
         context["Inspect_ability"] = FunkRecord(mapOf("to_str" to FunkNull))
+        context["LogicalAnd_ability"] = FunkRecord(mapOf("and" to FunkNull))
+        context["LogicalOr_ability"] = FunkRecord(mapOf("or" to FunkNull))
+        context["LogicalNot_ability"] = FunkRecord(mapOf("not" to FunkNull))
 
         // Register implementations for Int
         context["NumAdd_Int"] = FunkRecord(mapOf(
-            "num_add" to context["__native_int_add"]!!
+            "add" to context["__native_int_add"]!!
         ))
         context["NumSub_Int"] = FunkRecord(mapOf(
-            "num_sub" to context["__native_int_subtract"]!!
+            "sub" to context["__native_int_subtract"]!!,
+            "neg" to context["__native_int_neg"]!!
         ))
         context["NumMul_Int"] = FunkRecord(mapOf(
-            "num_mul" to context["__native_int_multiply"]!!
+            "mul" to context["__native_int_multiply"]!!
         ))
         context["NumDiv_Int"] = FunkRecord(mapOf(
-            "num_div" to context["__native_int_divide"]!!
+            "div" to context["__native_int_divide"]!!
         ))
         context["NumMod_Int"] = FunkRecord(mapOf(
-            "num_mod" to context["__native_int_modulo"]!!
+            "mod" to context["__native_int_modulo"]!!
         ))
         context["Eq_Int"] = FunkRecord(mapOf(
-            "eq" to context["__native_int_equals"]!!
+            "eq" to context["__native_int_equals"]!!,
+            "neq" to NativeFunkFunction("__native_int_not_equals") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkInt
+                val r = record.fields["r"] as FunkInt
+                FunkBool(l.value != r.value)
+            }
+        ))
+        context["Ord_Int"] = FunkRecord(mapOf(
+            "lt" to context["__native_int_less_than"]!!,
+            "gt" to context["__native_int_greater_than"]!!,
+            "le" to NativeFunkFunction("__native_int_less_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkInt
+                val r = record.fields["r"] as FunkInt
+                FunkBool(l.value <= r.value)
+            },
+            "ge" to NativeFunkFunction("__native_int_greater_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkInt
+                val r = record.fields["r"] as FunkInt
+                FunkBool(l.value >= r.value)
+            }
         ))
         context["Inspect_Int"] = FunkRecord(mapOf(
             "to_str" to context["__native_int_to_string"]!!
@@ -2458,19 +2422,42 @@ class FunkInterpreter {
 
         // Register implementations for Float
         context["NumAdd_Float"] = FunkRecord(mapOf(
-            "num_add" to context["__native_float_add"]!!
+            "add" to context["__native_float_add"]!!
         ))
         context["NumSub_Float"] = FunkRecord(mapOf(
-            "num_sub" to context["__native_float_subtract"]!!
+            "sub" to context["__native_float_subtract"]!!,
+            "neg" to context["__native_float_neg"]!!
         ))
         context["NumMul_Float"] = FunkRecord(mapOf(
-            "num_mul" to context["__native_float_multiply"]!!
+            "mul" to context["__native_float_multiply"]!!
         ))
         context["NumDiv_Float"] = FunkRecord(mapOf(
-            "num_div" to context["__native_float_divide"]!!
+            "div" to context["__native_float_divide"]!!
         ))
         context["Eq_Float"] = FunkRecord(mapOf(
-            "eq" to context["__native_float_equals"]!!
+            "eq" to context["__native_float_equals"]!!,
+            "neq" to NativeFunkFunction("__native_float_not_equals") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkFloat
+                val r = record.fields["r"] as FunkFloat
+                FunkBool(l.value != r.value)
+            }
+        ))
+        context["Ord_Float"] = FunkRecord(mapOf(
+            "lt" to context["__native_float_less_than"]!!,
+            "gt" to context["__native_float_greater_than"]!!,
+            "le" to NativeFunkFunction("__native_float_less_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkFloat
+                val r = record.fields["r"] as FunkFloat
+                FunkBool(l.value <= r.value)
+            },
+            "ge" to NativeFunkFunction("__native_float_greater_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkFloat
+                val r = record.fields["r"] as FunkFloat
+                FunkBool(l.value >= r.value)
+            }
         ))
         context["Inspect_Float"] = FunkRecord(mapOf(
             "to_str" to context["__native_float_to_string"]!!
@@ -2478,19 +2465,42 @@ class FunkInterpreter {
 
         // Register implementations for Frac
         context["NumAdd_Frac"] = FunkRecord(mapOf(
-            "num_add" to context["__native_frac_add"]!!
+            "add" to context["__native_frac_add"]!!
         ))
         context["NumSub_Frac"] = FunkRecord(mapOf(
-            "num_sub" to context["__native_frac_subtract"]!!
+            "sub" to context["__native_frac_subtract"]!!,
+            "neg" to context["__native_frac_neg"]!!
         ))
         context["NumMul_Frac"] = FunkRecord(mapOf(
-            "num_mul" to context["__native_frac_multiply"]!!
+            "mul" to context["__native_frac_multiply"]!!
         ))
         context["NumDiv_Frac"] = FunkRecord(mapOf(
-            "num_div" to context["__native_frac_divide"]!!
+            "div" to context["__native_frac_divide"]!!
         ))
         context["Eq_Frac"] = FunkRecord(mapOf(
-            "eq" to context["__native_frac_equals"]!!
+            "eq" to context["__native_frac_equals"]!!,
+            "neq" to NativeFunkFunction("__native_frac_not_equals") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkFrac
+                val r = record.fields["r"] as FunkFrac
+                FunkBool(l.numerator * r.denominator != r.numerator * l.denominator)
+            }
+        ))
+        context["Ord_Frac"] = FunkRecord(mapOf(
+            "lt" to context["__native_frac_less_than"]!!,
+            "gt" to context["__native_frac_greater_than"]!!,
+            "le" to NativeFunkFunction("__native_frac_less_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkFrac
+                val r = record.fields["r"] as FunkFrac
+                FunkBool(l.numerator * r.denominator <= r.numerator * l.denominator)
+            },
+            "ge" to NativeFunkFunction("__native_frac_greater_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkFrac
+                val r = record.fields["r"] as FunkFrac
+                FunkBool(l.numerator * r.denominator >= r.numerator * l.denominator)
+            }
         ))
         context["Inspect_Frac"] = FunkRecord(mapOf(
             "to_str" to context["__native_frac_to_string"]!!
@@ -2498,19 +2508,41 @@ class FunkInterpreter {
 
         // Register implementations for Nat (no NumSub since Nat - Nat can go negative)
         context["NumAdd_Nat"] = FunkRecord(mapOf(
-            "num_add" to context["__native_nat_add"]!!
+            "add" to context["__native_nat_add"]!!
         ))
         context["NumMul_Nat"] = FunkRecord(mapOf(
-            "num_mul" to context["__native_nat_multiply"]!!
+            "mul" to context["__native_nat_multiply"]!!
         ))
         context["NumDiv_Nat"] = FunkRecord(mapOf(
-            "num_div" to context["__native_nat_divide"]!!
+            "div" to context["__native_nat_divide"]!!
         ))
         context["NumMod_Nat"] = FunkRecord(mapOf(
-            "num_mod" to context["__native_nat_modulo"]!!
+            "mod" to context["__native_nat_modulo"]!!
         ))
         context["Eq_Nat"] = FunkRecord(mapOf(
-            "eq" to context["__native_nat_equals"]!!
+            "eq" to context["__native_nat_equals"]!!,
+            "neq" to NativeFunkFunction("__native_nat_not_equals") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkNat
+                val r = record.fields["r"] as FunkNat
+                FunkBool(l.value != r.value)
+            }
+        ))
+        context["Ord_Nat"] = FunkRecord(mapOf(
+            "lt" to context["__native_nat_less_than"]!!,
+            "gt" to context["__native_nat_greater_than"]!!,
+            "le" to NativeFunkFunction("__native_nat_less_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkNat
+                val r = record.fields["r"] as FunkNat
+                FunkBool(l.value <= r.value)
+            },
+            "ge" to NativeFunkFunction("__native_nat_greater_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkNat
+                val r = record.fields["r"] as FunkNat
+                FunkBool(l.value >= r.value)
+            }
         ))
         context["Inspect_Nat"] = FunkRecord(mapOf(
             "to_str" to context["__native_nat_to_string"]!!
@@ -2518,7 +2550,29 @@ class FunkInterpreter {
 
         // Register implementations for String
         context["Eq_String"] = FunkRecord(mapOf(
-            "eq" to context["__native_string_equals"]!!
+            "eq" to context["__native_string_equals"]!!,
+            "neq" to NativeFunkFunction("__native_string_not_equals") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkString
+                val r = record.fields["r"] as FunkString
+                FunkBool(l.value != r.value)
+            }
+        ))
+        context["Ord_String"] = FunkRecord(mapOf(
+            "lt" to context["__native_string_less_than"]!!,
+            "gt" to context["__native_string_greater_than"]!!,
+            "le" to NativeFunkFunction("__native_string_less_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkString
+                val r = record.fields["r"] as FunkString
+                FunkBool(l.value <= r.value)
+            },
+            "ge" to NativeFunkFunction("__native_string_greater_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkString
+                val r = record.fields["r"] as FunkString
+                FunkBool(l.value >= r.value)
+            }
         ))
         context["Inspect_String"] = FunkRecord(mapOf(
             "to_str" to NativeFunkFunction("to_str_string") { args ->
@@ -2529,7 +2583,66 @@ class FunkInterpreter {
 
         // Register implementations for Bool
         context["Eq_Bool"] = FunkRecord(mapOf(
-            "eq" to context["__native_boolean_equals"]!!
+            "eq" to context["__native_boolean_equals"]!!,
+            "neq" to NativeFunkFunction("__native_boolean_not_equals") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkBool
+                val r = record.fields["r"] as FunkBool
+                FunkBool(l.value != r.value)
+            }
+        ))
+        context["Ord_Bool"] = FunkRecord(mapOf(
+            "lt" to NativeFunkFunction("__native_bool_less_than") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkBool
+                val r = record.fields["r"] as FunkBool
+                // false < true
+                FunkBool(!l.value && r.value)
+            },
+            "gt" to NativeFunkFunction("__native_bool_greater_than") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkBool
+                val r = record.fields["r"] as FunkBool
+                // true > false
+                FunkBool(l.value && !r.value)
+            },
+            "le" to NativeFunkFunction("__native_bool_less_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkBool
+                val r = record.fields["r"] as FunkBool
+                // false <= true, false <= false, true <= true
+                FunkBool(!l.value || r.value)
+            },
+            "ge" to NativeFunkFunction("__native_bool_greater_or_equal") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkBool
+                val r = record.fields["r"] as FunkBool
+                // true >= false, true >= true, false >= false
+                FunkBool(l.value || !r.value)
+            }
+        ))
+        context["LogicalAnd_Bool"] = FunkRecord(mapOf(
+            "and" to NativeFunkFunction("__native_bool_and") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkBool
+                val r = record.fields["r"] as FunkBool
+                FunkBool(l.value && r.value)
+            }
+        ))
+        context["LogicalOr_Bool"] = FunkRecord(mapOf(
+            "or" to NativeFunkFunction("__native_bool_or") { args ->
+                val record = args[0] as FunkRecord
+                val l = record.fields["l"] as FunkBool
+                val r = record.fields["r"] as FunkBool
+                FunkBool(l.value || r.value)
+            }
+        ))
+        context["LogicalNot_Bool"] = FunkRecord(mapOf(
+            "not" to NativeFunkFunction("__native_bool_not") { args ->
+                val record = args[0] as FunkRecord
+                val value = record.fields["val"] as FunkBool
+                FunkBool(!value.value)
+            }
         ))
         context["Inspect_Bool"] = FunkRecord(mapOf(
             "to_str" to NativeFunkFunction("to_str_bool") { args ->
@@ -3320,8 +3433,7 @@ class FunkInterpreter {
     private fun containsSelfReference(expr: Expression, variableName: String): Boolean {
         return when (expr) {
             is Identifier -> expr.name == variableName
-            is BinaryOperation -> containsSelfReference(expr.left, variableName) || containsSelfReference(expr.right, variableName)
-            is UnaryOperation -> containsSelfReference(expr.operand, variableName)
+            // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
             is FunctionCall -> containsSelfReference(expr.function, variableName) || containsSelfReference(expr.arguments, variableName)
             is IfExpression -> containsSelfReference(expr.condition, variableName) || 
                               containsSelfReference(expr.thenBranch, variableName) || 

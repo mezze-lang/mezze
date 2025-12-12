@@ -160,12 +160,13 @@ class LiteralPatternTypeCheckingTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        // Check that the error message mentions incompatible types
+        // Check that the error message mentions incompatible types (either generic unification error or specific ability error)
         assertTrue(
             exception.message?.contains("cannot unify", ignoreCase = true) == true ||
             exception.message?.contains("type mismatch", ignoreCase = true) == true ||
-            exception.message?.contains("incompatible types", ignoreCase = true) == true,
-            "Exception message should contain 'cannot unify', 'type mismatch', or 'incompatible types', but was: '${exception.message}'"
+            exception.message?.contains("incompatible types", ignoreCase = true) == true ||
+            exception.message?.contains("does not implement ability", ignoreCase = true) == true,
+            "Exception message should contain 'cannot unify', 'type mismatch', 'incompatible types', or 'does not implement ability', but was: '${exception.message}'"
         )
     }
 

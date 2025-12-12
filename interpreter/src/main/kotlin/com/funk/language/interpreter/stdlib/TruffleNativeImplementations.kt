@@ -20,7 +20,6 @@ import com.funk.language.interpreter.stdlib.effects.FilesystemImplementations
 import com.funk.language.interpreter.stdlib.effects.TimeImplementations
 import com.funk.language.interpreter.stdlib.effects.EnvironmentImplementations
 import com.funk.language.interpreter.stdlib.effects.ContinuationImplementations
-import com.funk.language.interpreter.stdlib.effects.GeneratorImplementations
 import com.funk.language.interpreter.stdlib.conversion.TruffleConversionImplementations
 import com.funk.language.interpreter.stdlib.io.TruffleIOImplementations
 import com.funk.language.interpreter.stdlib.system.TruffleSystemImplementations
@@ -66,13 +65,12 @@ object TruffleNativeImplementations {
         TruffleMapImplementations.registerAll(context)
         TruffleSetImplementations.registerAll(context)
 
-        // Register effects implementations (log, filesystem, time, environment, continuation, generator)
+        // Register effects implementations (log, filesystem, time, environment, continuation)
         LogImplementations.registerAll(context)
         FilesystemImplementations.registerAll(context)
         TimeImplementations.registerAll(context)
         EnvironmentImplementations.registerAll(context)
         ContinuationImplementations.registerAll(context, null)  // interpreter will be set up later
-        GeneratorImplementations.registerAll(context, null)  // interpreter will be set up later
 
         // Register legacy implementations (for backward compatibility)
         TruffleConversionImplementations.registerAll(context)
@@ -86,7 +84,7 @@ object TruffleNativeImplementations {
             System.err.println("Program crashed: ${msg.value}")
             System.exit(1)
             // This line will never be reached, but needed for type checking
-            throw RuntimeException("Program crashed: ${msg.value}")
+            throw FunkException("Program crashed: ${msg.value}")
         }
 
         // NOTE: Numeric operations (__native_int_*, __native_float_*, etc.) are now defined in
@@ -233,14 +231,14 @@ object TruffleNativeImplementations {
             val record = args.firstOrNull() as? FunkRecord ?: throw NativeFunctionException("/", "expects FunkRecord")
             val left = record.fields["left"] ?: throw NativeFunctionException("/", "expects 'left' field")
             val right = record.fields["right"] ?: throw NativeFunctionException("/", "expects 'right' field")
-            
+
             when {
                 left is FunkInt && right is FunkInt -> {
-                    if (right.value == 0L) throw ArithmeticException("Division by zero")
+                    if (right.value == 0L) throw FunkException("Division by zero")
                     FunkInt(left.value / right.value)
                 }
                 left is FunkFloat && right is FunkFloat -> {
-                    if (right.value == 0.0) throw ArithmeticException("Division by zero")
+                    if (right.value == 0.0) throw FunkException("Division by zero")
                     FunkFloat(left.value / right.value)
                 }
                 else -> throw NativeFunctionException("/", "unsupported types: ${left::class.simpleName} / ${right::class.simpleName}")
@@ -251,14 +249,14 @@ object TruffleNativeImplementations {
             val record = args.firstOrNull() as? FunkRecord ?: throw NativeFunctionException("%", "expects FunkRecord")
             val left = record.fields["left"] ?: throw NativeFunctionException("%", "expects 'left' field")
             val right = record.fields["right"] ?: throw NativeFunctionException("%", "expects 'right' field")
-            
+
             when {
                 left is FunkInt && right is FunkInt -> {
-                    if (right.value == 0L) throw ArithmeticException("Modulo by zero")
+                    if (right.value == 0L) throw FunkException("Modulo by zero")
                     FunkInt(left.value % right.value)
                 }
                 left is FunkFloat && right is FunkFloat -> {
-                    if (right.value == 0.0) throw ArithmeticException("Modulo by zero")
+                    if (right.value == 0.0) throw FunkException("Modulo by zero")
                     FunkFloat(left.value % right.value)
                 }
                 else -> throw NativeFunctionException("%", "unsupported types: ${left::class.simpleName} % ${right::class.simpleName}")
@@ -362,7 +360,7 @@ object TruffleNativeImplementations {
             val msg = record.fields["msg"] as? FunkString ?: throw NativeFunctionException("crash", "expects 'msg' as String")
             System.err.println("Program crashed: ${msg.value}")
             System.exit(1)
-            throw RuntimeException("Program crashed: ${msg.value}")
+            throw FunkException("Program crashed: ${msg.value}")
         }
         
         // Validate that all functions from the registry are implemented

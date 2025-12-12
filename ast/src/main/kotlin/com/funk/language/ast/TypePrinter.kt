@@ -43,9 +43,6 @@ private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableList
                 constructorType?.let { collectTypeVariablesRecursive(it, variables) }
             }
         }
-        is FunkType.ArrayListType -> {
-            collectTypeVariablesRecursive(type.elementType, variables)
-        }
         is FunkType.ArrayType -> {
             collectTypeVariablesRecursive(type.elementType, variables)
         }
@@ -119,7 +116,6 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
             "| $constructors |"
         }
     }
-    is FunkType.ArrayListType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
     is FunkType.ArrayType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
     is FunkType.TypeApplication -> {
         val argsStr = type.args.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
@@ -266,7 +262,6 @@ private fun collectTypeVars(type: FunkType, result: MutableList<TypeVar>) {
             collectTypeVars(type.returnType, result)
         }
         is FunkType.ListType -> collectTypeVars(type.elementType, result)
-        is FunkType.ArrayListType -> collectTypeVars(type.elementType, result)
         is FunkType.ArrayType -> collectTypeVars(type.elementType, result)
         is FunkType.MapType -> {
             collectTypeVars(type.keyType, result)
@@ -439,7 +434,6 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
         }
     }
-    is FunkType.ArrayListType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}]"
     is FunkType.ArrayType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}]"
     is FunkType.TypeApplication -> {
         val argsStr = type.args.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
@@ -776,8 +770,8 @@ fun isBuiltinType(type: FunkType): Boolean {
         // Record and variant types are user-defined (unless they're built-in constructors)
         is FunkType.RecordType, is FunkType.VariantType -> false
 
-        // ArrayList and Array types are legacy/compatibility types
-        is FunkType.ArrayListType, is FunkType.ArrayType -> false
+        // Array types
+        is FunkType.ArrayType -> false
 
         // TypeApplication (e.g., Option Int) - check if constructor is built-in
         is FunkType.TypeApplication -> type.constructor in setOf("Option", "Result")
@@ -908,11 +902,6 @@ private fun alphaEquivHelper(
 
         // List types
         type1 is FunkType.ListType && type2 is FunkType.ListType -> {
-            alphaEquivHelper(type1.elementType, type2.elementType, mapping1to2, mapping2to1)
-        }
-
-        // ArrayList types
-        type1 is FunkType.ArrayListType && type2 is FunkType.ArrayListType -> {
             alphaEquivHelper(type1.elementType, type2.elementType, mapping1to2, mapping2to1)
         }
 

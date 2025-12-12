@@ -30,7 +30,7 @@ pub let from_nat = { n: Nat } ->
 
 # Utility functions for integers
 pub let abs = { n: Int } ->
-    if n < 0 then -n else n
+    if n < 0 then NumSub.neg { n = n } else n
 
 pub let max = { l: Int, r: Int } ->
     if l > r then l else r

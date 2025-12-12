@@ -31,6 +31,81 @@ class FunkParser {
     }
 
     /**
+     * Desugar a binary operator into an ability method call.
+     * For example: x + y becomes NumAdd.add {l = x, r = y}
+     */
+    private fun desugarBinaryOperator(
+        operator: String,
+        left: Expression,
+        right: Expression,
+        location: SourceLocation?
+    ): Expression {
+        val (abilityName, operationName) = when (operator) {
+            "+" -> "NumAdd" to "add"
+            "-" -> "NumSub" to "sub"
+            "*" -> "NumMul" to "mul"
+            "/" -> "NumDiv" to "div"
+            "%" -> "NumMod" to "mod"
+            "==" -> "Eq" to "eq"
+            "!=" -> "Eq" to "neq"
+            "<" -> "Ord" to "lt"
+            ">" -> "Ord" to "gt"
+            "<=" -> "Ord" to "le"
+            ">=" -> "Ord" to "ge"
+            "&&" -> "LogicalAnd" to "and"
+            "||" -> "LogicalOr" to "or"
+            else -> throw IllegalArgumentException("Unknown binary operator: $operator")
+        }
+
+        return FunctionCall(
+            function = MemberAccess(
+                receiver = Identifier(abilityName, sourceLocation = location),
+                member = operationName,
+                sourceLocation = location
+            ),
+            arguments = RecordLiteral(
+                entries = listOf(
+                    RecordFieldEntry("l", left),
+                    RecordFieldEntry("r", right)
+                ),
+                sourceLocation = location
+            ),
+            sourceLocation = location
+        )
+    }
+
+    /**
+     * Desugar a unary operator into an ability method call.
+     * For example: -x becomes NumSub.neg {n = x}, !x becomes LogicalNot.not {val = x}
+     */
+    private fun desugarUnaryOperator(
+        operator: String,
+        operand: Expression,
+        location: SourceLocation?
+    ): Expression {
+        val (abilityName, operationName, fieldName) = when (operator) {
+            "-" -> Triple("NumSub", "neg", "n")
+            "!" -> Triple("LogicalNot", "not", "val")
+            else -> throw IllegalArgumentException("Unknown unary operator: $operator")
+        }
+
+        return FunctionCall(
+            function = MemberAccess(
+                receiver = Identifier(abilityName, sourceLocation = location),
+                member = operationName,
+                sourceLocation = location
+            ),
+            arguments = RecordLiteral(
+                entries = listOf(
+                    RecordFieldEntry(fieldName, operand)
+                ),
+                sourceLocation = location
+            ),
+            sourceLocation = location
+        )
+    }
+
+    /**
      * Fix source locations for expressions parsed from string interpolations.
      * This recursively updates sourceLocation fields to reflect the actual position in the original file.
      */
@@ -155,19 +230,6 @@ class FunkParser {
 
     private fun desugarExpression(expr: Expression): Expression {
         return when (expr) {
-            is BinaryOperation -> {
-                if (expr.operator == "|>") {
-                    // Desugar pipe: left |> right becomes right with @ replaced by left
-                    val desugaredLeft = desugarExpression(expr.left)
-                    val desugaredRight = desugarExpression(expr.right)
-                    desugarPipe(desugaredLeft, desugaredRight)
-                } else {
-                    expr.copy(
-                        left = desugarExpression(expr.left),
-                        right = desugarExpression(expr.right)
-                    )
-                }
-            }
             is FunctionCall -> expr.copy(
                 function = desugarExpression(expr.function),
                 arguments = desugarExpression(expr.arguments)
@@ -184,7 +246,6 @@ class FunkParser {
                     }
                 }
             )
-            is UnaryOperation -> expr.copy(operand = desugarExpression(expr.operand))
             is IfExpression -> expr.copy(
                 condition = desugarExpression(expr.condition),
                 thenBranch = desugarExpression(expr.thenBranch),
@@ -2352,22 +2413,9 @@ class FunkParser {
     }
 
     private val arrayElementParser: Parser<Expression> = { stream ->
-        // Check for spread operator ...
-        val ellipsis = tok(TokenType.ELLIPSIS)(stream)
-        if (ellipsis is ParseResult.Success) {
-            // Spread element: ...rest
-            val expr = expression(ellipsis.remaining)
-            when (expr) {
-                is ParseResult.Success -> ParseResult.Success(
-                    UnaryOperation("...", expr.value),
-                    expr.remaining
-                )
-                is ParseResult.Failure -> expr
-            }
-        } else {
-            // Normal element
-            expression(stream)
-        }
+        // Array spread operator (...) is not yet implemented
+        // For now, just parse regular expressions
+        expression(stream)
     }
 
     // ===== PRIMARY EXPRESSION =====
@@ -3161,11 +3209,11 @@ class FunkParser {
                 val right = logicalAndExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3191,11 +3239,11 @@ class FunkParser {
                 val right = pipeExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3233,17 +3281,6 @@ class FunkParser {
                         )
                     }
                 }
-            )
-
-            // Recurse into binary operations (for nested expressions)
-            is BinaryOperation -> target.copy(
-                left = desugarPipe(pipeValue, target.left),
-                right = desugarPipe(pipeValue, target.right)
-            )
-
-            // Recurse into unary operations
-            is UnaryOperation -> target.copy(
-                operand = desugarPipe(pipeValue, target.operand)
             )
 
             // Recurse into conditional expressions
@@ -3314,12 +3351,9 @@ class FunkParser {
                 val right = comparisonExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> {
-                        // Keep pipe operator in AST - will be desugared later
+                        // Desugar pipe operator immediately at parse time
                         ParseResult.Success(
-                            BinaryOperation(
-                                result.value, "|>", right.value,
-                                sourceLocation = result.value.sourceLocation
-                            ),
+                            desugarPipe(result.value, right.value),
                             right.remaining
                         )
                     }
@@ -3347,11 +3381,11 @@ class FunkParser {
                 val right = additiveExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3377,11 +3411,11 @@ class FunkParser {
                 val right = multiplicativeExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3407,11 +3441,11 @@ class FunkParser {
                 val right = unaryExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3428,13 +3462,69 @@ class FunkParser {
     private val unaryExpression: Parser<Expression> = { stream ->
         val token = stream.current()
 
-        if (token?.type == TokenType.MINUS || token?.type == TokenType.NOT) {
+        if (token?.type == TokenType.MINUS) {
+            // Check if this is a negative literal (skip newlines first)
+            val opLocation = tokenLocation(token)
+            val streamAfterMinus = skipNewlines(stream.advance())
+            val literalToken = streamAfterMinus.current()
+
+            if (literalToken?.type == TokenType.INTEGER || literalToken?.type == TokenType.FLOAT || literalToken?.type == TokenType.FRACTION) {
+                // Parse as negative literal
+
+                when (literalToken.type) {
+                    TokenType.INTEGER -> ParseResult.Success(
+                        IntLiteral(-literalToken.text.toLong(), sourceLocation = opLocation),
+                        streamAfterMinus.advance()
+                    )
+                    TokenType.FLOAT -> ParseResult.Success(
+                        FloatLiteral(-literalToken.text.toDouble(), sourceLocation = opLocation),
+                        streamAfterMinus.advance()
+                    )
+                    TokenType.FRACTION -> {
+                        // Parse fraction like "1//2" into numerator and denominator
+                        val parts = literalToken.text.split("//")
+                        if (parts.size == 2) {
+                            ParseResult.Success(
+                                FractionLiteral(-parts[0].toLong(), parts[1].toLong(), sourceLocation = opLocation),
+                                streamAfterMinus.advance()
+                            )
+                        } else {
+                            ParseResult.Failure("Invalid fraction literal: ${literalToken.text}", streamAfterMinus.getSourcePosition())
+                        }
+                    }
+                    else -> {
+                        // Should not reach here given the check above
+                        val opStream = stream.advance()
+                        val operand = unaryExpression(opStream)
+                        when (operand) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                desugarUnaryOperator(token.text, operand.value, opLocation),
+                                operand.remaining
+                            )
+                            is ParseResult.Failure -> operand
+                        }
+                    }
+                }
+            } else {
+                // Not a literal, desugar to NumSub.neg call
+                val opStream = stream.advance()
+                val operand = unaryExpression(opStream)
+                when (operand) {
+                    is ParseResult.Success -> ParseResult.Success(
+                        desugarUnaryOperator(token.text, operand.value, opLocation),
+                        operand.remaining
+                    )
+                    is ParseResult.Failure -> operand
+                }
+            }
+        } else if (token?.type == TokenType.NOT) {
+            // Desugar to ability method call
             val opLocation = tokenLocation(token)  // Capture operator location
             val opStream = stream.advance()
-            val operand = unaryExpression(opStream) // Right-associative: -(-5) is valid
+            val operand = unaryExpression(opStream) // Right-associative: !(!x) is valid
             when (operand) {
                 is ParseResult.Success -> ParseResult.Success(
-                    UnaryOperation(token.text, operand.value, sourceLocation = opLocation),
+                    desugarUnaryOperator(token.text, operand.value, opLocation),
                     operand.remaining
                 )
                 is ParseResult.Failure -> operand

@@ -547,11 +547,11 @@ object BasicTypes {
 
         context["__native_string_split"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("s" to FunkType.StringType, "delimiter" to FunkType.StringType)),
-            FunkType.ArrayListType(FunkType.StringType)
+            FunkType.ArrayType(FunkType.StringType)
         )
 
         context["__native_string_join"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("strings" to FunkType.ArrayListType(FunkType.StringType), "separator" to FunkType.StringType)),
+            FunkType.RecordType(mapOf("strings" to FunkType.ArrayType(FunkType.StringType), "separator" to FunkType.StringType)),
             FunkType.StringType
         )
 

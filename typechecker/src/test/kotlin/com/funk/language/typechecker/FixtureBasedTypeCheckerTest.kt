@@ -83,6 +83,40 @@ class FixtureBasedTypeCheckerTest {
         return actualTypes
     }
 
+    /**
+     * Normalize a type string by sorting ability constraints alphabetically.
+     * This allows order-independent comparison since "with NumAdd 'a, NumSub 'a"
+     * is semantically equivalent to "with NumSub 'a, NumAdd 'a".
+     */
+    private fun normalizeTypeString(typeStr: String): String {
+        // Check if the type has ability constraints (contains "with")
+        val withIndex = typeStr.indexOf(" with ")
+        if (withIndex == -1) {
+            return typeStr
+        }
+
+        // Split into the part before "with" and the constraints part
+        val beforeWith = typeStr.substring(0, withIndex)
+        val afterWith = typeStr.substring(withIndex + 6) // Skip " with "
+
+        // Find where the constraints end (look for " ->")
+        val arrowIndex = afterWith.indexOf(" -> ")
+        if (arrowIndex == -1) {
+            // No arrow, just constraints
+            val constraints = afterWith.split(", ").sorted()
+            return "$beforeWith with ${constraints.joinToString(", ")}"
+        }
+
+        // Split constraints from the return type
+        val constraintsPart = afterWith.substring(0, arrowIndex)
+        val returnPart = afterWith.substring(arrowIndex)
+
+        // Sort the constraints alphabetically
+        val constraints = constraintsPart.split(", ").sorted()
+
+        return "$beforeWith with ${constraints.joinToString(", ")}$returnPart"
+    }
+
     private fun testValidFixture(filename: String, permissive: Boolean = false) {
         val source = loadFunkFile("${getFixturesPath()}/valid/$filename")
         val expectedTypes = extractExpectedTypes(source)
@@ -99,7 +133,10 @@ class FixtureBasedTypeCheckerTest {
             if (permissive) {
                 assertTrue(actualType.isNotEmpty(), "Variable '$varName' should have a non-empty type")
             } else {
-                assertEquals(expectedType, actualType, "Type mismatch for variable '$varName'")
+                // Normalize both types to allow order-independent comparison of ability constraints
+                val normalizedExpected = normalizeTypeString(expectedType)
+                val normalizedActual = normalizeTypeString(actualType)
+                assertEquals(normalizedExpected, normalizedActual, "Type mismatch for variable '$varName'")
             }
         }
     }
@@ -120,7 +157,10 @@ class FixtureBasedTypeCheckerTest {
             if (permissive) {
                 assertTrue(actualType.isNotEmpty(), "Variable '$varName' should have a non-empty type")
             } else {
-                assertEquals(expectedType, actualType, "Type mismatch for variable '$varName'")
+                // Normalize both types to allow order-independent comparison of ability constraints
+                val normalizedExpected = normalizeTypeString(expectedType)
+                val normalizedActual = normalizeTypeString(actualType)
+                assertEquals(normalizedExpected, normalizedActual, "Type mismatch for variable '$varName'")
             }
         }
     }
@@ -136,7 +176,10 @@ class FixtureBasedTypeCheckerTest {
         for ((varName, expectedType) in expectedTypes) {
             val actualType = actualTypes[varName]
             assertNotNull(actualType, "Variable '$varName' should have a type")
-            assertEquals(expectedType, actualType, "Type mismatch for variable '$varName'")
+            // Normalize both types to allow order-independent comparison of ability constraints
+            val normalizedExpected = normalizeTypeString(expectedType)
+            val normalizedActual = normalizeTypeString(actualType)
+            assertEquals(normalizedExpected, normalizedActual, "Type mismatch for variable '$varName'")
         }
     }
 

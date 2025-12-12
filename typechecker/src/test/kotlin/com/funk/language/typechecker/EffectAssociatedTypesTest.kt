@@ -405,8 +405,8 @@ class EffectAssociatedTypesTest {
         val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
         println("[TEST LIST] Actual type: ${binding.inferredType}")
         println("[TEST LIST] Type class: ${binding.inferredType?.javaClass?.simpleName}")
-        // List T is converted to ArrayListType (same as [T]) for compatibility
-        assertTrue(binding.inferredType is FunkType.ArrayListType || binding.inferredType is FunkType.TypeApplication)
+        // List T is kept as TypeApplication
+        assertTrue(binding.inferredType is FunkType.TypeApplication)
     }
 
     @Test

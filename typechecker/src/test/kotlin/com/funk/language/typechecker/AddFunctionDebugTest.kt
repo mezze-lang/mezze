@@ -11,6 +11,7 @@ class AddFunctionDebugTest {
     fun testAddFunctionTypeInference() {
         // Enable debug output to see what's happening
         System.setProperty("funk.debug.constraints", "true")
+        System.setProperty("funk.typecheck.debug", "true")
         
         val source = """
             let add = {x, y} -> x + y

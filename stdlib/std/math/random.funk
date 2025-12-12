@@ -32,8 +32,8 @@ pub let normal_cdf_approx = { x: Float, mean: Float, std_dev: Float } ->
 
 # Probability density function for exponential distribution
 pub let exponential_pdf = { x: Float, rate: Float } ->
-    if x < 0.0 then 0.0 else rate * exp { value = -rate * x }
+    if x < 0.0 then 0.0 else rate * exp { value = NumSub.neg { n = rate } * x }
 
 # Cumulative distribution function for exponential distribution
 pub let exponential_cdf = { x: Float, rate: Float } ->
-    if x < 0.0 then 0.0 else 1.0 - exp { value = -rate * x }
+    if x < 0.0 then 0.0 else 1.0 - exp { value = NumSub.neg { n = rate } * x }

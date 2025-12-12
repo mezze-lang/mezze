@@ -24,5 +24,25 @@ object BoolImplementations {
             val value = record.fields["value"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_to_string", "expects 'value' as Boolean")
             FunkString(value.value.toString())
         }
+
+        context["__native_boolean_and"] = NativeFunkFunction("__native_boolean_and") { args ->
+            val record = args[0] as FunkRecord
+            val l = record.fields["l"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_and", "expects 'l' as Boolean")
+            val r = record.fields["r"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_and", "expects 'r' as Boolean")
+            FunkBool(l.value && r.value)
+        }
+
+        context["__native_boolean_or"] = NativeFunkFunction("__native_boolean_or") { args ->
+            val record = args[0] as FunkRecord
+            val l = record.fields["l"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_or", "expects 'l' as Boolean")
+            val r = record.fields["r"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_or", "expects 'r' as Boolean")
+            FunkBool(l.value || r.value)
+        }
+
+        context["__native_boolean_not"] = NativeFunkFunction("__native_boolean_not") { args ->
+            val record = args[0] as FunkRecord
+            val value = record.fields["val"] as? FunkBool ?: throw NativeFunctionException("__native_boolean_not", "expects 'val' as Boolean")
+            FunkBool(!value.value)
+        }
     }
 }

@@ -229,5 +229,11 @@ object FracImplementations {
             val n = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("__native_negate_frac", "expects 'frac' as Frac")
             FunkFrac(-n.numerator, n.denominator).reduce()
         }
+
+        context["__native_frac_neg"] = NativeFunkFunction("__native_frac_neg") { args ->
+            val record = args[0] as FunkRecord
+            val value = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("__native_frac_neg", "expects 'n' as Frac")
+            FunkFrac(-value.numerator, value.denominator).reduce()
+        }
     }
 }

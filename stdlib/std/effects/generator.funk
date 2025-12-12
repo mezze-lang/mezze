@@ -1,51 +1,80 @@
-# std/effects/generator.funk - Generator effect for lazy sequences
+# std/effects/generator.funk - Generator library built on Continuation effect
 
-# Generator effect provides yield/resume pattern for creating lazy sequences.
-# Built on top of the Continuation effect.
+# Generators provide a yield/resume pattern for creating lazy sequences.
+# Built entirely on top of the Continuation effect - no special language support needed!
 #
-# Generators allow you to yield values one at a time, suspending execution
-# between yields. This enables lazy evaluation and infinite sequences.
+# This is a pure userland library. Generators are just functions that use
+# Continuation.suspend_with to yield values. No effect declaration needed!
 
 use std::effects::continuation::{Continuation, Delimited}
 
-# Generator effect - allows yielding values from a computation
-# Now with associated types! The 'item type determines what values are yielded
-pub effect Generator having 'item where {
-    # Yield a value and suspend execution
-    # Returns control to the caller with the yielded value
-    # Can be resumed to continue generating more values
-    yield: { value: 'item } -> {} <Generator>
-}
+# =============================================================================
+# Creating Generators
+# =============================================================================
 
-# Yieldable performer - implements Generator using continuations
-# When you yield, it suspends the computation and returns the yielded value
-# Note: With associated types, each generator implementation specifies its item type
-pub impl Generator for Yieldable having 'item = 'a where {
-    yield = { value } -> __native_generator_yield { value = value }
-}
+# To create a generator, write a function that uses perform Delimited in and
+# calls Continuation.suspend_with to yield values. For example:
+#
+# let yield_helper = { i, n } -> do
+#     if i < n then do
+#         Continuation.suspend_with { value = i }
+#         yield_helper { i = i + 1, n = n }
+#     else {}
+#
+# let count_up_to = { n } -> perform Delimited in
+#     yield_helper { i = 0, n = n }
+#
+# # Then consume it:
+# let my_gen = count_up_to { n = 5 }
+# let values = perform Delimited in to_list { gen = my_gen }
+#
+# The generator function wraps in `perform Delimited in`, and consumers also
+# need to wrap in `perform Delimited in` when calling library functions.
 
 # =============================================================================
-# Generator Utility Functions
+# Generator Consumption Functions
 # =============================================================================
 
 # Get the next value from a generator
-# Returns { value: Option, gen: next_state }
+# Takes a suspended generator and returns { value: Option 'a, gen: next_state }
 # - value is Some { val } if there's a yielded value, None if done
 # - gen is the next generator state to use for subsequent calls
-pub let next = { gen } ->
-    __native_generator_next { gen = gen }
+pub let next = { gen } -> do
+    let extracted = Continuation.extract_suspended { suspended = gen }
+    match extracted is
+        Some { val } -> do
+            # Resume the continuation to get the next state
+            let next_state = Continuation.resume { cont = val.cont, value = {} }
+            { value = Some { val = val.value }, gen = next_state }
+        None -> { value = None, gen = {} }
 
-# Consume entire generator into a list
+# Consume entire generator into an array
 # Warning: Will not terminate for infinite generators!
-pub let to_list = { gen } ->
-    __native_generator_to_list { gen = gen }
+# Implemented using recursion over next
+let to_list_helper = { gen, acc } -> do
+    let result = next { gen = gen }
+    match result.value is
+        Some { val } ->
+            to_list_helper { gen = result.gen, acc = __native_arraylist_concat { xs = acc, ys = [val] } }
+        None -> acc
+
+pub let to_list = { gen } -> to_list_helper { gen = gen, acc = [] }
 
 # Take first n values from a generator
-# Returns { values: List, gen: remaining_state }
-# - values is a list of up to n yielded values
+# Returns { values: ['elem], gen: remaining_state }
+# - values is an array of up to n yielded values
 # - gen is the remaining generator state (can be used to continue)
-pub let take = { gen, n } ->
-    __native_generator_take { gen = gen, n = n }
+let take_helper = { gen, n, acc } -> do
+    if n <= 0 then
+        { values = acc, gen = gen }
+    else do
+        let result = next { gen = gen }
+        match result.value is
+            Some { val } ->
+                take_helper { gen = result.gen, n = n - 1, acc = __native_arraylist_concat { xs = acc, ys = [val] } }
+            None -> { values = acc, gen = {} }
+
+pub let take = { gen, n } -> take_helper { gen = gen, n = n, acc = [] }
 
 # =============================================================================
 # Generator Transformation Functions
@@ -60,7 +89,7 @@ let map_helper = { gen, f, acc } -> do
         None -> acc
 
 # Map a function over all values from a generator
-# Consumes the generator and returns a list of transformed values
+# Consumes the generator and returns an array of transformed values
 # Example: map { gen = int_gen, f = { x } -> x * 2 }
 pub let map = { gen, f } -> map_helper { gen = gen, f = f, acc = [] }
 
@@ -75,7 +104,7 @@ let filter_helper = { gen, p, acc } -> do
         None -> acc
 
 # Filter values from a generator based on a predicate
-# Consumes the generator and returns a list of filtered values
+# Consumes the generator and returns an array of filtered values
 # Example: filter { gen = int_gen, p = { x } -> x % 2 == 0 }
 pub let filter = { gen, p } -> filter_helper { gen = gen, p = p, acc = [] }
 

@@ -281,7 +281,7 @@ object FilesystemImplementations {
                     ))
                 }
                 val entries = file.list()?.map { FunkString(it) } ?: emptyList()
-                createOk(FunkList(entries))
+                createOk(FunkArrayList(entries.toMutableList()))
             } catch (e: SecurityException) {
                 createFileSystemError("PermissionDenied", mapOf(
                     "path" to FunkString(path.value),

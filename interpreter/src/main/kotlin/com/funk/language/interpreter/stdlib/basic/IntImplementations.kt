@@ -174,5 +174,11 @@ object IntImplementations {
             val n = record.fields["n"] as? FunkInt ?: throw NativeFunctionException("__native_int_to_frac", "expects 'n' as Int")
             FunkFrac(n.value, 1L)
         }
+
+        context["__native_int_neg"] = NativeFunkFunction("__native_int_neg") { args ->
+            val record = args[0] as FunkRecord
+            val value = record.fields["n"] as? FunkInt ?: throw NativeFunctionException("__native_int_neg", "expects 'n' as Int")
+            FunkInt(-value.value)
+        }
     }
 }

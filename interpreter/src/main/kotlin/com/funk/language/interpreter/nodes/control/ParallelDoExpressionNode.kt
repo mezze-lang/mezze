@@ -286,9 +286,8 @@ object DoExpressionNodeFactory {
     private fun containsEffectCallsInExpression(expression: com.funk.language.ast.Expression): Boolean {
         return when (expression) {
             is com.funk.language.ast.EffectCallExpression -> true
-            is com.funk.language.ast.BinaryOperation -> 
-                containsEffectCallsInExpression(expression.left) || containsEffectCallsInExpression(expression.right)
-            is com.funk.language.ast.FunctionCall -> 
+            // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
+            is com.funk.language.ast.FunctionCall ->
                 containsEffectCallsInExpression(expression.function) || containsEffectCallsInExpression(expression.arguments)
             is com.funk.language.ast.DoExpression -> containsEffectCalls(expression)
             else -> false

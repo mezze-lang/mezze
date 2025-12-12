@@ -35,12 +35,18 @@ object BuiltinAbilities {
     const val NUM_MUL = "NumMul"
     const val NUM_DIV = "NumDiv"
     const val NUM_MOD = "NumMod"
+    const val NUM_NEG = "NumNeg"
+
+    // Logical abilities
+    const val LOGICAL_AND = "LogicalAnd"
+    const val LOGICAL_OR = "LogicalOr"
+    const val LOGICAL_NOT = "LogicalNot"
 
     // Inspect ability
     const val INSPECT = "Inspect"
 
     // All built-in abilities
-    val ALL = setOf(EQ, ORD, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, INSPECT)
+    val ALL = setOf(EQ, ORD, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, NUM_NEG, LOGICAL_AND, LOGICAL_OR, LOGICAL_NOT, INSPECT)
     
     /**
      * Check if an ability name is a built-in ability
@@ -53,12 +59,12 @@ object BuiltinAbilities {
      */
     private val automaticImplementations = mapOf(
         // Primitive types
-        "Int" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD),
-        "Float" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
+        "Int" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_MOD, NUM_NEG),
+        "Float" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_NEG),
         "String" to setOf(EQ, ORD, INSPECT),
-        "Boolean" to setOf(EQ, ORD, INSPECT),
+        "Boolean" to setOf(EQ, ORD, INSPECT, LOGICAL_AND, LOGICAL_OR, LOGICAL_NOT),
         "Nat" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_MUL, NUM_DIV, NUM_MOD),
-        "Frac" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV),
+        "Frac" to setOf(EQ, ORD, INSPECT, NUM_ADD, NUM_SUB, NUM_MUL, NUM_DIV, NUM_NEG),
 
         // Built-in core types (conditional implementations based on element types)
         "Option" to setOf(EQ, ORD, INSPECT), // if element type has these abilities
@@ -150,36 +156,40 @@ object BuiltinOperators {
         "<=" to BuiltinAbilities.ORD,
         ">=" to BuiltinAbilities.ORD
     )
-    
+
     /**
-     * Boolean operators (built-in language constructs)
+     * Logical operators mapped to abilities
      */
-    val booleanOperators = setOf("&&", "||", "!")
+    val logicalOperators = mapOf(
+        "&&" to BuiltinAbilities.LOGICAL_AND,
+        "||" to BuiltinAbilities.LOGICAL_OR,
+        "!" to BuiltinAbilities.LOGICAL_NOT
+    )
     
     /**
      * All built-in operators
      */
-    val allOperators = arithmeticOperators.keys + comparisonOperators.keys + booleanOperators
-    
+    val allOperators = arithmeticOperators.keys + comparisonOperators.keys + logicalOperators.keys
+
     /**
      * Check if an operator is a built-in operator
      */
     fun isBuiltinOperator(operator: String): Boolean {
         return operator in allOperators
     }
-    
+
     /**
      * Get the ability required for an operator
      */
     fun getRequiredAbility(operator: String): String? {
-        return arithmeticOperators[operator] ?: comparisonOperators[operator]
+        return arithmeticOperators[operator] ?: comparisonOperators[operator] ?: logicalOperators[operator]
     }
-    
+
     /**
-     * Check if an operator is a boolean operator (no ability constraint needed)
+     * Check if an operator is a logical operator
      */
-    fun isBooleanOperator(operator: String): Boolean {
-        return operator in booleanOperators
+    fun isLogicalOperator(operator: String): Boolean {
+        return operator in logicalOperators
     }
     
     /**
@@ -196,6 +206,9 @@ object BuiltinOperators {
             "<" -> "less_than"
             ">" -> "greater_than"
             "<=", ">=" -> null // derived from other operations
+            "&&" -> "and"
+            "||" -> "or"
+            "!" -> "not"
             else -> null
         }
     }
@@ -257,7 +270,35 @@ object BuiltinAbilityDefinitions {
     data class NumModAbility(
         val modulo: String = "modulo" // { l: 'a, r: 'a } -> 'a
     )
-    
+
+    /**
+     * Numeric negation ability
+     */
+    data class NumNegAbility(
+        val neg: String = "neg" // { val: 'a } -> 'a
+    )
+
+    /**
+     * Logical AND ability
+     */
+    data class LogicalAndAbility(
+        val and: String = "and" // { l: Bool, r: Bool } -> Bool
+    )
+
+    /**
+     * Logical OR ability
+     */
+    data class LogicalOrAbility(
+        val or: String = "or" // { l: Bool, r: Bool } -> Bool
+    )
+
+    /**
+     * Logical NOT ability
+     */
+    data class LogicalNotAbility(
+        val not: String = "not" // { val: Bool } -> Bool
+    )
+
     /**
      * Inspect ability - provides string representation
      */
@@ -272,8 +313,8 @@ object BuiltinAbilityDefinitions {
         return when (abilityName) {
             BuiltinAbilities.EQ -> listOf(EqAbility().equals)
             BuiltinAbilities.ORD -> listOf(
-                OrdAbility().compare, 
-                OrdAbility().lessThan, 
+                OrdAbility().compare,
+                OrdAbility().lessThan,
                 OrdAbility().greaterThan
             )
             BuiltinAbilities.NUM_ADD -> listOf(NumAddAbility().add)
@@ -281,6 +322,10 @@ object BuiltinAbilityDefinitions {
             BuiltinAbilities.NUM_MUL -> listOf(NumMulAbility().multiply)
             BuiltinAbilities.NUM_DIV -> listOf(NumDivAbility().divide)
             BuiltinAbilities.NUM_MOD -> listOf(NumModAbility().modulo)
+            BuiltinAbilities.NUM_NEG -> listOf(NumNegAbility().neg)
+            BuiltinAbilities.LOGICAL_AND -> listOf(LogicalAndAbility().and)
+            BuiltinAbilities.LOGICAL_OR -> listOf(LogicalOrAbility().or)
+            BuiltinAbilities.LOGICAL_NOT -> listOf(LogicalNotAbility().not)
             BuiltinAbilities.INSPECT -> listOf(InspectAbility().to_str)
             else -> emptyList()
         }
@@ -434,12 +479,8 @@ sealed interface FunkType {
     // Built-in ordering type for comparisons
     @Serializable
     object OrderingType : FunkType
-    
-    // ArrayList types (maps to java.util.ArrayList) - kept for backward compatibility
-    @Serializable
-    data class ArrayListType(val elementType: FunkType) : FunkType
-    
-    // Array types (for native arrays)
+
+    // Array types (for arrays [] syntax)
     @Serializable
     data class ArrayType(val elementType: FunkType) : FunkType
     
@@ -626,9 +667,6 @@ data class TypeScheme(
             is FunkType.SetType -> FunkType.SetType(
                 applySubstitutionToType(type.elementType, substitution)
             )
-            is FunkType.ArrayListType -> FunkType.ArrayListType(
-                applySubstitutionToType(type.elementType, substitution)
-            )
             is FunkType.ArrayType -> FunkType.ArrayType(
                 applySubstitutionToType(type.elementType, substitution)
             )
@@ -646,59 +684,61 @@ data class TypeScheme(
 }
 
 @Serializable
-data class TypeVar(val name: String, val level: Int = 0) {
+data class TypeVar(val name: String, val level: Int = 0, val id: Int = 0) {
     companion object {
         private var globalCounter = 0
         private var currentLevel = 0
         private val scopeCounters = mutableMapOf<Int, Int>()
-        
+
         fun fresh(level: Int = currentLevel): TypeVar {
             // Get or initialize counter for this level, starting from 0
             val scopeCounter = scopeCounters.getOrPut(level) { 0 }
-            
+
             // Generate name: 'a', 'b', 'c', etc.
             val name = "'${('a' + scopeCounter)}"
-            
-            // Increment counter for this level
+
+            // Increment counters
             scopeCounters[level] = scopeCounter + 1
-            
-            return TypeVar(name, level)
+            val id = globalCounter++
+
+            return TypeVar(name, level, id)
         }
-        
+
         fun freshNamed(baseName: String, level: Int = currentLevel): TypeVar {
             val scopeCounter = scopeCounters.getOrPut(level) { 0 }
             val name = "'${baseName}${scopeCounter}"
             scopeCounters[level] = scopeCounter + 1
-            return TypeVar(name, level)
+            val id = globalCounter++
+            return TypeVar(name, level, id)
         }
-        
+
         fun resetCounter() {
             globalCounter = 0
             currentLevel = 0
             scopeCounters.clear()
         }
-        
+
         fun resetScope(level: Int = 0) {
             // Reset counter for a specific scope level (useful for per-function reset)
             scopeCounters[level] = 0
         }
-        
+
         fun enterScope(): Int {
             currentLevel++
             // Each new scope starts fresh with 'a
             scopeCounters[currentLevel] = 0
             return currentLevel
         }
-        
+
         fun exitScope() {
             if (currentLevel > 0) {
                 scopeCounters.remove(currentLevel)
                 currentLevel--
             }
         }
-        
+
         fun getCurrentLevel(): Int = currentLevel
-        
+
         fun resetScopeCounter(level: Int = currentLevel) {
             scopeCounters[level] = 0
         }
@@ -1209,26 +1249,8 @@ data class PlaceholderExpression(
     override val sourceLocation: SourceLocation? = null
 ) : Expression
 
-
-// Operations
-@Serializable
-data class BinaryOperation(
-    val left: Expression,
-    val operator: String,
-    val right: Expression,
-    override val inferredType: FunkType? = null,
-    override val sourceLocation: SourceLocation? = null
-) : Expression
-
-@Serializable
-data class UnaryOperation(
-    val operator: String,
-    val operand: Expression,
-    override val inferredType: FunkType? = null,
-    override val sourceLocation: SourceLocation? = null
-) : Expression
-
 // PipeExpression removed - pipe operator is now desugared during parsing
+// BinaryOperation and UnaryOperation removed - operators are now desugared during parsing
 
 // Records
 @Serializable
@@ -1686,11 +1708,6 @@ data class FunctionTypeAnnotation(
 ) : TypeAnnotation
 
 @Serializable
-data class ArrayListTypeAnnotation(
-    val elementType: TypeAnnotation
-) : TypeAnnotation
-
-@Serializable
 data class ArrayTypeAnnotation(
     val elementType: TypeAnnotation
 ) : TypeAnnotation
@@ -1965,9 +1982,6 @@ private fun extractTypeVariables(type: FunkType): Set<TypeVar> {
         is FunkType.SetType -> {
             result.addAll(extractTypeVariables(type.elementType))
         }
-        is FunkType.ArrayListType -> {
-            result.addAll(extractTypeVariables(type.elementType))
-        }
         is FunkType.ArrayType -> {
             result.addAll(extractTypeVariables(type.elementType))
         }
@@ -2074,9 +2088,6 @@ private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<T
         is FunkType.SetType -> {
             collectTypeVariablesInOrder(type.elementType, collector)
         }
-        is FunkType.ArrayListType -> {
-            collectTypeVariablesInOrder(type.elementType, collector)
-        }
         is FunkType.ArrayType -> {
             collectTypeVariablesInOrder(type.elementType, collector)
         }
@@ -2128,9 +2139,6 @@ private fun collectTypeVariables(type: FunkType, collector: MutableSet<TypeVar>)
             collectTypeVariables(type.valueType, collector)
         }
         is FunkType.SetType -> {
-            collectTypeVariables(type.elementType, collector)
-        }
-        is FunkType.ArrayListType -> {
             collectTypeVariables(type.elementType, collector)
         }
         is FunkType.ArrayType -> {
@@ -2202,10 +2210,6 @@ private fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVa
         is FunkType.SetType -> {
             val newElementType = substituteTypeVariables(type.elementType, mapping)
             FunkType.SetType(newElementType)
-        }
-        is FunkType.ArrayListType -> {
-            val newElementType = substituteTypeVariables(type.elementType, mapping)
-            FunkType.ArrayListType(newElementType)
         }
         is FunkType.ArrayType -> {
             val newElementType = substituteTypeVariables(type.elementType, mapping)

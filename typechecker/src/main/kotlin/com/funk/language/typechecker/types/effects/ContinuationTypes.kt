@@ -66,6 +66,24 @@ object ContinuationTypes {
             FunkType.VarType(com.funk.language.ast.TypeVar("b"))
         )
 
+        // __native_continuation_fork: { cont: { value: 'a } -> 'b, values: ['a] } -> ['b]
+        // Multi-shot: resumes continuation once for each value, collects all results
+        // This is the key primitive for implementing nondeterministic choice (amb/backtracking)
+        context["__native_continuation_fork"] = FunkType.FunctionType(
+            // Parameter type: { cont: { value: 'a } -> 'b, values: ['a] }
+            FunkType.RecordType(mapOf(
+                "cont" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf(
+                        "value" to FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+                    )),
+                    FunkType.VarType(com.funk.language.ast.TypeVar("b"))
+                ),
+                "values" to FunkType.ArrayType(FunkType.VarType(com.funk.language.ast.TypeVar("a")))
+            )),
+            // Return type: ['b] (array of all results from resuming with each value)
+            FunkType.ArrayType(FunkType.VarType(com.funk.language.ast.TypeVar("b")))
+        )
+
         // __native_continuation_abort: {} -> 'b
         // Aborts the current computation without resuming
         context["__native_continuation_abort"] = FunkType.FunctionType(
@@ -73,6 +91,38 @@ object ContinuationTypes {
             FunkType.RecordType(emptyMap()),
             // Return type: 'b (never actually returns, but type is polymorphic)
             FunkType.VarType(com.funk.language.ast.TypeVar("b"))
+        )
+
+        // __native_continuation_is_suspended: { value: 'a } -> Bool
+        // Checks if a value is a suspended continuation
+        context["__native_continuation_is_suspended"] = FunkType.FunctionType(
+            // Parameter type: { value: 'a }
+            FunkType.RecordType(mapOf(
+                "value" to FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+            )),
+            // Return type: Bool
+            FunkType.BooleanType
+        )
+
+        // __native_continuation_extract_suspended: { suspended: 'a } -> Option { value: 'v, cont: 'c }
+        // Extracts the suspended value and continuation from a suspended state
+        context["__native_continuation_extract_suspended"] = FunkType.FunctionType(
+            // Parameter type: { suspended: 'a }
+            FunkType.RecordType(mapOf(
+                "suspended" to FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+            )),
+            // Return type: Option { value: 'v, cont: 'c }
+            FunkType.TypeApplication("Option", listOf(
+                FunkType.RecordType(mapOf(
+                    "value" to FunkType.VarType(com.funk.language.ast.TypeVar("v")),
+                    "cont" to FunkType.FunctionType(
+                        FunkType.RecordType(mapOf(
+                            "value" to FunkType.VarType(com.funk.language.ast.TypeVar("x"))
+                        )),
+                        FunkType.VarType(com.funk.language.ast.TypeVar("c"))
+                    )
+                ))
+            ))
         )
     }
 }

@@ -39,10 +39,13 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_head", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_head", "expects 'xs' as List")
+
+            // Return Option - Some if list is non-empty, None otherwise
             if (xs.elements.isEmpty()) {
-                throw NativeFunctionException("__native_list_head", "cannot get head of empty list")
+                FunkVariant("None", null)
+            } else {
+                FunkVariant("Some", FunkRecord(mapOf("val" to xs.elements.first())))
             }
-            xs.elements.first()
         }
 
         context["__native_list_tail"] = NativeFunkFunction("__native_list_tail") { args ->
@@ -50,10 +53,13 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_tail", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_tail", "expects 'xs' as List")
+
+            // Return Option - Some if list is non-empty, None otherwise
             if (xs.elements.isEmpty()) {
-                throw NativeFunctionException("__native_list_tail", "cannot get tail of empty list")
+                FunkVariant("None", null)
+            } else {
+                FunkVariant("Some", FunkRecord(mapOf("val" to FunkList(xs.elements.drop(1)))))
             }
-            FunkList(xs.elements.drop(1))
         }
 
         context["__native_list_length"] = NativeFunkFunction("__native_list_length") { args ->
@@ -85,10 +91,12 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_get", "expects 'index' as Int")
 
             val idx = index.value.toInt()
+            // Return Option - Some if index is valid, None otherwise
             if (idx < 0 || idx >= xs.elements.size) {
-                throw NativeFunctionException("__native_list_get", "index out of bounds: $idx")
+                FunkVariant("None", null)
+            } else {
+                FunkVariant("Some", FunkRecord(mapOf("val" to xs.elements[idx])))
             }
-            xs.elements[idx]
         }
 
         context["__native_list_take"] = NativeFunkFunction("__native_list_take") { args ->
@@ -222,16 +230,14 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_reduce", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_reduce", "expects 'xs' as List")
+            val init = record.fields["init"]
+                ?: throw NativeFunctionException("__native_list_reduce", "expects 'init' value")
             val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_list_reduce", "expects 'f' function")
 
-            if (xs.elements.isEmpty()) {
-                throw NativeFunctionException("__native_list_reduce", "cannot reduce empty list")
-            }
-
-            var acc = xs.elements.first()
-            for (elem in xs.elements.drop(1)) {
-                val callArg = FunkRecord(mapOf("acc" to acc, "x" to elem))
+            var acc = init
+            for (elem in xs.elements) {
+                val callArg = FunkRecord(mapOf("a" to acc, "b" to elem))
                 acc = when (f) {
                     is SimpleFunkFunction -> {
                         if (interpreter == null) throw NativeFunctionException("Function callbacks", "Interpreter not available for SimpleFunkFunction")

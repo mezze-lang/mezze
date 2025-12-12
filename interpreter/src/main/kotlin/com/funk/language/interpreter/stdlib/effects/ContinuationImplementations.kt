@@ -27,7 +27,10 @@ object ContinuationImplementations {
         registerResume(context, interpreter)
         registerSuspend(context, interpreter)
         registerSuspendWith(context, interpreter)
+        registerFork(context, interpreter)
         registerAbort(context, interpreter)
+        registerIsSuspended(context)
+        registerExtractSuspended(context)
     }
 
     /**
@@ -217,6 +220,58 @@ object ContinuationImplementations {
     }
 
     /**
+     * __native_continuation_fork - Multi-shot continuation: resume with multiple values.
+     *
+     * Takes:
+     * - cont: The continuation to resume
+     * - values: Array of values to resume with
+     *
+     * Returns: Array of results from resuming the continuation with each value
+     *
+     * This is the key primitive for implementing nondeterministic choice (amb/backtracking).
+     * It enables exploring multiple execution paths by resuming the same continuation
+     * multiple times with different values.
+     */
+    private fun registerFork(
+        context: MutableMap<String, FunkValue>,
+        interpreter: FunkInterpreter?
+    ) {
+        context["__native_continuation_fork"] = NativeFunkFunction("__native_continuation_fork") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_continuation_fork", "expects FunkRecord")
+
+            val cont = record.fields["cont"]
+                ?: throw NativeFunctionException("__native_continuation_fork", "expects 'cont' field")
+            val values = record.fields["values"] as? FunkArrayList
+                ?: throw NativeFunctionException("__native_continuation_fork", "expects 'values' field as array")
+
+            when (cont) {
+                is FunkContinuation -> {
+                    // Resume the continuation once for each value, collecting results
+                    val results = values.elements.map { value ->
+                        // Call the continuation's resume function with this value
+                        val arg = FunkRecord(mapOf("value" to value))
+                        when (val resumeFn = cont.resumeFunction) {
+                            is NativeFunkFunction -> {
+                                try {
+                                    resumeFn.call(listOf(arg))
+                                } catch (e: ContinuationAbortedException) {
+                                    // If this path aborts, don't include it in results
+                                    null
+                                }
+                            }
+                            else -> throw NativeFunctionException("__native_continuation_fork", "Invalid continuation")
+                        }
+                    }.filterNotNull() // Remove aborted paths
+
+                    FunkArrayList(results.toMutableList())
+                }
+                else -> throw NativeFunctionException("__native_continuation_fork", "cont must be a FunkContinuation")
+            }
+        }
+    }
+
+    /**
      * __native_continuation_abort - Aborts the current computation.
      *
      * Throws a ContinuationAbortedException to stop execution.
@@ -234,6 +289,60 @@ object ContinuationImplementations {
             throw ContinuationAbortedException("Continuation aborted")
         }
     }
+
+    /**
+     * __native_continuation_is_suspended - Check if a value is a suspended continuation.
+     *
+     * Takes: { value: 'a }
+     * Returns: Bool - true if the value is FunkContinuationSuspended, false otherwise
+     */
+    private fun registerIsSuspended(context: MutableMap<String, FunkValue>) {
+        context["__native_continuation_is_suspended"] = NativeFunkFunction("__native_continuation_is_suspended") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_continuation_is_suspended", "expects FunkRecord")
+
+            val value = record.fields["value"]
+                ?: throw NativeFunctionException("__native_continuation_is_suspended", "expects 'value' field")
+
+            FunkBool(value is FunkContinuationSuspended)
+        }
+    }
+
+    /**
+     * __native_continuation_extract_suspended - Extract value and continuation from suspended state.
+     *
+     * Takes: { suspended: 'a }
+     * Returns: Option { value: 'v, cont: 'c } - Some if suspended, None otherwise
+     *
+     * This allows userland code to work with suspended continuations by unpacking them
+     * into their constituent parts (the yielded value and the continuation).
+     */
+    private fun registerExtractSuspended(context: MutableMap<String, FunkValue>) {
+        context["__native_continuation_extract_suspended"] = NativeFunkFunction("__native_continuation_extract_suspended") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_continuation_extract_suspended", "expects FunkRecord")
+
+            val suspended = record.fields["suspended"]
+                ?: throw NativeFunctionException("__native_continuation_extract_suspended", "expects 'suspended' field")
+
+            when (suspended) {
+                is FunkContinuationSuspended -> {
+                    // Return Some { value: suspended_value, cont: continuation }
+                    FunkVariant("Some", FunkRecord(mapOf(
+                        "val" to FunkRecord(mapOf(
+                            "value" to suspended.suspendedValue,
+                            "cont" to suspended.continuation
+                        ))
+                    )))
+                }
+                else -> {
+                    // Return None
+                    FunkVariant("None", null)
+                }
+            }
+        }
+    }
+
 }
 
 /**
