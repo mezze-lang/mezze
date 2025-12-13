@@ -633,20 +633,27 @@ class FunkInterpreter {
                 
                 // CRITICAL: Check for effect handlers BEFORE regular member access
                 // Priority 1: Active handlers (from perform expressions)
-                if (expr.receiver is Identifier) {
-                    val effectName = (expr.receiver as Identifier).name
+
+                // Extract effect name from receiver (handles both Identifier and VariantConstruction)
+                val effectName = when (val receiver = expr.receiver) {
+                    is Identifier -> receiver.name
+                    is VariantConstruction -> if (receiver.value == null) receiver.constructor else null
+                    else -> null
+                }
+
+                if (effectName != null) {
                     val operationName = expr.member
-                    
+
                     // Check if we have an active handler for this effect
                     val handlersRecord = (context["__handlers"] as? FunkRecord) ?: effectHandler.getCurrentHandlers()
                     if (handlersRecord?.fields?.containsKey(effectName) == true) {
                         // This is an effect operation - return the handler operation
                         val handler = handlersRecord.fields[effectName] as? FunkRecord
-                        return handler?.fields?.get(operationName) 
+                        return handler?.fields?.get(operationName)
                             ?: throw RuntimeException("Operation '$operationName' not found in handler for effect '$effectName'")
                     }
                 }
-                
+
                 // Regular member access
                 val record = evaluateExpression(expr.receiver, context)
                 when (record) {
@@ -3324,7 +3331,19 @@ class FunkInterpreter {
             // Check if result is a tail call
             if (result is TailCall && result.function == currentFunction) {
                 // This is a tail recursive call - optimize it
+                // CRITICAL: Preserve runtime state across tail calls
+                val preservedHandlers = currentContext["__handlers"]
+                val preservedInterpreter = currentContext["__interpreter_instance"]
+                val preservedImplMappings = currentContext["__impl_mappings"]
+                val preservedCurrentHandler = currentContext["__current_handler"]
+
                 currentContext = currentFunction.closure.toMutableMap()
+
+                // Restore preserved runtime state
+                preservedHandlers?.let { currentContext["__handlers"] = it }
+                preservedInterpreter?.let { currentContext["__interpreter_instance"] = it }
+                preservedImplMappings?.let { currentContext["__impl_mappings"] = it }
+                preservedCurrentHandler?.let { currentContext["__current_handler"] = it }
 
                 // Add recursive reference
                 currentFunction.recursiveName?.let { name ->
@@ -3346,7 +3365,7 @@ class FunkInterpreter {
                         }
                     }
                 }
-                
+
                 // Continue loop for tail call optimization
             } else {
                 // Not a tail call, return the result

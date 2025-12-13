@@ -12,12 +12,20 @@ use std::effects::continuation::{Continuation, Delimited}
 # Creating Generators
 # =============================================================================
 
+# Yield a value from a generator
+# This is a convenience wrapper around Continuation.suspend_with
+# Must be called within a `perform Delimited in` block
+pub let yield = { value } -> Continuation.suspend_with { value = value }
+
 # To create a generator, write a function that uses perform Delimited in and
-# calls Continuation.suspend_with to yield values. For example:
+# calls yield to produce values. For example:
+#
+# use std::effects::continuation::{Continuation, Delimited}
+# use std::effects::generator::{yield, to_list}
 #
 # let yield_helper = { i, n } -> do
 #     if i < n then do
-#         Continuation.suspend_with { value = i }
+#         yield { value = i }
 #         yield_helper { i = i + 1, n = n }
 #     else {}
 #
@@ -39,6 +47,7 @@ use std::effects::continuation::{Continuation, Delimited}
 # Takes a suspended generator and returns { value: Option 'a, gen: next_state }
 # - value is Some { val } if there's a yielded value, None if done
 # - gen is the next generator state to use for subsequent calls
+# NOTE: Must be called within a `perform Delimited in` block!
 pub let next = { gen } -> do
     let extracted = Continuation.extract_suspended { suspended = gen }
     match extracted is
