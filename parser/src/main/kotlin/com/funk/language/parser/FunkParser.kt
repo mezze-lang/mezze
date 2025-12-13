@@ -3636,6 +3636,69 @@ class FunkParser {
                         is ParseResult.Failure -> break  // Not a member access
                     }
                 }
+                TokenType.LPAREN -> {
+                    // BUG FIX: Reject () syntax for function calls
+                    // Funk uses {} for function calls, not ()
+                    val funcExpr = (result as ParseResult.Success).value
+                    val funcName = when (funcExpr) {
+                        is Identifier -> funcExpr.name
+                        is MemberAccess -> {
+                            val receiverName = when (val receiver = funcExpr.receiver) {
+                                is Identifier -> receiver.name
+                                is VariantConstruction -> receiver.constructor
+                                else -> "..."
+                            }
+                            "$receiverName.${funcExpr.member}"
+                        }
+                        else -> "expression"
+                    }
+                    throw createParseException(
+                        "Function calls must use {} syntax, not (). " +
+                        "Instead of '$funcName(...)', use '$funcName { <field> = <value> }' with named arguments.",
+                        currentStream
+                    )
+                }
+                TokenType.NEWLINE -> {
+                    // BUG FIX: Check if there's a { after the newline(s)
+                    // Only check if the expression looks like a function call (Identifier or MemberAccess)
+                    val funcExpr = (result as ParseResult.Success).value
+                    if (funcExpr is Identifier || funcExpr is MemberAccess) {
+                        var checkStream = currentStream.advance()  // Skip first newline
+                        // Skip any additional newlines
+                        while (checkStream.current()?.type == TokenType.NEWLINE) {
+                            checkStream = checkStream.advance()
+                        }
+                        // Check if next non-newline token is LBRACE
+                        if (checkStream.current()?.type == TokenType.LBRACE) {
+                            // IMPORTANT: Only error if the { would be parsed as function arguments
+                            // If it's a lambda (has -> after brace), don't error
+                            // This prevents false positives in match expressions where we have:
+                            //   { pattern } -> body
+                            //   { pattern } -> body
+                            // The body ends with an identifier, then newline, then { starts next pattern
+                            if (!lookAheadForArrowAfterBrace(checkStream)) {
+                                val funcName = when (funcExpr) {
+                                    is Identifier -> funcExpr.name
+                                    is MemberAccess -> {
+                                        val receiverName = when (val receiver = funcExpr.receiver) {
+                                            is Identifier -> receiver.name
+                                            else -> "..."
+                                        }
+                                        "$receiverName.${funcExpr.member}"
+                                    }
+                                    else -> "expression"
+                                }
+                                throw createParseException(
+                                    "Newline not allowed before '{' in function call. Function calls require '{' on the same line. " +
+                                    "Instead of:\n  $funcName\n  { ... }\nUse:\n  $funcName { ... }",
+                                    currentStream
+                                )
+                            }
+                        }
+                    }
+                    // Not a function call, just a newline - break out of postfix loop
+                    break
+                }
                 TokenType.IDENTIFIER -> {
                     // BUG #10 FIX: Check for function call without {} syntax
                     // Only check when the previous expression is a simple identifier (like `my_func x`)
