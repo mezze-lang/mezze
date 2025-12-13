@@ -1024,6 +1024,18 @@ class ConstraintSolver(
                             listOf(type1, type2)
                         )
                     }
+                    type1 is FunkType.IntType && type2 is FunkType.NatType -> {
+                        throw ConstraintConflictError(
+                            "Type conflict: Cannot unify Int and Nat. Use 'n' suffix for Nat literals (e.g., 5n).",
+                            listOf(type1, type2)
+                        )
+                    }
+                    type1 is FunkType.NatType && type2 is FunkType.IntType -> {
+                        throw ConstraintConflictError(
+                            "Type conflict: Cannot unify Nat and Int. Use 'n' suffix for Nat literals (e.g., 5n).",
+                            listOf(type1, type2)
+                        )
+                    }
                     type1 is FunkType.StringType && (type2 is FunkType.IntType || type2 is FunkType.FloatType || type2 is FunkType.BooleanType) -> {
                         throw ConstraintConflictError(
                             "Type conflict: Cannot unify String with ${prettyPrintType(type2)}. Consider using string conversion functions.",

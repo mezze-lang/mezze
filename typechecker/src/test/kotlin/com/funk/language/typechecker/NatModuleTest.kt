@@ -31,7 +31,7 @@ class NatModuleTest {
     fun `test nat subtract_to_int function`() {
         val source = """
             use std::nat
-            let result = nat::subtract_to_int { l = 10, r = 15 }
+            let result = nat::subtract_to_int { l = 10n, r = 15n }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -75,7 +75,7 @@ class NatModuleTest {
     fun `test nat min function`() {
         val source = """
             use std::nat
-            let result = nat::min { l = 10, r = 20 }
+            let result = nat::min { l = 10n, r = 20n }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -86,7 +86,7 @@ class NatModuleTest {
     fun `test nat max function`() {
         val source = """
             use std::nat
-            let result = nat::max { l = 10, r = 20 }
+            let result = nat::max { l = 10n, r = 20n }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -97,7 +97,7 @@ class NatModuleTest {
     fun `test nat is_zero function`() {
         val source = """
             use std::nat
-            let result = nat::is_zero { n = 0 }
+            let result = nat::is_zero { n = 0n }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -108,7 +108,7 @@ class NatModuleTest {
     fun `test nat is_even function`() {
         val source = """
             use std::nat
-            let result = nat::is_even { n = 42 }
+            let result = nat::is_even { n = 42n }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -119,7 +119,7 @@ class NatModuleTest {
     fun `test nat is_odd function`() {
         val source = """
             use std::nat
-            let result = nat::is_odd { n = 43 }
+            let result = nat::is_odd { n = 43n }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -130,8 +130,8 @@ class NatModuleTest {
     fun `test multiple nat operations`() {
         val source = """
             use std::nat
-            let a = 10
-            let b = 20
+            let a = 10n
+            let b = 20n
             let min_val = nat::min { l = a, r = b }
             let max_val = nat::max { l = a, r = b }
             let is_even_result = nat::is_even { n = a }

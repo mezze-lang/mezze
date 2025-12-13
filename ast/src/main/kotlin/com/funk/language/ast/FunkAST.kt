@@ -1138,6 +1138,57 @@ data class SourceLocation(
 }
 
 // ============================================================================
+// SYNTAX METADATA (Not part of AST, not part of content hash)
+// ============================================================================
+
+/**
+ * Tracks syntax metadata for desugared constructs to improve error messages.
+ *
+ * This is NOT part of the AST and NOT included in content hashing.
+ * It's used solely to provide better error messages by remembering the
+ * original syntax that was desugared during parsing.
+ *
+ * For example:
+ * - User writes: `-x`
+ * - Parser desugars to: `NumSub.neg {n = x}`
+ * - Metadata records: "This came from operator `-`"
+ * - Error messages can say: "Type error in operator `-`" instead of "Type error in call to NumSub.neg"
+ */
+object SyntaxMetadata {
+    private val operatorMetadata = mutableMapOf<SourceLocation, String>()
+
+    /**
+     * Mark an expression as coming from operator syntax.
+     * @param location Source location of the expression
+     * @param operatorSyntax The operator that was desugared (e.g., "-", "+", "!")
+     */
+    fun markAsOperator(location: SourceLocation, operatorSyntax: String) {
+        operatorMetadata[location] = operatorSyntax
+    }
+
+    /**
+     * Get the operator syntax for an expression if it was desugared from an operator.
+     * @param location Source location of the expression
+     * @return The operator syntax, or null if not from an operator
+     */
+    fun getOperatorSyntax(location: SourceLocation): String? {
+        return operatorMetadata[location]
+    }
+
+    /**
+     * Clear all metadata. Typically called when starting a new parse.
+     */
+    fun clear() {
+        operatorMetadata.clear()
+    }
+
+    /**
+     * Get the number of tracked metadata entries (for debugging/testing)
+     */
+    fun size(): Int = operatorMetadata.size
+}
+
+// ============================================================================
 // EXPRESSIONS (Unified - can be untyped or typed)
 // ============================================================================
 
@@ -1151,6 +1202,13 @@ sealed interface Expression {
 // Literals
 @Serializable
 data class IntLiteral(
+    val value: Long,
+    override val inferredType: FunkType? = null,
+    override val sourceLocation: SourceLocation? = null
+) : Expression
+
+@Serializable
+data class NatLiteral(
     val value: Long,
     override val inferredType: FunkType? = null,
     override val sourceLocation: SourceLocation? = null
@@ -1555,6 +1613,9 @@ sealed interface LiteralValue
 
 @Serializable
 data class IntLiteralValue(val value: Long) : LiteralValue
+
+@Serializable
+data class NatLiteralValue(val value: Long) : LiteralValue
 
 @Serializable
 data class FloatLiteralValue(val value: Double) : LiteralValue

@@ -65,6 +65,7 @@ class ASTToTruffleConverter {
         println("DEBUG: Converting expression: ${expr::class.simpleName}")
         return when (expr) {
             is IntLiteral -> IntLiteralNode(expr.value)
+            is NatLiteral -> IntLiteralNode(expr.value)  // Nat values are represented as Int at runtime
             is FloatLiteral -> FloatLiteralNode(expr.value)
             is FractionLiteral -> FractionLiteralNode(expr.numerator, expr.denominator)
             is StringLiteral -> {
@@ -172,6 +173,7 @@ class ASTToTruffleConverter {
                 // Convert literal patterns to LiteralPatternNode with the appropriate FunkValue
                 val value = when (val lit = pattern.value) {
                     is IntLiteralValue -> FunkInt(lit.value)
+                    is NatLiteralValue -> FunkInt(lit.value)  // Nat values are represented as Int at runtime
                     is FloatLiteralValue -> FunkFloat(lit.value)
                     is StringLiteralValue -> FunkString(lit.value)
                     is BooleanLiteralValue -> FunkBool(lit.value)

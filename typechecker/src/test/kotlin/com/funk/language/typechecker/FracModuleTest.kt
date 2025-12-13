@@ -53,7 +53,7 @@ class FracModuleTest {
     fun `test frac from_nat function`() {
         val source = """
             use std::frac
-            let f = frac::from_nat { n = 10 }
+            let f = frac::from_nat { n = 10n }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

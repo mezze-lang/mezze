@@ -57,7 +57,7 @@ class FunkParser {
             else -> throw IllegalArgumentException("Unknown binary operator: $operator")
         }
 
-        return FunctionCall(
+        val desugared = FunctionCall(
             function = MemberAccess(
                 receiver = Identifier(abilityName, sourceLocation = location),
                 member = operationName,
@@ -72,6 +72,13 @@ class FunkParser {
             ),
             sourceLocation = location
         )
+
+        // Mark this expression as coming from operator syntax for better error messages
+        if (location != null) {
+            SyntaxMetadata.markAsOperator(location, operator)
+        }
+
+        return desugared
     }
 
     /**
@@ -89,7 +96,7 @@ class FunkParser {
             else -> throw IllegalArgumentException("Unknown unary operator: $operator")
         }
 
-        return FunctionCall(
+        val desugared = FunctionCall(
             function = MemberAccess(
                 receiver = Identifier(abilityName, sourceLocation = location),
                 member = operationName,
@@ -103,6 +110,13 @@ class FunkParser {
             ),
             sourceLocation = location
         )
+
+        // Mark this expression as coming from operator syntax for better error messages
+        if (location != null) {
+            SyntaxMetadata.markAsOperator(location, operator)
+        }
+
+        return desugared
     }
 
     /**
@@ -175,6 +189,9 @@ class FunkParser {
         // Store for error reporting in nested parser methods
         currentSource = source
         currentFile = file
+
+        // Clear syntax metadata from previous parses
+        SyntaxMetadata.clear()
 
         try {
             val lexer = Lexer(source)
@@ -3001,6 +3018,17 @@ class FunkParser {
                     ParseResult.Failure("Invalid integer literal: ${token.text}", stream.getSourcePosition())
                 }
             }
+            TokenType.NAT -> {
+                val value = token.text.toLongOrNull()
+                if (value != null) {
+                    ParseResult.Success(
+                        LiteralPattern(NatLiteralValue(value)),
+                        stream.advance()
+                    )
+                } else {
+                    ParseResult.Failure("Invalid nat literal: ${token.text}", stream.getSourcePosition())
+                }
+            }
             TokenType.STRING -> {
                 // String token includes quotes, strip them
                 val text = token.text
@@ -3032,7 +3060,7 @@ class FunkParser {
                     ParseResult.Failure("Invalid float literal: ${token.text}", stream.getSourcePosition())
                 }
             }
-            else -> ParseResult.Failure("Expected literal (integer, string, boolean, or float)", stream.getSourcePosition())
+            else -> ParseResult.Failure("Expected literal (integer, nat, string, boolean, or float)", stream.getSourcePosition())
         }
     }
 
@@ -3739,6 +3767,10 @@ class FunkParser {
         when (token?.type) {
             TokenType.INTEGER -> ParseResult.Success(
                 IntLiteral(token.text.toLong(), sourceLocation = location),
+                stream.advance()
+            )
+            TokenType.NAT -> ParseResult.Success(
+                NatLiteral(token.text.toLong(), sourceLocation = location),
                 stream.advance()
             )
             TokenType.FLOAT -> ParseResult.Success(

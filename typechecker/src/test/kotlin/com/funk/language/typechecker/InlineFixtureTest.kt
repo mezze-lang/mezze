@@ -169,12 +169,12 @@ let intProduct = intDefault * 2                # expected: intProduct : Int
 let intDifference = intSum - intProduct        # expected: intDifference : Int
 
 let intFunction = { x: Int } -> x + 1          # Force x to be Int
-let natFunction = { x: Nat } -> x + 1          # Force x to be Nat
+let natFunction = { x: Nat } -> x + 1n         # Force x to be Nat
 
 let intResult = intFunction { x = 42 }         # 42 is already Int (default)
-let natResult = natFunction { x = 42 }         # 42 gets constrained to Nat by context
+let natResult = natFunction { x = 42n }        # 42n is Nat (explicit syntax)
 
-let explicitNat: Nat = 42                      # Force 42 to be Nat
+let explicitNat = 42n                          # Nat using 'n' suffix
 let explicitInt: Int = 42                      # 42 is already Int (default)
 
 intDefault
@@ -191,23 +191,23 @@ intDefault
     fun `test natural numbers`() {
         val source = """
 
-let count: Nat = 42                # expected: count : Nat
-let items: Nat = 0                 # expected: items : Nat
-let total: Nat = 100               # expected: total : Nat
+let count = 42n                    # expected: count : Nat
+let items = 0n                     # expected: items : Nat
+let total = 100n                   # expected: total : Nat
 
-let product = count * 2            # expected: product : Nat
-let quotient = total / 10          # expected: quotient : Nat
+let product = count * 2n           # expected: product : Nat
+let quotient = total / 10n         # expected: quotient : Nat
 
-let hasItems = count > 0           # expected: hasItems : Boolean
-let isEqual = count == 42          # expected: isEqual : Boolean
+let hasItems = count > 0n          # expected: hasItems : Boolean
+let isEqual = count == 42n         # expected: isEqual : Boolean
 
 let natFunction = { x: Nat } -> x + x          # Force x to be Nat
-let natResult = natFunction { x = 21 }         # 21 gets constrained to Nat by context
+let natResult = natFunction { x = 21n }        # 21n is Nat (explicit syntax)
 
 let defaultInt = 42                # expected: defaultInt : Int
 let intSum = defaultInt + 10       # expected: intSum : Int
 
-let natValue: Nat = 50             # expected: natValue : Nat
+let natValue = 50n                 # expected: natValue : Nat
 let natSum = natValue + natValue   # expected: natSum : Nat
 
 count
@@ -376,7 +376,7 @@ let floatResult = addTwo { x = 3.14 }       # expected: floatResult : Float
 let fracResult = addTwo { x = 1/2 }         # expected: fracResult : Frac
 
 let natFunction = { x: Nat } -> x + x       # Function that forces Nat
-let natResult = natFunction { x = 21 }      # expected: natResult : Nat
+let natResult = natFunction { x = 21n }     # expected: natResult : Nat
 
 let intSquare = square { x = 7 }            # expected: intSquare : Int
 let fracSquare = square { x = 3/4 }         # expected: fracSquare : Frac
@@ -592,15 +592,15 @@ mixedSum1
 let validInt = 42                  # expected: validInt : Int (default)
 let validNegInt = -5               # expected: validNegInt : Int
 
-# Natural numbers require explicit type annotation
-let validNat: Nat = 42             # expected: validNat : Nat (explicit annotation)
+# Natural numbers require explicit 'n' suffix
+let validNat = 42n                 # expected: validNat : Nat (explicit syntax)
 
 # This should work - Int is compatible with Int function
 let intFunction = { x: Int } -> x + 1
 let intInIntContext = intFunction { x = 42 }  # Works: 42 is Int by default
 
 # This should fail - cannot pass Nat to Int function without conversion
-let explicitNat: Nat = 42
+let explicitNat = 42n
 let invalidUse = intFunction { x = explicitNat }  # Type error: cannot use Nat where Int expected
 
 validInt

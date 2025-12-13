@@ -2,15 +2,15 @@
 let validInt = 42                  # expected: validInt : Int (default)
 let validNegInt = -5               # expected: validNegInt : Int
 
-# Natural numbers require explicit type annotation
-let validNat: Nat = 42             # expected: validNat : Nat (explicit annotation)
+# Natural numbers use explicit 'n' suffix
+let validNat = 42n                 # expected: validNat : Nat (explicit syntax)
 
 # This should work - Int is compatible with Int function
 let intFunction = { x: Int } -> x + 1
 let intInIntContext = intFunction { x = 42 }  # Works: 42 is Int by default
 
 # This should fail - cannot pass Nat to Int function without conversion
-let explicitNat: Nat = 42
+let explicitNat = 42n
 let invalidUse = intFunction { x = explicitNat }  # Type error: cannot use Nat where Int expected
 
 validInt

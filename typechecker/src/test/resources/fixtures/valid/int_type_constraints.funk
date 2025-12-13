@@ -15,14 +15,14 @@ let intDifference = intSum - intProduct        # expected: intDifference : Int
 
 # Function parameters can constrain types
 let intFunction = { x: Int } -> x + 1          # Force x to be Int
-let natFunction = { x: Nat } -> x + 1          # Force x to be Nat
+let natFunction = { x: Nat } -> x + 1n         # Force x to be Nat
 
 # Using the functions
 let intResult = intFunction { x = 42 }         # 42 is already Int (default)
-let natResult = natFunction { x = 42 }         # 42 gets constrained to Nat by context
+let natResult = natFunction { x = 42n }        # 42n is Nat (explicit syntax)
 
 # Explicit type annotations
-let explicitNat: Nat = 42                      # Force 42 to be Nat
+let explicitNat = 42n                          # Nat using 'n' suffix
 let explicitInt: Int = 42                      # 42 is already Int (default)
 
 intDefault
