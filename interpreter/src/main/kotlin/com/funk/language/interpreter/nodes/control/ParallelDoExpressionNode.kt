@@ -7,6 +7,7 @@ import com.funk.language.ast.DoExpression
 import com.funk.language.interpreter.nodes.FunkNode
 import com.funk.language.interpreter.FunkValue
 import com.funk.language.interpreter.FunkNull
+import com.funk.language.interpreter.FunkContinuationSuspended
 import com.funk.language.interpreter.effects.EffectContext
 import com.funk.language.interpreter.concurrency.RuntimeParallelismDetector
 import com.funk.language.interpreter.concurrency.LoomConcurrencyManager
@@ -211,12 +212,19 @@ class SimpleDoExpressionNode(
     
     override fun execute(frame: VirtualFrame): FunkValue {
         var lastResult: FunkValue = FunkNull
-        
+
         // Execute statements sequentially
+        // CRITICAL: Check for FunkContinuationSuspended and propagate immediately
         statementNodes.forEach { statementNode ->
             lastResult = statementNode.execute(frame)
+
+            // If a statement returned a suspended continuation (e.g., from Exception.throw or Return.early),
+            // propagate it immediately instead of continuing to the next statement
+            if (lastResult is FunkContinuationSuspended) {
+                return lastResult
+            }
         }
-        
+
         // Execute and return result expression
         return resultNode.execute(frame)
     }

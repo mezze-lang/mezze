@@ -1,0 +1,48 @@
+# std/effects/early_return.funk - Early return from computations
+
+use std::effects::continuation::{Continuation, Delimited}
+
+pub effect Return having 'result where {
+    return: {val: 'result} -> 'a <Return>
+}
+
+# =============================================================================
+# Built-in Handlers
+# =============================================================================
+
+# Returns the value immediately (RECOMMENDED)
+# Uses suspend_with to package the return value, signaling early return
+# Note: Delimited is available directly in handler context, no perform block needed
+pub impl Return for WithReturn having 'result = 'r where {
+    return = {val} -> Delimited.suspend_with {value = val}
+}
+
+# Wraps the return value in Some (for optional early returns)
+pub impl Return for WithSome having 'result = 'r where {
+    return = {val} -> Delimited.suspend_with {value = Some {val = val}}
+}
+
+# Aborts computation, discarding return value
+pub impl Return for DiscardReturn having 'result = 'r where {
+    return = {val} -> Delimited.abort {}
+}
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+# Shorthand for Return.return
+pub let return = {val} -> Return.return {val}
+
+# Return if condition is true
+pub let return_if = {condition, val} ->
+    if condition then
+        Return.return {val}
+    else
+        {}
+
+# Return early unless value is None
+pub let return_some = {option} ->
+    match option is
+        Some {val} -> Return.return {val = val}
+        None -> {}

@@ -105,15 +105,28 @@ class EffectHandler {
             }
             is SimpleFunkFunction -> {
                 // Regular Funk functions use the interpreter's call mechanism
-                // CRITICAL: Ensure handler operations have access to current handlers
+                // CRITICAL: Ensure handler operations have access to current handlers AND Delimited
                 val handlerContext = context.toMutableMap()
-                
+
                 // Make sure handler operations can access the same handlers that are currently active
                 val activeHandlers = (context["__handlers"] as? FunkRecord) ?: getCurrentHandlers()
                 if (activeHandlers != null) {
-                    handlerContext["__handlers"] = activeHandlers
+                    // Inject Delimited from the function's closure if available
+                    val handlersWithDelimited = activeHandlers.fields.toMutableMap()
+                    if (!handlersWithDelimited.containsKey("Continuation") && operation.closure.containsKey("Delimited")) {
+                        // Handler's closure has Delimited - make it available as Continuation handler
+                        handlersWithDelimited["Continuation"] = operation.closure["Delimited"]!!
+                    }
+                    handlerContext["__handlers"] = FunkRecord(handlersWithDelimited)
                 }
-                
+
+                // CRITICAL: Also make sure Delimited is directly available in context
+                // Check BOTH closure and execution context for Delimited
+                val delimited = operation.closure["Delimited"] ?: context["Delimited"]
+                if (delimited != null) {
+                    handlerContext["Delimited"] = delimited
+                }
+
                 if (arguments is FunkRecord) {
                     interpreter.callFunctionWithRecord(operation, arguments, handlerContext)
                 } else {

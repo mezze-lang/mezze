@@ -275,15 +275,21 @@ class FunkInterpreter {
      */
     private fun executeModule(program: Program): Map<String, FunkValue> {
         val moduleContext = mutableMapOf<String, FunkValue>()
-        
+
         // Register built-in native functions
         registerNativeFunctions(moduleContext)
-        
+
+        // CRITICAL: Process imports first if module resolver is available
+        // This ensures that modules can import from other modules
+        if (moduleResolver != null) {
+            processImports(program, moduleContext)
+        }
+
         // Execute each item in the module
         for (item in program.items) {
             executeItem(item, moduleContext)
         }
-        
+
         return moduleContext.toMap()
     }
     
@@ -687,14 +693,8 @@ class FunkInterpreter {
                 evaluateMatchExpression(value, expr.cases, context)
             }
             is DoExpression -> {
-                // Check if this do block contains effect calls
-                if (containsEffectCalls(expr)) {
-                    // Execute as state machine for async effects
-                    executeDoBlockAsStateMachine(expr, context)
-                } else {
-                    // Execute sequentially for pure computations
-                    executeDoBlockSequentially(expr, context)
-                }
+                // ALWAYS use sequential execution for now
+                executeDoBlockSequentially(expr, context)
             }
             is FunctionCall -> {
                 // Check if this is an effect call (function is a member access like Log.log)
@@ -931,12 +931,35 @@ class FunkInterpreter {
                 effectHandler.pushHandlers(handlersRecord)
 
                 try {
-                    // Evaluate the expression with handlers available
-                    val result = evaluateExpression(expr.expression, context)
+                    // Push execution state for continuation operations
+                    // This allows suspend_with/abort to work even without an explicit do-block
+                    val executionState = ExecutionState(
+                        remainingStatements = emptyList(),
+                        resultExpression = RecordLiteral(emptyList()), // Unit
+                        context = context.toMap(),
+                        location = "perform-block"
+                    )
+                    executionStateStack.get().add(executionState)
 
-                    // CRITICAL: If result is a function, wrap handlers in its closure
-                    // This allows handler composition: perform H1 in (perform H2 in func)
-                    val wrappedResult = when (result) {
+                    // Evaluate the expression with handlers available
+                    val result = try {
+                        evaluateExpression(expr.expression, context)
+                    } finally {
+                        // Pop execution state
+                        executionStateStack.get().removeLastOrNull()
+                    }
+
+                    // CRITICAL: Check for early return via FunkContinuationSuspended
+                    // When effect handlers use suspend_with for early return, extract the value
+                    // For Exception/Return handlers: suspended values are Err/None/{}, normal values need Ok wrapping
+                    // For Continuation/Delimited handlers: suspended values must be kept as-is for generators
+                    val isExceptionHandler = handlerMap.containsKey("Exception")
+                    val isReturnHandler = handlerMap.containsKey("Return")
+                    val isEarlyReturnHandler = isExceptionHandler || isReturnHandler
+                    val wrappedResult = if (result is FunkContinuationSuspended && isEarlyReturnHandler) {
+                        // Early return (Exception/Return) - extract the suspended value (already wrapped in Err/None/{})
+                        result.suspendedValue
+                    } else when (result) {
                         is SimpleFunkFunction -> {
                             // Create a new function that carries the handlers in its closure
                             val newClosure = result.closure.toMutableMap()
@@ -968,8 +991,14 @@ class FunkInterpreter {
                             )
                         }
                         else -> {
-                            // For non-functions (direct values), return as-is
-                            result
+                            // For non-functions (direct values), check if we need to wrap in Ok
+                            // Exception handlers expect Result<T, E> - wrap normal results in Ok
+                            if (isExceptionHandler) {
+                                // Normal completion with Exception handler - wrap in Ok
+                                FunkVariant("Ok", FunkRecord(mapOf("val" to result)))
+                            } else {
+                                result
+                            }
                         }
                     }
 
@@ -1754,22 +1783,22 @@ class FunkInterpreter {
                     }
                 }
 
-                        // Create new context with captured closure and parameters
-                        val newContext = function.closure.toMutableMap()
+                // Create new context with captured closure and parameters
+                val newContext = function.closure.toMutableMap()
 
-                        // Bind parameters (simplified - assume list of parameter names)
-                        function.parameters.forEachIndexed { index, param ->
-                            if (index < args.size) {
-                                newContext[param] = args[index]
-                            }
-                        }
+                // Bind parameters (simplified - assume list of parameter names)
+                function.parameters.forEachIndexed { index, param ->
+                    if (index < args.size) {
+                        newContext[param] = args[index]
+                    }
+                }
 
-                        // Propagate effect handlers from current context
-                        context["__handlers"]?.let {
-                            newContext["__handlers"] = it
-                        }
+                // Propagate effect handlers from current context
+                context["__handlers"]?.let {
+                    newContext["__handlers"] = it
+                }
 
-                        evaluateExpression(function.body, newContext)
+                evaluateExpression(function.body, newContext)
             }
             else -> throw RuntimeException("Cannot call non-function value: ${function::class.simpleName}")
         }
@@ -1803,12 +1832,22 @@ class FunkInterpreter {
     
     /**
      * Check if an expression contains effect calls
+     *
+     * CRITICAL: This is used to determine if a do-block should use state machine execution.
+     * Only ACTUAL effect calls (EffectCallExpression) should be detected here.
+     * Regular function calls like Exception.throw use continuations but are NOT effect calls
+     * and should use sequential execution to properly handle FunkContinuationSuspended.
      */
     private fun containsEffectCallsInExpression(expr: Expression): Boolean {
         return when (expr) {
             is EffectCallExpression -> true
             is DoExpression -> containsEffectCalls(expr)
-            is FunctionCall -> containsEffectCallsInExpression(expr.function) || containsEffectCallsInExpression(expr.arguments)
+            is FunctionCall -> {
+                // REMOVED: Do NOT treat capitalized function calls as effect calls
+                // Exception.throw, Return.early, etc. are regular functions that use continuations
+                // They need sequential execution to handle FunkContinuationSuspended properly
+                containsEffectCallsInExpression(expr.function) || containsEffectCallsInExpression(expr.arguments)
+            }
             // BinaryOperation removed - operators are desugared at parse time
             is IfExpression -> containsEffectCallsInExpression(expr.condition) || 
                                containsEffectCallsInExpression(expr.thenBranch) || 
@@ -2137,7 +2176,7 @@ class FunkInterpreter {
                     listOf("args")
                 }
             }
-            
+
             op.name to when (val impl = op.implementation) {
                 is LambdaExpression -> {
                     // Evaluate the lambda expression to create a proper function with parameters
@@ -3320,14 +3359,14 @@ class FunkInterpreter {
     ): FunkValue {
         var currentContext = initialContext
         var currentFunction = function
-        
+
         // Tail call optimization loop
         while (true) {
             // Mark this context as being in tail position for optimization
             currentContext["__in_tail_position"] = FunkBool(true)
-            
+
             val result = evaluateExpressionWithTailCallDetection(currentFunction.body, currentContext, currentFunction)
-            
+
             // Check if result is a tail call
             if (result is TailCall && result.function == currentFunction) {
                 // This is a tail recursive call - optimize it
@@ -3427,7 +3466,12 @@ class FunkInterpreter {
                 // Execute statements (not in tail position)
                 localContext["__in_tail_position"] = FunkBool(false)
                 for (stmt in expr.statements) {
-                    executeStatement(stmt, localContext)
+                    val result = executeStatement(stmt, localContext)
+                    // CRITICAL: If an ExpressionStatement returns FunkContinuationSuspended (e.g., from Exception.throw),
+                    // propagate it immediately instead of continuing to the next statement
+                    if (stmt is ExpressionStatement && result is FunkContinuationSuspended) {
+                        return result
+                    }
                 }
 
                 // Result expression is in tail position
