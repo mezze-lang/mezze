@@ -42,7 +42,7 @@ class ModuleTypePreservationComprehensiveTest {
 
             # Function types
             pub let add: { a: Int, b: Int } -> Int = { a, b } -> a + b
-            pub let negate: { x: Int } -> Int = { x } -> -x
+            pub let negate: { x: Int } -> Int = { x } -> NumSub.neg { n = x }
             pub let concat: { s1: String, s2: String } -> String = { s1, s2 } -> s1
         """.trimIndent())
 

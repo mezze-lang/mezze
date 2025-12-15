@@ -5,7 +5,7 @@ let wrapColor = {c} -> match c is
   Red -> Wrapped {val = 1}
   Green -> Wrapped {val = 2}
   Blue -> Default
-  _ -> Other                                                    # expected: wrapColor : { c: | Red, Green, Blue, ... | } -> | Wrapped { val: Int } |
+  _ -> Other                                                    # expected: wrapColor : { c: | Red, Green, Blue, ... | } -> | Wrapped { val: Int }, Default, Other |
 
 # Open variant parameter, closed variant return
 let unwrapSafely = {w} -> match w is
@@ -28,7 +28,7 @@ let partialMatch = {x, y} -> match x is
 let branch = {choice} -> match choice is
   Left -> Alpha
   Right -> Beta
-  _ -> Gamma                                                    # expected: branch : { choice: | Left, Right, ... | } -> | Alpha |
+  _ -> Gamma                                                    # expected: branch : { choice: | Left, Right, ... | } -> | Alpha, Beta, Gamma |
 
 # Function that closes over open variant
 let handleWithDefault = {opt} -> match opt is
@@ -66,7 +66,7 @@ let exhaustiveInput = {x} -> match x is
   A -> Result {val = 1}
   B -> Result {val = 2}
   C -> Other
-  _ -> Unknown                                                  # expected: exhaustiveInput : { x: | A, B, C, ... | } -> | Result { val: Int } |
+  _ -> Unknown                                                  # expected: exhaustiveInput : { x: | A, B, C, ... | } -> | Result { val: Int }, Other, Unknown |
 
 # Polymorphic closed variant with constraints
 let closedCompare = {cmp, x, y} -> match cmp is

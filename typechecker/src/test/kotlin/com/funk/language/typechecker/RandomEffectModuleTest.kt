@@ -64,7 +64,7 @@ class RandomEffectModuleTest {
 
             let main = {} ->
                 perform SeededRandom { seed = 42 } in do
-                    let r = Random.random_nat { max = natWrapper { n = 100 } }
+                    let r = Random.random_nat { max = natWrapper { n = 100n } }
                     r
         """.trimIndent()
 

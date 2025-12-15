@@ -82,6 +82,7 @@ class AbilityRegistry {
         return when (type) {
             is FunkType.IntType -> abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord")
             is FunkType.FracType -> abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord")
+            is FunkType.FloatType -> abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord")
             is FunkType.NatType -> abilityName in setOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord")
             is FunkType.BooleanType -> abilityName in setOf("Eq", "LogicalAnd", "LogicalOr", "LogicalNot")
             is FunkType.StringType -> abilityName in setOf("Eq", "Ord")
@@ -278,9 +279,6 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
             }
             is FunkType.ArrayType -> {
                 FunkType.ArrayType(elementType = applyWithVisited(type.elementType, visited))
-            }
-            is FunkType.ArrayListType -> {
-                FunkType.ArrayListType(elementType = applyWithVisited(type.elementType, visited))
             }
             is FunkType.TypeApplication -> {
                 FunkType.TypeApplication(
@@ -1023,6 +1021,18 @@ class ConstraintSolver(
                     type1 is FunkType.FloatType && type2 is FunkType.IntType -> {
                         throw ConstraintConflictError(
                             "Type conflict: Cannot unify Float and Int. Consider using explicit type conversion.",
+                            listOf(type1, type2)
+                        )
+                    }
+                    type1 is FunkType.IntType && type2 is FunkType.NatType -> {
+                        throw ConstraintConflictError(
+                            "Type conflict: Cannot unify Int and Nat. Use 'n' suffix for Nat literals (e.g., 5n).",
+                            listOf(type1, type2)
+                        )
+                    }
+                    type1 is FunkType.NatType && type2 is FunkType.IntType -> {
+                        throw ConstraintConflictError(
+                            "Type conflict: Cannot unify Nat and Int. Use 'n' suffix for Nat literals (e.g., 5n).",
                             listOf(type1, type2)
                         )
                     }

@@ -1,0 +1,40 @@
+# std/effects/choice.funk - Nondeterministic choice with backtracking
+
+use std::effects::continuation::{Continuation, Delimited}
+
+# Choice effect - explore multiple computation paths
+# When you choose between options, all paths are explored
+# When you fail, that path is abandoned (backtracking)
+pub effect Choice having 'a where {
+    # Choose one value from multiple options
+    # All branches will be explored (nondeterminism)
+    choose: { options: 'a } -> 'a <Choice>,
+
+    # Fail the current branch (triggers backtracking)
+    fail: {} -> 'b <Choice>
+}
+
+# AllPaths performer - explores all possible paths through choices
+# This implementation uses continuations to implement multi-shot semantics
+# Note: This is a simplified implementation that collects results eagerly
+pub impl Choice for AllPaths having 'a = 'a where {
+    choose = { options } -> perform Delimited in do
+        # For now, just return the first option
+        # TODO: Implement true multi-shot by capturing continuation
+        # and resuming it once for each option
+        match options is
+            [] -> Continuation.abort {}
+            [first, ..._rest] -> first
+
+    fail = {} -> perform Delimited in
+        Continuation.abort {}
+}
+
+# Helper function to run a choice computation and collect all successful results
+# This would need native support for true multi-shot continuations
+# For now, this is a placeholder that shows the intended API
+pub let run_all_paths = { computation } -> do
+    # TODO: Implement multi-shot continuation handling
+    # This requires capturing the continuation at each `choose`
+    # and resuming it multiple times (once for each option)
+    [computation {}]

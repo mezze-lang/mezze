@@ -65,6 +65,7 @@ class ASTToTruffleConverter {
         println("DEBUG: Converting expression: ${expr::class.simpleName}")
         return when (expr) {
             is IntLiteral -> IntLiteralNode(expr.value)
+            is NatLiteral -> IntLiteralNode(expr.value)  // Nat values are represented as Int at runtime
             is FloatLiteral -> FloatLiteralNode(expr.value)
             is FractionLiteral -> FractionLiteralNode(expr.numerator, expr.denominator)
             is StringLiteral -> {
@@ -84,8 +85,7 @@ class ASTToTruffleConverter {
             }
             is BooleanLiteral -> BooleanLiteralNode(expr.value)
             is Identifier -> convertIdentifier(expr)
-            is BinaryOperation -> convertBinaryOperation(expr)
-            is UnaryOperation -> convertUnaryOperation(expr)
+            // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
             is IfExpression -> convertIfExpression(expr)
             is MatchExpression -> convertMatchExpression(expr)
             is FunctionCall -> convertFunctionCall(expr)
@@ -128,40 +128,8 @@ class ASTToTruffleConverter {
         }
     }
     
-    /**
-     * Convert a binary operation to a specialized arithmetic/comparison node
-     */
-    private fun convertBinaryOperation(binOp: BinaryOperation): FunkNode {
-        val leftNode = convertExpression(binOp.left)
-        val rightNode = convertExpression(binOp.right)
-        
-        return when (binOp.operator) {
-            "+" -> createAddNode(leftNode, rightNode)
-            "-" -> createSubtractNode(leftNode, rightNode)
-            "*" -> createMultiplyNode(leftNode, rightNode)
-            "/" -> createDivideNode(leftNode, rightNode)
-            "==" -> createEqualNode(leftNode, rightNode)
-            "<" -> createLessThanNode(leftNode, rightNode)
-            ">" -> createGreaterThanNode(leftNode, rightNode)
-            "<=" -> createLessEqualNode(leftNode, rightNode)
-            ">=" -> createGreaterEqualNode(leftNode, rightNode)
-            else -> throw RuntimeException("Unsupported binary operator: ${binOp.operator}")
-        }
-    }
-    
-    /**
-     * Convert a unary operation to a Truffle node
-     */
-    private fun convertUnaryOperation(unaryOp: UnaryOperation): FunkNode {
-        val operandNode = convertExpression(unaryOp.operand)
-        
-        return when (unaryOp.operator) {
-            "-" -> createNegateNode(operandNode)
-            "!" -> createNotNode(operandNode)
-            else -> throw RuntimeException("Unsupported unary operator: ${unaryOp.operator}")
-        }
-    }
-    
+    // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
+
     /**
      * Convert an if expression to a conditional node
      */
@@ -205,6 +173,7 @@ class ASTToTruffleConverter {
                 // Convert literal patterns to LiteralPatternNode with the appropriate FunkValue
                 val value = when (val lit = pattern.value) {
                     is IntLiteralValue -> FunkInt(lit.value)
+                    is NatLiteralValue -> FunkInt(lit.value)  // Nat values are represented as Int at runtime
                     is FloatLiteralValue -> FunkFloat(lit.value)
                     is StringLiteralValue -> FunkString(lit.value)
                     is BooleanLiteralValue -> FunkBool(lit.value)
@@ -308,11 +277,12 @@ class ASTToTruffleConverter {
     }
     
     /**
-     * Convert variant construction (placeholder implementation)
+     * Convert variant construction to a variant construction node
      */
     private fun convertVariantConstruction(variantConst: VariantConstruction): FunkNode {
-        // For now, return a null literal - variant construction needs more complex handling
-        return NullLiteralNode()
+        val constructorName = variantConst.constructor
+        val valueNode = variantConst.value?.let { convertExpression(it) }
+        return com.funk.language.interpreter.nodes.literal.VariantConstructionNode(constructorName, valueNode)
     }
     
     /**

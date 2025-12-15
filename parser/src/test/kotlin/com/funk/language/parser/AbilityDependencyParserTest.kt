@@ -133,7 +133,7 @@ class AbilityDependencyParserTest {
         assertEquals(1, ability.operations.size)
     }
 
-    @org.junit.jupiter.api.Disabled("Type application in dependencies - needs parser optimization")
+    // @org.junit.jupiter.api.Disabled("Type application in dependencies - needs parser optimization")
     @Test
     fun testAbilityWithTypeApplicationDependency() {
         val source = """

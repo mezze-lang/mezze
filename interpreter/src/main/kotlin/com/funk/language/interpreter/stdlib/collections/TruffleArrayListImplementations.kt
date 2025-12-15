@@ -29,10 +29,13 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_get", "expects 'xs' as ArrayList")
             val i = (record.fields["i"] as? FunkInt)?.value?.toInt()
                 ?: throw NativeFunctionException("__native_arraylist_get", "expects 'i' as Int")
+
+            // Return Option - Some if index is valid, None otherwise
             if (i < 0 || i >= xs.size()) {
-                throw NativeFunctionException("__native_arraylist_get", "index out of bounds: $i")
+                FunkVariant("None", null)
+            } else {
+                FunkVariant("Some", FunkRecord(mapOf("val" to xs.get(i))))
             }
-            xs.get(i)
         }
 
         context["__native_arraylist_set"] = NativeFunkFunction("__native_arraylist_set") { args ->
@@ -44,13 +47,16 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_set", "expects 'i' as Int")
             val x = record.fields["x"]
                 ?: throw NativeFunctionException("__native_arraylist_set", "expects 'x' field")
+
+            // Return Option - Some if index is valid, None otherwise
             if (i < 0 || i >= xs.size()) {
-                throw NativeFunctionException("__native_arraylist_set", "index out of bounds: $i")
+                FunkVariant("None", null)
+            } else {
+                // Create a new ArrayList with the updated element (immutable)
+                val newElements = xs.elements.toMutableList()
+                newElements[i] = x
+                FunkVariant("Some", FunkRecord(mapOf("val" to FunkArrayList(newElements))))
             }
-            // Create a new ArrayList with the updated element (immutable)
-            val newElements = xs.elements.toMutableList()
-            newElements[i] = x
-            FunkArrayList(newElements)
         }
 
         context["__native_arraylist_add"] = NativeFunkFunction("__native_arraylist_add") { args ->
@@ -73,13 +79,16 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_remove", "expects 'xs' as ArrayList")
             val i = (record.fields["i"] as? FunkInt)?.value?.toInt()
                 ?: throw NativeFunctionException("__native_arraylist_remove", "expects 'i' as Int")
+
+            // Return Option - Some if index is valid, None otherwise
             if (i < 0 || i >= xs.size()) {
-                throw NativeFunctionException("__native_arraylist_remove", "index out of bounds: $i")
+                FunkVariant("None", null)
+            } else {
+                // Create a new ArrayList without the element (immutable)
+                val newElements = xs.elements.toMutableList()
+                newElements.removeAt(i)
+                FunkVariant("Some", FunkRecord(mapOf("val" to FunkArrayList(newElements))))
             }
-            // Create a new ArrayList without the element (immutable)
-            val newElements = xs.elements.toMutableList()
-            newElements.removeAt(i)
-            FunkArrayList(newElements)
         }
 
         context["__native_arraylist_concat"] = NativeFunkFunction("__native_arraylist_concat") { args ->
@@ -159,18 +168,16 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'xs' as ArrayList")
+            val init = record.fields["init"]
+                ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'init' field")
             val f = record.fields["f"] as? FunkFunction
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'f' as Function")
-
-            if (xs.isEmpty()) {
-                throw NativeFunctionException("__native_arraylist_reduce", "cannot reduce empty arraylist")
-            }
 
             val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "interpreter not available")
 
-            xs.elements.drop(1).fold(xs.elements.first()) { acc, element ->
-                interpreter.callFunctionWithRecord(f, FunkRecord(mapOf("acc" to acc, "x" to element)), context.toMutableMap())
+            xs.elements.fold(init) { acc, element ->
+                interpreter.callFunctionWithRecord(f, FunkRecord(mapOf("a" to acc, "b" to element)), context.toMutableMap())
             }
         }
 

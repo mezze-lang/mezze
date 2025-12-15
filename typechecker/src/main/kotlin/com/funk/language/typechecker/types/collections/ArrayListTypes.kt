@@ -35,7 +35,7 @@ object ArrayListTypes {
                 "xs" to arrayType,
                 "i" to FunkType.IntType
             )),
-            arrayElemType
+            optionType(arrayElemType)
         )
 
         context["__native_arraylist_set"] = FunkType.FunctionType(
@@ -44,7 +44,7 @@ object ArrayListTypes {
                 "i" to FunkType.IntType,
                 "x" to arrayElemType
             )),
-            arrayType
+            optionType(arrayType)
         )
 
         context["__native_arraylist_add"] = FunkType.FunctionType(
@@ -60,7 +60,7 @@ object ArrayListTypes {
                 "xs" to arrayType,
                 "i" to FunkType.IntType
             )),
-            arrayType
+            optionType(arrayType)
         )
 
         context["__native_arraylist_concat"] = FunkType.FunctionType(
@@ -130,6 +130,7 @@ object ArrayListTypes {
         context["__native_arraylist_reduce"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
                 "xs" to arrayType,
+                "init" to arrayElemType,
                 "f" to arrayReduceFuncType
             )),
             arrayElemType

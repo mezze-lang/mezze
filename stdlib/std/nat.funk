@@ -24,10 +24,10 @@ pub let max = { l: Nat, r: Nat } ->
     if l > r then l else r
 
 pub let is_zero = { n: Nat } ->
-    n == 0
+    n == 0n
 
 pub let is_even = { n: Nat } ->
-    (n % 2) == 0
+    (n % 2n) == 0n
 
 pub let is_odd = { n: Nat } ->
     if is_even { n = n } then false else true

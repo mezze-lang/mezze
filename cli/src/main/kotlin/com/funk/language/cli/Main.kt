@@ -336,9 +336,7 @@ private fun prettyPrintExpression(expr: Expression): String {
             }
             "$params -> ${prettyPrintExpression(expr.body)}"
         }
-        is BinaryOperation -> {
-            "${prettyPrintExpression(expr.left)} ${expr.operator} ${prettyPrintExpression(expr.right)}"
-        }
+        // BinaryOperation removed - operators are desugared at parse time
         is FunctionCall -> {
             "${prettyPrintExpression(expr.function)} ${prettyPrintExpression(expr.arguments)}"
         }
@@ -403,6 +401,22 @@ private fun handleExecCommand(args: List<String>) {
         // Execute the program to load all definitions and get the context
         val result = interpreter.execute(typedProgram, projectRoot)
         val context = interpreter.getLastExecutionContext()
+
+        // Check if the program already called main (via TopLevelExpression)
+        // If so, we don't need to call it again
+        val lastItem = typedProgram.items.lastOrNull()
+        val programAlreadyCalledMain = lastItem is TopLevelExpression &&
+                                        lastItem.expression is FunctionCall &&
+                                        (lastItem.expression as FunctionCall).function is Identifier &&
+                                        ((lastItem.expression as FunctionCall).function as Identifier).name == "main"
+
+        if (programAlreadyCalledMain) {
+            // Program already called main - just print the result
+            println("✅ Execution successful!")
+            println()
+            println(prettyPrintResult(result))
+            return
+        }
 
         // Check if 'main' exists
         val mainValue = context["main"]

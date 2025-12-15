@@ -138,11 +138,7 @@ class RuntimeParallelismDetector(
         fun extractFromExpression(expr: Expression) {
             when (expr) {
                 is Identifier -> readVars.add(expr.name)
-                is BinaryOperation -> {
-                    extractFromExpression(expr.left)
-                    extractFromExpression(expr.right)
-                }
-                is UnaryOperation -> extractFromExpression(expr.operand)
+                // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
                 is FunctionCall -> {
                     extractFromExpression(expr.function)
                     extractFromExpression(expr.arguments)
@@ -191,8 +187,7 @@ class RuntimeParallelismDetector(
     private fun containsEffectCalls(expression: Expression): Boolean {
         return when (expression) {
             is EffectCallExpression -> true
-            is BinaryOperation -> containsEffectCalls(expression.left) || containsEffectCalls(expression.right)
-            is UnaryOperation -> containsEffectCalls(expression.operand)
+            // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
             is FunctionCall -> containsEffectCalls(expression.function) || containsEffectCalls(expression.arguments)
             is IfExpression -> containsEffectCalls(expression.condition) || 
                               containsEffectCalls(expression.thenBranch) || 
@@ -238,7 +233,7 @@ class RuntimeParallelismDetector(
             is FunctionCall -> Duration.ofMillis(10) // Function calls have some overhead
             is DoExpression -> Duration.ofMillis(50) // Nested do expressions
             is IfExpression -> Duration.ofMillis(5) // Conditionals
-            is BinaryOperation, is UnaryOperation -> Duration.ofMillis(1) // Simple operations
+            // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
             else -> Duration.ofMillis(1) // Default for literals, identifiers, etc.
         }
     }
@@ -456,18 +451,7 @@ class LazyParallelExecutionPlan(
                     ?: throw RuntimeException("Variable '${expression.name}' not found in context")
             }
 
-            // Binary operations
-            is BinaryOperation -> {
-                val left = evaluateExpression(expression.left, context)
-                val right = evaluateExpression(expression.right, context)
-                evaluateBinaryOperation(left, expression.operator, right)
-            }
-
-            // Unary operations
-            is UnaryOperation -> {
-                val operand = evaluateExpression(expression.operand, context)
-                evaluateUnaryOperation(expression.operator, operand)
-            }
+            // BinaryOperation and UnaryOperation removed - operators are desugared at parse time
 
             // Effect calls - for test purposes, return a simulated string result
             is EffectCallExpression -> {

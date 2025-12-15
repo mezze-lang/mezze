@@ -1,0 +1,246 @@
+# Real-World Example: Building a Multi-Language Web Scraper
+
+use std::http
+use std::result
+use foreign::python
+use foreign::javascript
+
+# ============================================================================
+# DEFINE THE DOMAIN
+# ============================================================================
+
+type Article = Article {
+  title: String,
+  author: String,
+  content: String,
+  sentiment: Float
+}
+
+# ============================================================================
+# HTTP CLIENT (Blocking - but uses Virtual Threads on JVM 21+)
+# ============================================================================
+
+# Simple, clean syntax - runtime handles threading
+let fetch_html: {url: String} -> Result String HttpError <HTTP> = {url} ->
+  HTTP.get {
+    url = url,
+    headers = Map.from_pairs {pairs = [
+      ("User-Agent", "FunkBot/1.0")
+    ]}
+  }
+
+# ============================================================================
+# JAVASCRIPT FOR SCRAPING (via GraalVM)
+# ============================================================================
+
+# Use cheerio (JS library) for HTML parsing
+let parse_article: {html: String} -> Result Article ParseError <JavaScript> = {html} ->
+  perform JavaScript where {
+    # Load cheerio (popular HTML parser)
+    let cheerio = js_import! "cheerio"
+    let $ = cheerio.load(html)
+
+    # Extract data using jQuery-like syntax
+    let title = $("article h1").text()
+    let author = $("article .author").text()
+    let content = $("article .content").text()
+
+    Ok {val = Article {
+      title = title,
+      author = author,
+      content = content,
+      sentiment = 0.0  # Will compute later
+    }}
+  }
+
+# ============================================================================
+# PYTHON FOR ML (via GraalVM)
+# ============================================================================
+
+# Use Python's TextBlob for sentiment analysis
+let analyze_sentiment: {text: String} -> Float <Python> = {text} ->
+  perform Python where {
+    # Import Python library
+    let textblob = python_import! "textblob"
+
+    # Create TextBlob and get sentiment
+    let blob = textblob.TextBlob(text)
+    let sentiment = blob.sentiment.polarity
+
+    sentiment
+  }
+
+# ============================================================================
+# COMPOSE EVERYTHING
+# ============================================================================
+
+let scrape_and_analyze: {url: String} -> Result Article Error <HTTP, JavaScript, Python> = {url} ->
+  # Step 1: Fetch HTML (blocking HTTP call - uses thread pool or virtual thread)
+  match fetch_html {url} is
+    Err {error} -> Err {error = HttpFailed {error}}
+    Ok {val = html} ->
+      # Step 2: Parse with JavaScript
+      match parse_article {html} is
+        Err {error} -> Err {error = ParseFailed {error}}
+        Ok {val = article} ->
+          # Step 3: Analyze sentiment with Python
+          let sentiment = analyze_sentiment {text = article.content}
+
+          # Return complete article
+          Ok {val = Article {
+            title = article.title,
+            author = article.author,
+            content = article.content,
+            sentiment = sentiment
+          }}
+
+# ============================================================================
+# CONCURRENT SCRAPING
+# ============================================================================
+
+# Scrape multiple URLs concurrently (each on its own virtual thread)
+let scrape_many: {urls: [String]} -> [Result Article Error] <HTTP, JavaScript, Python> = {urls} ->
+  # parallel_map runs each task on a separate virtual thread/green thread
+  urls |> parallel_map {url} ->
+    scrape_and_analyze {url}
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+let main = do
+  let urls = [
+    "https://news.ycombinator.com/item?id=1",
+    "https://news.ycombinator.com/item?id=2",
+    "https://news.ycombinator.com/item?id=3"
+  ]
+
+  print "Scraping $(urls |> List.length {}) articles..."
+
+  # This runs all three effects:
+  # - HTTP: Blocking calls on virtual threads
+  # - JavaScript: Runs on GraalVM JS context
+  # - Python: Runs on GraalVM Python context
+  let results = perform
+    JavaHttpClient,      # HTTP handler (blocking)
+    GraalJavaScript,     # JS handler (via GraalVM)
+    GraalPython          # Python handler (via GraalVM)
+  where {
+    scrape_many {urls}
+  }
+
+  # Process results
+  for result in results do
+    match result is
+      Ok {val = article} ->
+        print "✓ $(article.title)"
+        print "  Author: $(article.author)"
+        print "  Sentiment: $(article.sentiment)"
+
+      Err {error} ->
+        print "✗ Failed: $(error)"
+  done
+
+  print "Done!"
+done
+
+# ============================================================================
+# ALTERNATIVE: PURE ASYNC VERSION (NO BLOCKING)
+# ============================================================================
+
+let scrape_and_analyze_async: {url: String} -> Article <AsyncHTTP, JavaScript, Python> = {url} ->
+  # Async HTTP - returns Promise
+  let html_promise = AsyncHTTP.get {url}
+
+  # await! suspends the continuation, not the thread
+  let html = await! html_promise
+
+  # JavaScript and Python are synchronous (or we could make them async too)
+  let article = parse_article {html} |> Result.unwrap {}
+  let sentiment = analyze_sentiment {text = article.content}
+
+  Article {
+    title = article.title,
+    author = article.author,
+    content = article.content,
+    sentiment = sentiment
+  }
+
+# Async version - highly concurrent, no threads blocked
+let async_main = do
+  let urls = [...]  # 1000 URLs
+
+  # All requests start simultaneously
+  let promises = urls |> map {url} ->
+    scrape_and_analyze_async {url}
+
+  # Wait for all to complete
+  let articles = await_all! promises
+
+  print "Scraped $(articles |> List.length {}) articles!"
+done
+
+# ============================================================================
+# WHAT ACTUALLY HAPPENS AT RUNTIME
+# ============================================================================
+
+# For `scrape_and_analyze {url}`:
+#
+# 1. HTTP.get {url}
+#    ├─ Runtime detects: Effect marked as @blocking
+#    ├─ JVM 21+? Use virtual thread
+#    │  └─ Create new virtual thread
+#    │  └─ Call Java HttpClient.send()  // This blocks the virtual thread
+#    │  └─ When response arrives, resume
+#    │
+#    └─ JVM 11-17? Use thread pool
+#       └─ Submit to blocking thread pool
+#       └─ Suspend current continuation
+#       └─ When response arrives, resume continuation
+#
+# 2. parse_article {html}
+#    ├─ Runtime detects: JavaScript effect
+#    ├─ Get GraalVM JS context
+#    ├─ Execute cheerio code
+#    └─ Return result
+#
+# 3. analyze_sentiment {text}
+#    ├─ Runtime detects: Python effect
+#    ├─ Get GraalVM Python context
+#    ├─ Execute textblob code
+#    └─ Return result
+#
+# All of this is TRANSPARENT to the user!
+
+# ============================================================================
+# SYNTAX SUGAR OPTIONS
+# ============================================================================
+
+# Option 1: Pipeline style
+let pipeline_style: {url: String} -> Result Article Error = {url} ->
+  url
+  |> fetch_html
+  |> Result.and_then {html} -> parse_article {html}
+  |> Result.map {article} -> Article {
+      ...article,
+      sentiment = analyze_sentiment {text = article.content}
+    }
+
+# Option 2: Do-notation style (monadic)
+let do_style: {url: String} -> Result Article Error = {url} ->
+  do? {  # ? means short-circuit on Err
+    let html = fetch_html {url}
+    let article = parse_article {html}
+    let sentiment = analyze_sentiment {text = article.content}
+
+    Ok {val = Article {...article, sentiment}}
+  }
+
+# Option 3: Inline foreign calls (most concise)
+let inline_style: {url: String} -> Article = {url} ->
+  let html = http! "GET $(url)"
+  let title = js! "cheerio.load($(html))('h1').text()"
+  let content = js! "cheerio.load($(html))('.content').text()"
+  let sentiment = py! "TextBlob($(content)).sentiment.polarity"
+
+  Article {title, author = "", content, sentiment}

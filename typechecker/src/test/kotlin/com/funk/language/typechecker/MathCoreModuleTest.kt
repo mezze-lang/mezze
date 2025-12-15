@@ -174,7 +174,7 @@ class MathCoreModuleTest {
     fun `test pow_nat function`() {
         val source = """
             use std::math::core::{pow_nat}
-            let result = pow_nat { base = 2, exp = 5 }
+            let result = pow_nat { base = 2n, exp = 5n }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

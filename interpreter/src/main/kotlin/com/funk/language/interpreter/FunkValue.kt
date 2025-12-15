@@ -875,6 +875,58 @@ data class FunkThunk(
 }
 
 /**
+ * Continuation value - represents a captured continuation (the rest of a computation).
+ * A continuation is essentially a function that can be called with a value to resume
+ * the computation from where it was captured.
+ *
+ * Used by the Continuation effect for custom control flow (generators, backtracking, async).
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkContinuation(
+    val resumeFunction: FunkValue,  // The function to call to resume the continuation
+    val capturePoint: String  // For debugging - location where continuation was captured
+) : FunkValue() {
+    override fun getDisplayString(): String = "<continuation@$capturePoint>"
+
+    @ExportMessage
+    fun isExecutable(): Boolean = true
+
+    @ExportMessage
+    fun execute(arguments: Array<Any?>): Any {
+        // Delegate to the resume function (which is a FunkValue function)
+        if (resumeFunction is FunkTruffleFunction) {
+            return resumeFunction.execute(arguments)
+        }
+        throw FunkException("Continuation resume function is not executable")
+    }
+}
+
+/**
+ * Suspended continuation value - represents a computation that has been suspended
+ * via Continuation.suspend(). This signals to the effect handler that execution
+ * should pause here.
+ *
+ * Different from FunkSuspended (which is for unhandled effects), this is specifically
+ * for continuation-based control flow where we explicitly suspend and resume.
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkContinuationSuspended(
+    val continuation: FunkContinuation,
+    val suspendedValue: FunkValue = FunkNull  // Optional value at suspension point
+) : FunkValue() {
+    override fun getDisplayString(): String = "<suspended-continuation>"
+
+    @ExportMessage
+    fun isExecutable(): Boolean = false
+
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun execute(arguments: Array<Any?>): Any {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+}
+
+/**
  * Wrapper for FunkInterpreter to store in context
  * This is NOT a FunkValue (intentionally) - it's just stored in the context Map
  */

@@ -15,10 +15,10 @@ data class Token(
 
 enum class TokenType {
     // Keywords
-    LET, TYPE, IF, THEN, ELSE, MATCH, IS, DO, EFFECT, IMPL, PERFORM, ABILITY, PUB, FOR, WHERE, WITH, IN, USE, HAVING, FORALL,
+    LET, TYPE, NEWTYPE, IF, THEN, ELSE, MATCH, IS, DO, EFFECT, IMPL, PERFORM, ABILITY, PUB, FOR, WHERE, WITH, IN, USE, HAVING, FORALL,
 
     // Literals
-    INTEGER, FLOAT, FRACTION, STRING, BOOLEAN,
+    INTEGER, NAT, FLOAT, FRACTION, STRING, BOOLEAN,
 
     // Identifiers
     IDENTIFIER,
@@ -50,6 +50,7 @@ class Lexer(private val source: String) {
     private val keywords = mapOf(
         "let" to TokenType.LET,
         "type" to TokenType.TYPE,
+        "newtype" to TokenType.NEWTYPE,
         "if" to TokenType.IF,
         "then" to TokenType.THEN,
         "else" to TokenType.ELSE,
@@ -207,7 +208,8 @@ class Lexer(private val source: String) {
     }
 
     private fun lexNumber(start: Int, startLine: Int, startColumn: Int): Token {
-        while (!isAtEnd() && current().isDigit()) {
+        // Read digits, allowing underscores as separators
+        while (!isAtEnd() && (current().isDigit() || current() == '_')) {
             advance()
         }
 
@@ -215,22 +217,38 @@ class Lexer(private val source: String) {
         if (!isAtEnd() && position + 1 < source.length && current() == '/' && peek() == '/' && position + 2 < source.length && source[position + 2].isDigit()) {
             advance()  // consume first '/'
             advance()  // consume second '/'
-            while (!isAtEnd() && current().isDigit()) {
+            while (!isAtEnd() && (current().isDigit() || current() == '_')) {
                 advance()
             }
-            return Token(TokenType.FRACTION, source.substring(start, position), start, startLine, startColumn)
+            val text = source.substring(start, position).replace("_", "")
+            return Token(TokenType.FRACTION, text, start, startLine, startColumn)
         }
 
         // Check for float
         if (!isAtEnd() && current() == '.' && peek().isDigit()) {
             advance()  // consume '.'
-            while (!isAtEnd() && current().isDigit()) {
+            while (!isAtEnd() && (current().isDigit() || current() == '_')) {
                 advance()
             }
-            return Token(TokenType.FLOAT, source.substring(start, position), start, startLine, startColumn)
+            val text = source.substring(start, position).replace("_", "")
+            return Token(TokenType.FLOAT, text, start, startLine, startColumn)
         }
 
-        return Token(TokenType.INTEGER, source.substring(start, position), start, startLine, startColumn)
+        // Check for Nat suffix 'n'
+        // 'n' must be the end of the token (followed by non-identifier character or EOF)
+        if (!isAtEnd() && current() == 'n') {
+            val nextChar = peek()  // Look ahead to see what follows 'n'
+            val isEndOfToken = isAtEnd() || !(nextChar.isLetterOrDigit() || nextChar == '_')
+            if (isEndOfToken) {
+                advance()  // consume 'n'
+                val text = source.substring(start, position - 1).replace("_", "")  // Remove underscores and exclude 'n'
+                return Token(TokenType.NAT, text, start, startLine, startColumn)
+            }
+        }
+
+        // Regular integer (remove underscores from text)
+        val text = source.substring(start, position).replace("_", "")
+        return Token(TokenType.INTEGER, text, start, startLine, startColumn)
     }
 
     private fun lexString(start: Int, startLine: Int, startColumn: Int): Token {

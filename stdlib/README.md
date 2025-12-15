@@ -105,6 +105,40 @@ let half = frac::create { num = 1, denom = 2 }
 let sum = frac::add { l = half, r = half }  # 1/1
 ```
 
+### Generators
+
+**`std::effects::generator`** - Continuation-based generators with associated types
+```funk
+use std::effects::generator::{Generator, Yieldable, next, to_list}
+
+# Define a generator using the Generator effect
+let fib_gen = { n: Int } -> perform Yieldable in do
+    let value = if n == 0 then 0
+                else if n == 1 then 1
+                else n  # Simplified for example
+    Generator.yield { value = value }
+
+# Use next to extract values
+let main = {} -> do
+    let g = fib_gen { n = 5 }
+    let result = next { gen = g }
+    match result.value is
+        Some { val } -> val
+        None -> 0
+
+# Or use to_list to consume the generator
+let main2 = {} -> do
+    let g = fib_gen { n = 7 }
+    to_list { gen = g }  # [13]
+```
+
+**Key Features:**
+- Built on algebraic effects and delimited continuations
+- Type-safe with associated types: `effect Generator having 'item`
+- Composable with other effects (Log, FileSystem, etc.)
+- Supports map, filter, zip operations for generator transformations
+```
+
 ### Collections (`std::collections`)
 
 **`std::collections::array`** - Array/list operations
@@ -299,6 +333,8 @@ arr::map { xs = [1, 2, 3], f = { x } -> x * 2 }
 - `std::effects::time` - Time (SystemTime, MockTime)
 - `std::effects::random` - Random (SystemRandom, SeededRandom)
 - `std::effects::environment` - Environment (SystemEnvironment, MockEnvironment)
+- `std::effects::generator` - Continuation-based generators (Yieldable)
+- `std::effects::continuation` - Delimited continuations (Delimited)
 
 ## Testing Patterns
 

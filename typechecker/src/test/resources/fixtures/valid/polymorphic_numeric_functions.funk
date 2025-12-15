@@ -8,9 +8,9 @@ let intResult = addTwo { x = 21 }           # expected: intResult : Int
 let floatResult = addTwo { x = 3.14 }       # expected: floatResult : Float
 let fracResult = addTwo { x = 1/2 }         # expected: fracResult : Frac
 
-# Using Nat requires explicit constraint
+# Using Nat requires explicit syntax
 let natFunction = { x: Nat } -> x + x       # Function that forces Nat
-let natResult = natFunction { x = 21 }      # expected: natResult : Nat
+let natResult = natFunction { x = 21n }     # expected: natResult : Nat
 
 # Square function
 let intSquare = square { x = 7 }            # expected: intSquare : Int

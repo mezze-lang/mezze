@@ -31,6 +31,95 @@ class FunkParser {
     }
 
     /**
+     * Desugar a binary operator into an ability method call.
+     * For example: x + y becomes NumAdd.add {l = x, r = y}
+     */
+    private fun desugarBinaryOperator(
+        operator: String,
+        left: Expression,
+        right: Expression,
+        location: SourceLocation?
+    ): Expression {
+        val (abilityName, operationName) = when (operator) {
+            "+" -> "NumAdd" to "add"
+            "-" -> "NumSub" to "sub"
+            "*" -> "NumMul" to "mul"
+            "/" -> "NumDiv" to "div"
+            "%" -> "NumMod" to "mod"
+            "==" -> "Eq" to "eq"
+            "!=" -> "Eq" to "neq"
+            "<" -> "Ord" to "lt"
+            ">" -> "Ord" to "gt"
+            "<=" -> "Ord" to "le"
+            ">=" -> "Ord" to "ge"
+            "&&" -> "LogicalAnd" to "and"
+            "||" -> "LogicalOr" to "or"
+            else -> throw IllegalArgumentException("Unknown binary operator: $operator")
+        }
+
+        val desugared = FunctionCall(
+            function = MemberAccess(
+                receiver = Identifier(abilityName, sourceLocation = location),
+                member = operationName,
+                sourceLocation = location
+            ),
+            arguments = RecordLiteral(
+                entries = listOf(
+                    RecordFieldEntry("l", left),
+                    RecordFieldEntry("r", right)
+                ),
+                sourceLocation = location
+            ),
+            sourceLocation = location
+        )
+
+        // Mark this expression as coming from operator syntax for better error messages
+        if (location != null) {
+            SyntaxMetadata.markAsOperator(location, operator)
+        }
+
+        return desugared
+    }
+
+    /**
+     * Desugar a unary operator into an ability method call.
+     * For example: -x becomes NumSub.neg {n = x}, !x becomes LogicalNot.not {val = x}
+     */
+    private fun desugarUnaryOperator(
+        operator: String,
+        operand: Expression,
+        location: SourceLocation?
+    ): Expression {
+        val (abilityName, operationName, fieldName) = when (operator) {
+            "-" -> Triple("NumSub", "neg", "n")
+            "!" -> Triple("LogicalNot", "not", "val")
+            else -> throw IllegalArgumentException("Unknown unary operator: $operator")
+        }
+
+        val desugared = FunctionCall(
+            function = MemberAccess(
+                receiver = Identifier(abilityName, sourceLocation = location),
+                member = operationName,
+                sourceLocation = location
+            ),
+            arguments = RecordLiteral(
+                entries = listOf(
+                    RecordFieldEntry(fieldName, operand)
+                ),
+                sourceLocation = location
+            ),
+            sourceLocation = location
+        )
+
+        // Mark this expression as coming from operator syntax for better error messages
+        if (location != null) {
+            SyntaxMetadata.markAsOperator(location, operator)
+        }
+
+        return desugared
+    }
+
+    /**
      * Fix source locations for expressions parsed from string interpolations.
      * This recursively updates sourceLocation fields to reflect the actual position in the original file.
      */
@@ -101,6 +190,9 @@ class FunkParser {
         currentSource = source
         currentFile = file
 
+        // Clear syntax metadata from previous parses
+        SyntaxMetadata.clear()
+
         try {
             val lexer = Lexer(source)
             val tokens = lexer.tokenize()
@@ -155,19 +247,6 @@ class FunkParser {
 
     private fun desugarExpression(expr: Expression): Expression {
         return when (expr) {
-            is BinaryOperation -> {
-                if (expr.operator == "|>") {
-                    // Desugar pipe: left |> right becomes right with @ replaced by left
-                    val desugaredLeft = desugarExpression(expr.left)
-                    val desugaredRight = desugarExpression(expr.right)
-                    desugarPipe(desugaredLeft, desugaredRight)
-                } else {
-                    expr.copy(
-                        left = desugarExpression(expr.left),
-                        right = desugarExpression(expr.right)
-                    )
-                }
-            }
             is FunctionCall -> expr.copy(
                 function = desugarExpression(expr.function),
                 arguments = desugarExpression(expr.arguments)
@@ -184,7 +263,6 @@ class FunkParser {
                     }
                 }
             )
-            is UnaryOperation -> expr.copy(operand = desugarExpression(expr.operand))
             is IfExpression -> expr.copy(
                 condition = desugarExpression(expr.condition),
                 thenBranch = desugarExpression(expr.thenBranch),
@@ -254,6 +332,7 @@ class FunkParser {
     private lateinit var implAbilityDeclaration: Parser<ProgramItem>
     private lateinit var abilityDeclaration: Parser<ProgramItem>
     private lateinit var typeDeclaration: Parser<ProgramItem>
+    private lateinit var newtypeDeclaration: Parser<ProgramItem>
     private lateinit var useDeclaration: Parser<ProgramItem>
     private lateinit var letDeclaration: Parser<ProgramItem>
     private lateinit var topLevelExpression: Parser<ProgramItem>
@@ -697,6 +776,74 @@ class FunkParser {
                 }
             }
             is ParseResult.Failure -> typeToken
+        }
+    }
+
+    private fun parseNewtypeDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+        val newtypeToken = tok(TokenType.NEWTYPE)(stream)
+        return when (newtypeToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(newtypeToken.remaining)
+                val typeName = identifierParser(stream1)
+
+                when (typeName) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(typeName.remaining)
+
+                        // Parse optional type parameters: 'a 'b
+                        val typeParams = mutableListOf<String>()
+                        var currentStream = stream2
+                        while (true) {
+                            val typeVar = currentStream.current()
+                            if (typeVar?.type == TokenType.IDENTIFIER && typeVar.text.startsWith("'")) {
+                                typeParams.add(typeVar.text)
+                                currentStream = currentStream.advance()
+                                currentStream = skipNewlines(currentStream)
+                            } else {
+                                break
+                            }
+                        }
+
+                        val stream3 = skipNewlines(currentStream)
+                        val assign = tok(TokenType.ASSIGN)(stream3)
+
+                        when (assign) {
+                            is ParseResult.Success -> {
+                                val stream4 = skipNewlines(assign.remaining)
+                                val constructor = identifierParser(stream4)
+
+                                when (constructor) {
+                                    is ParseResult.Success -> {
+                                        val stream5 = skipNewlines(constructor.remaining)
+                                        val wrappedType = typeAnnotationParser(stream5)
+
+                                        when (wrappedType) {
+                                            is ParseResult.Success -> ParseResult.Success(
+                                                TypeDeclaration(
+                                                    name = typeName.value.text,
+                                                    visibility = visibility,
+                                                    typeParams = typeParams,
+                                                    definition = NewtypeDefinition(
+                                                        constructor = constructor.value.text,
+                                                        wrappedType = wrappedType.value
+                                                    ),
+                                                    inferredType = null
+                                                ),
+                                                wrappedType.remaining
+                                            )
+                                            is ParseResult.Failure -> wrappedType
+                                        }
+                                    }
+                                    is ParseResult.Failure -> constructor
+                                }
+                            }
+                            is ParseResult.Failure -> assign
+                        }
+                    }
+                    is ParseResult.Failure -> typeName
+                }
+            }
+            is ParseResult.Failure -> newtypeToken
         }
     }
 
@@ -1918,6 +2065,7 @@ class FunkParser {
         implAbilityDeclaration = { stream -> parseImplAbilityDeclaration(stream) }
         abilityDeclaration = { stream -> parseAbilityDeclaration(stream, Visibility.PRIVATE) }
         typeDeclaration = { stream -> parseTypeDeclaration(stream, Visibility.PRIVATE) }
+        newtypeDeclaration = { stream -> parseNewtypeDeclaration(stream, Visibility.PRIVATE) }
         useDeclaration = { stream -> parseUseDeclaration(stream, Visibility.PRIVATE) }
         letDeclaration = { stream -> parseLetBinding(stream) }  // Lambda wrapper
         topLevelExpression = { stream -> Parsers.map(expression) { TopLevelExpression(it) }(stream) }
@@ -1936,6 +2084,7 @@ class FunkParser {
             val declResult = Parsers.oneOf(
                 { s -> parseEffectDeclaration(s, visibility) },
                 { s -> parseTypeDeclaration(s, visibility) },
+                { s -> parseNewtypeDeclaration(s, visibility) },
                 { s -> parseAbilityDeclaration(s, visibility) },
                 { s -> parseImplAbilityDeclaration(s) },  // Try ability impl first
                 { s -> parseImplDeclaration(s) },          // Then effect impl
@@ -2352,22 +2501,9 @@ class FunkParser {
     }
 
     private val arrayElementParser: Parser<Expression> = { stream ->
-        // Check for spread operator ...
-        val ellipsis = tok(TokenType.ELLIPSIS)(stream)
-        if (ellipsis is ParseResult.Success) {
-            // Spread element: ...rest
-            val expr = expression(ellipsis.remaining)
-            when (expr) {
-                is ParseResult.Success -> ParseResult.Success(
-                    UnaryOperation("...", expr.value),
-                    expr.remaining
-                )
-                is ParseResult.Failure -> expr
-            }
-        } else {
-            // Normal element
-            expression(stream)
-        }
+        // Array spread operator (...) is not yet implemented
+        // For now, just parse regular expressions
+        expression(stream)
     }
 
     // ===== PRIMARY EXPRESSION =====
@@ -2953,6 +3089,17 @@ class FunkParser {
                     ParseResult.Failure("Invalid integer literal: ${token.text}", stream.getSourcePosition())
                 }
             }
+            TokenType.NAT -> {
+                val value = token.text.toLongOrNull()
+                if (value != null) {
+                    ParseResult.Success(
+                        LiteralPattern(NatLiteralValue(value)),
+                        stream.advance()
+                    )
+                } else {
+                    ParseResult.Failure("Invalid nat literal: ${token.text}", stream.getSourcePosition())
+                }
+            }
             TokenType.STRING -> {
                 // String token includes quotes, strip them
                 val text = token.text
@@ -2984,7 +3131,7 @@ class FunkParser {
                     ParseResult.Failure("Invalid float literal: ${token.text}", stream.getSourcePosition())
                 }
             }
-            else -> ParseResult.Failure("Expected literal (integer, string, boolean, or float)", stream.getSourcePosition())
+            else -> ParseResult.Failure("Expected literal (integer, nat, string, boolean, or float)", stream.getSourcePosition())
         }
     }
 
@@ -3161,11 +3308,11 @@ class FunkParser {
                 val right = logicalAndExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3191,11 +3338,11 @@ class FunkParser {
                 val right = pipeExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3233,17 +3380,6 @@ class FunkParser {
                         )
                     }
                 }
-            )
-
-            // Recurse into binary operations (for nested expressions)
-            is BinaryOperation -> target.copy(
-                left = desugarPipe(pipeValue, target.left),
-                right = desugarPipe(pipeValue, target.right)
-            )
-
-            // Recurse into unary operations
-            is UnaryOperation -> target.copy(
-                operand = desugarPipe(pipeValue, target.operand)
             )
 
             // Recurse into conditional expressions
@@ -3314,12 +3450,9 @@ class FunkParser {
                 val right = comparisonExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> {
-                        // Keep pipe operator in AST - will be desugared later
+                        // Desugar pipe operator immediately at parse time
                         ParseResult.Success(
-                            BinaryOperation(
-                                result.value, "|>", right.value,
-                                sourceLocation = result.value.sourceLocation
-                            ),
+                            desugarPipe(result.value, right.value),
                             right.remaining
                         )
                     }
@@ -3347,11 +3480,11 @@ class FunkParser {
                 val right = additiveExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3377,11 +3510,11 @@ class FunkParser {
                 val right = multiplicativeExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3407,11 +3540,11 @@ class FunkParser {
                 val right = unaryExpression(opStream)
                 result = when (right) {
                     is ParseResult.Success -> ParseResult.Success(
-                        BinaryOperation(
-                            result.value,
+                        desugarBinaryOperator(
                             op.text,
+                            result.value,
                             right.value,
-                            sourceLocation = result.value.sourceLocation  // Use left operand's location
+                            result.value.sourceLocation  // Use left operand's location
                         ),
                         right.remaining
                     )
@@ -3428,13 +3561,69 @@ class FunkParser {
     private val unaryExpression: Parser<Expression> = { stream ->
         val token = stream.current()
 
-        if (token?.type == TokenType.MINUS || token?.type == TokenType.NOT) {
+        if (token?.type == TokenType.MINUS) {
+            // Check if this is a negative literal (skip newlines first)
+            val opLocation = tokenLocation(token)
+            val streamAfterMinus = skipNewlines(stream.advance())
+            val literalToken = streamAfterMinus.current()
+
+            if (literalToken?.type == TokenType.INTEGER || literalToken?.type == TokenType.FLOAT || literalToken?.type == TokenType.FRACTION) {
+                // Parse as negative literal
+
+                when (literalToken.type) {
+                    TokenType.INTEGER -> ParseResult.Success(
+                        IntLiteral(-literalToken.text.toLong(), sourceLocation = opLocation),
+                        streamAfterMinus.advance()
+                    )
+                    TokenType.FLOAT -> ParseResult.Success(
+                        FloatLiteral(-literalToken.text.toDouble(), sourceLocation = opLocation),
+                        streamAfterMinus.advance()
+                    )
+                    TokenType.FRACTION -> {
+                        // Parse fraction like "1//2" into numerator and denominator
+                        val parts = literalToken.text.split("//")
+                        if (parts.size == 2) {
+                            ParseResult.Success(
+                                FractionLiteral(-parts[0].toLong(), parts[1].toLong(), sourceLocation = opLocation),
+                                streamAfterMinus.advance()
+                            )
+                        } else {
+                            ParseResult.Failure("Invalid fraction literal: ${literalToken.text}", streamAfterMinus.getSourcePosition())
+                        }
+                    }
+                    else -> {
+                        // Should not reach here given the check above
+                        val opStream = stream.advance()
+                        val operand = unaryExpression(opStream)
+                        when (operand) {
+                            is ParseResult.Success -> ParseResult.Success(
+                                desugarUnaryOperator(token.text, operand.value, opLocation),
+                                operand.remaining
+                            )
+                            is ParseResult.Failure -> operand
+                        }
+                    }
+                }
+            } else {
+                // Not a literal, desugar to NumSub.neg call
+                val opStream = stream.advance()
+                val operand = unaryExpression(opStream)
+                when (operand) {
+                    is ParseResult.Success -> ParseResult.Success(
+                        desugarUnaryOperator(token.text, operand.value, opLocation),
+                        operand.remaining
+                    )
+                    is ParseResult.Failure -> operand
+                }
+            }
+        } else if (token?.type == TokenType.NOT) {
+            // Desugar to ability method call
             val opLocation = tokenLocation(token)  // Capture operator location
             val opStream = stream.advance()
-            val operand = unaryExpression(opStream) // Right-associative: -(-5) is valid
+            val operand = unaryExpression(opStream) // Right-associative: !(!x) is valid
             when (operand) {
                 is ParseResult.Success -> ParseResult.Success(
-                    UnaryOperation(token.text, operand.value, sourceLocation = opLocation),
+                    desugarUnaryOperator(token.text, operand.value, opLocation),
                     operand.remaining
                 )
                 is ParseResult.Failure -> operand
@@ -3517,6 +3706,69 @@ class FunkParser {
                         )
                         is ParseResult.Failure -> break  // Not a member access
                     }
+                }
+                TokenType.LPAREN -> {
+                    // BUG FIX: Reject () syntax for function calls
+                    // Funk uses {} for function calls, not ()
+                    val funcExpr = (result as ParseResult.Success).value
+                    val funcName = when (funcExpr) {
+                        is Identifier -> funcExpr.name
+                        is MemberAccess -> {
+                            val receiverName = when (val receiver = funcExpr.receiver) {
+                                is Identifier -> receiver.name
+                                is VariantConstruction -> receiver.constructor
+                                else -> "..."
+                            }
+                            "$receiverName.${funcExpr.member}"
+                        }
+                        else -> "expression"
+                    }
+                    throw createParseException(
+                        "Function calls must use {} syntax, not (). " +
+                        "Instead of '$funcName(...)', use '$funcName { <field> = <value> }' with named arguments.",
+                        currentStream
+                    )
+                }
+                TokenType.NEWLINE -> {
+                    // BUG FIX: Check if there's a { after the newline(s)
+                    // Only check if the expression looks like a function call (Identifier or MemberAccess)
+                    val funcExpr = (result as ParseResult.Success).value
+                    if (funcExpr is Identifier || funcExpr is MemberAccess) {
+                        var checkStream = currentStream.advance()  // Skip first newline
+                        // Skip any additional newlines
+                        while (checkStream.current()?.type == TokenType.NEWLINE) {
+                            checkStream = checkStream.advance()
+                        }
+                        // Check if next non-newline token is LBRACE
+                        if (checkStream.current()?.type == TokenType.LBRACE) {
+                            // IMPORTANT: Only error if the { would be parsed as function arguments
+                            // If it's a lambda (has -> after brace), don't error
+                            // This prevents false positives in match expressions where we have:
+                            //   { pattern } -> body
+                            //   { pattern } -> body
+                            // The body ends with an identifier, then newline, then { starts next pattern
+                            if (!lookAheadForArrowAfterBrace(checkStream)) {
+                                val funcName = when (funcExpr) {
+                                    is Identifier -> funcExpr.name
+                                    is MemberAccess -> {
+                                        val receiverName = when (val receiver = funcExpr.receiver) {
+                                            is Identifier -> receiver.name
+                                            else -> "..."
+                                        }
+                                        "$receiverName.${funcExpr.member}"
+                                    }
+                                    else -> "expression"
+                                }
+                                throw createParseException(
+                                    "Newline not allowed before '{' in function call. Function calls require '{' on the same line. " +
+                                    "Instead of:\n  $funcName\n  { ... }\nUse:\n  $funcName { ... }",
+                                    currentStream
+                                )
+                            }
+                        }
+                    }
+                    // Not a function call, just a newline - break out of postfix loop
+                    break
                 }
                 TokenType.IDENTIFIER -> {
                     // BUG #10 FIX: Check for function call without {} syntax
@@ -3649,6 +3901,10 @@ class FunkParser {
         when (token?.type) {
             TokenType.INTEGER -> ParseResult.Success(
                 IntLiteral(token.text.toLong(), sourceLocation = location),
+                stream.advance()
+            )
+            TokenType.NAT -> ParseResult.Success(
+                NatLiteral(token.text.toLong(), sourceLocation = location),
                 stream.advance()
             )
             TokenType.FLOAT -> ParseResult.Success(

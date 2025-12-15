@@ -18,4 +18,4 @@ pub let from_string = { s: String } ->
     __native_float_from_string { s = s }
 
 pub let abs = { n: Float } ->
-    if n < 0.0 then -n else n
+    if n < 0.0 then NumSub.neg { n = n } else n

@@ -66,6 +66,6 @@ let transform = {input} -> match input is
   Red -> Blue
   Green -> Yellow
   Blue -> Red
-  Yellow -> Green                                               # expected: transform : { input: | Red, Green, Blue, Yellow | } -> | Blue |
+  Yellow -> Green                                               # expected: transform : { input: | Red, Green, Blue, Yellow | } -> | Blue, Yellow, Red, Green |
 
 transform {input = Red}

@@ -91,9 +91,9 @@ class AbilityMethodAccessTest {
     // ========== NUMADD ABILITY ==========
 
     @Test
-    fun `test NumAdd num_add access should return function type`() {
+    fun `test NumAdd add access should return function type`() {
         val code = """
-            let add = NumAdd.num_add
+            let add = NumAdd.add
         """.trimIndent()
 
         val type = getVariableType(code, "add")
@@ -102,9 +102,9 @@ class AbilityMethodAccessTest {
     }
 
     @Test
-    fun `test NumAdd num_add can be stored and called later`() {
+    fun `test NumAdd add can be stored and called later`() {
         val code = """
-            let add = NumAdd.num_add
+            let add = NumAdd.add
             let result = add {l = 1, r = 2}
         """.trimIndent()
 
@@ -118,9 +118,9 @@ class AbilityMethodAccessTest {
     // ========== NUMSUB ABILITY ==========
 
     @Test
-    fun `test NumSub num_sub access should return function type`() {
+    fun `test NumSub sub access should return function type`() {
         val code = """
-            let sub = NumSub.num_sub
+            let sub = NumSub.sub
         """.trimIndent()
 
         val type = getVariableType(code, "sub")
@@ -131,9 +131,9 @@ class AbilityMethodAccessTest {
     // ========== NUMMUL ABILITY ==========
 
     @Test
-    fun `test NumMul num_mul access should return function type`() {
+    fun `test NumMul mul access should return function type`() {
         val code = """
-            let mul = NumMul.num_mul
+            let mul = NumMul.mul
         """.trimIndent()
 
         val type = getVariableType(code, "mul")
@@ -144,9 +144,9 @@ class AbilityMethodAccessTest {
     // ========== NUMDIV ABILITY ==========
 
     @Test
-    fun `test NumDiv num_div access should return function type`() {
+    fun `test NumDiv div access should return function type`() {
         val code = """
-            let div = NumDiv.num_div
+            let div = NumDiv.div
         """.trimIndent()
 
         val type = getVariableType(code, "div")

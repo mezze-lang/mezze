@@ -61,9 +61,12 @@ class ListTest {
 
             let xs = empty {}
             let ys = cons { head = 42, tail = xs }
-            let h = head { xs = ys }
+            let h_opt = head { xs = ys }
 
-            let main = {} -> h
+            let main = {} -> match h_opt is
+                Some { val } -> val
+                None -> 0
+
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -84,13 +87,31 @@ class ListTest {
             use std::collections::list::{empty, cons, head, tail, is_empty}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
-            let h = head { xs = xs }
-            let t = tail { xs = xs }
-            let h2 = head { xs = t }
-            let t2 = tail { xs = t }
-            let empty_check = is_empty { xs = t2 }
 
-            let main = {} -> if h == 1 && h2 == 2 && empty_check then 1 else 0
+            let check_h = { h } -> if h == 1 then true else false
+            let check_h2 = { h2 } -> if h2 == 2 then true else false
+            let check_empty = { t2 } -> is_empty { xs = t2 }
+
+            let main = {} -> match head { xs = xs } is
+                Some { val } ->
+                    if check_h { h = val } then
+                        match tail { xs = xs } is
+                            Some { val } ->
+                                match head { xs = val } is
+                                    Some { val } ->
+                                        if check_h2 { h2 = val } then
+                                            match tail { xs = xs } is
+                                                Some { val } ->
+                                                    match tail { xs = val } is
+                                                        Some { val } ->
+                                                            if check_empty { t2 = val } then 1 else 0
+                                                        None -> 0
+                                                None -> 0
+                                        else 0
+                                    None -> 0
+                            None -> 0
+                    else 0
+                None -> 0
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -191,11 +212,22 @@ class ListTest {
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
             let ys = map { xs = xs, f = { x } -> x * 2 }
-            let h1 = head { xs = ys }
-            let t1 = tail { xs = ys }
-            let h2 = head { xs = t1 }
 
-            let main = {} -> if h1 == 2 && h2 == 4 then 1 else 0
+            let check_h1 = { h1 } -> if h1 == 2 then true else false
+            let check_h2 = { h2 } -> if h2 == 4 then true else false
+
+            let main = {} -> match head { xs = ys } is
+                Some { val } ->
+                    if check_h1 { h1 = val } then
+                        match tail { xs = ys } is
+                            Some { val } ->
+                                match head { xs = val } is
+                                    Some { val } ->
+                                        if check_h2 { h2 = val } then 1 else 0
+                                    None -> 0
+                            None -> 0
+                    else 0
+                None -> 0
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -318,9 +350,10 @@ class ListTest {
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
             let ys = reverse { xs = xs }
-            let h = head { xs = ys }
 
-            let main = {} -> h
+            let main = {} -> match head { xs = ys } is
+                Some { val } -> val
+                None -> 0
         """.trimIndent()
 
         val program = parser.parse(source)

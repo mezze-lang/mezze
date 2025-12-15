@@ -49,7 +49,7 @@ class NatTypeValidationTest {
     fun `test assign positive integer to Nat`() {
         assertTypeChecks(
             """
-            let x: Nat = 5
+            let x = 5n
             x
             """.trimIndent(),
             "x",
@@ -61,7 +61,7 @@ class NatTypeValidationTest {
     fun `test assign zero to Nat`() {
         assertTypeChecks(
             """
-            let x: Nat = 0
+            let x = 0n
             x
             """.trimIndent(),
             "x",
@@ -73,7 +73,7 @@ class NatTypeValidationTest {
     fun `test assign large positive integer to Nat`() {
         assertTypeChecks(
             """
-            let x: Nat = 1000000
+            let x = 1000000n
             x
             """.trimIndent(),
             "x",
@@ -85,7 +85,7 @@ class NatTypeValidationTest {
     fun `test Nat in function parameter`() {
         assertTypeChecks(
             """
-            let addOne: { n: Nat } -> Nat = { n } -> n + 1
+            let addOne: { n: Nat } -> Nat = { n } -> n + 1n
             addOne
             """.trimIndent(),
             "addOne",
@@ -97,7 +97,7 @@ class NatTypeValidationTest {
     fun `test Nat in function return type`() {
         assertTypeChecks(
             """
-            let getPositive: {} -> Nat = {} -> 42
+            let getPositive: {} -> Nat = {} -> 42n
             getPositive
             """.trimIndent(),
             "getPositive",
@@ -141,7 +141,7 @@ class NatTypeValidationTest {
     fun `test reject negative in function call with Nat parameter`() {
         assertTypeCheckFails(
             """
-            let processNat: { n: Nat } -> Nat = { n } -> n + 1
+            let processNat: { n: Nat } -> Nat = { n } -> n + 1n
             let result = processNat { n = -5 }
             result
             """.trimIndent()
@@ -164,8 +164,8 @@ class NatTypeValidationTest {
     fun `test Nat with arithmetic operations`() {
         assertTypeChecks(
             """
-            let x: Nat = 10
-            let y: Nat = 5
+            let x = 10n
+            let y = 5n
             let result = x + y
             result
             """.trimIndent(),
@@ -179,8 +179,8 @@ class NatTypeValidationTest {
         // Subtraction of Nat values may produce Nat (depending on implementation)
         assertTypeChecks(
             """
-            let x: Nat = 10
-            let y: Nat = 5
+            let x = 10n
+            let y = 5n
             let result = x - y
             result
             """.trimIndent(),
@@ -193,7 +193,7 @@ class NatTypeValidationTest {
     fun `test Nat in list`() {
         assertTypeChecks(
             """
-            let numbers: [Nat] = [1, 2, 3]
+            let numbers: [Nat] = [1n, 2n, 3n]
             numbers
             """.trimIndent(),
             "numbers",
@@ -205,7 +205,7 @@ class NatTypeValidationTest {
     fun `test explicit Nat type annotation on variable`() {
         assertTypeChecks(
             """
-            let x: Nat = 100
+            let x = 100n
             let y = x
             y
             """.trimIndent(),
