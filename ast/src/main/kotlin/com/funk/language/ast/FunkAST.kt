@@ -1037,6 +1037,22 @@ data class VariantDefinition(
     val isOpen: Boolean = false
 ) : TypeDefinition
 
+/**
+ * Newtype definition - zero-cost wrapper with a single constructor.
+ *
+ * Newtypes create distinct types at compile time but are erased at runtime.
+ * The constructor is private to the defining module (not exported even if pub).
+ *
+ * Examples:
+ *   newtype Email = Email String
+ *   newtype UserId = UserId Int
+ *   newtype Point = Point { x: Float, y: Float }
+ */
+@Serializable
+data class NewtypeDefinition(
+    val constructor: String,        // Constructor name (e.g., "Email")
+    val wrappedType: TypeAnnotation // Type being wrapped (e.g., String)
+) : TypeDefinition
 
 @Serializable
 data class RecordFieldDef(

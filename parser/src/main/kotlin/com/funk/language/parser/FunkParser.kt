@@ -332,6 +332,7 @@ class FunkParser {
     private lateinit var implAbilityDeclaration: Parser<ProgramItem>
     private lateinit var abilityDeclaration: Parser<ProgramItem>
     private lateinit var typeDeclaration: Parser<ProgramItem>
+    private lateinit var newtypeDeclaration: Parser<ProgramItem>
     private lateinit var useDeclaration: Parser<ProgramItem>
     private lateinit var letDeclaration: Parser<ProgramItem>
     private lateinit var topLevelExpression: Parser<ProgramItem>
@@ -775,6 +776,74 @@ class FunkParser {
                 }
             }
             is ParseResult.Failure -> typeToken
+        }
+    }
+
+    private fun parseNewtypeDeclaration(stream: TokenStream, visibility: Visibility): ParseResult<ProgramItem> {
+        val newtypeToken = tok(TokenType.NEWTYPE)(stream)
+        return when (newtypeToken) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(newtypeToken.remaining)
+                val typeName = identifierParser(stream1)
+
+                when (typeName) {
+                    is ParseResult.Success -> {
+                        val stream2 = skipNewlines(typeName.remaining)
+
+                        // Parse optional type parameters: 'a 'b
+                        val typeParams = mutableListOf<String>()
+                        var currentStream = stream2
+                        while (true) {
+                            val typeVar = currentStream.current()
+                            if (typeVar?.type == TokenType.IDENTIFIER && typeVar.text.startsWith("'")) {
+                                typeParams.add(typeVar.text)
+                                currentStream = currentStream.advance()
+                                currentStream = skipNewlines(currentStream)
+                            } else {
+                                break
+                            }
+                        }
+
+                        val stream3 = skipNewlines(currentStream)
+                        val assign = tok(TokenType.ASSIGN)(stream3)
+
+                        when (assign) {
+                            is ParseResult.Success -> {
+                                val stream4 = skipNewlines(assign.remaining)
+                                val constructor = identifierParser(stream4)
+
+                                when (constructor) {
+                                    is ParseResult.Success -> {
+                                        val stream5 = skipNewlines(constructor.remaining)
+                                        val wrappedType = typeAnnotationParser(stream5)
+
+                                        when (wrappedType) {
+                                            is ParseResult.Success -> ParseResult.Success(
+                                                TypeDeclaration(
+                                                    name = typeName.value.text,
+                                                    visibility = visibility,
+                                                    typeParams = typeParams,
+                                                    definition = NewtypeDefinition(
+                                                        constructor = constructor.value.text,
+                                                        wrappedType = wrappedType.value
+                                                    ),
+                                                    inferredType = null
+                                                ),
+                                                wrappedType.remaining
+                                            )
+                                            is ParseResult.Failure -> wrappedType
+                                        }
+                                    }
+                                    is ParseResult.Failure -> constructor
+                                }
+                            }
+                            is ParseResult.Failure -> assign
+                        }
+                    }
+                    is ParseResult.Failure -> typeName
+                }
+            }
+            is ParseResult.Failure -> newtypeToken
         }
     }
 
@@ -1996,6 +2065,7 @@ class FunkParser {
         implAbilityDeclaration = { stream -> parseImplAbilityDeclaration(stream) }
         abilityDeclaration = { stream -> parseAbilityDeclaration(stream, Visibility.PRIVATE) }
         typeDeclaration = { stream -> parseTypeDeclaration(stream, Visibility.PRIVATE) }
+        newtypeDeclaration = { stream -> parseNewtypeDeclaration(stream, Visibility.PRIVATE) }
         useDeclaration = { stream -> parseUseDeclaration(stream, Visibility.PRIVATE) }
         letDeclaration = { stream -> parseLetBinding(stream) }  // Lambda wrapper
         topLevelExpression = { stream -> Parsers.map(expression) { TopLevelExpression(it) }(stream) }
@@ -2014,6 +2084,7 @@ class FunkParser {
             val declResult = Parsers.oneOf(
                 { s -> parseEffectDeclaration(s, visibility) },
                 { s -> parseTypeDeclaration(s, visibility) },
+                { s -> parseNewtypeDeclaration(s, visibility) },
                 { s -> parseAbilityDeclaration(s, visibility) },
                 { s -> parseImplAbilityDeclaration(s) },  // Try ability impl first
                 { s -> parseImplDeclaration(s) },          // Then effect impl

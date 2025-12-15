@@ -277,11 +277,12 @@ class ASTToTruffleConverter {
     }
     
     /**
-     * Convert variant construction (placeholder implementation)
+     * Convert variant construction to a variant construction node
      */
     private fun convertVariantConstruction(variantConst: VariantConstruction): FunkNode {
-        // For now, return a null literal - variant construction needs more complex handling
-        return NullLiteralNode()
+        val constructorName = variantConst.constructor
+        val valueNode = variantConst.value?.let { convertExpression(it) }
+        return com.funk.language.interpreter.nodes.literal.VariantConstructionNode(constructorName, valueNode)
     }
     
     /**

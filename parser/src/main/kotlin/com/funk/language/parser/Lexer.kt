@@ -15,7 +15,7 @@ data class Token(
 
 enum class TokenType {
     // Keywords
-    LET, TYPE, IF, THEN, ELSE, MATCH, IS, DO, EFFECT, IMPL, PERFORM, ABILITY, PUB, FOR, WHERE, WITH, IN, USE, HAVING, FORALL,
+    LET, TYPE, NEWTYPE, IF, THEN, ELSE, MATCH, IS, DO, EFFECT, IMPL, PERFORM, ABILITY, PUB, FOR, WHERE, WITH, IN, USE, HAVING, FORALL,
 
     // Literals
     INTEGER, NAT, FLOAT, FRACTION, STRING, BOOLEAN,
@@ -50,6 +50,7 @@ class Lexer(private val source: String) {
     private val keywords = mapOf(
         "let" to TokenType.LET,
         "type" to TokenType.TYPE,
+        "newtype" to TokenType.NEWTYPE,
         "if" to TokenType.IF,
         "then" to TokenType.THEN,
         "else" to TokenType.ELSE,
