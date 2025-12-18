@@ -20,7 +20,7 @@ class LiteralPatternTypeCheckingTest {
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val typeChecker = TypeChecker()
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     // ========== Valid Integer Literal Patterns ==========

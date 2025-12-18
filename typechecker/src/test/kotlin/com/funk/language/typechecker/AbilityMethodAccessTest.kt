@@ -23,7 +23,7 @@ class AbilityMethodAccessTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code))
+    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code)).program
 
     private fun getVariableType(code: String, varName: String): String {
         val program = parseAndTypeCheck(code)

@@ -119,10 +119,31 @@ object BuiltinAbilities {
                 typeHasAutomaticImplementation(type.valueType, abilityName)
             }
             is FunkType.SetType -> {
-                hasAutomaticImplementation("Set", abilityName) && 
+                hasAutomaticImplementation("Set", abilityName) &&
                 typeHasAutomaticImplementation(type.elementType, abilityName)
             }
-            
+
+            // Record types automatically derive Eq and Inspect if all fields have these abilities
+            is FunkType.RecordType -> {
+                when (abilityName) {
+                    EQ, INSPECT -> type.fields.values.all { fieldType ->
+                        typeHasAutomaticImplementation(fieldType, abilityName)
+                    }
+                    else -> false
+                }
+            }
+
+            // Variant types automatically derive Eq and Inspect if all constructors have these abilities
+            is FunkType.VariantType -> {
+                when (abilityName) {
+                    EQ, INSPECT -> type.constructors.values.all { constructorDataType ->
+                        // Constructors without data (like None) always support Eq and Inspect
+                        constructorDataType == null || typeHasAutomaticImplementation(constructorDataType, abilityName)
+                    }
+                    else -> false
+                }
+            }
+
             else -> false
         }
     }
@@ -881,6 +902,21 @@ data class Program(
     val items: List<ProgramItem>
 )
 
+/**
+ * Result of type checking a program
+ * Separates user code (Program) from compiler artifacts (monomorphic instances)
+ *
+ * This follows the Rust approach:
+ * - User AST contains only user-written code
+ * - Monomorphic instances are compiler-internal, not part of the AST
+ * - Users never see or write mangled names like "add$Int"
+ */
+@Serializable
+data class TypeCheckResult(
+    val program: Program,  // User's original AST with type information
+    val monomorphicInstances: Map<String, LetBinding> = emptyMap()  // Compiler-generated specialized functions (e.g., "add$Int" -> specialized binding)
+)
+
 @Serializable
 @JsonClassDiscriminator("itemKind")
 sealed interface ProgramItem
@@ -896,7 +932,13 @@ data class LetBinding(
     val typeAnnotation: TypeAnnotation? = null,  // From parser
     val inferredType: FunkType? = null,          // From typechecker (monomorphic, instantiated type)
     val typeScheme: TypeScheme? = null,          // From typechecker (polymorphic type with constraints)
-    val expression: Expression
+    val expression: Expression,
+
+    // NEW: Monomorphization tracking
+    // If this is a monomorphic instance of a generic function, these fields track it
+    val isMonomorphicInstance: Boolean = false,  // true if this is a specialized version
+    val originalFunctionName: String? = null,    // name of the original generic function
+    val monomorphicTypeArgs: Map<String, FunkType> = emptyMap()  // type arguments for this instance
 ) : ProgramItem {
     /**
      * For backward compatibility - returns the variable name if pattern is a simple VariablePattern.
@@ -1208,11 +1250,28 @@ object SyntaxMetadata {
 // EXPRESSIONS (Unified - can be untyped or typed)
 // ============================================================================
 
+/**
+ * Resolved ability information for monomorphic dispatch
+ * This is populated by the TypeChecker during ability resolution
+ */
+@Serializable
+data class ResolvedAbility(
+    val abilityName: String,                    // e.g., "NumAdd"
+    val typeArgs: List<FunkType>,               // e.g., [IntType]
+    val implementationRef: String,              // e.g., "std::int::NumAdd_Int_impl"
+    val isBuiltin: Boolean = false              // true for built-in abilities with automatic implementation
+)
+
 @Serializable
 @JsonClassDiscriminator("exprKind")
 sealed interface Expression {
     val inferredType: FunkType? // null during parsing, filled by typechecker
     val sourceLocation: SourceLocation? get() = null // source location for error reporting (default implementation)
+
+    // NEW: Type substitution for monomorphization
+    // Maps generic type parameter names to concrete types
+    // Example: for map<Int, String>, this would be {'a -> Int, 'b -> String}
+    val typeSubstitution: Map<String, FunkType> get() = emptyMap()
 }
 
 // Literals
@@ -1497,7 +1556,27 @@ data class FunctionCall(
     val function: Expression,
     val arguments: Expression,
     override val inferredType: FunkType? = null,
-    override val sourceLocation: SourceLocation? = null
+    override val sourceLocation: SourceLocation? = null,
+
+    // NEW: Resolved ability implementations for this call
+    // Maps ability constraint identifier to its resolved implementation
+    // Example: {"NumAdd<Int>" -> ResolvedAbility(...)}
+    val resolvedAbilities: Map<String, ResolvedAbility> = emptyMap(),
+
+    // NEW: For monomorphic dispatch - direct reference to specialized function
+    // When this is non-null, Truffle can call the function directly without runtime lookup
+    val resolvedFunctionName: String? = null,
+
+    // NEW: Type substitution for generic function instantiation
+    // Maps type parameter names to concrete types
+    override val typeSubstitution: Map<String, FunkType> = emptyMap(),
+
+    // NEW: Instantiated function type at this call site
+    // For polymorphic functions, this contains the type with concrete types substituted
+    // Example: double = {x} -> x * 2 has type forall a. {x: a} -> a where a: NumMul
+    //          At call site double {x = 5}, instantiatedFunctionType is {x: Int} -> Int where Int: NumMul
+    // This allows ability resolution to see concrete types instead of type variables
+    val instantiatedFunctionType: FunkType.FunctionType? = null
 ) : Expression {
     override fun toString(): String {
         val depth = RecordLiteral.toStringDepth.get()
@@ -1556,13 +1635,28 @@ data class PerformExpression(
     val expression: Expression,
     val handlers: List<PerformHandler>,
     override val inferredType: FunkType? = null,
-    override val sourceLocation: SourceLocation? = null
+    override val sourceLocation: SourceLocation? = null,
+
+    // NEW: Resolved effect handler implementations
+    // Maps effect name to its resolved handler
+    val resolvedHandlers: Map<String, ResolvedEffectHandler> = emptyMap()
 ) : Expression
 
 @Serializable
 data class PerformHandler(
     val name: String,
     val parameters: RecordLiteral? = null
+)
+
+/**
+ * Resolved effect handler information for direct dispatch
+ * This is populated by the TypeChecker during effect resolution
+ */
+@Serializable
+data class ResolvedEffectHandler(
+    val effectName: String,
+    val performerName: String,
+    val implDeclarationRef: String?  // Reference to ImplDeclaration if available
 )
 
 

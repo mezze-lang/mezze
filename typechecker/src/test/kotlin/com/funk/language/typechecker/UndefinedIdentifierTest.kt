@@ -21,7 +21,7 @@ class UndefinedIdentifierTest {
         val program = parser.parse(source)
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)
@@ -39,7 +39,7 @@ class UndefinedIdentifierTest {
         val program = parser.parse(source)
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)
@@ -57,7 +57,7 @@ class UndefinedIdentifierTest {
         val program = parser.parse(source)
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)
@@ -76,7 +76,7 @@ class UndefinedIdentifierTest {
 
         // Should not throw - variant constructors are allowed
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -92,7 +92,7 @@ class UndefinedIdentifierTest {
 
         // Should not throw - x is a parameter
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -109,7 +109,7 @@ class UndefinedIdentifierTest {
 
         // Should not throw - value is defined
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -127,7 +127,7 @@ class UndefinedIdentifierTest {
 
         // Should not throw - intToString is built-in
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -142,7 +142,7 @@ class UndefinedIdentifierTest {
         val program = parser.parse(source)
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)
@@ -160,7 +160,7 @@ class UndefinedIdentifierTest {
         val program = parser.parse(source)
 
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
 
         assertTrue(exception.message?.contains("Undefined") == true)

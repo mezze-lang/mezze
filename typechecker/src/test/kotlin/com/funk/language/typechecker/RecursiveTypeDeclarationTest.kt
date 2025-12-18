@@ -19,7 +19,7 @@ class RecursiveTypeDeclarationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         // Extract the type declaration
         val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
@@ -41,7 +41,7 @@ class RecursiveTypeDeclarationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         // Extract the type declaration
         val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
@@ -79,7 +79,7 @@ class RecursiveTypeDeclarationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         // This test just verifies typechecking succeeds
         // The actual printing is verified manually

@@ -59,13 +59,15 @@ class EffectHandler {
     
     /**
      * Execute an effect call by finding the appropriate handler
+     *
+     * Now uses FunkTruffleFunction exclusively (100% Truffle execution)
      */
     fun executeEffectCall(
-        effectName: String, 
-        operationName: String, 
+        effectName: String,
+        operationName: String,
         arguments: FunkValue,
         context: MutableMap<String, FunkValue>,
-        interpreter: FunkInterpreter
+        interpreter: FunkInterpreter  // Kept for backward compatibility, but not used
     ): FunkValue {
         // COMPREHENSIVE HANDLER RESOLUTION
         // 1. Check context first (for nested handlers)
@@ -77,63 +79,48 @@ class EffectHandler {
                 "No handlers available for effect call: $effectName.$operationName. " +
                 "Available context keys: ${context.keys}, Handler stack size: ${handlerStack.size}"
             )
-        
+
         val handlers = handlersRecord.fields
         val handler = handlers[effectName]
             ?: throw RuntimeException("No handler found for effect: $effectName")
-        
+
         if (handler !is FunkRecord) {
             throw RuntimeException("Handler for $effectName is not a record: $handler")
         }
-        
+
         val operation = handler.fields[operationName]
             ?: throw RuntimeException("Operation $operationName not found in handler for $effectName")
-        
-        if (operation !is SimpleFunkFunction && operation !is NativeFunkFunction) {
-            throw RuntimeException("Operation $operationName in handler for $effectName is not a function: $operation")
-        }
-        
+
         // Execute the handler operation
+        println("DEBUG EffectHandler: operation type = ${operation::class.simpleName}")
+        println("DEBUG EffectHandler: arguments type = ${arguments::class.simpleName}")
+        if (arguments is FunkRecord) {
+            println("DEBUG EffectHandler: arguments fields = ${arguments.fields.keys}, types = ${arguments.fields.mapValues { it.value::class.simpleName }}")
+        }
+
         return when (operation) {
             is NativeFunkFunction -> {
-                // Native functions handle their own argument processing
-                val argsMap = when (arguments) {
-                    is FunkRecord -> arguments.fields
-                    else -> throw RuntimeException("Native function expects record arguments, got: ${arguments::class.simpleName}")
+                // Native functions expect the FunkRecord as args[0]
+                if (arguments !is FunkRecord) {
+                    throw RuntimeException("Native function expects record arguments, got: ${arguments::class.simpleName}")
                 }
-                operation.call(argsMap.values.toList())
+                // Pass the record as a single argument
+                println("DEBUG EffectHandler: Calling native function with record argument")
+                operation.call(listOf(arguments))
             }
-            is SimpleFunkFunction -> {
-                // Regular Funk functions use the interpreter's call mechanism
-                // CRITICAL: Ensure handler operations have access to current handlers AND Delimited
-                val handlerContext = context.toMutableMap()
-
-                // Make sure handler operations can access the same handlers that are currently active
-                val activeHandlers = (context["__handlers"] as? FunkRecord) ?: getCurrentHandlers()
-                if (activeHandlers != null) {
-                    // Inject Delimited from the function's closure if available
-                    val handlersWithDelimited = activeHandlers.fields.toMutableMap()
-                    if (!handlersWithDelimited.containsKey("Continuation") && operation.closure.containsKey("Delimited")) {
-                        // Handler's closure has Delimited - make it available as Continuation handler
-                        handlersWithDelimited["Continuation"] = operation.closure["Delimited"]!!
-                    }
-                    handlerContext["__handlers"] = FunkRecord(handlersWithDelimited)
-                }
-
-                // CRITICAL: Also make sure Delimited is directly available in context
-                // Check BOTH closure and execution context for Delimited
-                val delimited = operation.closure["Delimited"] ?: context["Delimited"]
-                if (delimited != null) {
-                    handlerContext["Delimited"] = delimited
-                }
-
-                if (arguments is FunkRecord) {
-                    interpreter.callFunctionWithRecord(operation, arguments, handlerContext)
-                } else {
-                    interpreter.callFunction(operation, listOf(arguments), handlerContext)
-                }
+            is FunkTruffleFunction -> {
+                // Truffle functions are called directly via their CallTarget
+                // All context is managed by Truffle frames
+                println("DEBUG EffectHandler: Calling Truffle function via CallTarget")
+                // Pass closure variables along with arguments
+                operation.callTarget.call(arguments, operation.closureVariables) as FunkValue
             }
-            else -> throw RuntimeException("Unknown function type: ${operation::class.simpleName}")
+            else -> {
+                throw RuntimeException(
+                    "Operation $operationName in handler for $effectName must be a Truffle function or native function. " +
+                    "Got: ${operation::class.simpleName}"
+                )
+            }
         }
     }
     

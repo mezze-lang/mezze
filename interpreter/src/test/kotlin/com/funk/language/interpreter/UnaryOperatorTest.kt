@@ -11,18 +11,17 @@ class UnaryOperatorTest {
 
     private val parser = FunkParser()
     private val typeChecker = TypeChecker()
-    private val interpreter = FunkInterpreter()
 
     private fun parseTypeCheckAndRun(source: String): Map<String, FunkValue> {
         val program = parser.parse(source)
-        val typedProgram = try {
+        val typeCheckResult = try {
             typeChecker.typeCheck(program)
         } catch (e: TypeCheckError) {
             // If type checking fails, try to run with the untyped program
             // This maintains compatibility with interpreter tests
-            program
+            com.funk.language.ast.TypeCheckResult(program, emptyMap())
         }
-        val (_, context) = interpreter.executeWithContext(typedProgram)
+        val (_, context) = FunkTestHelper.executeWithContext(typeCheckResult.program, typeCheckResult.monomorphicInstances)
         return context
     }
 

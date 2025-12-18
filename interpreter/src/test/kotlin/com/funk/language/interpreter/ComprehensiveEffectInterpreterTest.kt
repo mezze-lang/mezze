@@ -35,9 +35,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should execute successfully and return unit
         assertTrue(result is FunkRecord)
@@ -60,9 +60,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return an integer between 1 and 100
         assertTrue(result is FunkInt)
@@ -100,9 +100,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return an integer
         assertTrue(result is FunkInt)
@@ -139,9 +139,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return 15
         assertTrue(result is FunkInt)
@@ -163,9 +163,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should execute successfully and return unit
         assertTrue(result is FunkRecord)
@@ -187,9 +187,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return 42
         assertTrue(result is FunkInt)
@@ -213,9 +213,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return "test"
         assertTrue(result is FunkString)
@@ -250,9 +250,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return the string
         assertTrue(result is FunkString)
@@ -281,9 +281,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return 42
         assertTrue(result is FunkInt)
@@ -317,9 +317,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return (3 + 4) * 2 = 14
         assertTrue(result is FunkInt)
@@ -353,9 +353,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should execute successfully (result might be FunkNull for unit type)
         assertTrue(result is FunkRecord || result is FunkNull)
@@ -369,9 +369,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return an integer between 1 and 10
         assertTrue(result is FunkInt)
@@ -406,9 +406,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should execute successfully
         assertTrue(result is FunkString)
@@ -432,9 +432,9 @@ class ComprehensiveEffectInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should execute successfully even with empty parameters
         assertTrue(result is FunkRecord)

@@ -13,7 +13,7 @@ class DebugUnificationTest {
     fun `debug simple add function`() {
         val code = "let add = {x, y} -> x + y"
         val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val typedAst = typeChecker.typeCheck(ast).program
         
         val addBinding = typedAst.items.first() as LetBinding
         val functionType = addBinding.inferredType as FunkType.FunctionType

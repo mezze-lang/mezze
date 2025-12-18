@@ -23,7 +23,7 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         val typeDecls = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>()
         val letBindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
@@ -55,7 +55,7 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         val typeDecls = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>()
         val letBindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
@@ -82,7 +82,7 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         val typeDecls = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>()
         val letBindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
@@ -110,7 +110,7 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         val typeDecls = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>()
         val letBindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
@@ -135,7 +135,7 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         val typeDecls = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>()
         val letBindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
@@ -164,7 +164,7 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         val typeDecls = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>()
         assertEquals(2, typeDecls.size)
@@ -193,7 +193,7 @@ class NamedTypePrintingTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
 
         val typeDecls = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>()
         val letBindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()

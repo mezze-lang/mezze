@@ -19,7 +19,7 @@ class EffectTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val effectDecl = typedProgram.items[0] as EffectDeclaration
         assertNotNull(effectDecl.inferredType)
@@ -39,7 +39,7 @@ class EffectTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val implDecl = typedProgram.items[1] as ImplDeclaration
         assertNotNull(implDecl.inferredType)
@@ -60,7 +60,7 @@ class EffectTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[1] as LetBinding
         assertNotNull(letBinding.inferredType)
@@ -78,7 +78,7 @@ class EffectTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         assertNotNull(letBinding.inferredType)
@@ -103,7 +103,7 @@ class EffectTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[2] as LetBinding
         assertNotNull(letBinding.inferredType)
@@ -136,7 +136,7 @@ class EffectTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val resultBinding = typedProgram.items[3] as LetBinding
         assertNotNull(resultBinding.inferredType)
@@ -165,7 +165,7 @@ class EffectTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[2] as LetBinding
         assertNotNull(letBinding.inferredType)
@@ -204,7 +204,7 @@ class EffectTypeCheckerTest {
         val program = parser.parse(source)
         // This should not throw a type error
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
     
@@ -225,7 +225,7 @@ class EffectTypeCheckerTest {
         val program = parser.parse(source)
         
         // Type check should succeed - effect inference may handle this automatically
-        val checkedProgram = typeChecker.typeCheck(program)
+        val checkedProgram = typeChecker.typeCheck(program).program
         assertNotNull(checkedProgram)
     }
     
@@ -239,7 +239,7 @@ class EffectTypeCheckerTest {
 
         // This should throw an error because UndefinedEffect is not defined
         val exception = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
 
         assertTrue(exception.message?.contains("UndefinedEffect") == true)

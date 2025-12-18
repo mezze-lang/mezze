@@ -20,7 +20,7 @@ class LetDestructuringTest {
 
     private fun parseAndTypeCheck(code: String): Program {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     // ========== TOP-LEVEL RECORD DESTRUCTURING ==========

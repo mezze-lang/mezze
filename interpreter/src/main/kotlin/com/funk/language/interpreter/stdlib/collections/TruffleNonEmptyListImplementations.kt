@@ -8,9 +8,28 @@ import com.funk.language.interpreter.*
  */
 object TruffleNonEmptyListImplementations {
 
+    /**
+     * Helper to call any function type (Truffle or Native)
+     * Replaces the need for interpreter.callFunctionWithRecord
+     */
+    private fun callFunction(f: FunkValue, arg: FunkValue, operationName: String): FunkValue {
+        return when (f) {
+            is FunkTruffleFunction -> {
+                // Call Truffle function directly via CallTarget
+                // Pass closure variables along with arguments
+                f.callTarget.call(arg, f.closureVariables) as FunkValue
+            }
+            is NativeFunkFunction -> {
+                // Call native function
+                f.implementation(listOf(arg))
+            }
+            else -> {
+                throw NativeFunctionException(operationName, "Expected Truffle function or native function, got: ${f::class.simpleName}")
+            }
+        }
+    }
+
     fun registerAll(context: MutableMap<String, FunkValue>) {
-        // Try to get interpreter from context (stored with special key)
-        val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
         // Basic non-empty list operations
         context["__native_nel_singleton"] = NativeFunkFunction("__native_nel_singleton") { args ->
             val record = args.firstOrNull() as? FunkRecord
@@ -129,19 +148,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_map", "expects 'f' function")
 
             val mapped = xs.elements.map { elem ->
-                when (f) {
-                    is SimpleFunkFunction -> {
-                        if (interpreter == null) throw NativeFunctionException("Function callbacks", "Interpreter not available for SimpleFunkFunction")
-                        val arg = if (f.parameters.size == 1) {
-                            FunkRecord(mapOf(f.parameters[0] to elem))
-                        } else {
-                            FunkRecord(emptyMap())
-                        }
-                        interpreter.callFunctionWithRecord(f, arg, context)
-                    }
-                    is NativeFunkFunction -> f.implementation(listOf(elem))
-                    else -> throw NativeFunctionException("__native_nel_map", "f must be a function")
-                }
+                callFunction(f, elem, "__native_nel_map")
             }
             FunkNonEmptyList(mapped)
         }
@@ -155,19 +162,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_flat_map", "expects 'f' function")
 
             val mapped = xs.elements.flatMap { elem ->
-                val result = when (f) {
-                    is SimpleFunkFunction -> {
-                        if (interpreter == null) throw NativeFunctionException("Function callbacks", "Interpreter not available for SimpleFunkFunction")
-                        val arg = if (f.parameters.size == 1) {
-                            FunkRecord(mapOf(f.parameters[0] to elem))
-                        } else {
-                            FunkRecord(emptyMap())
-                        }
-                        interpreter.callFunctionWithRecord(f, arg, context)
-                    }
-                    is NativeFunkFunction -> f.implementation(listOf(elem))
-                    else -> throw NativeFunctionException("__native_nel_flat_map", "f must be a function")
-                }
+                val result = callFunction(f, elem, "__native_nel_flat_map")
                 (result as? FunkNonEmptyList)?.elements
                     ?: throw NativeFunctionException("__native_nel_flat_map", "f must return NonEmptyList")
             }
@@ -187,19 +182,7 @@ object TruffleNonEmptyListImplementations {
             var acc = init
             for (elem in xs.elements) {
                 val callArg = FunkRecord(mapOf("acc" to acc, "x" to elem))
-                acc = when (f) {
-                    is SimpleFunkFunction -> {
-                        if (interpreter == null) throw NativeFunctionException("Function callbacks", "Interpreter not available for SimpleFunkFunction")
-                        val arg = if (f.parameters.size == 1) {
-                            FunkRecord(mapOf(f.parameters[0] to elem))
-                        } else {
-                            FunkRecord(emptyMap())
-                        }
-                        interpreter.callFunctionWithRecord(f, arg, context)
-                    }
-                    is NativeFunkFunction -> f.implementation(listOf(callArg))
-                    else -> throw NativeFunctionException("__native_nel_fold_left", "f must be a function")
-                }
+                acc = callFunction(f, callArg, "__native_nel_fold_left")
             }
             acc
         }
@@ -217,19 +200,7 @@ object TruffleNonEmptyListImplementations {
             var acc = init
             for (elem in xs.elements.reversed()) {
                 val callArg = FunkRecord(mapOf("x" to elem, "acc" to acc))
-                acc = when (f) {
-                    is SimpleFunkFunction -> {
-                        if (interpreter == null) throw NativeFunctionException("Function callbacks", "Interpreter not available for SimpleFunkFunction")
-                        val arg = if (f.parameters.size == 1) {
-                            FunkRecord(mapOf(f.parameters[0] to elem))
-                        } else {
-                            FunkRecord(emptyMap())
-                        }
-                        interpreter.callFunctionWithRecord(f, arg, context)
-                    }
-                    is NativeFunkFunction -> f.implementation(listOf(callArg))
-                    else -> throw NativeFunctionException("__native_nel_fold_right", "f must be a function")
-                }
+                acc = callFunction(f, callArg, "__native_nel_fold_right")
             }
             acc
         }
@@ -245,14 +216,7 @@ object TruffleNonEmptyListImplementations {
             var acc = xs.elements.first()
             for (elem in xs.elements.drop(1)) {
                 val callArg = FunkRecord(mapOf("acc" to acc, "x" to elem))
-                acc = when (f) {
-                    is SimpleFunkFunction -> {
-                        if (interpreter == null) throw NativeFunctionException("Function callbacks", "Interpreter not available for SimpleFunkFunction")
-                        interpreter.callFunctionWithRecord(f, callArg, context)
-                    }
-                    is NativeFunkFunction -> f.implementation(listOf(callArg))
-                    else -> throw NativeFunctionException("__native_nel_reduce", "f must be a function")
-                }
+                acc = callFunction(f, callArg, "__native_nel_reduce")
             }
             acc
         }
@@ -267,19 +231,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_any", "expects 'p' predicate")
 
             val result = xs.elements.any { elem ->
-                val res = when (p) {
-                    is SimpleFunkFunction -> {
-                        if (interpreter == null) throw NativeFunctionException("Predicate callbacks", "Interpreter not available for SimpleFunkFunction")
-                        val arg = if (p.parameters.size == 1) {
-                            FunkRecord(mapOf(p.parameters[0] to elem))
-                        } else {
-                            FunkRecord(emptyMap())
-                        }
-                        interpreter.callFunctionWithRecord(p, arg, context)
-                    }
-                    is NativeFunkFunction -> p.implementation(listOf(elem))
-                    else -> throw NativeFunctionException("__native_nel_any", "p must be a function")
-                }
+                val res = callFunction(p, elem, "__native_nel_any")
                 (res as? FunkBool)?.value
                     ?: throw NativeFunctionException("__native_nel_any", "predicate must return Boolean")
             }
@@ -295,19 +247,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_all", "expects 'p' predicate")
 
             val result = xs.elements.all { elem ->
-                val res = when (p) {
-                    is SimpleFunkFunction -> {
-                        if (interpreter == null) throw NativeFunctionException("Predicate callbacks", "Interpreter not available for SimpleFunkFunction")
-                        val arg = if (p.parameters.size == 1) {
-                            FunkRecord(mapOf(p.parameters[0] to elem))
-                        } else {
-                            FunkRecord(emptyMap())
-                        }
-                        interpreter.callFunctionWithRecord(p, arg, context)
-                    }
-                    is NativeFunkFunction -> p.implementation(listOf(elem))
-                    else -> throw NativeFunctionException("__native_nel_all", "p must be a function")
-                }
+                val res = callFunction(p, elem, "__native_nel_all")
                 (res as? FunkBool)?.value
                     ?: throw NativeFunctionException("__native_nel_all", "predicate must return Boolean")
             }
@@ -431,14 +371,7 @@ object TruffleNonEmptyListImplementations {
 
             val sorted = xs.elements.sortedWith { a, b ->
                 val callArg = FunkRecord(mapOf("l" to a, "r" to b))
-                val result = when (cmp) {
-                    is SimpleFunkFunction -> {
-                        if (interpreter == null) throw NativeFunctionException("Comparator callbacks", "Interpreter not available for SimpleFunkFunction")
-                        interpreter.callFunctionWithRecord(cmp, callArg, context)
-                    }
-                    is NativeFunkFunction -> cmp.implementation(listOf(callArg))
-                    else -> throw NativeFunctionException("__native_nel_sort_by", "cmp must be a function")
-                }
+                val result = callFunction(cmp, callArg, "__native_nel_sort_by")
                 (result as? FunkInt)?.value?.toInt()
                     ?: throw NativeFunctionException("__native_nel_sort_by", "comparator must return Int")
             }

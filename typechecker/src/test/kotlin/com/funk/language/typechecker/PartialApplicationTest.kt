@@ -11,7 +11,7 @@ class PartialApplicationTest {
 
     private fun parseAndTypeCheck(source: String): com.funk.language.ast.Program {
         val program = parser.parse(source)
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     @Test

@@ -1,6 +1,6 @@
 plugins {
     kotlin("jvm")
-    kotlin("kapt") // Re-enable for Truffle annotation processing
+    kotlin("kapt")
 }
 
 // Enable annotation processing
@@ -17,7 +17,7 @@ dependencies {
 
     // Truffle API (Language, Node, etc.) - guest language API - match native-image version
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
-    kapt("org.graalvm.truffle:truffle-dsl-processor:24.2.2") // Re-enable for annotation processing
+    kapt("org.graalvm.truffle:truffle-dsl-processor:24.2.2")
 
     // Kotlin Coroutines for async support
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")

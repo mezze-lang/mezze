@@ -10,7 +10,6 @@ import com.funk.language.interpreter.FunkString
 import com.funk.language.interpreter.FunkNull
 import com.funk.language.interpreter.FunkInt
 import com.funk.language.interpreter.EffectHandler
-import com.funk.language.interpreter.SimpleFunkFunction
 import com.funk.language.interpreter.NativeFunkFunction
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -106,27 +105,19 @@ class PerformNode(
     private val handlers: Map<String, FunkValue>,
     @field:Child private var expressionNode: FunkNode
 ) : FunkNode() {
-    
+
     override fun execute(frame: VirtualFrame): FunkValue {
-        val effectHandler = getEffectHandler()
+        val effectHandler = getContext().effectHandler
         val handlersRecord = FunkRecord(handlers)
-        
+
         // Push handlers onto stack
         effectHandler.pushHandlers(handlersRecord)
-        
+
         try {
             return expressionNode.execute(frame)
         } finally {
             // Always pop handlers, even if exception occurs
             effectHandler.popHandlers()
-        }
-    }
-    
-    private fun getEffectHandler(): EffectHandler {
-        // Access through context - this would be optimized in a real implementation
-        return getContext().let { context ->
-            // For now, create a new effect handler - in practice this would be cached
-            EffectHandler()
         }
     }
 }

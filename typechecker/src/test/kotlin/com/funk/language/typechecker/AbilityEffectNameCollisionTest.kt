@@ -23,7 +23,7 @@ class AbilityEffectNameCollisionTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code))
+    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code)).program
 
     // ========== BUG #8a: ABILITIES CANNOT BE USED AS VALUES ==========
 

@@ -19,7 +19,7 @@ class ArithmeticWithFunctionsTest {
     private fun typeCheckShouldFail(code: String): String {
         val program = parser.parse(code)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         return exception.message ?: ""
     }
@@ -128,7 +128,7 @@ class ArithmeticWithFunctionsTest {
 
         val program = parser.parse(code)
         // Should not throw
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program).program
     }
 
     @Test
@@ -140,7 +140,7 @@ class ArithmeticWithFunctionsTest {
 
         val program = parser.parse(code)
         // Should not throw
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program).program
     }
 
     @Test
@@ -153,6 +153,6 @@ class ArithmeticWithFunctionsTest {
 
         val program = parser.parse(code)
         // Should not throw
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program).program
     }
 }

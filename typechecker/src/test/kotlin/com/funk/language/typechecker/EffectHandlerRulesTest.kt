@@ -46,7 +46,7 @@ class EffectHandlerRulesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Handler with exact type match should pass")
     }
@@ -77,7 +77,7 @@ class EffectHandlerRulesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Handler adding effects should pass")
     }
@@ -107,7 +107,7 @@ class EffectHandlerRulesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Handler implementing all methods should pass")
     }
@@ -139,7 +139,7 @@ class EffectHandlerRulesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Handler using other effects should pass")
     }
@@ -174,7 +174,7 @@ class EffectHandlerRulesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Partial effect handling should pass")
     }
@@ -214,7 +214,7 @@ class EffectHandlerRulesTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Handler adding multiple effects should pass")
     }
@@ -240,7 +240,7 @@ class EffectHandlerRulesTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -257,7 +257,7 @@ class EffectHandlerRulesTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Console handles Log effect, but pureFunction doesn't use Log") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -288,7 +288,7 @@ class EffectHandlerRulesTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: PostgresDB handles Database, not Log") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -315,7 +315,7 @@ class EffectHandlerRulesTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Can't apply two handlers to the same single effect usage") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 }

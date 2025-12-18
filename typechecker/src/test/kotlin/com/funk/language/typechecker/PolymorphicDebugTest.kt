@@ -36,7 +36,7 @@ class PolymorphicDebugTest {
             val ast = parser.parse(code)
             
             val typeChecker = TypeChecker()
-            val result = typeChecker.typeCheck(ast)
+            val result = typeChecker.typeCheck(ast).program
             val typeAliases = typeChecker.getTypeAliases()
             
             for (item in result.items) {

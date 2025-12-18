@@ -25,7 +25,7 @@ class ConstraintPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Should succeed - the polymorphic add function should propagate NumAdd constraint
         assertNotNull(typedProgram)
@@ -53,7 +53,7 @@ class ConstraintPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Should succeed - both Int and String have Eq ability
         assertNotNull(typedProgram)
@@ -79,7 +79,7 @@ class ConstraintPropagationTest {
             // Should fail - Bool doesn't have NumAdd ability
             assertThrows(TypeCheckError::class.java) {
                 val program = parser.parse(code)
-                typeChecker.typeCheck(program)
+                typeChecker.typeCheck(program).program
             }
         } finally {
             System.clearProperty("funk.typecheck.strict")
@@ -94,7 +94,7 @@ class ConstraintPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Should succeed - requires both NumAdd and Eq abilities, Int has both
         assertNotNull(typedProgram)
@@ -113,7 +113,7 @@ class ConstraintPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Should succeed - addAndCheck requires both NumAdd and Eq abilities
         assertNotNull(typedProgram)
@@ -135,7 +135,7 @@ class ConstraintPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Should succeed - identity should preserve the constraints of add
         assertNotNull(typedProgram)
@@ -156,7 +156,7 @@ class ConstraintPropagationTest {
         
         // For now, allow either success or failure - the record type system needs improvement
         try {
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
             assertNotNull(typedProgram)
             
             // If it succeeds, check the result type
@@ -178,7 +178,7 @@ class ConstraintPropagationTest {
         """.trimIndent()
         
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Should succeed - applyBinary should propagate constraints from f
         assertNotNull(typedProgram)

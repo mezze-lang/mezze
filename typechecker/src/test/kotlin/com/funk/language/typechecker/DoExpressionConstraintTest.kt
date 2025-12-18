@@ -33,7 +33,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val directType = getVariableType(typedProgram, "direct")
         val withDoType = getVariableType(typedProgram, "withDo")
@@ -72,7 +72,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val concatType = getVariableType(typedProgram, "concat") as FunkType.FunctionType
         val paramType = concatType.paramType as FunkType.RecordType
@@ -97,7 +97,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val complexType = getVariableType(typedProgram, "complex") as FunkType.FunctionType
         val paramType = complexType.paramType as FunkType.RecordType
@@ -123,7 +123,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val nestedType = getVariableType(typedProgram, "nested") as FunkType.FunctionType
         val paramType = nestedType.paramType as FunkType.RecordType
@@ -144,7 +144,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val compareType = getVariableType(typedProgram, "compare") as FunkType.FunctionType
         val paramType = compareType.paramType as FunkType.RecordType
@@ -166,7 +166,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val directType = getVariableType(typedProgram, "direct") as FunkType.FunctionType
         val withDoType = getVariableType(typedProgram, "withDo") as FunkType.FunctionType
@@ -194,7 +194,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val mixedType = getVariableType(typedProgram, "mixed") as FunkType.FunctionType
         val paramType = mixedType.paramType as FunkType.RecordType
@@ -225,7 +225,7 @@ class DoExpressionConstraintTest {
 
         // This should fail because val has type Bool, but there's no impl Show Bool
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(ast)
+            typeChecker.typeCheck(ast).program
         }
     }
 
@@ -243,7 +243,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val noiseAddType = getVariableType(typedProgram, "noiseAdd") as FunkType.FunctionType
 
@@ -267,7 +267,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val polyShowType = getVariableType(typedProgram, "polyShow") as FunkType.FunctionType
 
@@ -288,7 +288,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val testType = getVariableType(typedProgram, "test") as FunkType.FunctionType
         val returnType = testType.returnType as FunkType.RecordType
@@ -310,7 +310,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val testType = getVariableType(typedProgram, "test") as FunkType.FunctionType
         val returnType = testType.returnType as FunkType.RecordType
@@ -336,7 +336,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val testType = getVariableType(typedProgram, "test") as FunkType.FunctionType
 
@@ -361,7 +361,7 @@ class DoExpressionConstraintTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val noiseAddType = getVariableType(typedProgram, "noiseAdd") as FunkType.FunctionType
 

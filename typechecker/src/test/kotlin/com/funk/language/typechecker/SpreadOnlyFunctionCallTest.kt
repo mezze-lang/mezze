@@ -26,7 +26,7 @@ class SpreadOnlyFunctionCallTest {
 
     private fun parseAndTypeCheck(code: String): Program {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     // ========== INVALID: Spread-only in function calls ==========

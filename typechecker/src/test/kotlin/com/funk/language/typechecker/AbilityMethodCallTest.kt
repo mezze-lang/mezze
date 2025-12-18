@@ -27,7 +27,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Find the let binding
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
@@ -54,7 +54,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -74,7 +74,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -102,7 +102,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "showResult" } as LetBinding?
         assertNotNull(letBinding)
@@ -138,7 +138,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val test1 = typedProgram.items.find { it is LetBinding && it.variableName == "test1" } as LetBinding?
         val test2 = typedProgram.items.find { it is LetBinding && it.variableName == "test2" } as LetBinding?
@@ -163,7 +163,7 @@ class AbilityMethodCallTest {
 
         // Abilities cannot be used as values - should throw TypeCheckError
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -180,7 +180,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -212,7 +212,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -240,7 +240,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -264,7 +264,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -291,7 +291,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -326,7 +326,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "showIfEqual" } as LetBinding?
         assertNotNull(letBinding)
@@ -359,7 +359,7 @@ class AbilityMethodCallTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -390,7 +390,7 @@ class AbilityMethodCallTest {
         // 2. f + 10.5 requires f to be Float (10.5 is Float)
         // 3. No impl Parse Float exists
         assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 }

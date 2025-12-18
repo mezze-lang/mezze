@@ -35,7 +35,7 @@ class UndefinedEffectTest {
                 return
             }
 
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
 
             // If we get here, the typechecker is being too permissive
             println("⚠️  WARNING: TypeChecker allowed undefined effect 'UndefinedEffect'")
@@ -70,7 +70,7 @@ class UndefinedEffectTest {
                 return
             }
 
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
 
             val context = typeChecker.getContext()
             val noiseAddType = context["noise_add"]

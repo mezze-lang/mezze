@@ -46,7 +46,7 @@ class ModuleTypePreservationFixtureTest {
         """.trimIndent()
 
         val program = parser.parse(importingSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
         // Get the final context
         val context = typeChecker.getContext()
@@ -97,7 +97,7 @@ class ModuleTypePreservationFixtureTest {
         """.trimIndent()
 
         val program = parser.parse(importingSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
         // Get the final context
         val context = typeChecker.getContext()
@@ -151,7 +151,7 @@ class ModuleTypePreservationFixtureTest {
         val program = parser.parse(importingSource)
 
         // This should not throw any type errors
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
         val context = typeChecker.getContext()
 
@@ -185,7 +185,7 @@ class ModuleTypePreservationFixtureTest {
         """.trimIndent()
 
         val program = parser.parse(importingSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
         val context = typeChecker.getContext()
 

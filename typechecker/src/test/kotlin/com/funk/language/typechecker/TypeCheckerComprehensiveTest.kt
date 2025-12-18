@@ -32,7 +32,8 @@ class TypeCheckerComprehensiveTest {
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val typeChecker = TypeChecker()
         val program = parser.parse(source)
-        return typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program)
+        return result.program
     }
     
     @TestFactory

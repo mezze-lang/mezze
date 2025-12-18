@@ -39,8 +39,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         assertEquals(1L, (result as FunkFrac).numerator)
@@ -56,8 +56,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // Note: Auto-reduction happens during typechecking, not in interpreter
@@ -74,8 +74,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // Note: Auto-reduction happens during typechecking, not in interpreter
@@ -92,8 +92,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         assertEquals(-3L, (result as FunkFrac).numerator)
@@ -109,8 +109,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // Note: Fractions are not automatically reduced in interpreter
@@ -133,8 +133,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 1/4 + 2/4 = 3/4
@@ -153,8 +153,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 1/2 + 1/3 = 3/6 + 2/6 = 5/6
@@ -173,8 +173,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 3/4 + (-1/4) = 2/4 = 1/2
@@ -191,8 +191,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 1/4 + 1/4 + 1/4 + 1/4 = 4/4 = 1/1
@@ -215,8 +215,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 3/4 - 1/4 = 2/4 = 1/2
@@ -235,8 +235,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 2/3 - 1/2 = 4/6 - 3/6 = 1/6
@@ -255,8 +255,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 1/4 - 3/4 = -2/4 = -1/2
@@ -279,8 +279,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 2/3 * 3/4 = 6/12 = 1/2
@@ -299,8 +299,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 1/2 * (-3/4) = -3/8
@@ -317,8 +317,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 1/2 * 2/3 * 3/4 = 6/24 = 1/4
@@ -341,8 +341,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 1/2 / 1/4 = 1/2 * 4/1 = 4/2 = 2/1
@@ -361,8 +361,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 1/4 / 1/2 = 1/4 * 2/1 = 2/4 = 1/2
@@ -381,8 +381,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 3/4 / (-1/2) = 3/4 * (-2/1) = -6/4 = -3/2
@@ -413,8 +413,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // (1/2 + 1/4) * 2/3 - 1/2 / 1/4
@@ -440,8 +440,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // (1/2 + 1/3) - (1/2 * 1/3) + (1/3 / 1/6)
@@ -469,8 +469,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkBool)
         assertTrue((result as FunkBool).value)
@@ -487,8 +487,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkBool)
         assertFalse((result as FunkBool).value)
@@ -505,8 +505,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkBool)
         assertTrue((result as FunkBool).value)
@@ -531,8 +531,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // Zero fractions are reduced to 0//1
@@ -553,8 +553,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         assertEquals(1L, (result as FunkFrac).numerator)
@@ -572,8 +572,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         assertEquals(0L, (result as FunkFrac).numerator)
@@ -592,8 +592,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkInt)
         assertEquals(1L, (result as FunkInt).value)
@@ -609,8 +609,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // 1/2 + 3/4 = 2/4 + 3/4 = 5/4
@@ -631,8 +631,8 @@ class FracInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkFrac)
         // x = 1/2 + 1/4 = 3/4

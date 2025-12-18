@@ -23,13 +23,13 @@ class StringInterpolationTypeCheckerTest {
 
     private fun assertTypeChecks(source: String) {
         val program = parser.parse(source)
-        assertDoesNotThrow { typeChecker.typeCheck(program) }
+        assertDoesNotThrow { typeChecker.typeCheck(program).program }
     }
 
     private fun assertTypeCheckFails(source: String, expectedError: String? = null) {
         val program = parser.parse(source)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         if (expectedError != null) {
             assertTrue(

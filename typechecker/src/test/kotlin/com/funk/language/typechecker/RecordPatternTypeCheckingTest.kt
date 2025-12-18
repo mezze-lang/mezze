@@ -17,7 +17,7 @@ class RecordPatternTypeCheckingTest {
 
     private fun parseAndTypeCheck(code: String): Program {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     // ========== Basic Record Pattern Matching ==========

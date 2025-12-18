@@ -23,6 +23,7 @@ import com.funk.language.interpreter.stdlib.effects.ContinuationImplementations
 import com.funk.language.interpreter.stdlib.conversion.TruffleConversionImplementations
 import com.funk.language.interpreter.stdlib.io.TruffleIOImplementations
 import com.funk.language.interpreter.stdlib.system.TruffleSystemImplementations
+import com.funk.language.interpreter.stdlib.logic.TruffleLogicImplementations
 
 
 /**
@@ -71,6 +72,9 @@ object TruffleNativeImplementations {
         TimeImplementations.registerAll(context)
         EnvironmentImplementations.registerAll(context)
         ContinuationImplementations.registerAll(context, null)  // interpreter will be set up later
+
+        // Register logic implementations (boolean operations, comparisons)
+        TruffleLogicImplementations.registerAll(context)
 
         // Register legacy implementations (for backward compatibility)
         TruffleConversionImplementations.registerAll(context)

@@ -24,15 +24,15 @@ class PolymorphicEffectsInterpreterTest {
 
     private fun execute(code: String): FunkValue? {
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
-        val (result, _) = interpreter.executeWithContext(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val (result, _) = FunkTestHelper.executeWithContext(typeCheckResult.program, typeCheckResult.monomorphicInstances)
         return result
     }
 
     private fun executeWithContext(code: String): Map<String, FunkValue> {
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
-        val (_, context) = interpreter.executeWithContext(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val (_, context) = FunkTestHelper.executeWithContext(typeCheckResult.program, typeCheckResult.monomorphicInstances)
         return context
     }
 

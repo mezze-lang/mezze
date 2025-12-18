@@ -9,12 +9,11 @@ class VariantInterpreterTest {
 
     private val parser = FunkParser()
     private val typeChecker = TypeChecker()
-    private val interpreter = FunkInterpreter()
 
     private fun parseTypeCheckAndRun(source: String): Map<String, FunkValue> {
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val (_, context) = interpreter.executeWithContext(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val (_, context) = FunkTestHelper.executeWithContext(typeCheckResult.program, typeCheckResult.monomorphicInstances)
         return context
     }
 

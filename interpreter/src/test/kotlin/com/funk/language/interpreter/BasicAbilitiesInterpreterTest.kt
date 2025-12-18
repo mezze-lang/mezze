@@ -25,8 +25,8 @@ class BasicAbilitiesInterpreterTest {
         val source = "42"
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkInt)
         assertEquals(42L, (result as FunkInt).value)
@@ -37,8 +37,8 @@ class BasicAbilitiesInterpreterTest {
         val source = "\"hello\""
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkString)
         assertEquals("hello", (result as FunkString).value)
@@ -52,8 +52,8 @@ class BasicAbilitiesInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkInt)
         assertEquals(42L, (result as FunkInt).value)
@@ -68,9 +68,9 @@ class BasicAbilitiesInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("42", (result as FunkString).value)
@@ -83,8 +83,9 @@ class BasicAbilitiesInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is FunkInt)
         assertEquals(8L, (result as FunkInt).value)
@@ -98,8 +99,9 @@ class BasicAbilitiesInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is FunkInt)
         assertEquals(10L, (result as FunkInt).value)
@@ -113,8 +115,8 @@ class BasicAbilitiesInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkString)
         assertEquals("Alice", (result as FunkString).value)
@@ -130,8 +132,9 @@ class BasicAbilitiesInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is FunkInt)
         assertEquals(30L, (result as FunkInt).value)
@@ -144,8 +147,8 @@ class BasicAbilitiesInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkString)
         assertEquals("yes", (result as FunkString).value)
@@ -160,8 +163,8 @@ class BasicAbilitiesInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkString)
         assertEquals("Hello World", (result as FunkString).value)

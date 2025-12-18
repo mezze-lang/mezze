@@ -12,7 +12,7 @@ class PipeOperatorTypeCheckerTest {
     private fun parseAndTypeCheck(source: String): Program {
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     @Test

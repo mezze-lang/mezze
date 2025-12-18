@@ -32,7 +32,7 @@ let z = x + y
         val program = parser.parse(source)
 
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
 
         assertNotNull(error.sourceLocation, "TypeCheckError should have sourceLocation")
@@ -51,7 +51,7 @@ let y = x + unknown_var
         val program = parser.parse(source)
 
         val error = assertThrows(TypeCheckError::class.java) {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
 
         assertNotNull(error.sourceLocation, "TypeCheckError should have sourceLocation for undefined variable")
@@ -69,7 +69,7 @@ let z = x + y
         val program = parser.parse(source)
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             val prettyPrinted = ErrorPrettyPrinter.prettyPrint(e, source, "test.funk")
@@ -92,7 +92,7 @@ let z = x + y
         val program = parser.parse(source)
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             // The error message should include location info
@@ -117,7 +117,7 @@ let e = a + "string"
         val program = parser.parse(source)
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             assertNotNull(e.sourceLocation, "Error should have source location")
@@ -136,7 +136,7 @@ let z = x + y
         val program = parser.parse(source)
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             // The error should be a constraint violation (NumAdd ability)
@@ -159,7 +159,7 @@ let g = 7
         val program = parser.parse(source)
 
         try {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
             fail("Should have thrown TypeCheckError")
         } catch (e: TypeCheckError) {
             val prettyPrinted = ErrorPrettyPrinter.prettyPrint(e, source, "test.funk")
@@ -182,7 +182,7 @@ let z = x + y
         val program = parser.parse(source)
 
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 }

@@ -26,7 +26,7 @@ class BasicEffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // The useDatabase function should be the last item (index 2: Log, Database, useDatabase)
         val useDatabaseDecl = typedProgram.items[2] as LetBinding
@@ -55,7 +55,7 @@ class BasicEffectPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // The logSomething function should be at index 1
         val logFunctionDecl = typedProgram.items[1] as LetBinding

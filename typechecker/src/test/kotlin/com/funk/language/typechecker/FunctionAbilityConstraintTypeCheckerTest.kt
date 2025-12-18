@@ -19,7 +19,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(1, typedProgram.items.size)
         val item = typedProgram.items[0]
@@ -49,7 +49,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(2, typedProgram.items.size)
         
@@ -75,7 +75,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(2, typedProgram.items.size)
         
@@ -109,7 +109,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(3, typedProgram.items.size)
         
@@ -142,7 +142,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(2, typedProgram.items.size)
         
@@ -175,7 +175,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(2, typedProgram.items.size)
         
@@ -206,7 +206,7 @@ class FunctionAbilityConstraintTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(2, typedProgram.items.size)
         

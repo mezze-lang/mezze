@@ -27,7 +27,7 @@ class DebugEffectTest {
             println("Item $index: $item")
         }
         
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // The logSomething function should be at index 1
         val logFunctionDecl = typedProgram.items[1] as LetBinding

@@ -1,8 +1,8 @@
 package com.funk.language.interpreter.stdlib
 
 import com.funk.language.interpreter.FunkInt
-import com.funk.language.interpreter.FunkInterpreter
 import com.funk.language.interpreter.FunkString
+import com.funk.language.interpreter.FunkTestHelper
 import com.funk.language.parser.FunkParser
 import com.funk.language.typechecker.TypeChecker
 import org.junit.jupiter.api.Test
@@ -14,21 +14,21 @@ class IntModuleTest {
 
     private val parser = FunkParser()
     private val typeChecker = TypeChecker()
-    private lateinit var interpreter: FunkInterpreter
 
     @BeforeEach
     fun setup() {
-        interpreter = FunkInterpreter()
         // Set project root for module resolution
         System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
+        // Clear module cache to ensure clean state between tests
+        com.funk.language.typechecker.ModuleResolver.clearCache()
     }
 
     private fun parseTypeCheckAndRun(source: String): Map<String, com.funk.language.interpreter.FunkValue> {
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
         val projectRoot = Paths.get(System.getProperty("funk.project.root", "."))
-        interpreter.execute(typedProgram, projectRoot)
-        return interpreter.getLastExecutionContext()
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
+        return FunkTestHelper.getLastExecutionContext()
     }
 
     @Test

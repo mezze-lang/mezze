@@ -21,7 +21,7 @@ class BuiltinTypesTest {
         
         // Should not throw an exception if Option type is available
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
     
@@ -36,7 +36,7 @@ class BuiltinTypesTest {
         
         // Should not throw an exception if List type is available
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
     
@@ -51,7 +51,7 @@ class BuiltinTypesTest {
         
         // Should not throw an exception if Result type is available
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
     
@@ -66,7 +66,7 @@ class BuiltinTypesTest {
         
         // Should not throw an exception if Ordering type is available
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 }

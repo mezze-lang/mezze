@@ -13,7 +13,7 @@ class AnnotationTypeCheckingTest {
         val parser = FunkParser()
         val ast = parser.parse(code)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(ast)
+        return typeChecker.typeCheck(ast).program
     }
 
     private fun getVariableType(program: Program, varName: String): FunkType? {

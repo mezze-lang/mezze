@@ -250,11 +250,116 @@ class VariablePatternNode(private val variableName: String) : PatternNode() {
  */
 @NodeInfo(shortName = "wildcard-pattern")
 class WildcardPatternNode : PatternNode() {
-    
+
     override fun matchesInt(frame: VirtualFrame, value: FunkInt): Boolean = true
     override fun matchesString(frame: VirtualFrame, value: FunkString): Boolean = true
     override fun matchesBoolean(frame: VirtualFrame, value: FunkBool): Boolean = true
     override fun matchesVariant(frame: VirtualFrame, value: FunkVariant): Boolean = true
     override fun matchesRecord(frame: VirtualFrame, value: FunkRecord): Boolean = true
     override fun matchesGeneric(frame: VirtualFrame, value: FunkValue): Boolean = true
+}
+
+/**
+ * Constructor pattern node (matches variant constructors with optional nested patterns)
+ * Examples:
+ * - Some { val } -> matches Some variant, extracts `val` field
+ * - None -> matches None variant (no fields)
+ * - Ok { value } -> matches Ok variant, extracts `value` field
+ */
+@NodeInfo(shortName = "constructor-pattern")
+class ConstructorPatternNode(
+    private val constructorName: String,
+    private val recordPattern: com.funk.language.ast.RecordPattern?,
+    private val variableSlots: Map<String, Int>  // Pre-allocated slots for pattern variables
+) : PatternNode() {
+
+    override fun matchesInt(frame: VirtualFrame, value: FunkInt): Boolean = false
+    override fun matchesString(frame: VirtualFrame, value: FunkString): Boolean = false
+    override fun matchesBoolean(frame: VirtualFrame, value: FunkBool): Boolean = false
+    override fun matchesRecord(frame: VirtualFrame, value: FunkRecord): Boolean = false
+    override fun matchesGeneric(frame: VirtualFrame, value: FunkValue): Boolean {
+        return if (value is FunkVariant) {
+            matchesVariant(frame, value)
+        } else {
+            false
+        }
+    }
+
+    override fun matchesVariant(frame: VirtualFrame, value: FunkVariant): Boolean {
+        // Check if constructor name matches
+        if (value.constructor != constructorName) {
+            return false
+        }
+
+        // If there's no record pattern, just check constructor name
+        if (recordPattern == null) {
+            return true
+        }
+
+        // If there's a record pattern, extract and bind fields from the variant's value
+        val variantValue = value.value
+        if (variantValue !is FunkRecord) {
+            // Pattern expects a record but variant has no record value
+            return false
+        }
+
+        // Extract bindings from the pattern and bind them to frame slots
+        val bindings = collectRecordPatternBindings(recordPattern)
+        for ((fieldPath, varName) in bindings) {
+            var currentValue: FunkValue = variantValue
+
+            // Navigate the field path (for nested patterns)
+            for (fieldName in fieldPath) {
+                if (currentValue !is FunkRecord) {
+                    return false  // Pattern doesn't match structure
+                }
+                currentValue = currentValue.fields[fieldName] ?: return false
+            }
+
+            // Bind the value to the variable slot
+            val slot = variableSlots[varName] ?: return false
+            frame.setObject(slot, currentValue)
+        }
+
+        return true
+    }
+
+    /**
+     * Helper to collect bindings from a record pattern
+     * (Duplicates logic from ASTToTruffleConverter for pattern matching)
+     */
+    private fun collectRecordPatternBindings(
+        pattern: com.funk.language.ast.RecordPattern,
+        prefix: List<String> = emptyList()
+    ): List<Pair<List<String>, String>> {
+        val bindings = mutableListOf<Pair<List<String>, String>>()
+
+        for (entry in pattern.entries) {
+            val fieldPath = prefix + entry.name
+
+            when (val entryPattern = entry.pattern) {
+                null -> {
+                    // Shorthand: {val} means {val = val}
+                    bindings.add(fieldPath to entry.name)
+                }
+                is com.funk.language.ast.VariablePattern -> {
+                    // Renamed: {val = x}
+                    bindings.add(fieldPath to entryPattern.name)
+                }
+                is com.funk.language.ast.RecordPattern -> {
+                    // Nested: {inner = {value}}
+                    bindings.addAll(collectRecordPatternBindings(entryPattern, fieldPath))
+                }
+                is com.funk.language.ast.WildcardPattern -> {
+                    // {val = _} - ignore this field
+                }
+                else -> {
+                    // Unsupported pattern - fail to match
+                    return emptyList()
+                }
+            }
+        }
+
+        return bindings
+    }
 }

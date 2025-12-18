@@ -17,7 +17,7 @@ class StringInterpolationDebugTest {
 
         try {
             val program = parser.parse(source)
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
             println("SUCCESS: String interpolation lambda type checking passed")
 
             val concatBinding = typedProgram.items.find { it is com.funk.language.ast.LetBinding && it.variableName == "concat" } as com.funk.language.ast.LetBinding
@@ -44,7 +44,7 @@ class StringInterpolationDebugTest {
 
         try {
             val program = parser.parse(source)
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
             println("SUCCESS: Multiple expression string interpolation type checking passed")
 
             val formatBinding = typedProgram.items.find { it is com.funk.language.ast.LetBinding && it.variableName == "format" } as com.funk.language.ast.LetBinding

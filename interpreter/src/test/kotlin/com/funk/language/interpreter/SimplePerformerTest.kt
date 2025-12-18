@@ -39,10 +39,10 @@ class SimplePerformerTest {
         val program = parser.parse(source)
         
         println("Type checking...")
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         
         println("Executing...")
-        val result = interpreter.execute(typedProgram)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type

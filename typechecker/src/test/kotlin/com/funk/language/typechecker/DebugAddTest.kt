@@ -12,7 +12,7 @@ class DebugAddTest {
         val program = parser.parse(source)
         
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
         val typeAliases = typeChecker.getTypeAliases()
         
         println("Program: $source")

@@ -25,7 +25,7 @@ class AddFunctionDebugTest {
         println("Parsed program: $program")
         
         val typeChecker = TypeChecker()
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
         val typeAliases = typeChecker.getTypeAliases()
         
         println("Source: $source")

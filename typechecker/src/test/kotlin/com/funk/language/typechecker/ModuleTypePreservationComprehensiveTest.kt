@@ -65,7 +65,7 @@ class ModuleTypePreservationComprehensiveTest {
 
         println("\n📝 Testing module imports...")
         val program = parser.parse(mainSource)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
         val context = typeChecker.getContext()
 
@@ -152,7 +152,7 @@ class ModuleTypePreservationComprehensiveTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program, tempDir)
+        val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
         val context = typeChecker.getContext()
         val myValueType = context["my_value"]

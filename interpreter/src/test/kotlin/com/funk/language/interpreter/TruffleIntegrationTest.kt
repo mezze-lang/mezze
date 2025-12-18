@@ -108,8 +108,8 @@ class TruffleIntegrationTest {
         val parser = FunkParser()
         val ast = parser.parse(sourceCode)
         val typeChecker = TypeChecker()
-        val typedProgram = typeChecker.typeCheck(ast)
-        
+        val typedProgram = typeChecker.typeCheck(ast).program
+
         // Convert to Truffle nodes
         val converter = ASTToTruffleConverter()
         val truffleNode = converter.convertProgram(typedProgram)

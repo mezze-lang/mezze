@@ -21,7 +21,7 @@ class PatternValidationTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code))
+    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code)).program
 
     // ========== UNIT VARIANT PAYLOAD DESTRUCTURING (BUG FIX) ==========
 

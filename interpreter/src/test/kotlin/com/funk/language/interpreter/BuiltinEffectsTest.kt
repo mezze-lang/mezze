@@ -44,7 +44,7 @@ class BuiltinEffectsTest {
         assertDoesNotThrow { typeChecker.typeCheck(program) }
         
         // This should execute and print to console
-        val result = interpreter.execute(program)
+        val result = FunkTestHelper.execute(program)
         // Result should be unit (empty record)
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size)
@@ -72,7 +72,7 @@ class BuiltinEffectsTest {
         val program = parser.parse(source)
         assertDoesNotThrow { typeChecker.typeCheck(program) }
         
-        val result = interpreter.execute(program)
+        val result = FunkTestHelper.execute(program)
         assertTrue(result is FunkInt)
         val randomValue = (result as FunkInt).value
         assertTrue(randomValue >= 1 && randomValue <= 10, "Random value $randomValue should be between 1 and 10")
@@ -119,7 +119,7 @@ class BuiltinEffectsTest {
         // but it demonstrates the concept
         try {
             typeChecker.typeCheck(program)
-            val result = interpreter.execute(program)
+            val result = FunkTestHelper.execute(program)
             assertTrue(result is FunkInt)
             val randomValue = (result as FunkInt).value
             assertTrue(randomValue >= 1 && randomValue <= 100)
@@ -152,7 +152,7 @@ class BuiltinEffectsTest {
         val program = parser.parse(source)
         
         // This test verifies that our parameter extraction improvement works
-        // The impl should create a SimpleFunkFunction with parameters ["first", "second", "third"]
+        // The impl should create a FunkTruffleFunction with parameters ["first", "second", "third"]
         // instead of the old simplified ["args"]
         
         assertDoesNotThrow { parser.parse(source) }
@@ -174,11 +174,11 @@ class BuiltinEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         
         // This should execute without throwing an exception
         assertDoesNotThrow { 
-            val result = interpreter.execute(typedProgram)
+            val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
             // Native function should execute successfully
             // The important thing is that it doesn't throw an exception and produces some result
             assertTrue(result is FunkRecord || result is FunkNull)

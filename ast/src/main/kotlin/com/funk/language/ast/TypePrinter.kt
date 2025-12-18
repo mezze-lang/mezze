@@ -139,8 +139,15 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
         }
 
         // Add ability constraints after parameter type but before arrow
-        val abilityConstraints = if (type.abilityConstraints.isNotEmpty()) {
-            " with " + type.abilityConstraints.joinToString(", ") { constraint ->
+        // Filter out constraints that are already satisfied by concrete types
+        val filteredConstraints = type.abilityConstraints.filter { constraint ->
+            // Keep constraint if any of its type args is a type variable
+            // Remove constraint if all type args are concrete types that already have the ability
+            constraint.typeArgs.any { arg -> arg is FunkType.VarType }
+        }
+
+        val abilityConstraints = if (filteredConstraints.isNotEmpty()) {
+            " with " + filteredConstraints.joinToString(", ") { constraint ->
                 val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
                 if (typeArgs.isNotEmpty()) {
                     "${constraint.abilityName} $typeArgs"
@@ -451,8 +458,15 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
 
         // Add ability constraints after parameter type but before arrow
-        val abilityConstraints = if (type.abilityConstraints.isNotEmpty()) {
-            " with " + type.abilityConstraints.joinToString(", ") { constraint ->
+        // Filter out constraints that are already satisfied by concrete types
+        val filteredConstraints = type.abilityConstraints.filter { constraint ->
+            // Keep constraint if any of its type args is a type variable
+            // Remove constraint if all type args are concrete types that already have the ability
+            constraint.typeArgs.any { arg -> arg is FunkType.VarType }
+        }
+
+        val abilityConstraints = if (filteredConstraints.isNotEmpty()) {
+            " with " + filteredConstraints.joinToString(", ") { constraint ->
                 val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
                 if (typeArgs.isNotEmpty()) {
                     "${constraint.abilityName} $typeArgs"

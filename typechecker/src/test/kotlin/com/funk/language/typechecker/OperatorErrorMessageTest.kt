@@ -29,7 +29,7 @@ class OperatorErrorMessageTest {
     private fun getErrorMessage(source: String): String? {
         return try {
             val program = parser.parse(source)
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
             null  // No error
         } catch (e: TypeCheckError) {
             e.message
@@ -261,7 +261,7 @@ class OperatorErrorMessageTest {
         val explicitProgram = parser.parse(explicitCode)
 
         assertDoesNotThrow {
-            typeChecker.typeCheck(operatorProgram)
+            typeChecker.typeCheck(operatorProgram).program
         }
 
         // Clear cache for second check

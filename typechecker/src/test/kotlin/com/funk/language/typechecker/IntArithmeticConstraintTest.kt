@@ -15,7 +15,7 @@ class IntArithmeticConstraintTest {
     fun `test int add constraint propagation`() {
         val code = "let test = {left, right} -> left + right"
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -31,7 +31,7 @@ class IntArithmeticConstraintTest {
     fun `test int subtract constraint propagation`() {
         val code = "let test = {left, right} -> left - right"
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -47,7 +47,7 @@ class IntArithmeticConstraintTest {
     fun `test int multiply constraint propagation`() {
         val code = "let test = {left, right} -> left * right"
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -63,7 +63,7 @@ class IntArithmeticConstraintTest {
     fun `test int divide constraint propagation`() {
         val code = "let test = {left, right} -> left / right"
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -79,7 +79,7 @@ class IntArithmeticConstraintTest {
     fun `test int modulo constraint propagation`() {
         val code = "let test = {left, right} -> left % right"
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -95,7 +95,7 @@ class IntArithmeticConstraintTest {
     fun `test nested int arithmetic constraint propagation`() {
         val code = "let test = {a, b, c} -> (a * b) + c"
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -112,7 +112,7 @@ class IntArithmeticConstraintTest {
     fun `test int arithmetic constraint propagation with result`() {
         val code = "let test = {x, y} -> x + y"
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType

@@ -29,7 +29,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(2, typedProgram.items.size)
         
@@ -62,7 +62,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(3, typedProgram.items.size)
         
@@ -93,7 +93,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(3, typedProgram.items.size)
         
@@ -130,7 +130,7 @@ class AbilityDependencyTypeCheckerTest {
         
         // The type checker should detect and reject circular dependencies
         assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -146,7 +146,7 @@ class AbilityDependencyTypeCheckerTest {
         
         // The type checker should detect and reject self-dependencies
         assertFailsWith<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -168,7 +168,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(3, typedProgram.items.size)
         
@@ -206,7 +206,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(4, typedProgram.items.size)
         
@@ -246,7 +246,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(5, typedProgram.items.size)
         
@@ -274,7 +274,7 @@ class AbilityDependencyTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         assertEquals(1, typedProgram.items.size)
         

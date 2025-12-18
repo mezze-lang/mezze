@@ -36,7 +36,7 @@ class BidirectionalAbilityInferenceTest {
 
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
 
             // Should type check successfully
             assertNotNull(typedProgram)
@@ -76,7 +76,7 @@ class BidirectionalAbilityInferenceTest {
         // This should fail because there's no Parse Float implementation
         assertThrows<TypeCheckError> {
             val program = parser.parse(code)
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -107,7 +107,7 @@ class BidirectionalAbilityInferenceTest {
         // The second usage (10.4 + x) tries to use x as Float, which should fail
         assertThrows<TypeCheckError> {
             val program = parser.parse(code)
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -134,7 +134,7 @@ class BidirectionalAbilityInferenceTest {
 
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
 
             // Should type check successfully - x is Int, used as Int twice
             assertNotNull(typedProgram)
@@ -162,7 +162,7 @@ class BidirectionalAbilityInferenceTest {
 
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
 
             // Should type check successfully - x is Float
             assertNotNull(typedProgram)
@@ -189,7 +189,7 @@ class BidirectionalAbilityInferenceTest {
 
         try {
             val program = parser.parse(code)
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
 
             // Should type check successfully - x remains polymorphic
             assertNotNull(typedProgram)

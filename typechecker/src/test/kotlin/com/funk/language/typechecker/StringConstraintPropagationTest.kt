@@ -15,7 +15,7 @@ class StringConstraintPropagationTest {
     fun `test string interpolation constraint propagation`() {
         val code = "let test = {a, b} -> \"$(a)$(b)\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
 
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -31,7 +31,7 @@ class StringConstraintPropagationTest {
     fun `test string with literal constraint propagation`() {
         val code = "let test = {value} -> \"$(value)\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
 
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -46,7 +46,7 @@ class StringConstraintPropagationTest {
     fun `test string prefix constraint propagation`() {
         val code = "let test = {value} -> \"prefix: $(value)\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
 
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -61,7 +61,7 @@ class StringConstraintPropagationTest {
     fun `test string suffix constraint propagation`() {
         val code = "let test = {value} -> \"$(value) suffix\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
 
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -76,7 +76,7 @@ class StringConstraintPropagationTest {
     fun `test string multiple interpolation constraint propagation`() {
         val code = "let test = {a, b, c} -> \"$(a)$(b)$(c)\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
 
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -93,7 +93,7 @@ class StringConstraintPropagationTest {
     fun `test string with literal comparison constraint propagation`() {
         val code = "let test = {value} -> \"$(value)test\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
 
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType
@@ -108,7 +108,7 @@ class StringConstraintPropagationTest {
     fun `test nested string interpolation constraint propagation`() {
         val code = "let test = {x, y} -> \"$(x)$(y)end\""
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program, Paths.get("."))
+        val typedProgram = typeChecker.typeCheck(program, Paths.get(".")).program
 
         val letBinding = typedProgram.items[0] as LetBinding
         val functionType = letBinding.inferredType as FunkType.FunctionType

@@ -21,7 +21,7 @@ class ArrayListTypeCheckerTest {
     fun `test empty ArrayList type inference`() {
         val source = "let empty = []"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as FunkType.ArrayType
@@ -34,7 +34,7 @@ class ArrayListTypeCheckerTest {
     fun `test integer ArrayList type inference`() {
         val source = "let numbers = [1, 2, 3, 4, 5]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as FunkType.ArrayType
@@ -47,7 +47,7 @@ class ArrayListTypeCheckerTest {
     fun `test string ArrayList type inference`() {
         val source = """let names = ["Alice", "Bob", "Charlie"]"""
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as FunkType.ArrayType
@@ -60,7 +60,7 @@ class ArrayListTypeCheckerTest {
     fun `test boolean ArrayList type inference`() {
         val source = "let flags = [true, false, true]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as FunkType.ArrayType
@@ -73,7 +73,7 @@ class ArrayListTypeCheckerTest {
     fun `test nested ArrayList type inference`() {
         val source = "let matrix = [[1, 2], [3, 4]]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as FunkType.ArrayType
@@ -89,7 +89,7 @@ class ArrayListTypeCheckerTest {
         // Let's test basic inference instead
         val source = "let numbers = [1, 2, 3]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType
@@ -106,7 +106,7 @@ class ArrayListTypeCheckerTest {
         // Test basic nested inference instead of explicit annotations
         val source = "let matrix = [[1, 2], [3, 4]]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType
@@ -127,7 +127,7 @@ class ArrayListTypeCheckerTest {
 
         // Arrays must have homogeneous element types - this should fail
         assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
     
@@ -135,7 +135,7 @@ class ArrayListTypeCheckerTest {
     fun `test ArrayList with expression elements`() {
         val source = "let computed = [1 + 2, 3 * 4, 5 - 1]"
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as FunkType.ArrayType
@@ -153,7 +153,7 @@ class ArrayListTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Check that array literals have proper types
         val bindings = typedProgram.items.filterIsInstance<LetBinding>()
@@ -186,7 +186,7 @@ class ArrayListTypeCheckerTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val bindings = typedProgram.items.filterIsInstance<LetBinding>()
         
@@ -220,7 +220,7 @@ class ArrayListTypeCheckerTest {
         // This should either type check successfully or fail with a reasonable error
         // The test verifies that the basic structure is sound
         try {
-            val typedProgram = typeChecker.typeCheck(program)
+            val typedProgram = typeChecker.typeCheck(program).program
             // If it doesn't throw, the basic structure is working
             assertTrue(true)
         } catch (e: TypeCheckError) {

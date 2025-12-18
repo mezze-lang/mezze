@@ -36,8 +36,8 @@ class NewEffectSystemTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         // Should execute without error and return unit
         assertTrue(result is FunkRecord)
@@ -60,8 +60,8 @@ class NewEffectSystemTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkRecord)
     }
@@ -91,8 +91,8 @@ class NewEffectSystemTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkRecord)
     }
@@ -130,8 +130,8 @@ class NewEffectSystemTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkString)
         assertEquals("App result for TestApp", (result as FunkString).value)

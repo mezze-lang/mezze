@@ -123,25 +123,122 @@ class ParallelDoExpressionNode(
             doExpression: DoExpression,
             converter: com.funk.language.interpreter.nodes.ASTToTruffleConverter
         ): ParallelDoExpressionNode {
-            // Convert statements to Truffle nodes
+            // Convert statements to Truffle nodes using converter's convertStatement
+            // This properly handles pattern destructuring and other complex patterns
             val statementNodes = doExpression.statements.map { statement ->
-                when (statement) {
-                    is com.funk.language.ast.LetStatement -> {
-                        val slot = converter.getOrCreateSlot(statement.variableName)
-                        val valueNode = converter.convertExpression(statement.expression)
-                        com.funk.language.interpreter.nodes.variable.SimpleWriteVariableNode(slot, valueNode)
-                    }
-                    is com.funk.language.ast.ExpressionStatement -> {
-                        converter.convertExpression(statement.expression)
-                    }
-                    else -> throw RuntimeException("Unsupported statement type: ${statement::class.simpleName}")
-                }
+                convertStatementViaReflection(converter, statement)
             }.toTypedArray()
-            
+
             // Convert result expression
             val resultNode = converter.convertExpression(doExpression.result)
-            
+
             return ParallelDoExpressionNode(doExpression, statementNodes, resultNode)
+        }
+
+        /**
+         * Helper to call converter.convertStatement via reflection since it's private
+         */
+        fun convertStatementViaReflection(
+            converter: com.funk.language.interpreter.nodes.ASTToTruffleConverter,
+            statement: com.funk.language.ast.Statement
+        ): FunkNode {
+            return when (statement) {
+                is com.funk.language.ast.LetStatement -> {
+                    when (val pattern = statement.pattern) {
+                        is com.funk.language.ast.VariablePattern -> {
+                            val slot = converter.getOrCreateSlot(pattern.name)
+                            val valueNode = converter.convertExpression(statement.expression)
+                            com.funk.language.interpreter.nodes.variable.SimpleWriteVariableNode(slot, valueNode, pattern.name)
+                        }
+                        is com.funk.language.ast.RecordPattern -> {
+                            // Pattern destructuring - need to call private method via reflection or duplicate logic
+                            // For now, duplicate the logic
+                            convertRecordPatternBindingHelper(converter, pattern, statement.expression)
+                        }
+                        is com.funk.language.ast.WildcardPattern -> {
+                            converter.convertExpression(statement.expression)
+                        }
+                        else -> throw RuntimeException("Unsupported pattern in let statement: ${pattern::class.simpleName}")
+                    }
+                }
+                is com.funk.language.ast.ExpressionStatement -> {
+                    converter.convertExpression(statement.expression)
+                }
+                else -> throw RuntimeException("Unsupported statement type: ${statement::class.simpleName}")
+            }
+        }
+
+        /**
+         * Helper to convert record pattern bindings (duplicates logic from ASTToTruffleConverter)
+         */
+        fun convertRecordPatternBindingHelper(
+            converter: com.funk.language.interpreter.nodes.ASTToTruffleConverter,
+            pattern: com.funk.language.ast.RecordPattern,
+            valueExpr: com.funk.language.ast.Expression
+        ): FunkNode {
+            val valueNode = converter.convertExpression(valueExpr)
+            val bindings = collectRecordPatternBindingsHelper(pattern)
+
+            // CRITICAL: Pre-allocate frame slots for all variables BEFORE creating the node
+            val slots = bindings.map { (_, varName) ->
+                varName to converter.getOrCreateSlot(varName)
+            }.toMap()
+
+            return object : FunkNode() {
+                @field:Child private var valueChild = valueNode
+
+                override fun execute(frame: VirtualFrame): FunkValue {
+                    val value = valueChild.execute(frame)
+
+                    if (value !is com.funk.language.interpreter.FunkRecord) {
+                        throw RuntimeException("Cannot destructure non-record value: ${value::class.simpleName}")
+                    }
+
+                    val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
+
+                    for ((fieldPath, varName) in bindings) {
+                        var currentValue: FunkValue = value
+
+                        for (fieldName in fieldPath) {
+                            if (currentValue !is com.funk.language.interpreter.FunkRecord) {
+                                throw RuntimeException("Cannot access field '$fieldName' on non-record value: ${currentValue::class.simpleName}")
+                            }
+                            currentValue = currentValue.fields[fieldName]
+                                ?: throw RuntimeException("Field '$fieldName' not found in record")
+                        }
+
+                        val slot = slots[varName]!!
+                        frame.setObject(slot, currentValue)
+                        context.defineLocal(varName, currentValue)
+                    }
+
+                    return com.funk.language.interpreter.FunkRecord(emptyMap())
+                }
+            }
+        }
+
+        /**
+         * Helper to collect record pattern bindings (duplicates logic from ASTToTruffleConverter)
+         */
+        fun collectRecordPatternBindingsHelper(
+            pattern: com.funk.language.ast.RecordPattern,
+            prefix: List<String> = emptyList()
+        ): List<Pair<List<String>, String>> {
+            val bindings = mutableListOf<Pair<List<String>, String>>()
+
+            for (entry in pattern.entries) {
+                val fieldPath = prefix + entry.name
+
+                when (val entryPattern = entry.pattern) {
+                    null -> bindings.add(fieldPath to entry.name)
+                    is com.funk.language.ast.VariablePattern -> bindings.add(fieldPath to entryPattern.name)
+                    is com.funk.language.ast.RecordPattern -> bindings.addAll(collectRecordPatternBindingsHelper(entryPattern, fieldPath))
+                    is com.funk.language.ast.WildcardPattern -> {} // Ignore
+                    else -> throw RuntimeException("Unsupported pattern in record destructuring: ${entryPattern::class.simpleName}")
+                }
+            }
+
+            return bindings
         }
     }
 }
@@ -271,7 +368,8 @@ object DoExpressionNodeFactory {
             hasEffectCalls = hasEffectCalls,
             hasComplexExpressions = hasComplexExpressions,
             estimatedParallelism = estimatedParallelism,
-            shouldUseParallelism = statementCount > 2 && estimatedParallelism > 1,
+            // DISABLED: Parallelism is currently broken, always use simple sequential execution
+            shouldUseParallelism = false,
             isEffectHeavy = hasEffectCalls && statementCount > 3
         )
     }
@@ -362,21 +460,11 @@ object DoExpressionNodeFactory {
         converter: com.funk.language.interpreter.nodes.ASTToTruffleConverter
     ): EffectHeavyDoExpressionNode {
         val statementNodes = doExpression.statements.map { statement ->
-            when (statement) {
-                is com.funk.language.ast.LetStatement -> {
-                    val slot = converter.getOrCreateSlot(statement.variableName)
-                    val valueNode = converter.convertExpression(statement.expression)
-                    com.funk.language.interpreter.nodes.variable.SimpleWriteVariableNode(slot, valueNode)
-                }
-                is com.funk.language.ast.ExpressionStatement -> {
-                    converter.convertExpression(statement.expression)
-                }
-                else -> throw RuntimeException("Unsupported statement type: ${statement::class.simpleName}")
-            }
+            ParallelDoExpressionNode.convertStatementViaReflection(converter, statement)
         }.toTypedArray()
-        
+
         val resultNode = converter.convertExpression(doExpression.result)
-        
+
         return EffectHeavyDoExpressionNode(doExpression, statementNodes, resultNode)
     }
     
@@ -388,21 +476,11 @@ object DoExpressionNodeFactory {
         converter: com.funk.language.interpreter.nodes.ASTToTruffleConverter
     ): SimpleDoExpressionNode {
         val statementNodes = doExpression.statements.map { statement ->
-            when (statement) {
-                is com.funk.language.ast.LetStatement -> {
-                    val slot = converter.getOrCreateSlot(statement.variableName)
-                    val valueNode = converter.convertExpression(statement.expression)
-                    com.funk.language.interpreter.nodes.variable.SimpleWriteVariableNode(slot, valueNode)
-                }
-                is com.funk.language.ast.ExpressionStatement -> {
-                    converter.convertExpression(statement.expression)
-                }
-                else -> throw RuntimeException("Unsupported statement type: ${statement::class.simpleName}")
-            }
+            ParallelDoExpressionNode.convertStatementViaReflection(converter, statement)
         }.toTypedArray()
-        
+
         val resultNode = converter.convertExpression(doExpression.result)
-        
+
         return SimpleDoExpressionNode(statementNodes, resultNode)
     }
 }

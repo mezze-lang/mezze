@@ -41,7 +41,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Simple ability implementation should pass")
     }
@@ -65,7 +65,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Ability with type parameter specialization should pass")
     }
@@ -92,7 +92,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Multi-parameter ability should pass")
     }
@@ -116,7 +116,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Ability with record types should pass")
     }
@@ -150,7 +150,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Ability with dependencies should pass")
     }
@@ -178,7 +178,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Ability with associated types for generic containers should pass")
     }
@@ -205,7 +205,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Missing 'neq' operation") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -229,7 +229,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Extra 'compare' operation not in ability") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -254,7 +254,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Type variable 'a must be replaced with Int") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -277,7 +277,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Both parameters must be String") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -300,7 +300,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Return type should be String, not Int") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -325,7 +325,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Field name is 'message' not 'text'") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -348,7 +348,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Two type parameters, but only one target type") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -373,7 +373,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Record field name is 'val' not 'value'") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -399,7 +399,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Float does not implement Show") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -427,7 +427,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: Float implements Show")
     }
@@ -450,7 +450,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Float does not implement Show") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -485,7 +485,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: Int implements both Show and Eq")
     }
@@ -519,7 +519,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: String does not implement Eq") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -546,7 +546,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: Constraint propagates through nested calls")
     }
@@ -574,7 +574,7 @@ class AbilityValidationTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: Float, Int does not implement Convert") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -599,7 +599,7 @@ class AbilityValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: Int implements Show")
     }

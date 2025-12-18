@@ -48,8 +48,8 @@ class RobustEffectSystemTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type
@@ -78,8 +78,8 @@ class RobustEffectSystemTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type
@@ -281,8 +281,8 @@ class RobustEffectSystemTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type
@@ -304,8 +304,8 @@ class RobustEffectSystemTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        val result = interpreter.execute(typedProgram)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkString)
         assertEquals("localhost:5432:SELECT 1", (result as FunkString).value)

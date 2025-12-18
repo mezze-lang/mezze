@@ -28,13 +28,13 @@ class ComprehensivePatternMatchingTest {
 
     private fun parseAndTypeCheck(code: String): Program {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     private fun assertTypeCheckFails(code: String, expectedMessagePart: String? = null): TypeCheckError {
         val program = parser.parse(code)
         val error = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         if (expectedMessagePart != null) {
             assertContains(error.message ?: "", expectedMessagePart, ignoreCase = true)

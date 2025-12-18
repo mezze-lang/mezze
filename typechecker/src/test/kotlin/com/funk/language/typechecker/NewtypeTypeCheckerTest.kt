@@ -24,7 +24,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Simple newtype declaration typechecks")
     }
@@ -39,7 +39,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Public newtype declaration typechecks")
     }
@@ -54,7 +54,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Newtype with record type typechecks")
     }
@@ -71,7 +71,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Newtype with type parameter typechecks")
     }
@@ -86,7 +86,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Newtype with function type typechecks")
     }
@@ -101,7 +101,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Newtype with array type typechecks")
     }
@@ -120,7 +120,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Multiple newtype declarations typecheck")
     }
@@ -135,7 +135,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         assertTrue(exception.message!!.contains("must start with an uppercase letter"))
         println("✅ Constructor naming convention enforced")
@@ -149,7 +149,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         val exception = assertThrows<TypeCheckError> {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         assertTrue(exception.message!!.contains("already used by a built-in ability"))
         println("✅ Constructor collision with built-in ability prevented")
@@ -165,7 +165,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Same name for type and constructor allowed")
     }
@@ -180,7 +180,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Different names for type and constructor allowed")
     }
@@ -198,7 +198,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Newtype constructor works as a function")
     }
@@ -221,7 +221,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Newtype provides type safety")
     }
@@ -238,7 +238,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Newtype with nested types typechecks")
     }
@@ -257,7 +257,7 @@ class NewtypeTypeCheckerTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
         println("✅ Newtype pattern matching typechecks")
     }

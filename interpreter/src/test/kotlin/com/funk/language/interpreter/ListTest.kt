@@ -39,15 +39,12 @@ class ListTest {
             let xs = empty {}
             let check = is_empty { xs = xs }
 
-            let main = {} -> if check then 1 else 0
+            if check then 1 else 0
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(1L, (result as FunkInt).value)
@@ -63,18 +60,14 @@ class ListTest {
             let ys = cons { head = 42, tail = xs }
             let h_opt = head { xs = ys }
 
-            let main = {} -> match h_opt is
+            match h_opt is
                 Some { val } -> val
                 None -> 0
-
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(42L, (result as FunkInt).value)
@@ -92,7 +85,7 @@ class ListTest {
             let check_h2 = { h2 } -> if h2 == 2 then true else false
             let check_empty = { t2 } -> is_empty { xs = t2 }
 
-            let main = {} -> match head { xs = xs } is
+            match head { xs = xs } is
                 Some { val } ->
                     if check_h { h = val } then
                         match tail { xs = xs } is
@@ -115,11 +108,8 @@ class ListTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(1L, (result as FunkInt).value)
@@ -132,17 +122,13 @@ class ListTest {
             use std::collections::list::{empty, cons, length}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
-            let len = length { xs = xs }
 
-            let main = {} -> len
+            length { xs = xs }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(3L, (result as FunkInt).value)
@@ -159,17 +145,13 @@ class ListTest {
             use std::collections::list::{singleton, length}
 
             let xs = singleton { x = 42 }
-            let len = length { xs = xs }
 
-            let main = {} -> len
+            length { xs = xs }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(1L, (result as FunkInt).value)
@@ -184,17 +166,13 @@ class ListTest {
             let xs = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
             let ys = cons { head = 3, tail = cons { head = 4, tail = empty {} } }
             let zs = append { xs = xs, ys = ys }
-            let len = length { xs = zs }
 
-            let main = {} -> len
+            length { xs = zs }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(4L, (result as FunkInt).value)
@@ -216,7 +194,7 @@ class ListTest {
             let check_h1 = { h1 } -> if h1 == 2 then true else false
             let check_h2 = { h2 } -> if h2 == 4 then true else false
 
-            let main = {} -> match head { xs = ys } is
+            match head { xs = ys } is
                 Some { val } ->
                     if check_h1 { h1 = val } then
                         match tail { xs = ys } is
@@ -231,11 +209,8 @@ class ListTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(1L, (result as FunkInt).value)
@@ -249,17 +224,13 @@ class ListTest {
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = cons { head = 4, tail = empty {} } } } }
             let ys = filter { xs = xs, p = { x } -> x > 2 }
-            let len = length { xs = ys }
 
-            let main = {} -> len
+            length { xs = ys }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(2L, (result as FunkInt).value)
@@ -272,17 +243,13 @@ class ListTest {
             use std::collections::list::{empty, cons, fold_left}
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
-            let sum = fold_left { xs = xs, init = 0, f = { acc, x } -> acc + x }
 
-            let main = {} -> sum
+            fold_left { xs = xs, init = 0, f = { acc, x } -> acc + x }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(6L, (result as FunkInt).value)
@@ -301,15 +268,12 @@ class ListTest {
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
             let has_even = any { xs = xs, p = { x } -> x % 2 == 0 }
 
-            let main = {} -> if has_even then 1 else 0
+            if has_even then 1 else 0
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(1L, (result as FunkInt).value)
@@ -324,15 +288,12 @@ class ListTest {
             let xs = cons { head = 2, tail = cons { head = 4, tail = cons { head = 6, tail = empty {} } } }
             let all_even = all { xs = xs, p = { x } -> x % 2 == 0 }
 
-            let main = {} -> if all_even then 1 else 0
+            if all_even then 1 else 0
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(1L, (result as FunkInt).value)
@@ -351,17 +312,14 @@ class ListTest {
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
             let ys = reverse { xs = xs }
 
-            let main = {} -> match head { xs = ys } is
+            match head { xs = ys } is
                 Some { val } -> val
                 None -> 0
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(3L, (result as FunkInt).value)
@@ -380,17 +338,13 @@ class ListTest {
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
             let arr = to_array { xs = xs }
-            let len = length { xs = arr }
 
-            let main = {} -> len
+            length { xs = arr }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(3L, (result as FunkInt).value)
@@ -405,17 +359,13 @@ class ListTest {
 
             let arr = of { x = 1, xs = of { x = 2, xs = of { x = 3, xs = [] } } }
             let xs = from_array { xs = arr }
-            let len = length { xs = xs }
 
-            let main = {} -> len
+            length { xs = xs }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(3L, (result as FunkInt).value)
@@ -432,17 +382,13 @@ class ListTest {
             use std::collections::list::{range, length}
 
             let xs = range { start = 0, end = 10 }
-            let len = length { xs = xs }
 
-            let main = {} -> len
+            length { xs = xs }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(10L, (result as FunkInt).value)
@@ -455,17 +401,13 @@ class ListTest {
             use std::collections::list::{repeat, length}
 
             let xs = repeat { x = 42, n = 5 }
-            let len = length { xs = xs }
 
-            let main = {} -> len
+            length { xs = xs }
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(5L, (result as FunkInt).value)
@@ -483,17 +425,14 @@ class ListTest {
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
             let ys = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
-            let result = xs == ys
+            let eq_result = xs == ys
 
-            let main = {} -> if result then 1 else 0
+            if eq_result then 1 else 0
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(1L, (result as FunkInt).value)
@@ -507,17 +446,14 @@ class ListTest {
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
             let ys = cons { head = 1, tail = cons { head = 3, tail = empty {} } }
-            let result = xs == ys
+            let eq_result = xs == ys
 
-            let main = {} -> if result then 1 else 0
+            if eq_result then 1 else 0
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-        interpreter.execute(typedProgram, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
-        val mainFn = interpreter.getLastExecutionContext()["main"] as? SimpleFunkFunction
-            ?: throw AssertionError("main function not found")
-        val result = interpreter.callFunctionWithRecord(mainFn, FunkRecord(emptyMap()), interpreter.getLastExecutionContext().toMutableMap())
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
         assertEquals(0L, (result as FunkInt).value)

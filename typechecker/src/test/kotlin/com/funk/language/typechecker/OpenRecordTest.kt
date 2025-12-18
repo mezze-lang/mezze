@@ -30,7 +30,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: open records accept extra fields")
     }
@@ -44,7 +44,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: nested open records accept extra fields")
     }
@@ -58,7 +58,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: extra fields can be any type")
     }
@@ -72,7 +72,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: extra fields can be Boolean")
     }
@@ -86,7 +86,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: extra fields can be Float")
     }
@@ -100,7 +100,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: can have multiple extra fields of different types")
     }
@@ -114,7 +114,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: open records accept exact match (no extra fields)")
     }
@@ -130,7 +130,7 @@ class OpenRecordTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: closed records cannot accept extra fields") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -143,7 +143,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: extra fields can be of different types")
     }
@@ -157,7 +157,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: nested record 'a' is open, accepts extra field 'z'")
     }
@@ -173,7 +173,7 @@ class OpenRecordTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: nested record 'b' is closed, cannot accept extra field 'r'") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -186,7 +186,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: deeply nested open records all accept extra fields")
     }
@@ -200,7 +200,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: extra field can be a record")
     }
@@ -218,7 +218,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: multiple open record functions can be used independently")
     }
@@ -232,7 +232,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: record literals can be declared as open")
     }
@@ -246,7 +246,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: open record pattern in lambda accepts extra fields")
     }
@@ -262,7 +262,7 @@ class OpenRecordTest {
         val program = parser.parse(source)
 
         assertThrows<TypeCheckError>("Should fail: closed record pattern cannot accept extra fields") {
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
     }
 
@@ -275,7 +275,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: single field open record pattern")
     }
@@ -289,7 +289,7 @@ class OpenRecordTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         assertNotNull(typedProgram, "Should pass: outer pattern is open, accepts extra field 'c'")
     }

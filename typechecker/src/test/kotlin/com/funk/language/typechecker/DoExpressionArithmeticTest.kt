@@ -19,7 +19,7 @@ class DoExpressionArithmeticTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Find the withDo binding
         val withDoBinding = typedProgram.items.find { 

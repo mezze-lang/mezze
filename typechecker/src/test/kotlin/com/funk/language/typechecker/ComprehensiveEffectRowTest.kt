@@ -30,7 +30,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val programBinding = typedProgram.items[1] as com.funk.language.ast.LetBinding
         val inferredType = programBinding.inferredType
@@ -55,7 +55,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val programBinding = typedProgram.items[1] as com.funk.language.ast.LetBinding
         val inferredType = programBinding.inferredType
@@ -86,7 +86,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val programBinding = typedProgram.items[2] as com.funk.language.ast.LetBinding
         val inferredType = programBinding.inferredType
@@ -118,7 +118,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Check that the program was parsed correctly
         println("DEBUG: typedProgram.items.size = ${typedProgram.items.size}")
@@ -156,7 +156,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Check program has effectful type
         val programBinding = typedProgram.items[2] as com.funk.language.ast.LetBinding
@@ -200,7 +200,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Check program has both effects
         val programBinding = typedProgram.items[3] as com.funk.language.ast.LetBinding
@@ -247,7 +247,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Check program has both effects
         val programBinding = typedProgram.items[4] as com.funk.language.ast.LetBinding
@@ -296,7 +296,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Check program has Log effect
         val programBinding = typedProgram.items[3] as com.funk.language.ast.LetBinding
@@ -355,7 +355,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         // Debug output
         println("DEBUG: typedProgram.items.size = ${typedProgram.items.size}")
@@ -397,7 +397,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val binding = typedProgram.items[0] as com.funk.language.ast.LetBinding
         val inferredType = binding.inferredType
@@ -421,7 +421,7 @@ class ComprehensiveEffectRowTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         
         val binding = typedProgram.items[1] as com.funk.language.ast.LetBinding
         val inferredType = binding.inferredType

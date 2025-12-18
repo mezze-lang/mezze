@@ -17,7 +17,7 @@ class PolymorphicArithmeticMultiparameterTest {
     fun `three parameter function with arithmetic should be polymorphic`() {
         val code = "let complex = {x, y, z} -> x + y"
         val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val typedAst = typeChecker.typeCheck(ast).program
         
         val complexBinding = typedAst.items.first() as LetBinding
         val functionType = complexBinding.inferredType as FunkType.FunctionType
@@ -44,7 +44,7 @@ class PolymorphicArithmeticMultiparameterTest {
     fun `four parameter function with arithmetic should be polymorphic`() {
         val code = "let fourParam = {x, y, z, w} -> x + y"
         val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val typedAst = typeChecker.typeCheck(ast).program
         
         val functionBinding = typedAst.items.first() as LetBinding
         val functionType = functionBinding.inferredType as FunkType.FunctionType
@@ -65,7 +65,7 @@ class PolymorphicArithmeticMultiparameterTest {
     fun `record return with arithmetic should preserve polymorphism`() {
         val code = "let recordResult = {x, y, z} -> {result = x + y, other = z}"
         val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val typedAst = typeChecker.typeCheck(ast).program
         
         val functionBinding = typedAst.items.first() as LetBinding
         val functionType = functionBinding.inferredType as FunkType.FunctionType
@@ -93,7 +93,7 @@ class PolymorphicArithmeticMultiparameterTest {
         """.trimIndent()
         
         val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val typedAst = typeChecker.typeCheck(ast).program
         
         val intResultBinding = typedAst.items[1] as LetBinding
         assertTrue(intResultBinding.inferredType is FunkType.IntType, "intResult should be Int")
@@ -110,7 +110,7 @@ class PolymorphicArithmeticMultiparameterTest {
         """.trimIndent()
         
         val ast = parser.parse(code)
-        val typedAst = typeChecker.typeCheck(ast)
+        val typedAst = typeChecker.typeCheck(ast).program
         
         // Check doMultiple function type
         val doMultipleBinding = typedAst.items[0] as LetBinding

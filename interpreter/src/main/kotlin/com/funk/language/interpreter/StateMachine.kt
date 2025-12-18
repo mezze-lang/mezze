@@ -33,13 +33,13 @@ data class StateMachine(
     val currentState: Int,
     val localVariables: MutableMap<String, FunkValue>,
     val continuations: List<Continuation>,
-    val effectContext: EffectContext,
+    val effectContext: StateMachineEffectContext,
     val executionState: ExecutionState = ExecutionState.RUNNING
 ) {
     companion object {
         fun create(
             localVariables: MutableMap<String, FunkValue> = mutableMapOf(),
-            effectContext: EffectContext = EffectContext()
+            effectContext: StateMachineEffectContext = StateMachineEffectContext()
         ): StateMachine {
             return StateMachine(
                 currentState = 0,
@@ -114,17 +114,19 @@ data class StateMachine(
 }
 
 /**
- * Context for effect handling within a state machine
+ * Context for effect handling within a state machine (legacy)
+ * Note: This is the old state machine effect context. New code should use
+ * com.funk.language.interpreter.effects.EffectContext
  */
-data class EffectContext(
+data class StateMachineEffectContext(
     val handlers: Map<String, FunkRecord> = emptyMap(),
     val currentHandler: FunkRecord? = null
 ) {
-    fun withHandlers(newHandlers: Map<String, FunkRecord>): EffectContext {
+    fun withHandlers(newHandlers: Map<String, FunkRecord>): StateMachineEffectContext {
         return copy(handlers = handlers + newHandlers)
     }
 
-    fun withCurrentHandler(handler: FunkRecord): EffectContext {
+    fun withCurrentHandler(handler: FunkRecord): StateMachineEffectContext {
         return copy(currentHandler = handler)
     }
 }
@@ -193,9 +195,11 @@ data class ResultContinuation(
 }
 
 /**
- * Represents a suspension point in the execution
+ * Represents a suspension point in the execution (legacy)
+ * Note: This is the old state machine suspension point. New code should use
+ * com.funk.language.interpreter.effects.SuspensionPoint
  */
-data class SuspensionPoint(
+data class StateMachineSuspensionPoint(
     val stateMachine: StateMachine,
     val asyncOperation: CompletableFuture<FunkValue>
 ) {
@@ -219,7 +223,7 @@ data class SuspensionPoint(
  */
 class StateMachineExecutor {
     private val activeMachines = mutableMapOf<String, StateMachine>()
-    private val suspendedMachines = mutableMapOf<String, SuspensionPoint>()
+    private val suspendedMachines = mutableMapOf<String, StateMachineSuspensionPoint>()
 
     /**
      * Start executing a state machine
@@ -252,7 +256,7 @@ class StateMachineExecutor {
      * Suspend a state machine for an async operation
      */
     fun suspend(stateMachine: StateMachine, asyncOperation: CompletableFuture<FunkValue>): CompletableFuture<FunkValue> {
-        val suspensionPoint = SuspensionPoint(
+        val suspensionPoint = StateMachineSuspensionPoint(
             stateMachine.copy(executionState = ExecutionState.SUSPENDED),
             asyncOperation
         )

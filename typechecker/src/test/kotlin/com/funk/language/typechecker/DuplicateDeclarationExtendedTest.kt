@@ -26,7 +26,7 @@ class DuplicateDeclarationExtendedTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code))
+    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code)).program
 
     // ========== BUG #9a: DUPLICATE VARIABLE DECLARATIONS ==========
 

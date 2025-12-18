@@ -9,7 +9,6 @@ class AbilityInterpreterTest {
     
     private val parser = FunkParser()
     private val typeChecker = TypeChecker()
-    private val interpreter = FunkInterpreter()
     
     @Test
     fun testSimpleAbilityDeclaration() {
@@ -20,11 +19,11 @@ class AbilityInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         
         // Should not throw any exceptions
         assertDoesNotThrow {
-            interpreter.execute(typedProgram)
+            FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
         }
     }
     
@@ -41,11 +40,11 @@ class AbilityInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         
         // Should not throw any exceptions
         assertDoesNotThrow {
-            val result = interpreter.execute(typedProgram)
+            val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
             // The result should be a record representing the implementation
             assertTrue(result is FunkRecord)
         }
@@ -68,11 +67,11 @@ class AbilityInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         
         // Should not throw any exceptions
         assertDoesNotThrow {
-            val result = interpreter.execute(typedProgram)
+            val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
             // The result should be the last implementation (String)
             assertTrue(result is FunkRecord)
         }
@@ -93,10 +92,10 @@ class AbilityInterpreterTest {
         """.trimIndent()
         
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         
         assertDoesNotThrow {
-            val result = interpreter.execute(typedProgram)
+            val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
             assertTrue(result is FunkRecord)
             
             val record = result as FunkRecord
@@ -120,18 +119,25 @@ class AbilityInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-
+        val typeCheckResult = typeChecker.typeCheck(program)
         assertDoesNotThrow {
             val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-            val result = interpreter.execute(typedProgram, projectRoot)
+            val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
             assertTrue(result is FunkRecord)
 
             val record = result as FunkRecord
             assertTrue(record.fields.containsKey("serialize"))
 
             // serialize operation should be a function
-            assertTrue(record.fields["serialize"] is SimpleFunkFunction)
+            val serializeField = record.fields["serialize"]
+            // Accept either FunkTruffleFunction (from FunctionNode.kt or FunkValue.kt) or NativeFunkFunction
+            assertTrue(
+                serializeField != null && (
+                    serializeField::class.simpleName == "FunkTruffleFunction" ||
+                    serializeField is NativeFunkFunction
+                ),
+                "Expected FunkTruffleFunction or NativeFunkFunction, got: ${serializeField?.javaClass?.simpleName}"
+            )
         }
     }
     
@@ -152,10 +158,9 @@ class AbilityInterpreterTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
-
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         // The result should be the last expression (42)
         assertTrue(result is FunkInt)

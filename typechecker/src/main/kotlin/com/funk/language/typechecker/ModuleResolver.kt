@@ -219,11 +219,11 @@ class ModuleResolver(
             // Parse the module
             val source = Files.readString(filePath)
             val program = parser.parse(source)
-            
+
             // Don't type-check during module resolution to avoid circular dependencies
             // The module will be type-checked when it's actually used
             val typedProgram = program
-            
+
             // Extract dependencies first
             val dependencies = extractDependencies(typedProgram)
             
@@ -613,5 +613,129 @@ class ModuleResolver(
             )
         }
         moduleCache[modulePath] = updatedModule
+    }
+
+    /**
+     * Qualify all unqualified variable references in a module's program.
+     * This implements module lexical scoping: when a module function calls `add`,
+     * it should resolve to the module's own `add` function, not one from another module.
+     *
+     * @param program The parsed program AST
+     * @param modulePath The module path (e.g., "std::collections::array")
+     * @return A transformed program with qualified variable names
+     */
+    private fun qualifyModuleVariables(program: Program, modulePath: String): Program {
+        // Convert module path to qualified prefix (e.g., "std::collections::array" -> "std__collections__array")
+        val qualifiedPrefix = modulePath.replace("::", "__") + "__"
+
+        // Collect all variable names defined in this module (excluding imports)
+        val moduleDefinedNames = program.items.mapNotNull { item ->
+            when (item) {
+                is LetBinding -> item.variableName
+                is TypeDeclaration -> item.name
+                is EffectDeclaration -> item.name
+                is ImplDeclaration -> item.performerName
+                else -> null
+            }
+        }.toSet()
+
+        // Transform all program items
+        val qualifiedItems = program.items.map { item ->
+            qualifyProgramItem(item, moduleDefinedNames, qualifiedPrefix)
+        }
+
+        return Program(qualifiedItems)
+    }
+
+    /**
+     * Qualify a single program item
+     */
+    private fun qualifyProgramItem(item: ProgramItem, moduleNames: Set<String>, prefix: String): ProgramItem {
+        return when (item) {
+            is LetBinding -> item.copy(
+                expression = qualifyExpression(item.expression, moduleNames, prefix)
+            )
+            // Other program items don't need qualification
+            else -> item
+        }
+    }
+
+    /**
+     * Recursively qualify variable references in an expression
+     */
+    private fun qualifyExpression(expr: Expression, moduleNames: Set<String>, prefix: String): Expression {
+        return when (expr) {
+            is Identifier -> {
+                // If this identifier refers to a module-defined function, qualify it
+                if (expr.name in moduleNames) {
+                    expr.copy(name = prefix + expr.name)
+                } else {
+                    expr // Leave external references unchanged
+                }
+            }
+            is FunctionCall -> expr.copy(
+                function = qualifyExpression(expr.function, moduleNames, prefix),
+                arguments = qualifyExpression(expr.arguments, moduleNames, prefix)
+            )
+            is LambdaExpression -> expr.copy(
+                body = qualifyExpression(expr.body, moduleNames, prefix)
+            )
+            is DoExpression -> expr.copy(
+                statements = expr.statements.map { stmt -> qualifyStatement(stmt, moduleNames, prefix) },
+                result = qualifyExpression(expr.result, moduleNames, prefix)
+            )
+            is IfExpression -> expr.copy(
+                condition = qualifyExpression(expr.condition, moduleNames, prefix),
+                thenBranch = qualifyExpression(expr.thenBranch, moduleNames, prefix),
+                elseBranch = qualifyExpression(expr.elseBranch, moduleNames, prefix)
+            )
+            is RecordLiteral -> expr.copy(
+                entries = expr.entries.map { entry ->
+                    when (entry) {
+                        is RecordFieldEntry -> entry.copy(
+                            value = entry.value?.let { qualifyExpression(it, moduleNames, prefix) }
+                        )
+                        is RecordSpreadEntry -> entry.copy(
+                            expression = qualifyExpression(entry.expression, moduleNames, prefix)
+                        )
+                    }
+                }
+            )
+            is MemberAccess -> expr.copy(
+                receiver = qualifyExpression(expr.receiver, moduleNames, prefix)
+            )
+            is MatchExpression -> expr.copy(
+                expression = qualifyExpression(expr.expression, moduleNames, prefix),
+                cases = expr.cases.map { case ->
+                    case.copy(
+                        guard = case.guard?.let { qualifyExpression(it, moduleNames, prefix) },
+                        expression = qualifyExpression(case.expression, moduleNames, prefix)
+                    )
+                }
+            )
+            is ArrayLiteral -> expr.copy(
+                elements = expr.elements.map { qualifyExpression(it, moduleNames, prefix) }
+            )
+            // Literal expressions don't need qualification
+            is IntLiteral, is NatLiteral, is FloatLiteral, is StringLiteral,
+            is BooleanLiteral -> expr
+            // Add more cases as needed
+            else -> expr // Fallback: return unchanged
+        }
+    }
+
+    /**
+     * Qualify variable references in a statement
+     */
+    private fun qualifyStatement(stmt: Statement, moduleNames: Set<String>, prefix: String): Statement {
+        return when (stmt) {
+            is LetStatement -> stmt.copy(
+                expression = qualifyExpression(stmt.expression, moduleNames, prefix)
+            )
+            is ExpressionStatement -> stmt.copy(
+                expression = qualifyExpression(stmt.expression, moduleNames, prefix)
+            )
+            else -> stmt // Other statement types don't need qualification
+        }
     }
 }

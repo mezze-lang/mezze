@@ -32,7 +32,7 @@ class MatchEffectUnificationTest {
 
     private fun typeCheck(code: String): Program {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     private fun getBinding(program: Program, name: String): LetBinding {

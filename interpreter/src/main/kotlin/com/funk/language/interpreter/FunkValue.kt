@@ -505,22 +505,30 @@ data class FunkSet(val elements: Set<FunkValue>) : FunkValue() {
 }
 
 /**
- * Function value for Truffle-based execution
+ * Function value for Truffle-based execution with closure support
  */
 @ExportLibrary(InteropLibrary::class)
 data class FunkTruffleFunction(
     val callTarget: CallTarget,
-    val name: String? = null
+    val name: String? = null,
+    val closureVariables: Map<String, FunkValue> = emptyMap()
 ) : FunkValue() {
     override fun getDisplayString(): String = name ?: "<function>"
-    
+
     @ExportMessage
     fun isExecutable(): Boolean = true
-    
+
     @ExportMessage
     fun execute(arguments: Array<Any?>): Any {
-        return callTarget.call(*arguments)
+        // Pass closure variables along with arguments
+        return if (closureVariables.isNotEmpty()) {
+            callTarget.call(*arguments, closureVariables)
+        } else {
+            callTarget.call(*arguments)
+        }
     }
+
+    override fun toString(): String = "FunkTruffleFunction(${name ?: "anonymous"}, ${closureVariables.size} closure vars)"
 }
 
 /**
@@ -578,17 +586,6 @@ data class FunkPartialFunction(
  */
 class RecursiveFunctionPlaceholder(val name: String) : FunkValue() {
     override fun getDisplayString(): String = "<recursive-placeholder-$name>"
-}
-
-
-/**
- * Represents a tail call for optimization
- */
-class TailCall(
-    val function: com.funk.language.interpreter.SimpleFunkFunction,
-    val args: FunkValue
-) : FunkValue() {
-    override fun getDisplayString(): String = "<tail-call>"
 }
 
 /**

@@ -26,7 +26,7 @@ class SimpleComparisonTest {
             val program = parser.parse(code)
             println("Parsed successfully")
             
-            val result = typeChecker.typeCheck(program)
+            val result = typeChecker.typeCheck(program).program
             println("Type check successful: $result")
             
         } catch (e: Exception) {

@@ -27,7 +27,7 @@ class FractionDebugTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val thirdType = getVariableType(typedProgram, "third")
         println("third type: $thirdType")

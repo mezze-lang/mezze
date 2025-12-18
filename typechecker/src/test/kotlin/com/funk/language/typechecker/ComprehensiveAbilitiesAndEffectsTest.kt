@@ -38,7 +38,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify ability declaration is processed
         val abilityDecl = typedProgram.items.find { it is AbilityDeclaration } as AbilityDeclaration?
@@ -81,7 +81,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify Ord ability has dependency on Eq
         val ordDecl = typedProgram.items.find { 
@@ -109,7 +109,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Should not throw
         assertTrue(true)
@@ -135,7 +135,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify displayValue has ability constraints
         val displayValueBinding = typedProgram.items.find { 
@@ -166,7 +166,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify multi-parameter ability declaration
         val convertDecl = typedProgram.items.find { 
@@ -199,7 +199,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify fetchUser function has only Database effect
         val fetchUserBinding = typedProgram.items.find {
@@ -240,7 +240,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify only SecureDatabase effect is used
         val fetchBinding = typedProgram.items.find {
@@ -276,7 +276,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify loggedOperation has Log effect
         val operationBinding = typedProgram.items.find { 
@@ -323,7 +323,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val program = parser.parse(source)
 
         // With strict validation, all ability constraints must have implementations
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         assertNotNull(typedProgram)
     }
 
@@ -357,7 +357,7 @@ class ComprehensiveAbilitiesAndEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify loggedShow has both ability constraints and effects
         val loggedShowBinding = typedProgram.items.find { 

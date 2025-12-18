@@ -26,7 +26,7 @@ class EffectPolymorphismTest {
 
     private fun typeCheck(code: String): Program {
         val program = parser.parse(code)
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     private fun getBinding(program: Program, name: String): LetBinding {
@@ -295,7 +295,7 @@ class EffectPolymorphismTest {
 
         // Should not throw an exception
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         assertNotNull(typedProgram)
     }
 
@@ -316,7 +316,7 @@ class EffectPolymorphismTest {
         // That's a different validation (effect usage validation), not polymorphic effect validation
         val exception = assertThrows<TypeCheckError> {
             val program = parser.parse(code)
-            typeChecker.typeCheck(program)
+            typeChecker.typeCheck(program).program
         }
 
         assertTrue(exception.message?.contains("Annotation declares effects Log which are not used") == true)
@@ -332,7 +332,7 @@ class EffectPolymorphismTest {
 
         // Should not throw an exception
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         assertNotNull(typedProgram)
     }
 
@@ -346,7 +346,7 @@ class EffectPolymorphismTest {
 
         // Should not throw an exception
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         assertNotNull(typedProgram)
     }
 
@@ -374,7 +374,7 @@ class EffectPolymorphismTest {
 
         // Should not throw an exception
         val program = parser.parse(code)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
         assertNotNull(typedProgram)
 
         val resultBinding = getBinding(typedProgram, "result")

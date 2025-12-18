@@ -19,7 +19,7 @@ class OrdConstraintPropagationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)
@@ -46,7 +46,7 @@ class OrdConstraintPropagationTest {
         System.setProperty("funk.debug.constraints", "true")
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val letBinding = typedProgram.items.find { it is LetBinding && it.variableName == "test" } as LetBinding?
         assertNotNull(letBinding)

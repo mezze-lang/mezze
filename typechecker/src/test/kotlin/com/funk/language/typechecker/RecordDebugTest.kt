@@ -22,7 +22,7 @@ class RecordDebugTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
         
         println("Simple record access worked!")
     }
@@ -34,7 +34,7 @@ class RecordDebugTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
         
         println("Double record access worked!")
     }

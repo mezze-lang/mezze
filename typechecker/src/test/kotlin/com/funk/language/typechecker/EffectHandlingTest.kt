@@ -46,7 +46,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val effectfulType = getVariableType(typedProgram, "effectfulFunc") as FunkType.FunctionType
         val handledResultType = getVariableType(typedProgram, "handledResult")
@@ -99,7 +99,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val multiEffectType = getVariableType(typedProgram, "multiEffectFunc") as FunkType.FunctionType
 
@@ -146,7 +146,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val originalType = getVariableType(typedProgram, "multiEffectFunc") as FunkType.FunctionType
         val onlyLogHandledType = getVariableType(typedProgram, "onlyLogHandled")
@@ -197,7 +197,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val originalType = getVariableType(typedProgram, "multiEffectFunc") as FunkType.FunctionType
         val handledResultType = getVariableType(typedProgram, "handledResult")
@@ -237,7 +237,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val originalType = getVariableType(typedProgram, "multiEffectFunc") as FunkType.FunctionType
         val partiallyHandledType = getVariableType(typedProgram, "partiallyHandled")
@@ -270,7 +270,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val effectfulType = getVariableType(typedProgram, "effectfulCalc") as FunkType.FunctionType
         val handledType = getVariableType(typedProgram, "handledCalc") as FunkType.FunctionType
@@ -317,7 +317,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val originalType = getVariableType(typedProgram, "dualEffectFunc") as FunkType.FunctionType
         val partiallyHandledType = getVariableType(typedProgram, "partiallyHandled") as FunkType.FunctionType
@@ -362,7 +362,7 @@ class EffectHandlingTest {
         """.trimIndent()
 
         val ast = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(ast)
+        val typedProgram = typeChecker.typeCheck(ast).program
 
         val composedType = getVariableType(typedProgram, "composedFunc") as FunkType.FunctionType
         val handledType = getVariableType(typedProgram, "handledFunc") as FunkType.FunctionType

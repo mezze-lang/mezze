@@ -118,9 +118,9 @@ class PerformerValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type
@@ -141,9 +141,9 @@ class PerformerValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type
@@ -176,9 +176,9 @@ class PerformerValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is FunkString)
         assertEquals("localhost:5432 -> SELECT 1", (result as FunkString).value)
@@ -214,9 +214,9 @@ class PerformerValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typeCheckResult = typeChecker.typeCheck(program)
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = interpreter.execute(typedProgram, projectRoot)
+        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is FunkRecord)
         assertEquals(0, (result as FunkRecord).fields.size) // Unit type

@@ -51,7 +51,7 @@ class ModuleTypePreservationTest {
 
         try {
             val program = parser.parse(mainSource)
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
             println("\n========================================")
             println("RESULTS:")
@@ -122,7 +122,7 @@ class ModuleTypePreservationTest {
 
         try {
             val program = parser.parse(mainSource)
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
             println("\n========================================")
             println("RESULTS:")

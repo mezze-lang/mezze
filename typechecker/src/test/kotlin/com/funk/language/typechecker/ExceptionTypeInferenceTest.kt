@@ -26,7 +26,7 @@ class ExceptionTypeInferenceTest {
 
     private fun typeCheck(source: String) {
         val program = parser.parse(source)
-        typeChecker.typeCheck(program)
+        typeChecker.typeCheck(program).program
     }
 
     // ========================================================================

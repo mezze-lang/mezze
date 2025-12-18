@@ -385,111 +385,42 @@ private fun handleExecCommand(args: List<String>) {
     }
 
     try {
-        // Parse the source code
-        val parser = FunkParser()
-        val fileName = filePath?.fileName?.toString()
-        val program = parser.parse(source, file = fileName)
+        // Execute using Truffle/Polyglot API for full module loading support
+        val engine = Engine.newBuilder()
+            .allowExperimentalOptions(true)
+            .build()
 
-        // Type check the program with module resolution
-        val projectRoot = filePath?.parent ?: java.nio.file.Paths.get(".")
-        val typeChecker = TypeChecker()
-        val typedProgram = typeChecker.typeCheck(program, projectRoot)
-        
-        // Execute using FunkInterpreter with module loading
-        val interpreter = com.funk.language.interpreter.FunkInterpreter()
+        val context = Context.newBuilder("funk")
+            .engine(engine)
+            .allowAllAccess(true)
+            .allowExperimentalOptions(true)
+            .build()
 
-        // Execute the program to load all definitions and get the context
-        val result = interpreter.execute(typedProgram, projectRoot)
-        val context = interpreter.getLastExecutionContext()
-
-        // Check if the program already called main (via TopLevelExpression)
-        // If so, we don't need to call it again
-        val lastItem = typedProgram.items.lastOrNull()
-        val programAlreadyCalledMain = lastItem is TopLevelExpression &&
-                                        lastItem.expression is FunctionCall &&
-                                        (lastItem.expression as FunctionCall).function is Identifier &&
-                                        ((lastItem.expression as FunctionCall).function as Identifier).name == "main"
-
-        if (programAlreadyCalledMain) {
-            // Program already called main - just print the result
-            println("✅ Execution successful!")
-            println()
-            println(prettyPrintResult(result))
-            return
-        }
-
-        // Check if 'main' exists
-        val mainValue = context["main"]
-        if (mainValue == null) {
-            println("❌ Error: No 'main' function found")
-            println()
-            println("The program must define a 'main' function:")
-            println("  let main = {} -> ...")
-            println()
-            println("Example:")
-            println("  let main = {} -> do")
-            println("    Log.println { msg = \"Hello, World!\" }")
-            kotlin.system.exitProcess(1)
-        }
-
-        // Check if main is a function
-        val isFunctionType = mainValue is com.funk.language.interpreter.SimpleFunkFunction ||
-                            mainValue is com.funk.language.interpreter.FunkTruffleFunction ||
-                            mainValue is com.funk.language.interpreter.NativeFunkFunction
-
-        if (!isFunctionType) {
-            println("❌ Error: 'main' must be a function, not a value")
-            println()
-            println("Found: ${mainValue::class.simpleName}")
-            println()
-            println("Change your code from:")
-            println("  let main = perform Console in demo {}")
-            println()
-            println("To:")
-            println("  let main = {} -> perform Console in demo {}")
-            kotlin.system.exitProcess(1)
-        }
-
-        // Check if main has the signature {} -> {} for auto-execution
-        // Get the type of main from the typed program
-        val mainBinding = typedProgram.items.filterIsInstance<LetBinding>().find { it.variableName == "main" }
-        val mainType = mainBinding?.inferredType
-
-        val shouldAutoExecute = mainType is FunkType.FunctionType &&
-                                mainType.paramType is FunkType.RecordType &&
-                                (mainType.paramType as FunkType.RecordType).fields.isEmpty() &&
-                                mainType.returnType is FunkType.RecordType &&
-                                (mainType.returnType as FunkType.RecordType).fields.isEmpty()
-
-        // Call main with empty record argument
-        // Use the execution context that has all the imports
-        val emptyArgs = com.funk.language.interpreter.FunkRecord(emptyMap())
-        val mainContext = context.toMutableMap()
-
-        val mainResult = when (mainValue) {
-            is com.funk.language.interpreter.SimpleFunkFunction -> {
-                interpreter.callFunctionWithRecord(mainValue, emptyArgs, mainContext)
+        try {
+            // Create a Polyglot Source from the Funk code
+            val sourceBuilder = if (filePath != null) {
+                Source.newBuilder("funk", filePath.toFile())
+            } else {
+                Source.newBuilder("funk", source, "stdin")
             }
-            is com.funk.language.interpreter.NativeFunkFunction -> {
-                mainValue.call(listOf(emptyArgs))
-            }
-            else -> {
-                println("❌ Error: Unsupported function type for main")
-                kotlin.system.exitProcess(1)
-                com.funk.language.interpreter.FunkNull
-            }
-        }
+            val polyglotSource = sourceBuilder.build()
 
-        // For auto-executing main with {} -> {}, just indicate success without printing the empty result
-        if (shouldAutoExecute) {
-            // Main auto-executed, don't print the empty record result
-            println()
-            println("✅ Execution successful!")
-        } else {
-            // Regular main or main with different signature - print result
-            println("✅ Execution successful!")
-            println()
-            println(prettyPrintResult(mainResult))
+            // Execute the source through Truffle (this will trigger module loading)
+            val result = context.eval(polyglotSource)
+
+            // Print result if meaningful
+            if (result != null && !result.isNull) {
+                println()
+                println("✅ Execution successful!")
+                println()
+                println(result.toString())
+            } else {
+                println()
+                println("✅ Execution successful!")
+            }
+        } finally {
+            context.close()
+            engine.close()
         }
         
     } catch (e: TypeCheckError) {
@@ -559,12 +490,12 @@ private fun handleCompileCommand(args: List<String>) {
         val ast = parser.parse(source)
         
         val typeChecker = TypeChecker()
-        val typedProgram = typeChecker.typeCheck(ast, inputFile.toPath().parent ?: inputFile.toPath())
-        
+        val typeCheckResult = typeChecker.typeCheck(ast, inputFile.toPath().parent ?: inputFile.toPath())
+
         println("✅ Type checking successful")
-        
+
         // Always create standalone JAR (AST + Interpreter + Truffle)
-        createStandaloneJar(inputFile, outputFile, source, typedProgram)
+        createStandaloneJar(inputFile, outputFile, source, typeCheckResult.program)
         
         println("✅ Compilation successful!")
         println()
@@ -611,14 +542,14 @@ private fun createKotlinMainClass(tempDir: File, inputFile: File, source: String
     
     val program = parser.parse(source)
     val projectRoot = inputFile.toPath().parent ?: inputFile.toPath()
-    val enhancedProgram = typeChecker.typeCheck(program, projectRoot)
-    
-    // Serialize the enhanced AST to JSON
-    val json = kotlinx.serialization.json.Json { 
+    val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+
+    // Serialize the enhanced AST to JSON (clean user AST only, no compiler artifacts)
+    val json = kotlinx.serialization.json.Json {
         prettyPrint = false
         ignoreUnknownKeys = true
     }
-    val serializedAST = json.encodeToString(Program.serializer(), enhancedProgram)
+    val serializedAST = json.encodeToString(Program.serializer(), typeCheckResult.program)
     val mainClassDir = File(tempDir, "src/main/kotlin/com/funk/standalone")
     mainClassDir.mkdirs()
     
@@ -965,15 +896,15 @@ private fun printGeneralError(error: Exception) {
     }
 }
 
-private fun printTypeCheckSuccess(result: Program, typeAliases: Map<String, TypeAliasInfo>) {
+private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<String, TypeAliasInfo>) {
     println("✅ Type checking successful!")
     println("━".repeat(50))
-    
+
     // Count different types of items
-    val letBindings = result.items.filterIsInstance<LetBinding>()
-    val typeDeclarations = result.items.filterIsInstance<TypeDeclaration>()
-    val effectDeclarations = result.items.filterIsInstance<EffectDeclaration>()
-    val implDeclarations = result.items.filterIsInstance<ImplDeclaration>()
+    val letBindings = result.program.items.filterIsInstance<LetBinding>()
+    val typeDeclarations = result.program.items.filterIsInstance<TypeDeclaration>()
+    val effectDeclarations = result.program.items.filterIsInstance<EffectDeclaration>()
+    val implDeclarations = result.program.items.filterIsInstance<ImplDeclaration>()
     
     // Print summary
     println("📊 Summary:")
@@ -1073,8 +1004,14 @@ private fun prettyPrintResult(result: com.funk.language.interpreter.FunkValue): 
             }
             "{ ${fields.joinToString(", ")} }"
         }
-        is com.funk.language.interpreter.SimpleFunkFunction -> "<function>"
         is com.funk.language.interpreter.NativeFunkFunction -> "<native-function:${result.name}>"
-        else -> result.getDisplayString()
+        else -> {
+            // Check if it's FunkTruffleFunction (from either package) using class name
+            if (result::class.simpleName == "FunkTruffleFunction") {
+                "<function>"
+            } else {
+                result.getDisplayString()
+            }
+        }
     }
 }

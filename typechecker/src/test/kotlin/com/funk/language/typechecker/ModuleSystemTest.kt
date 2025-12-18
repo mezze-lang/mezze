@@ -58,7 +58,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir)
+            val typedProgram = typeCheckerWithRoot.typeCheck(program, tempDir).program
             assertNotNull(typedProgram)
             
             // Verify that the result variable has the correct type
@@ -88,7 +88,7 @@ class ModuleSystemTest {
         val program = parser.parse(source)
         
         val exception = assertThrows(ModuleError.ModuleNotFound::class.java) {
-            typeChecker.typeCheck(program, tempDir)
+            typeChecker.typeCheck(program, tempDir).program
         }
         
         assertTrue(exception.message!!.contains("non_existent::module"))
@@ -118,7 +118,7 @@ class ModuleSystemTest {
         val program = parser.parse(mainModule)
         
         val exception = assertThrows(ModuleError.ExportNotFound::class.java) {
-            typeChecker.typeCheck(program, srcDir)
+            typeChecker.typeCheck(program, srcDir).program
         }
         
         // Just verify we got the right exception type - the message format can vary
@@ -150,7 +150,7 @@ class ModuleSystemTest {
         val program = parser.parse(mainModule)
         
         val exception = assertThrows(ModuleError.InternalModuleAccess::class.java) {
-            typeChecker.typeCheck(program, srcDir)
+            typeChecker.typeCheck(program, srcDir).program
         }
         
         assertTrue(exception.message!!.contains("internal"))
@@ -185,7 +185,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, srcDir)
+            val typedProgram = typeChecker.typeCheck(program, srcDir).program
             assertNotNull(typedProgram)
             println("SUCCESS: Type constructor import worked!")
         } catch (e: Exception) {
@@ -222,7 +222,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(program, tempDir).program
             assertNotNull(typedProgram)
             println("SUCCESS: Module alias worked!")
         } catch (e: Exception) {
@@ -259,7 +259,7 @@ class ModuleSystemTest {
         
         // Should throw ModuleNotFound since module B doesn't exist
         try {
-            typeChecker.typeCheck(program, tempDir)
+            typeChecker.typeCheck(program, tempDir).program
             fail("Should have thrown an exception for missing module")
         } catch (e: ModuleError.ModuleNotFound) {
             // Expected - module B not found
@@ -304,7 +304,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(program, tempDir).program
             assertNotNull(typedProgram)
             
             // Verify that constructors are available
@@ -351,7 +351,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(program, tempDir).program
             assertNotNull(typedProgram)
             
             println("SUCCESS: Selective imports with aliases work!")
@@ -388,7 +388,7 @@ class ModuleSystemTest {
         
         // For now, allow module system issues - this needs investigation
         try {
-            val typedProgram = typeChecker.typeCheck(program, tempDir)
+            val typedProgram = typeChecker.typeCheck(program, tempDir).program
             assertNotNull(typedProgram)
             
             println("SUCCESS: Nested module paths work!")

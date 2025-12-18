@@ -53,7 +53,7 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val resultBinding = typedProgram.items.last() as com.funk.language.ast.LetBinding
         val resultType = resultBinding.inferredType
@@ -90,7 +90,7 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val resultBinding = typedProgram.items.last() as com.funk.language.ast.LetBinding
         val resultType = resultBinding.inferredType
@@ -131,7 +131,7 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // step1 should be SuspendedType with FileSystem
         val step1Binding = typedProgram.items[typedProgram.items.size - 2] as com.funk.language.ast.LetBinding
@@ -166,7 +166,7 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         val resultBinding = typedProgram.items.last() as com.funk.language.ast.LetBinding
         val resultType = resultBinding.inferredType
@@ -204,7 +204,7 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // funcRef should be FunctionType with FileSystem effect
         val funcRefBinding = typedProgram.items[typedProgram.items.size - 2] as com.funk.language.ast.LetBinding
@@ -244,7 +244,7 @@ class SuspendedTypeTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        val typedProgram = typeChecker.typeCheck(program)
+        val typedProgram = typeChecker.typeCheck(program).program
 
         // step1: B, C remain
         val step1Type = (typedProgram.items[typedProgram.items.size - 3] as com.funk.language.ast.LetBinding).inferredType

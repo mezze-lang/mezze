@@ -35,7 +35,7 @@ class FixtureBasedTypeCheckerTest {
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         val program = parser.parse(source)
         val typeChecker = TypeChecker()
-        return typeChecker.typeCheck(program)
+        return typeChecker.typeCheck(program).program
     }
 
     private fun extractExpectedTypes(source: String): Map<String, String> {
@@ -55,7 +55,7 @@ class FixtureBasedTypeCheckerTest {
     }
 
     private fun getActualTypes(program: Program, typeChecker: TypeChecker): Map<String, String> {
-        val result = typeChecker.typeCheck(program)
+        val result = typeChecker.typeCheck(program).program
         val typeAliases = typeChecker.getTypeAliases()
 
         val actualTypes = mutableMapOf<String, String>()

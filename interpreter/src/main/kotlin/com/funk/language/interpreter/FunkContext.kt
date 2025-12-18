@@ -15,21 +15,26 @@ class FunkContext(
     val language: FunkLanguage,
     val env: TruffleLanguage.Env?
 ) {
-    
+
     /**
      * Global variables and functions
      */
     private val globals = ConcurrentHashMap<String, FunkValue>()
-    
+
     /**
      * Local variables (for function scopes, blocks, etc.)
      */
     val locals = ConcurrentHashMap<String, FunkValue>()
-    
+
     /**
      * Built-in functions and effects
      */
     private val builtins = ConcurrentHashMap<String, FunkValue>()
+
+    /**
+     * Effect handler for managing effect handlers and effect calls
+     */
+    val effectHandler = EffectHandler()
     
     
     // Module runtime removed for simplified stub implementation
@@ -105,5 +110,15 @@ class FunkContext(
         captured.putAll(globals)
         return captured
     }
-    
+
+    /**
+     * Get all global variables (including builtins)
+     */
+    fun getAllGlobals(): Map<String, FunkValue> {
+        val all = mutableMapOf<String, FunkValue>()
+        all.putAll(builtins)
+        all.putAll(globals)
+        return all
+    }
+
 }
