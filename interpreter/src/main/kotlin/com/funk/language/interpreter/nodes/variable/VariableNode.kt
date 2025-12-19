@@ -141,6 +141,8 @@ class SimpleWriteVariableNode(
         val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
         context.defineLocal(variableName, value)
 
+        println("DEBUG SimpleWriteVariableNode: Wrote '$variableName' = ${value::class.simpleName} to slot $slot and context.locals")
+
         return value
     }
 }

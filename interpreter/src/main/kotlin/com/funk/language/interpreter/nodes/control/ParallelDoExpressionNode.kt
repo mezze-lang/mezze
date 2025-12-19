@@ -311,19 +311,27 @@ class SimpleDoExpressionNode(
         var lastResult: FunkValue = FunkNull
 
         // Execute statements sequentially
-        // CRITICAL: Check for FunkContinuationSuspended and propagate immediately
+        // CRITICAL: Check for FunkContinuationSuspended and FunkSuspended and propagate immediately
         statementNodes.forEach { statementNode ->
             lastResult = statementNode.execute(frame)
 
-            // If a statement returned a suspended continuation (e.g., from Exception.throw or Return.early),
+            // If a statement returned a suspended continuation (e.g., from Exception.throw or Return.early)
+            // or a suspended effect computation (e.g., from unhandled effects),
             // propagate it immediately instead of continuing to the next statement
-            if (lastResult is FunkContinuationSuspended) {
+            if (lastResult is FunkContinuationSuspended || lastResult is com.funk.language.interpreter.FunkSuspended) {
                 return lastResult
             }
         }
 
         // Execute and return result expression
-        return resultNode.execute(frame)
+        val result = resultNode.execute(frame)
+
+        // If the result is suspended, propagate it
+        if (result is com.funk.language.interpreter.FunkSuspended || result is FunkContinuationSuspended) {
+            return result
+        }
+
+        return result
     }
 }
 

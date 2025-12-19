@@ -27,7 +27,8 @@ class FunctionDefinitionNode(
     private val parameterNames: List<String>,
     @field:Child private var bodyNode: FunkNode,
     private val frameDescriptor: FrameDescriptor,
-    private val closureVariableNames: List<String> = emptyList()
+    private val closureVariableNames: List<String> = emptyList(),
+    private val closureVariableSlots: Map<String, Int> = emptyMap()
 ) : FunkNode() {
 
     private val callTarget: CallTarget by lazy {
@@ -48,12 +49,50 @@ class FunctionDefinitionNode(
         for (varName in closureVariableNames) {
             // Try to find the variable in the current frame or context
             val value = try {
-                // First try frame slots
-                val outerConverter = this.rootNode?.frameDescriptor
-                // Since we don't have access to the outer converter's slots directly,
-                // we'll use the context to get the value
-                val context = FunkLanguage.getCurrentContext(this)
-                context.lookupGlobal(varName)
+                // CRITICAL FIX: First try to read from the current frame's slots
+                // This allows nested functions to capture parameters and local variables from outer functions
+                val slot = closureVariableSlots[varName]
+                if (slot != null) {
+                    // Read from the frame slot
+                    val frameValue = frame.getObject(slot)
+                    println("DEBUG FunctionDefinitionNode: Reading '$varName' from frame slot $slot = ${frameValue?.let { "${it::class.simpleName}" } ?: "null"}")
+
+                    // If we got a valid value from the frame, use it
+                    if (frameValue is FunkValue && frameValue !is FunkNull) {
+                        frameValue
+                    } else {
+                        // Frame slot is null or FunkNull, fall back to global lookup
+                        // This handles recursive functions and module-imported functions
+                        val context = FunkLanguage.getCurrentContext(this)
+
+                        val lookupName = if (varName.contains("$")) {
+                            // Strip monomorphic suffix to get generic name
+                            println("DEBUG FunctionDefinitionNode: Stripping monomorphic suffix from '$varName' to '${varName.substringBefore("$")}'")
+                            varName.substringBefore("$")
+                        } else {
+                            varName
+                        }
+
+                        val result = context.lookupGlobal(lookupName)
+                        println("DEBUG FunctionDefinitionNode: Looking up '$lookupName' for closure var '$varName' = ${result?.let { "${it::class.simpleName}" } ?: "null"}")
+                        result
+                    }
+                } else {
+                    // No slot information, fall back to global lookup
+                    val context = FunkLanguage.getCurrentContext(this)
+
+                    val lookupName = if (varName.contains("$")) {
+                        // Strip monomorphic suffix to get generic name
+                        println("DEBUG FunctionDefinitionNode: Stripping monomorphic suffix from '$varName' to '${varName.substringBefore("$")}'")
+                        varName.substringBefore("$")
+                    } else {
+                        varName
+                    }
+
+                    val result = context.lookupGlobal(lookupName)
+                    println("DEBUG FunctionDefinitionNode: Looking up '$lookupName' for closure var '$varName' = ${result?.let { "${it::class.simpleName}" } ?: "null"}")
+                    result
+                }
             } catch (e: Exception) {
                 null
             }
@@ -65,9 +104,7 @@ class FunctionDefinitionNode(
             }
         }
 
-        val func = FunkTruffleFunction(callTarget, name, closureVariables)
-        println("DEBUG FunctionDefinitionNode($name): Created function = $func with ${closureVariables.size} closure vars: ${closureVariables.keys}")
-        return func
+        return FunkTruffleFunction(callTarget, name, closureVariables)
     }
 }
 
@@ -88,7 +125,6 @@ class FunctionCallNode(
             is FunkTruffleFunction -> {
                 // Direct call to Truffle function with closure variables
                 // Pass arguments and closure variables to the function
-                println("DEBUG FunctionCallNode: Calling function with ${function.closureVariables.size} closure variables")
                 function.callTarget.call(arguments, function.closureVariables) as FunkValue
             }
             is NativeFunkFunction -> {
@@ -117,7 +153,6 @@ class FunkFunctionRootNode(
     override fun execute(frame: VirtualFrame): Any {
         // Arguments: [0] = FunkRecord of parameters, [1] = Map<String, FunkValue> of closure variables
         val arguments = frame.getArguments()
-        println("DEBUG FunkFunctionRootNode($name): execute called with ${arguments.size} arguments")
 
         // Get context for registering variables
         val context = FunkLanguage.getCurrentContext(this)
@@ -130,8 +165,6 @@ class FunkFunctionRootNode(
             emptyMap()
         }
 
-        println("DEBUG FunkFunctionRootNode($name): Got ${closureVariables.size} closure variables: ${closureVariables.keys}")
-
         // Collect provided and missing parameters for partial application support
         val argsRecord = if (arguments.isNotEmpty()) arguments[0] as? FunkRecord else null
         val providedParams = mutableMapOf<String, FunkValue>()
@@ -142,7 +175,6 @@ class FunkFunctionRootNode(
             // Zero-parameter function - execute normally
             // Continue to normal execution (no partial application)
         } else if (argsRecord != null) {
-            println("DEBUG FunkFunctionRootNode($name): argsRecord = ${argsRecord.fields.mapValues { "${it.value::class.simpleName}:$it.value" }}")
             for (paramName in parameterNames) {
                 val value = argsRecord.fields[paramName]
                 if (value != null && value !is FunkNull) {
@@ -157,8 +189,6 @@ class FunkFunctionRootNode(
 
         // If not all parameters are provided (and function has > 0 parameters), return a partially applied function
         if (parameterNames.isNotEmpty() && missingParams.isNotEmpty()) {
-            println("DEBUG FunkFunctionRootNode($name): Partial application - provided ${providedParams.keys}, missing $missingParams")
-
             // Create a new function that captures the provided parameters
             // and waits for the remaining parameters
             val partiallyAppliedFunc = createPartiallyAppliedFunction(
@@ -170,17 +200,16 @@ class FunkFunctionRootNode(
         }
 
         // All parameters provided - execute the function body
-        // Bind parameters to frame slots AND context.locals
+        // Bind parameters to frame slots only (NOT context.locals to avoid polluting global namespace)
         for ((index, paramName) in parameterNames.withIndex()) {
             val value = providedParams[paramName] ?: FunkNull
-            println("DEBUG FunkFunctionRootNode($name): Setting parameter slot $index ($paramName) = ${value::class.simpleName}:$value")
-            // Write to frame slot
+            // Write to frame slot only
+            // Parameters should NOT be written to context.locals as they're function-local
+            // Closure capture is handled via the closure variables mechanism
             frame.setObject(index, value)
-            // ALSO write to context.locals so nested functions can capture this variable
-            context.defineLocal(paramName, value)
         }
 
-        // Bind closure variables to frame slots AND context.locals after parameters
+        // Bind closure variables to frame slots only (after parameters)
         val paramCount = parameterNames.size
         for ((index, varName) in closureVariableNames.withIndex()) {
             val slotIndex = paramCount + index
@@ -189,13 +218,10 @@ class FunkFunctionRootNode(
             // For recursive functions, the function won't be in the closure map,
             // and the variable read will fall back to global lookup
             if (value != null && value !is FunkNull) {
-                println("DEBUG FunkFunctionRootNode($name): Setting closure slot $slotIndex ($varName) = ${value::class.simpleName}:$value")
-                // Write to frame slot
+                // Write to frame slot only
+                // Closure variables should NOT be written to context.locals as they're function-local
                 frame.setObject(slotIndex, value)
-                // ALSO write to context.locals so they're accessible
-                context.defineLocal(varName, value)
             } else {
-                println("DEBUG FunkFunctionRootNode($name): Skipping closure slot $slotIndex ($varName) - will use global lookup")
                 // Set slot to FunkNull so reads will fall back to global lookup
                 frame.setObject(slotIndex, FunkNull)
             }
@@ -254,8 +280,6 @@ class PartiallyAppliedFunctionRootNode(
         val arguments = frame.getArguments()
         val newArgsRecord = if (arguments.isNotEmpty()) arguments[0] as? FunkRecord else null
 
-        println("DEBUG PartiallyAppliedFunctionRootNode: Called with args = ${newArgsRecord?.fields?.keys}")
-
         // Merge the previously provided parameters with the new ones
         val mergedParams = mutableMapOf<String, FunkValue>()
         mergedParams.putAll(providedParams)
@@ -268,8 +292,6 @@ class PartiallyAppliedFunctionRootNode(
                 }
             }
         }
-
-        println("DEBUG PartiallyAppliedFunctionRootNode: Merged params = ${mergedParams.keys}")
 
         // Create a record with all parameters and call the original function
         val allParamsRecord = FunkRecord(mergedParams)

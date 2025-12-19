@@ -21,7 +21,8 @@ import com.funk.language.interpreter.FunkRecord
  */
 class ASTToTruffleConverter(
     private val context: com.funk.language.interpreter.FunkContext? = null,
-    private val projectRoot: java.nio.file.Path? = null
+    private val projectRoot: java.nio.file.Path? = null,
+    parentHandlerMapping: Map<String, Pair<String, String>>? = null
 ) {
 
     private var frameDescriptorBuilder = FrameDescriptor.newBuilder()
@@ -30,8 +31,19 @@ class ASTToTruffleConverter(
     /**
      * Map of handler name → (effect name, implementation name)
      * e.g., "NativeRandom" → ("Random", "Random$NativeRandom")
+     * Initialized with parent mapping if provided (for nested converters in lambdas)
      */
-    private val handlerToEffectMapping = mutableMapOf<String, Pair<String, String>>()
+    private val handlerToEffectMapping = mutableMapOf<String, Pair<String, String>>().apply {
+        if (parentHandlerMapping != null) {
+            putAll(parentHandlerMapping)
+        }
+    }
+
+    /**
+     * Effect declarations collected during conversion
+     * These will be registered with the effect handler during execution
+     */
+    private val effectDeclarations = mutableListOf<EffectDeclaration>()
     
     /**
      * Convert a program to a Truffle node
@@ -64,17 +76,19 @@ class ASTToTruffleConverter(
     }
 
     /**
-     * Register an effect declaration so we can detect effect calls later
+     * Store an effect declaration for registration during execution
+     * The context doesn't exist during parse time, so we collect declarations
+     * and register them when execution starts
      */
     private fun registerEffectDeclaration(effectDecl: EffectDeclaration) {
-        // Create a record containing the effect's operations (as a marker)
-        // This allows EffectHandler to recognize effect names
-        val effectRecord = FunkRecord(emptyMap()) // Empty record, just used as a marker
+        // Store the declaration for later registration
+        effectDeclarations.add(effectDecl)
 
-        // If we have a context, register with its effect handler
-        context?.effectHandler?.registerEffect(effectDecl.name, effectRecord)
-
-        println("DEBUG registerEffectDeclaration: Registered effect '${effectDecl.name}'")
+        // If we have a context (e.g., during module loading), register immediately
+        if (context != null) {
+            val effectRecord = FunkRecord(emptyMap()) // Empty record, just used as a marker
+            context.effectHandler?.registerEffect(effectDecl.name, effectRecord)
+        }
     }
 
     /**
@@ -95,12 +109,9 @@ class ASTToTruffleConverter(
         // Create a mangled name for the implementation like "Random$NativeRandom"
         val implName = "${impl.effectName}\$${impl.performerName}"
 
-        println("DEBUG convertImplDeclaration: Storing impl as '$implName'")
-
         // CRITICAL: Store the mapping so we can look up handlers by performer name
         // This allows "perform NativeRandom in ..." to find the Random effect implementation
         handlerToEffectMapping[impl.performerName] = impl.effectName to implName
-        println("DEBUG convertImplDeclaration: Mapped handler '${impl.performerName}' → effect '${impl.effectName}', impl '$implName'")
 
         // Store the implementation record with the mangled name
         val slot = getOrCreateSlot(implName)
@@ -109,7 +120,7 @@ class ASTToTruffleConverter(
 
     /**
      * Convert an impl ability declaration to a record containing the implementations
-     * The record is stored with a mangled name like "Show$Int"
+     * The record is stored with a mangled name like "Show$Int" (using $ to avoid user namespace conflicts)
      */
     private fun convertImplAbilityDeclaration(impl: ImplAbilityDeclaration): FunkNode {
         val fieldNodes = mutableMapOf<String, FunkNode>()
@@ -122,7 +133,8 @@ class ASTToTruffleConverter(
         // Create the implementation record
         val recordNode = RecordLiteralNode(fieldNodes)
 
-        // Create a mangled name for the implementation like "Show$Int"
+        // Create a mangled name using $ to prevent user namespace conflicts: "Show$Int"
+        // Dollar signs are reserved for compiler/runtime use and cannot appear in user identifiers
         val targetTypeNames = impl.targetTypes.joinToString("$") { typeAnnotation ->
             // Simple type name extraction - just use the type annotation's name
             when (typeAnnotation) {
@@ -131,8 +143,6 @@ class ASTToTruffleConverter(
             }
         }
         val implName = "${impl.abilityName}\$$targetTypeNames"
-
-        println("DEBUG convertImplAbilityDeclaration: Storing impl as '$implName'")
 
         // Store the implementation record with the mangled name
         val slot = getOrCreateSlot(implName)
@@ -272,21 +282,6 @@ class ASTToTruffleConverter(
      * Convert an expression to a Truffle node
      */
     fun convertExpression(expr: Expression): FunkNode {
-        System.err.println("DEBUG convertExpression: Converting ${expr::class.simpleName}")
-        if (expr is PerformExpression) {
-            System.err.println("!!! FOUND PerformExpression in convertExpression !!!")
-        }
-        if (expr is FunctionCall) {
-            val funcCall = expr
-            System.err.println("DEBUG convertExpression: FunctionCall detected, function=${funcCall.function::class.simpleName}")
-            if (funcCall.function is MemberAccess) {
-                val ma = funcCall.function as MemberAccess
-                System.err.println("DEBUG convertExpression:   MemberAccess: receiver=${ma.receiver::class.simpleName}, member=${ma.member}")
-                if (ma.receiver is Identifier) {
-                    System.err.println("DEBUG convertExpression:   Receiver identifier: ${(ma.receiver as Identifier).name}")
-                }
-            }
-        }
         return when (expr) {
             is IntLiteral -> IntLiteralNode(expr.value)
             is NatLiteral -> IntLiteralNode(expr.value)  // Nat values are represented as Int at runtime
@@ -465,21 +460,28 @@ class ASTToTruffleConverter(
      */
     private fun convertFunctionCall(funcCall: FunctionCall): FunkNode {
         val functionClass = funcCall.function::class.simpleName
-        System.err.println("=== DEBUG convertFunctionCall ENTRY: function=$functionClass, resolvedAbilities=${funcCall.resolvedAbilities.size}, resolvedFunctionName=${funcCall.resolvedFunctionName}")
 
         // PRIORITY 1: Check for monomorphic function call (Rust-style)
         // Monomorphic functions are specialized and should be called directly
         if (funcCall.resolvedFunctionName != null) {
-            println("DEBUG convertFunctionCall: Has resolved function name: ${funcCall.resolvedFunctionName}")
             return convertMonomorphicFunctionCall(funcCall)
         }
 
         // PRIORITY 2: Check if this call has resolved abilities (from TypeChecker ability resolution pass)
         // Resolved abilities are compile-time known and take precedence over runtime effect detection
         if (funcCall.resolvedAbilities.isNotEmpty()) {
-            println("DEBUG convertFunctionCall: Has ${funcCall.resolvedAbilities.size} resolved abilities")
             // Use direct ability call for better Truffle performance
+            println("DEBUG convertFunctionCall: Using resolved ability call, resolvedAbilities = ${funcCall.resolvedAbilities.keys}")
             return convertResolvedAbilityCall(funcCall)
+        }
+
+        // Debug: Check if this looks like an ability call that wasn't resolved
+        if (funcCall.function is MemberAccess) {
+            val memberAccess = funcCall.function as MemberAccess
+            if (memberAccess.receiver is Identifier) {
+                val receiverName = (memberAccess.receiver as Identifier).name
+                println("DEBUG convertFunctionCall: MemberAccess call $receiverName.${memberAccess.member}, resolvedAbilities is EMPTY")
+            }
         }
 
         // PRIORITY 2.5: Fallback for ability calls that weren't resolved
@@ -498,7 +500,6 @@ class ASTToTruffleConverter(
                 )
 
                 if (isBuiltinAbility) {
-                    println("DEBUG convertFunctionCall: Detected unresolved builtin ability call: $receiverName.$operationName")
                     // Manually create the builtin operation node
                     val argsNode = convertExpression(funcCall.arguments)
 
@@ -520,7 +521,6 @@ class ASTToTruffleConverter(
                         receiverName == "LogicalNot" && operationName == "not" -> createBuiltinUnaryOp("not", argsNode)
                         else -> {
                             // Unknown ability operation - fall through to regular handling
-                            println("DEBUG convertFunctionCall: Unknown ability operation $receiverName.$operationName")
                             val functionNode = convertExpression(funcCall.function)
                             createFunctionCallNode(functionNode, argsNode)
                         }
@@ -535,15 +535,12 @@ class ASTToTruffleConverter(
         if (funcCall.function is MemberAccess) {
             val memberAccess = funcCall.function as MemberAccess
             val receiverClass = memberAccess.receiver::class.simpleName
-            System.err.println("=== DEBUG convertFunctionCall: function IS MemberAccess, receiver=$receiverClass, member=${memberAccess.member}")
 
             if (memberAccess.receiver is Identifier) {
                 val receiverName = (memberAccess.receiver as Identifier).name
                 val operationName = memberAccess.member
 
                 // Check if this is an effect call
-                System.err.println("=== DEBUG convertFunctionCall: MemberAccess receiver IS Identifier '$receiverName', operation='$operationName'")
-                System.err.println("=== DEBUG convertFunctionCall: Creating dynamic effect/function call node for '$receiverName.$operationName'")
                 System.err.println("=== *** RETURNING EARLY WITH DYNAMIC EFFECT CALL NODE ***")
 
                 // Create a node that checks at runtime if this is an effect call
@@ -553,17 +550,13 @@ class ASTToTruffleConverter(
                 val receiverName = (memberAccess.receiver as VariantConstruction).constructor
                 val operationName = memberAccess.member
 
-                System.err.println("=== DEBUG convertFunctionCall: MemberAccess receiver IS VariantConstruction '$receiverName', operation='$operationName'")
-                System.err.println("=== DEBUG convertFunctionCall: Creating dynamic effect/function call node for '$receiverName.$operationName'")
                 System.err.println("=== *** RETURNING EARLY WITH DYNAMIC EFFECT CALL NODE ***")
 
                 // Create a node that checks at runtime if this is an effect call
                 return createDynamicEffectOrFunctionCall(receiverName, operationName, funcCall.arguments)
             } else {
-                System.err.println("=== DEBUG convertFunctionCall: MemberAccess receiver is NOT Identifier or VariantConstruction, continuing...")
             }
         } else {
-            System.err.println("=== DEBUG convertFunctionCall: function is NOT MemberAccess, continuing...")
         }
 
         // Default: Dynamic dispatch through FunctionCallNode
@@ -590,13 +583,9 @@ class ASTToTruffleConverter(
                 val context = getContext()
                 val effectHandler = context.effectHandler
 
-                println("DEBUG DynamicEffectCall: Checking if '$receiverName' is an effect")
-                println("DEBUG DynamicEffectCall: context.effectHandler = $effectHandler")
-                println("DEBUG DynamicEffectCall: isEffectDeclared('$receiverName') = ${effectHandler.isEffectDeclared(receiverName)}")
 
                 // Check if this is a declared effect
                 if (effectHandler.isEffectDeclared(receiverName)) {
-                    println("DEBUG DynamicEffectCall: '$receiverName' IS an effect, calling executeEffectCall")
 
                     // This is an effect call - use the effect handler
                     val arguments = argsChild.execute(frame)
@@ -614,14 +603,10 @@ class ASTToTruffleConverter(
                         interpreter = com.funk.language.interpreter.FunkInterpreter()
                     )
                 } else {
-                    println("DEBUG DynamicEffectCall: '$receiverName' is NOT declared as effect")
-                    println("DEBUG DynamicEffectCall: effectHandler=$effectHandler")
-                    println("DEBUG DynamicEffectCall: Trying to look up '$receiverName' as regular variable")
 
                     // Not an effect - treat as regular member access and function call
                     // This is a fallback for non-effect member access like myRecord.myFunction
                     val receiver = context.lookupGlobal(receiverName)
-                    println("DEBUG DynamicEffectCall: lookupGlobal('$receiverName') returned: ${receiver?.let { it::class.simpleName } ?: "null"}")
 
                     if (receiver == null) {
                         throw RuntimeException("Undefined variable: $receiverName")
@@ -652,22 +637,18 @@ class ASTToTruffleConverter(
     private fun convertResolvedAbilityCall(funcCall: FunctionCall): FunkNode {
         // Get the first resolved ability (for now, we only handle single ability calls)
         val resolvedAbility = funcCall.resolvedAbilities.values.firstOrNull()
-        println("DEBUG convertResolvedAbilityCall: resolvedAbility=$resolvedAbility, isBuiltin=${resolvedAbility?.isBuiltin}, implementationRef=${resolvedAbility?.implementationRef}")
 
         if (resolvedAbility != null) {
             // Check if it's a builtin or user-defined ability
             if (resolvedAbility.isBuiltin) {
-            println("DEBUG convertResolvedAbilityCall: This is a builtin ability")
             // For builtin abilities, create specialized arithmetic/comparison nodes
             // Example: NumAdd -> AddNode, NumSub -> SubtractNode, etc.
 
             // The function should be a MemberAccess like x.add
-            println("DEBUG convertResolvedAbilityCall: function type is ${funcCall.function::class.simpleName}")
             if (funcCall.function is MemberAccess) {
                 val memberAccess = funcCall.function as MemberAccess
                 val operationName = memberAccess.member
                 val abilityName = resolvedAbility.abilityName
-                println("DEBUG convertResolvedAbilityCall: abilityName=$abilityName, operationName=$operationName")
 
                 // Convert arguments (should be a record like {l = x, r = y})
                 val argsNode = convertExpression(funcCall.arguments)
@@ -678,87 +659,68 @@ class ASTToTruffleConverter(
                 return when {
                     // Arithmetic operators
                     abilityName == "NumAdd" && operationName == "add" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin add node")
                         createBuiltinBinaryOp("add", argsNode)
                     }
                     abilityName == "NumSub" && operationName == "sub" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin subtract node")
                         createBuiltinBinaryOp("subtract", argsNode)
                     }
                     abilityName == "NumSub" && operationName == "neg" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin negate node")
                         createBuiltinUnaryOp("negate", argsNode)
                     }
                     abilityName == "NumMul" && operationName == "mul" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin multiply node")
                         createBuiltinBinaryOp("multiply", argsNode)
                     }
                     abilityName == "NumDiv" && operationName == "div" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin divide node")
                         createBuiltinBinaryOp("divide", argsNode)
                     }
                     abilityName == "NumMod" && operationName == "mod" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin modulo node")
                         createBuiltinBinaryOp("modulo", argsNode)
                     }
                     // Comparison operators
                     abilityName == "Eq" && operationName == "eq" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin equal node")
                         createBuiltinBinaryOp("equal", argsNode)
                     }
                     abilityName == "Eq" && operationName == "neq" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin not-equal node")
                         createBuiltinBinaryOp("notEqual", argsNode)
                     }
                     abilityName == "Ord" && operationName == "lt" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin less-than node")
                         createBuiltinBinaryOp("lessThan", argsNode)
                     }
                     abilityName == "Ord" && operationName == "gt" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin greater-than node")
                         createBuiltinBinaryOp("greaterThan", argsNode)
                     }
                     abilityName == "Ord" && operationName == "le" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin less-equal node")
                         createBuiltinBinaryOp("lessEqual", argsNode)
                     }
                     abilityName == "Ord" && operationName == "ge" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin greater-equal node")
                         createBuiltinBinaryOp("greaterEqual", argsNode)
                     }
                     // Logical operators
                     abilityName == "LogicalAnd" && operationName == "and" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin and node")
                         createBuiltinBinaryOp("and", argsNode)
                     }
                     abilityName == "LogicalOr" && operationName == "or" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin or node")
                         createBuiltinBinaryOp("or", argsNode)
                     }
                     abilityName == "LogicalNot" && operationName == "not" -> {
-                        println("DEBUG convertResolvedAbilityCall: Creating builtin not node")
                         createBuiltinUnaryOp("not", argsNode)
                     }
                     else -> {
-                        println("DEBUG convertResolvedAbilityCall: No matching builtin operation, falling back to dynamic dispatch")
                         // Unsupported builtin ability - fallback to dynamic dispatch
                         val functionNode = convertExpression(funcCall.function)
                         createFunctionCallNode(functionNode, argsNode)
                     }
                 }
             } else {
-                println("DEBUG convertResolvedAbilityCall: function is not MemberAccess, falling back")
             }
             } else {
                 // User-defined ability - look up the implementation directly
-                println("DEBUG convertResolvedAbilityCall: This is a user-defined ability")
 
                 // The function should be a MemberAccess like Show.show
                 if (funcCall.function is MemberAccess) {
                     val memberAccess = funcCall.function as MemberAccess
                     val operationName = memberAccess.member
                     val implementationRef = resolvedAbility.implementationRef
-                    println("DEBUG convertResolvedAbilityCall: operationName=$operationName, implementationRef=$implementationRef")
 
                     // Convert arguments
                     val argsNode = convertExpression(funcCall.arguments)
@@ -774,7 +736,6 @@ class ASTToTruffleConverter(
                         implementationRef
                     }
 
-                    println("DEBUG convertResolvedAbilityCall: Looking up impl record: $implRecordName, operation: $operationName")
 
                     // Create a node that:
                     // 1. Looks up the implementation record from context
@@ -784,8 +745,12 @@ class ASTToTruffleConverter(
                         @field:Child private var argumentsChild = argsNode
 
                         override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
-                            // Look up the implementation record
-                            val implRecord = context?.lookupGlobal(implRecordName) ?: context?.locals?.get(implRecordName)
+                            // Look up the implementation record from the CURRENT runtime context
+                            // NOT the converter's compile-time context
+                            val runtimeContext = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
+                            val implRecord = runtimeContext.lookupGlobal(implRecordName)
+
+                            println("DEBUG convertResolvedAbilityCall: Looking up '$implRecordName', found: ${implRecord?.let { "${it::class.simpleName}" } ?: "null"}")
 
                             if (implRecord == null || implRecord is com.funk.language.interpreter.FunkNull) {
                                 throw com.funk.language.interpreter.FunkException("Cannot find ability implementation: $implRecordName")
@@ -811,13 +776,11 @@ class ASTToTruffleConverter(
                         }
                     }
                 } else {
-                    println("DEBUG convertResolvedAbilityCall: User-defined ability but function is not MemberAccess, falling back")
                 }
             }
         }
 
         // Fallback to regular function call for non-builtin abilities
-        println("DEBUG convertResolvedAbilityCall: Using fallback path")
         val functionNode = convertExpression(funcCall.function)
         val argumentsNode = convertExpression(funcCall.arguments)
         return createFunctionCallNode(functionNode, argumentsNode)
@@ -1026,7 +989,7 @@ class ASTToTruffleConverter(
 
     /**
      * Structural equality check for Funk values
-     * Handles primitives, records, variants, and nested structures
+     * Handles primitives, records, variants, lists, and nested structures
      */
     private fun structuralEquals(left: FunkValue, right: FunkValue): Boolean {
         return when {
@@ -1040,6 +1003,18 @@ class ASTToTruffleConverter(
             // Fractions - compare using cross multiplication: a/b == c/d iff a*d == b*c
             left is com.funk.language.interpreter.FunkFrac && right is com.funk.language.interpreter.FunkFrac ->
                 left.numerator * right.denominator == right.numerator * left.denominator
+
+            // Lists - check length and all elements structurally
+            left is com.funk.language.interpreter.FunkList && right is com.funk.language.interpreter.FunkList -> {
+                if (left.elements.size != right.elements.size) {
+                    false // Different lengths
+                } else {
+                    // Check each element recursively
+                    left.elements.zip(right.elements).all { (leftElem, rightElem) ->
+                        structuralEquals(leftElem, rightElem)
+                    }
+                }
+            }
 
             // Records - check all fields structurally
             left is FunkRecord && right is FunkRecord -> {
@@ -1079,11 +1054,27 @@ class ASTToTruffleConverter(
      */
     private fun convertMonomorphicFunctionCall(funcCall: FunctionCall): FunkNode {
         val monomorphicName = funcCall.resolvedFunctionName!!
-        println("DEBUG convertMonomorphicFunctionCall: Looking up monomorphic function: $monomorphicName")
 
-        // Look up the monomorphic function by its mangled name
-        // Example: square$Int instead of square
-        val slot = getOrCreateSlot(monomorphicName)
+        // CRITICAL FIX: If the monomorphic name has a generic counterpart that's already
+        // been allocated as a closure variable, use that slot instead
+        // This prevents module shadowing issues where closure variables are captured with
+        // generic names but referenced with monomorphic names in the function body
+        val genericName = if (monomorphicName.contains("$")) {
+            monomorphicName.substringBefore("$")
+        } else {
+            monomorphicName
+        }
+
+        // Check if there's already a slot for the generic name (from closure capture)
+        val slot = if (variableSlots.containsKey(genericName)) {
+            // Use the existing slot for the generic name
+            println("DEBUG convertMonomorphicFunctionCall: Using generic slot for '$genericName' instead of creating new slot for '$monomorphicName'")
+            variableSlots[genericName]!!
+        } else {
+            // No generic slot exists, create a new slot for the monomorphic name
+            getOrCreateSlot(monomorphicName)
+        }
+
         val functionNode = SimpleReadVariableNode(slot, monomorphicName)
 
         val argumentsNode = convertExpression(funcCall.arguments)
@@ -1102,10 +1093,14 @@ class ASTToTruffleConverter(
         // Detect free variables (variables used in body but not parameters)
         val allVariables = collectVariableReferences(lambda.body)
         val freeVariables = allVariables.filter { it !in paramNames }.distinct()
-        println("DEBUG convertLambdaExpression: Found free variables: $freeVariables in lambda with params $paramNames")
 
         // Create a new converter for the function body to manage its own frame
-        val functionConverter = ASTToTruffleConverter()
+        // Pass the parent handler mapping so nested perform expressions can find handlers
+        val functionConverter = ASTToTruffleConverter(
+            context = this.context,
+            projectRoot = this.projectRoot,
+            parentHandlerMapping = this.handlerToEffectMapping
+        )
 
         // Pre-register parameter names in the function's frame
         paramNames.forEach { paramName ->
@@ -1120,8 +1115,21 @@ class ASTToTruffleConverter(
         val bodyNode = functionConverter.convertExpression(lambda.body)
         val functionFrameDescriptor = functionConverter.getFrameDescriptor()
 
-        // Pass closure variable names to function definition node
-        return FunctionDefinitionNode("lambda", paramNames, bodyNode, functionFrameDescriptor, freeVariables)
+        // CRITICAL FIX: Build a map of closure variable names to their slots in the OUTER frame
+        // This allows nested functions to capture parameters and local variables from outer functions
+        val closureVariableSlots = freeVariables.mapNotNull { varName ->
+            // Look up the slot in the OUTER frame (this converter, not functionConverter)
+            val slot = variableSlots[varName]
+            if (slot != null) {
+                varName to slot
+            } else {
+                // Variable not found in outer frame - it might be a global
+                null
+            }
+        }.toMap()
+
+        // Pass closure variable names AND their outer frame slots to function definition node
+        return FunctionDefinitionNode("lambda", paramNames, bodyNode, functionFrameDescriptor, freeVariables, closureVariableSlots)
     }
 
     /**
@@ -1392,30 +1400,19 @@ class ASTToTruffleConverter(
      * Convert perform expression to a PerformNode that manages effect handler stack
      */
     private fun convertPerformExpression(performExpr: PerformExpression): FunkNode {
-        System.err.println("DEBUG convertPerformExpression: Starting conversion, expression type=${performExpr.expression::class.simpleName}")
-        System.err.println("DEBUG convertPerformExpression: resolvedHandlers=${performExpr.resolvedHandlers}")
-        System.err.println("DEBUG convertPerformExpression: handlers=${performExpr.handlers.map { it.name }}")
 
         // Debug the inner expression if it's a FunctionCall
         if (performExpr.expression is FunctionCall) {
             val funcCall = performExpr.expression as FunctionCall
-            System.err.println("DEBUG convertPerformExpression: Inner expression is FunctionCall")
-            System.err.println("DEBUG convertPerformExpression:   function type=${funcCall.function::class.simpleName}")
             if (funcCall.function is MemberAccess) {
                 val memberAccess = funcCall.function as MemberAccess
-                System.err.println("DEBUG convertPerformExpression:   MemberAccess receiver=${memberAccess.receiver::class.simpleName}")
                 if (memberAccess.receiver is Identifier) {
-                    System.err.println("DEBUG convertPerformExpression:   Receiver name=${(memberAccess.receiver as Identifier).name}")
-                    System.err.println("DEBUG convertPerformExpression:   Member name=${memberAccess.member}")
                 }
             }
-            System.err.println("DEBUG convertPerformExpression:   resolvedAbilities=${funcCall.resolvedAbilities.size}")
         }
 
         // Convert the inner expression that will be executed with handlers
-        System.err.println("DEBUG convertPerformExpression: About to call convertExpression on inner expression")
         val expressionNode = convertExpression(performExpr.expression)
-        println("DEBUG convertPerformExpression: Converted inner expression, node type=${expressionNode::class.simpleName}")
 
         // Build a map of effect handlers
         // The handlers in performExpr are handler names like "NativeConsole"
@@ -1452,8 +1449,6 @@ class ASTToTruffleConverter(
                 val runtimeHandlers = mutableMapOf<String, FunkValue>()
                 val context = getContext()
 
-                println("DEBUG PerformNode.execute: performExpr.resolvedHandlers=${performExpr.resolvedHandlers}")
-                println("DEBUG PerformNode.execute: performExpr.handlers=${performExpr.handlers.map { it.name }}")
 
                 // If resolvedHandlers is populated, use it
                 if (performExpr.resolvedHandlers.isNotEmpty()) {
@@ -1462,7 +1457,6 @@ class ASTToTruffleConverter(
                         val performerName = resolvedHandler.performerName
                         val implRef = resolvedHandler.implDeclarationRef
 
-                        println("DEBUG PerformNode.execute: Using resolvedHandler: effectName=$effectName, performerName=$performerName, implRef=$implRef")
 
                         val lookupName = implRef ?: performerName
                         val performerValue = context.lookupGlobal(lookupName)
@@ -1472,11 +1466,8 @@ class ASTToTruffleConverter(
                     }
                 } else {
                     // Fallback: Use the handlerToEffectMapping we built during conversion
-                    println("DEBUG PerformNode.execute: resolvedHandlers is empty, using capturedMapping")
-                    println("DEBUG PerformNode.execute: capturedMapping keys=${capturedMapping.keys}")
                     for (handler in performExpr.handlers) {
                         val handlerName = handler.name
-                        println("DEBUG PerformNode.execute: Looking up handler '$handlerName' in mapping")
 
                         // Look up the effect name and implementation name from our mapping
                         val mapping = capturedMapping[handlerName]
@@ -1485,13 +1476,30 @@ class ASTToTruffleConverter(
                         }
 
                         val (effectName, implName) = mapping
-                        println("DEBUG PerformNode.execute: Handler '$handlerName' implements effect '$effectName', impl '$implName'")
 
                         // Look up the implementation record
-                        val performerValue = context.lookupGlobal(implName)
+                        var performerValue = context.lookupGlobal(implName)
                             ?: throw RuntimeException("Handler implementation not found: $implName for handler $handlerName")
 
-                        println("DEBUG PerformNode.execute: Found handler value of type: ${performerValue::class.simpleName}")
+
+                        // If the handler has parameters (e.g., FileLogger {path = "app.log"}),
+                        // we need to inject those parameters into the implementation functions
+                        val handlerParameters = handler.parameters
+                        if (handlerParameters != null) {
+                            // Evaluate the parameters to get a FunkRecord
+                            val paramsNode = convertExpression(handlerParameters)
+                            val paramsValue = paramsNode.execute(frame)
+
+                            if (paramsValue !is FunkRecord) {
+                                throw RuntimeException("Handler parameters must be a record, got: ${paramsValue::class.simpleName}")
+                            }
+
+
+                            // Inject parameters into the context so they're available to the implementation
+                            for ((paramName, paramValue) in paramsValue.fields) {
+                                context.defineLocal(paramName, paramValue)
+                            }
+                        }
 
                         // Store the handler under the effect name
                         runtimeHandlers[effectName] = performerValue
@@ -1535,6 +1543,12 @@ class ASTToTruffleConverter(
      * Get the variable slots mapping
      */
     fun getVariableSlots(): Map<String, Int> = variableSlots.toMap()
+
+    /**
+     * Get the effect declarations collected during conversion
+     * These need to be registered with the effect handler during execution
+     */
+    fun getEffectDeclarations(): List<EffectDeclaration> = effectDeclarations.toList()
 
     // Factory methods for creating specialized nodes
     

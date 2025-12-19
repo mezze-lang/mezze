@@ -122,6 +122,51 @@ object FunkTestHelper {
         return FunkLanguage.getLastExecutionContextGlobals()
     }
 
+    /**
+     * Execute a program and then call a specific function within the same context
+     * This avoids Truffle context sharing violations by adding the function call to the program AST
+     */
+    fun executeAndCallFunction(
+        program: Program,
+        functionName: String,
+        arguments: FunkRecord = FunkRecord(emptyMap()),
+        monomorphicInstances: Map<String, com.funk.language.ast.LetBinding> = emptyMap(),
+        projectRoot: Path? = null
+    ): FunkValue {
+        // Create a modified program that includes calling the function
+        // This way the function call happens within the same execution context as the function definition
+        val modifiedItems = program.items.toMutableList()
+
+        // Add a function call expression at the end
+        // Convert arguments record to AST RecordLiteral
+        val argumentsLiteral = com.funk.language.ast.RecordLiteral(
+            entries = arguments.fields.map { (name, value) ->
+                com.funk.language.ast.RecordFieldEntry(
+                    name = name,
+                    value = when (value) {
+                        is FunkInt -> com.funk.language.ast.IntLiteral(value.value)
+                        is FunkString -> com.funk.language.ast.StringLiteral(value.value)
+                        is FunkBool -> com.funk.language.ast.BooleanLiteral(value.value)
+                        else -> throw IllegalArgumentException("Unsupported argument type: ${value::class.simpleName}")
+                    }
+                )
+            }
+        )
+
+        // Create a function call: functionName(arguments)
+        val functionCall = com.funk.language.ast.FunctionCall(
+            function = com.funk.language.ast.Identifier(functionName),
+            arguments = argumentsLiteral
+        )
+
+        // Add the call as a top-level expression
+        modifiedItems.add(com.funk.language.ast.TopLevelExpression(functionCall))
+
+        // Execute the modified program
+        val modifiedProgram = com.funk.language.ast.Program(modifiedItems)
+        return execute(modifiedProgram, monomorphicInstances, projectRoot)
+    }
+
     // NOTE: programToSource() and related methods removed
     // We now execute typed ASTs directly without converting back to source
     // This preserves all type information, monomorphization, and optimizations

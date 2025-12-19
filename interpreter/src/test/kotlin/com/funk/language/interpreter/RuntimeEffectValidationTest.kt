@@ -41,25 +41,13 @@ class RuntimeEffectValidationTest {
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
-        // Execute should not throw - functions suspend instead
-        assertDoesNotThrow {
-            FunkTestHelper.execute(typedProgram)
-        }
 
-        // Get the context and call main
-        val context = interpreter.getLastExecutionContext()
-        val mainValue = context["main"]
-        assertNotNull(mainValue, "main function should exist")
-
-        // Call main{} - it should return FunkSuspended
-        val result = when (val fn = mainValue!!) {
-            is FunkTruffleFunction -> {
-                fn.callTarget.call(FunkRecord(emptyMap()), fn.closureVariables) as FunkValue
-            }
-            else -> {
-                throw AssertionError("Expected FunkTruffleFunction but got ${fn::class.simpleName}")
-            }
-        }
+        // Execute the program and call main within the same context to avoid context sharing violations
+        val result = FunkTestHelper.executeAndCallFunction(
+            program = typedProgram,
+            functionName = "main",
+            arguments = FunkRecord(emptyMap())
+        )
 
         // Result should be a suspended computation
         assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")
@@ -129,25 +117,13 @@ class RuntimeEffectValidationTest {
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
-        // Execute should not throw - functions suspend instead
-        assertDoesNotThrow {
-            FunkTestHelper.execute(typedProgram)
-        }
 
-        // Get the context and call main
-        val context = interpreter.getLastExecutionContext()
-        val mainValue = context["main"]
-        assertNotNull(mainValue, "main function should exist")
-
-        // Call main{} - it should return FunkSuspended
-        val result = when (val fn = mainValue!!) {
-            is FunkTruffleFunction -> {
-                fn.callTarget.call(FunkRecord(emptyMap()), fn.closureVariables) as FunkValue
-            }
-            else -> {
-                throw AssertionError("Expected FunkTruffleFunction but got ${fn::class.simpleName}")
-            }
-        }
+        // Execute the program and call main within the same context to avoid context sharing violations
+        val result = FunkTestHelper.executeAndCallFunction(
+            program = typedProgram,
+            functionName = "main",
+            arguments = FunkRecord(emptyMap())
+        )
 
         // Result should be a suspended computation
         assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")
@@ -188,25 +164,13 @@ class RuntimeEffectValidationTest {
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
-        // Execute should not throw - partially handled functions still suspend
-        assertDoesNotThrow {
-            FunkTestHelper.execute(typedProgram)
-        }
 
-        // Get the context and call main
-        val context = interpreter.getLastExecutionContext()
-        val mainValue = context["main"]
-        assertNotNull(mainValue, "main function should exist")
-
-        // Call main{} - it should return FunkSuspended
-        val result = when (val fn = mainValue!!) {
-            is FunkTruffleFunction -> {
-                fn.callTarget.call(FunkRecord(emptyMap()), fn.closureVariables) as FunkValue
-            }
-            else -> {
-                throw AssertionError("Expected FunkTruffleFunction but got ${fn::class.simpleName}")
-            }
-        }
+        // Execute the program and call main within the same context to avoid context sharing violations
+        val result = FunkTestHelper.executeAndCallFunction(
+            program = typedProgram,
+            functionName = "main",
+            arguments = FunkRecord(emptyMap())
+        )
 
         // Result should be a suspended computation with Random unhandled
         assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")
@@ -297,25 +261,13 @@ class RuntimeEffectValidationTest {
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
-        // Execute should not throw - nested effectful functions should suspend
-        assertDoesNotThrow {
-            FunkTestHelper.execute(typedProgram)
-        }
 
-        // Get the context and call main
-        val context = interpreter.getLastExecutionContext()
-        val mainValue = context["main"]
-        assertNotNull(mainValue, "main function should exist")
-
-        // Call main{} - it should return FunkSuspended
-        val result = when (val fn = mainValue!!) {
-            is FunkTruffleFunction -> {
-                fn.callTarget.call(FunkRecord(emptyMap()), fn.closureVariables) as FunkValue
-            }
-            else -> {
-                throw AssertionError("Expected FunkTruffleFunction but got ${fn::class.simpleName}")
-            }
-        }
+        // Execute the program and call main within the same context to avoid context sharing violations
+        val result = FunkTestHelper.executeAndCallFunction(
+            program = typedProgram,
+            functionName = "main",
+            arguments = FunkRecord(emptyMap())
+        )
 
         // Result should be a suspended computation
         assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")
@@ -354,25 +306,12 @@ class RuntimeEffectValidationTest {
             ast
         }
 
-        // Execute should not throw - partial application should suspend
-        assertDoesNotThrow {
-            FunkTestHelper.execute(typedProgram)
-        }
-
-        // Get the context and call main
-        val context = interpreter.getLastExecutionContext()
-        val mainValue = context["main"]
-        assertNotNull(mainValue, "main function should exist")
-
-        // Call main{} - it should return FunkSuspended
-        val result = when (val fn = mainValue!!) {
-            is FunkTruffleFunction -> {
-                fn.callTarget.call(FunkRecord(emptyMap()), fn.closureVariables) as FunkValue
-            }
-            else -> {
-                throw AssertionError("Expected FunkTruffleFunction but got ${fn::class.simpleName}")
-            }
-        }
+        // Execute the program and call main within the same context to avoid context sharing violations
+        val result = FunkTestHelper.executeAndCallFunction(
+            program = typedProgram,
+            functionName = "main",
+            arguments = FunkRecord(emptyMap())
+        )
 
         // Result should be a suspended computation
         assertTrue(result is FunkSuspended, "Result should be FunkSuspended but was ${result::class.simpleName}")

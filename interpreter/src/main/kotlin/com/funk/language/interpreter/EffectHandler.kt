@@ -72,17 +72,20 @@ class EffectHandler {
         // COMPREHENSIVE HANDLER RESOLUTION
         // 1. Check context first (for nested handlers)
         // 2. Check handler stack (for perform expressions)
-        // 3. Fail with detailed error message
+        // 3. If no handlers available, return FunkSuspended instead of throwing
         val handlersRecord = (context["__handlers"] as? FunkRecord)
             ?: handlerStack.lastOrNull()
-            ?: throw RuntimeException(
-                "No handlers available for effect call: $effectName.$operationName. " +
-                "Available context keys: ${context.keys}, Handler stack size: ${handlerStack.size}"
+            ?: return FunkSuspended(
+                value = FunkNull,
+                unhandledEffects = setOf(effectName)
             )
 
         val handlers = handlersRecord.fields
         val handler = handlers[effectName]
-            ?: throw RuntimeException("No handler found for effect: $effectName")
+            ?: return FunkSuspended(
+                value = FunkNull,
+                unhandledEffects = setOf(effectName)
+            )
 
         if (handler !is FunkRecord) {
             throw RuntimeException("Handler for $effectName is not a record: $handler")
@@ -91,13 +94,6 @@ class EffectHandler {
         val operation = handler.fields[operationName]
             ?: throw RuntimeException("Operation $operationName not found in handler for $effectName")
 
-        // Execute the handler operation
-        println("DEBUG EffectHandler: operation type = ${operation::class.simpleName}")
-        println("DEBUG EffectHandler: arguments type = ${arguments::class.simpleName}")
-        if (arguments is FunkRecord) {
-            println("DEBUG EffectHandler: arguments fields = ${arguments.fields.keys}, types = ${arguments.fields.mapValues { it.value::class.simpleName }}")
-        }
-
         return when (operation) {
             is NativeFunkFunction -> {
                 // Native functions expect the FunkRecord as args[0]
@@ -105,13 +101,11 @@ class EffectHandler {
                     throw RuntimeException("Native function expects record arguments, got: ${arguments::class.simpleName}")
                 }
                 // Pass the record as a single argument
-                println("DEBUG EffectHandler: Calling native function with record argument")
                 operation.call(listOf(arguments))
             }
             is FunkTruffleFunction -> {
                 // Truffle functions are called directly via their CallTarget
                 // All context is managed by Truffle frames
-                println("DEBUG EffectHandler: Calling Truffle function via CallTarget")
                 // Pass closure variables along with arguments
                 operation.callTarget.call(arguments, operation.closureVariables) as FunkValue
             }

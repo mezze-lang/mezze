@@ -450,10 +450,30 @@ object TruffleListImplementations {
             }
             FunkList(sorted)
         }
+
+        // List equality
+        context["__native_list_equals"] = NativeFunkFunction("__native_list_equals") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_list_equals", "expects FunkRecord")
+            val l = record.fields["l"] as? FunkList
+                ?: throw NativeFunctionException("__native_list_equals", "expects 'l' as List")
+            val r = record.fields["r"] as? FunkList
+                ?: throw NativeFunctionException("__native_list_equals", "expects 'r' as List")
+
+            // Lists are equal if they have the same length and all elements are equal
+            if (l.elements.size != r.elements.size) {
+                return@NativeFunkFunction FunkBool(false)
+            }
+
+            val allEqual = l.elements.zip(r.elements).all { (elemL, elemR) ->
+                compareValuesDeep(elemL, elemR)
+            }
+            FunkBool(allEqual)
+        }
     }
 
     /**
-     * Compare two FunkValues for equality
+     * Compare two FunkValues for equality (shallow - doesn't handle lists)
      */
     private fun compareValues(a: FunkValue, b: FunkValue): Boolean {
         return when {
@@ -462,6 +482,27 @@ object TruffleListImplementations {
             a is FunkString && b is FunkString -> a.value == b.value
             a is FunkBool && b is FunkBool -> a.value == b.value
             a is FunkNull && b is FunkNull -> true
+            else -> false
+        }
+    }
+
+    /**
+     * Compare two FunkValues for deep equality (handles lists recursively)
+     */
+    private fun compareValuesDeep(a: FunkValue, b: FunkValue): Boolean {
+        return when {
+            a is FunkInt && b is FunkInt -> a.value == b.value
+            a is FunkFloat && b is FunkFloat -> a.value == b.value
+            a is FunkString && b is FunkString -> a.value == b.value
+            a is FunkBool && b is FunkBool -> a.value == b.value
+            a is FunkNull && b is FunkNull -> true
+            a is FunkList && b is FunkList -> {
+                // Lists are equal if same length and all elements are equal
+                a.elements.size == b.elements.size &&
+                a.elements.zip(b.elements).all { (elemA, elemB) ->
+                    compareValuesDeep(elemA, elemB)
+                }
+            }
             else -> false
         }
     }

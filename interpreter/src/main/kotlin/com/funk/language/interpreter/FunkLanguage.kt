@@ -147,9 +147,10 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
                 val converter = ASTToTruffleConverter()
                 val truffleNode = converter.convertProgram(typedProgram)
                 val frameDescriptor = converter.getFrameDescriptor()
+                val effectDeclarations = converter.getEffectDeclarations()
 
                 // Create execution root node with module loading support
-                val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode, allImportedModules, projectRoot)
+                val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode, allImportedModules, projectRoot, effectDeclarations)
                 return rootNode.callTarget
             }
 
@@ -209,9 +210,10 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             val converter = ASTToTruffleConverter()
             val truffleNode = converter.convertProgram(typedProgram)
             val frameDescriptor = converter.getFrameDescriptor()
+            val effectDeclarations = converter.getEffectDeclarations()
 
             // Create optimized Truffle execution root node with module loading support
-            val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode, allImportedModules, projectRoot)
+            val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode, allImportedModules, projectRoot, effectDeclarations)
             return rootNode.callTarget
         } catch (e: Exception) {
             throw FunkException("Parse error: ${e.message}", e)
@@ -265,18 +267,33 @@ class FunkTruffleRootNode(
     frameDescriptor: FrameDescriptor,
     private val sourceCode: String,
     private val importedModules: List<String>,
-    private val projectRoot: java.nio.file.Path
+    private val projectRoot: java.nio.file.Path,
+    private val effectDeclarations: List<EffectDeclaration>
 ) : RootNode(language, frameDescriptor) {
 
     // Lazy-initialized module cache to avoid reloading modules on every execution
     private val loadedModules = mutableSetOf<String>()
+
+    // Track whether effects have been registered
+    private var effectsRegistered = false
 
     override fun execute(frame: VirtualFrame): Any {
         println("DEBUG FunkTruffleRootNode.execute: Starting execution")
         return try {
             // Get the context for registering module functions
             val context = FunkLanguage.getCurrentContext(this)
-            println("DEBUG FunkTruffleRootNode.execute: Got context, about to load modules")
+            println("DEBUG FunkTruffleRootNode.execute: Got context")
+
+            // Register effect declarations collected during conversion (only once)
+            if (!effectsRegistered) {
+                val effectHandler = context.effectHandler
+                for (effectDecl in effectDeclarations) {
+                    val effectRecord = FunkRecord(emptyMap()) // Empty record, just used as a marker
+                    effectHandler.registerEffect(effectDecl.name, effectRecord)
+                    println("DEBUG FunkTruffleRootNode.execute: Registered effect '${effectDecl.name}' at runtime")
+                }
+                effectsRegistered = true
+            }
 
             // Load and execute all imported modules before running the main program
             // This ensures module functions are registered in the context

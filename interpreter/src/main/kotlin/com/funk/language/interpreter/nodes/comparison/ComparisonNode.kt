@@ -10,6 +10,7 @@ import com.funk.language.interpreter.FunkNat
 import com.funk.language.interpreter.FunkFrac
 import com.funk.language.interpreter.FunkString
 import com.funk.language.interpreter.FunkBool
+import com.funk.language.interpreter.FunkList
 
 /**
  * Base class for binary comparison operations with manual specializations
@@ -45,6 +46,17 @@ class EqualNode(leftNode: FunkNode, rightNode: FunkNode) : BinaryComparisonNode(
             }
             left is FunkString && right is FunkString -> FunkBool(left.value == right.value)
             left is FunkBool && right is FunkBool -> FunkBool(left.value == right.value)
+            left is FunkList && right is FunkList -> {
+                // Lists are equal if same length and all elements are equal (deep comparison)
+                if (left.elements.size != right.elements.size) {
+                    FunkBool(false)
+                } else {
+                    val allEqual = left.elements.zip(right.elements).all { (elemL, elemR) ->
+                        (executeComparison(elemL, elemR) as FunkBool).value
+                    }
+                    FunkBool(allEqual)
+                }
+            }
             else -> FunkBool(false) // Different types are never equal
         }
     }
