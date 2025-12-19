@@ -141,8 +141,6 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 
                 val allImportedModules = (usePaths + pubUsePaths).distinct()
 
-                println("DEBUG FunkLanguage.parse (direct execution): Found ${allImportedModules.size} imported modules: $allImportedModules")
-
                 // Convert to Truffle nodes
                 val converter = ASTToTruffleConverter()
                 val truffleNode = converter.convertProgram(typedProgram)
@@ -158,15 +156,10 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             val parserImpl = FunkParser()
             val ast = parserImpl.parse(sourceCode)
 
-            println("DEBUG FunkLanguage.parse: AST has ${ast.items.size} items")
-            println("DEBUG FunkLanguage.parse: Item types: ${ast.items.map { it::class.simpleName }}")
-
             // Extract UseDeclarations from the ORIGINAL AST before type-checking
             // Type-checking may transform or remove these declarations
             val useDeclarations: List<UseDeclaration> = ast.items.filterIsInstance<UseDeclaration>()
             val pubUseDeclarations: List<PubUseDeclaration> = ast.items.filterIsInstance<PubUseDeclaration>()
-
-            println("DEBUG FunkLanguage.parse: Found ${useDeclarations.size} UseDeclarations and ${pubUseDeclarations.size} PubUseDeclarations")
 
             // Determine project root for type-checking and module loading
             // Priority: 1) System property 2) Source file parent 3) Current directory
@@ -203,8 +196,6 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             }
 
             val allImportedModules = (usePaths + pubUsePaths).distinct()
-
-            println("DEBUG FunkLanguage.parse: Found ${allImportedModules.size} imported modules: $allImportedModules")
 
             // Always use optimized Truffle nodes for all programs (including modules)
             val converter = ASTToTruffleConverter()
@@ -278,11 +269,9 @@ class FunkTruffleRootNode(
     private var effectsRegistered = false
 
     override fun execute(frame: VirtualFrame): Any {
-        println("DEBUG FunkTruffleRootNode.execute: Starting execution")
         return try {
             // Get the context for registering module functions
             val context = FunkLanguage.getCurrentContext(this)
-            println("DEBUG FunkTruffleRootNode.execute: Got context")
 
             // Register effect declarations collected during conversion (only once)
             if (!effectsRegistered) {
@@ -290,7 +279,6 @@ class FunkTruffleRootNode(
                 for (effectDecl in effectDeclarations) {
                     val effectRecord = FunkRecord(emptyMap()) // Empty record, just used as a marker
                     effectHandler.registerEffect(effectDecl.name, effectRecord)
-                    println("DEBUG FunkTruffleRootNode.execute: Registered effect '${effectDecl.name}' at runtime")
                 }
                 effectsRegistered = true
             }
@@ -298,7 +286,6 @@ class FunkTruffleRootNode(
             // Load and execute all imported modules before running the main program
             // This ensures module functions are registered in the context
             loadModules(importedModules, context, frame)
-            println("DEBUG FunkTruffleRootNode.execute: Modules loaded, executing main program")
 
             // Now execute the main program
             val result = programNode.execute(frame)
@@ -326,17 +313,11 @@ class FunkTruffleRootNode(
      * This registers module functions in the context so they can be called
      */
     private fun loadModules(modulePaths: List<String>, context: FunkContext, frame: VirtualFrame) {
-        println("DEBUG loadModules: Starting, ${modulePaths.size} modules to load")
-        println("DEBUG loadModules: Module paths: $modulePaths")
-
         for (modulePath in modulePaths) {
             // Skip if already loaded
             if (modulePath in loadedModules) {
-                println("DEBUG loadModules: Module '$modulePath' already loaded, skipping")
                 continue
             }
-
-            println("DEBUG loadModules: Loading module '$modulePath'")
 
             try {
                 // Load the module using ModuleResolver
@@ -345,8 +326,6 @@ class FunkTruffleRootNode(
                 if (!moduleFile.exists()) {
                     throw FunkException("Module not found: $modulePath at ${moduleFile.absolutePath}")
                 }
-
-                println("DEBUG loadModules: Module file: ${moduleFile.absolutePath}")
 
                 // Parse and type-check the module
                 val parserImpl = FunkParser()
@@ -357,14 +336,10 @@ class FunkTruffleRootNode(
                 val moduleTypeCheckResult = typeChecker.typeCheck(moduleAst, projectRoot)
                 val typedModule = moduleTypeCheckResult.program
 
-                println("DEBUG loadModules: Type-checked module, ${typedModule.items.size} items")
-
                 // Convert module to Truffle nodes
                 val moduleConverter = ASTToTruffleConverter(context, projectRoot)
                 val moduleNode = moduleConverter.convertProgram(typedModule)
                 val moduleFrameDescriptor = moduleConverter.getFrameDescriptor()
-
-                println("DEBUG loadModules: Converted module to Truffle nodes")
 
                 // Execute the module to register its functions
                 // We need to create a frame for the module execution
@@ -372,7 +347,6 @@ class FunkTruffleRootNode(
                 val moduleFrame: VirtualFrame = com.oracle.truffle.api.Truffle.getRuntime()
                     .createMaterializedFrame(emptyArray(), moduleFrameDescriptor)
 
-                println("DEBUG loadModules: Executing module to register functions")
                 moduleNode.execute(moduleFrame)
 
                 // After module execution, its functions are registered with unqualified names
@@ -391,12 +365,9 @@ class FunkTruffleRootNode(
                     val exportValue = moduleExports[exportName]
                     if (exportValue != null) {
                         val qualifiedName = "$modulePrefix::$exportName"
-                        println("DEBUG loadModules: Registering '$qualifiedName' = $exportValue")
                         context.defineGlobal(qualifiedName, exportValue)
                     }
                 }
-
-                println("DEBUG loadModules: Module '$modulePath' loaded successfully, registered ${publicExports.size} qualified exports")
 
                 // Mark as loaded
                 loadedModules.add(modulePath)

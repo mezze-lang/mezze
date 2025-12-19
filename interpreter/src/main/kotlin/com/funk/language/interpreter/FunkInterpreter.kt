@@ -108,10 +108,6 @@ class FunkInterpreter {
         // These are compiler-generated specializations (e.g., "add$Int") that
         // must be available at runtime WITHOUT going through the parser
         if (monomorphicInstances.isNotEmpty()) {
-            println("DEBUG FunkInterpreter: Setting ${monomorphicInstances.size} monomorphic instances for execution")
-            for ((name, _) in monomorphicInstances) {
-                println("DEBUG FunkInterpreter: Monomorphic instance: $name")
-            }
             FunkLanguage.setMonomorphicInstances(monomorphicInstances)
         }
 

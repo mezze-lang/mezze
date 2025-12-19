@@ -340,9 +340,6 @@ class ASTToTruffleConverter(
         // This catches cases where the typechecker failed to resolve ability calls properly
         val abilityNames = listOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "LogicalAnd", "LogicalOr", "LogicalNot")
         if (identifier.name in abilityNames) {
-            println("WARNING convertIdentifier: Looking up builtin ability name '${identifier.name}' as identifier!")
-            println("WARNING: This likely means the typechecker didn't properly resolve an operator")
-            println("WARNING: Creating a node that will throw a clear error at runtime")
             // Return a node that throws a helpful error
             return object : FunkNode() {
                 override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
@@ -471,18 +468,9 @@ class ASTToTruffleConverter(
         // Resolved abilities are compile-time known and take precedence over runtime effect detection
         if (funcCall.resolvedAbilities.isNotEmpty()) {
             // Use direct ability call for better Truffle performance
-            println("DEBUG convertFunctionCall: Using resolved ability call, resolvedAbilities = ${funcCall.resolvedAbilities.keys}")
             return convertResolvedAbilityCall(funcCall)
         }
 
-        // Debug: Check if this looks like an ability call that wasn't resolved
-        if (funcCall.function is MemberAccess) {
-            val memberAccess = funcCall.function as MemberAccess
-            if (memberAccess.receiver is Identifier) {
-                val receiverName = (memberAccess.receiver as Identifier).name
-                println("DEBUG convertFunctionCall: MemberAccess call $receiverName.${memberAccess.member}, resolvedAbilities is EMPTY")
-            }
-        }
 
         // PRIORITY 2.5: Fallback for ability calls that weren't resolved
         // This handles cases where modules are type-checked but ability resolution info is lost
@@ -540,17 +528,12 @@ class ASTToTruffleConverter(
                 val receiverName = (memberAccess.receiver as Identifier).name
                 val operationName = memberAccess.member
 
-                // Check if this is an effect call
-                System.err.println("=== *** RETURNING EARLY WITH DYNAMIC EFFECT CALL NODE ***")
-
                 // Create a node that checks at runtime if this is an effect call
                 return createDynamicEffectOrFunctionCall(receiverName, operationName, funcCall.arguments)
             } else if (memberAccess.receiver is VariantConstruction) {
                 // Effect names are often capitalized and parsed as VariantConstruction
                 val receiverName = (memberAccess.receiver as VariantConstruction).constructor
                 val operationName = memberAccess.member
-
-                System.err.println("=== *** RETURNING EARLY WITH DYNAMIC EFFECT CALL NODE ***")
 
                 // Create a node that checks at runtime if this is an effect call
                 return createDynamicEffectOrFunctionCall(receiverName, operationName, funcCall.arguments)
@@ -749,8 +732,6 @@ class ASTToTruffleConverter(
                             // NOT the converter's compile-time context
                             val runtimeContext = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
                             val implRecord = runtimeContext.lookupGlobal(implRecordName)
-
-                            println("DEBUG convertResolvedAbilityCall: Looking up '$implRecordName', found: ${implRecord?.let { "${it::class.simpleName}" } ?: "null"}")
 
                             if (implRecord == null || implRecord is com.funk.language.interpreter.FunkNull) {
                                 throw com.funk.language.interpreter.FunkException("Cannot find ability implementation: $implRecordName")
@@ -1068,7 +1049,6 @@ class ASTToTruffleConverter(
         // Check if there's already a slot for the generic name (from closure capture)
         val slot = if (variableSlots.containsKey(genericName)) {
             // Use the existing slot for the generic name
-            println("DEBUG convertMonomorphicFunctionCall: Using generic slot for '$genericName' instead of creating new slot for '$monomorphicName'")
             variableSlots[genericName]!!
         } else {
             // No generic slot exists, create a new slot for the monomorphic name

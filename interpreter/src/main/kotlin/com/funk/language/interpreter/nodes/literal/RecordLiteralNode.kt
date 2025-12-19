@@ -22,12 +22,10 @@ class RecordLiteralNode(
 
         for ((fieldName, fieldNode) in fieldNodes) {
             val fieldValue = fieldNode.execute(frame)
-            println("DEBUG RecordLiteralNode: field '$fieldName' = ${fieldValue::class.simpleName} value=$fieldValue")
             fields[fieldName] = fieldValue
         }
 
         val record = FunkRecord(fields)
-        println("DEBUG RecordLiteralNode: Created record with fields ${fields.keys}, types = ${fields.mapValues { it.value::class.simpleName }}")
         return record
     }
 }

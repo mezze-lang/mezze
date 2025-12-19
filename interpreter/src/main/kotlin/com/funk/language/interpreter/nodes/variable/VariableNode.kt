@@ -16,7 +16,6 @@ class ReadVariableNode(private val slot: Int, private val variableName: String) 
     override fun execute(frame: VirtualFrame): FunkValue {
         // First try reading from frame slot
         val value = frame.getObject(slot)
-        println("DEBUG ReadVariableNode: Reading '$variableName' from slot $slot = ${value?.let { "${it::class.simpleName}:$it" } ?: "null"}")
 
         // Return the value if it's a valid FunkValue (but NOT FunkNull)
         // FunkNull closure variables can occur with recursive functions
@@ -30,7 +29,6 @@ class ReadVariableNode(private val slot: Int, private val variableName: String) 
             val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
             val globalValue = context.lookupGlobal(variableName)
             if (globalValue != null) {
-                println("DEBUG ReadVariableNode: Found '$variableName' in globals")
                 return globalValue
             }
 
@@ -39,7 +37,6 @@ class ReadVariableNode(private val slot: Int, private val variableName: String) 
                 val genericName = variableName.substringBefore("$")
                 val genericValue = context.lookupGlobal(genericName)
                 if (genericValue != null) {
-                    println("DEBUG ReadVariableNode: Monomorphic '$variableName' not found, using generic '$genericName'")
                     return genericValue
                 }
             }
@@ -80,7 +77,6 @@ class SimpleReadVariableNode(private val slot: Int, private val variableName: St
     override fun execute(frame: VirtualFrame): FunkValue {
         // First try reading from frame slot
         val value = frame.getObject(slot)
-        println("DEBUG SimpleReadVariableNode: Reading '$variableName' from slot $slot = ${value?.let { "${it::class.simpleName}:$it" } ?: "null"}")
 
         // Return the value if it's a valid FunkValue (but NOT FunkNull)
         // FunkNull closure variables can occur with recursive functions where the function
@@ -97,7 +93,6 @@ class SimpleReadVariableNode(private val slot: Int, private val variableName: St
             val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
             val globalValue = context.lookupGlobal(variableName)
             if (globalValue != null) {
-                println("DEBUG SimpleReadVariableNode: Found '$variableName' in globals")
                 return globalValue
             }
 
@@ -106,7 +101,6 @@ class SimpleReadVariableNode(private val slot: Int, private val variableName: St
                 val genericName = variableName.substringBefore("$")
                 val genericValue = context.lookupGlobal(genericName)
                 if (genericValue != null) {
-                    println("DEBUG SimpleReadVariableNode: Monomorphic '$variableName' not found, using generic '$genericName'")
                     return genericValue
                 }
             }
@@ -140,8 +134,6 @@ class SimpleWriteVariableNode(
         // ALSO write to context.locals so module exports can be extracted
         val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
         context.defineLocal(variableName, value)
-
-        println("DEBUG SimpleWriteVariableNode: Wrote '$variableName' = ${value::class.simpleName} to slot $slot and context.locals")
 
         return value
     }

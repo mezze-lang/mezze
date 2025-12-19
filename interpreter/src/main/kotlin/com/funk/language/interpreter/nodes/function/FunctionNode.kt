@@ -55,7 +55,6 @@ class FunctionDefinitionNode(
                 if (slot != null) {
                     // Read from the frame slot
                     val frameValue = frame.getObject(slot)
-                    println("DEBUG FunctionDefinitionNode: Reading '$varName' from frame slot $slot = ${frameValue?.let { "${it::class.simpleName}" } ?: "null"}")
 
                     // If we got a valid value from the frame, use it
                     if (frameValue is FunkValue && frameValue !is FunkNull) {
@@ -67,14 +66,12 @@ class FunctionDefinitionNode(
 
                         val lookupName = if (varName.contains("$")) {
                             // Strip monomorphic suffix to get generic name
-                            println("DEBUG FunctionDefinitionNode: Stripping monomorphic suffix from '$varName' to '${varName.substringBefore("$")}'")
                             varName.substringBefore("$")
                         } else {
                             varName
                         }
 
                         val result = context.lookupGlobal(lookupName)
-                        println("DEBUG FunctionDefinitionNode: Looking up '$lookupName' for closure var '$varName' = ${result?.let { "${it::class.simpleName}" } ?: "null"}")
                         result
                     }
                 } else {
@@ -83,14 +80,12 @@ class FunctionDefinitionNode(
 
                     val lookupName = if (varName.contains("$")) {
                         // Strip monomorphic suffix to get generic name
-                        println("DEBUG FunctionDefinitionNode: Stripping monomorphic suffix from '$varName' to '${varName.substringBefore("$")}'")
                         varName.substringBefore("$")
                     } else {
                         varName
                     }
 
                     val result = context.lookupGlobal(lookupName)
-                    println("DEBUG FunctionDefinitionNode: Looking up '$lookupName' for closure var '$varName' = ${result?.let { "${it::class.simpleName}" } ?: "null"}")
                     result
                 }
             } catch (e: Exception) {
