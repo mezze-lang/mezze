@@ -19,13 +19,10 @@ class RecordLiteralNode(
     
     override fun execute(frame: VirtualFrame): FunkValue {
         val fields = mutableMapOf<String, FunkValue>()
-
         for ((fieldName, fieldNode) in fieldNodes) {
             val fieldValue = fieldNode.execute(frame)
             fields[fieldName] = fieldValue
         }
-
-        val record = FunkRecord(fields)
-        return record
+        return FunkRecord(fields)
     }
 }

@@ -370,7 +370,7 @@ object TruffleListImplementations {
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_list_from_array", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkArrayList
-                ?: throw NativeFunctionException("__native_list_from_array", "expects 'xs' as Array")
+                ?: throw NativeFunctionException("__native_list_from_array", "expects 'xs' as Array, got ${record.fields["xs"]?.let { it::class.simpleName } ?: "null"}")
             FunkList(xs.elements.toList())
         }
 

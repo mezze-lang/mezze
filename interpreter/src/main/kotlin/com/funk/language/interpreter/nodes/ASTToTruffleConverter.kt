@@ -528,6 +528,16 @@ class ASTToTruffleConverter(
                 val receiverName = (memberAccess.receiver as Identifier).name
                 val operationName = memberAccess.member
 
+                // CRITICAL: Check if the receiver is a local variable/parameter
+                // If it's in the frame, it's a regular record field access, not an effect call
+                if (variableSlots.containsKey(receiverName)) {
+                    // This is a regular function call on a record field (e.g., cfg.handler)
+                    // Use default dispatch
+                    val functionNode = convertExpression(funcCall.function)
+                    val argumentsNode = convertExpression(funcCall.arguments)
+                    return createFunctionCallNode(functionNode, argumentsNode)
+                }
+
                 // Create a node that checks at runtime if this is an effect call
                 return createDynamicEffectOrFunctionCall(receiverName, operationName, funcCall.arguments)
             } else if (memberAccess.receiver is VariantConstruction) {
@@ -1036,24 +1046,11 @@ class ASTToTruffleConverter(
     private fun convertMonomorphicFunctionCall(funcCall: FunctionCall): FunkNode {
         val monomorphicName = funcCall.resolvedFunctionName!!
 
-        // CRITICAL FIX: If the monomorphic name has a generic counterpart that's already
-        // been allocated as a closure variable, use that slot instead
-        // This prevents module shadowing issues where closure variables are captured with
-        // generic names but referenced with monomorphic names in the function body
-        val genericName = if (monomorphicName.contains("$")) {
-            monomorphicName.substringBefore("$")
-        } else {
-            monomorphicName
-        }
-
-        // Check if there's already a slot for the generic name (from closure capture)
-        val slot = if (variableSlots.containsKey(genericName)) {
-            // Use the existing slot for the generic name
-            variableSlots[genericName]!!
-        } else {
-            // No generic slot exists, create a new slot for the monomorphic name
-            getOrCreateSlot(monomorphicName)
-        }
+        // CRITICAL: Always use the monomorphic name directly, never fall back to generic name
+        // The monomorphic instance is a separate binding created by the type checker
+        // and should be looked up by its full monomorphic name (e.g., "displayValue$Int")
+        // Falling back to the generic name would execute the wrong (polymorphic) function
+        val slot = getOrCreateSlot(monomorphicName)
 
         val functionNode = SimpleReadVariableNode(slot, monomorphicName)
 
@@ -1066,8 +1063,12 @@ class ASTToTruffleConverter(
      */
     private fun convertLambdaExpression(lambda: LambdaExpression): FunkNode {
         val paramNames = when (val params = lambda.parameters) {
-            is UntypedParameters -> params.names
-            is TypedParameters -> params.recordType.entries.map { it.name }
+            is UntypedParameters -> {
+                params.names
+            }
+            is TypedParameters -> {
+                params.recordType.entries.map { it.name }
+            }
         }
 
         // Detect free variables (variables used in body but not parameters)
@@ -1139,7 +1140,16 @@ class ASTToTruffleConverter(
                     Unit
                 }
                 is FunctionCall -> {
-                    visit(e.function)
+                    // CRITICAL FIX: If this function call has a resolved monomorphic name,
+                    // we need to collect that name for closure capture, not the generic name
+                    // This ensures closure variables match the variable reads in the function body
+                    if (e.resolvedFunctionName != null && e.function is Identifier) {
+                        // Use the monomorphic name for closure capture
+                        variables.add(e.resolvedFunctionName!!)
+                    } else {
+                        // Regular case: visit the function expression
+                        visit(e.function)
+                    }
                     visit(e.arguments)
                     Unit
                 }

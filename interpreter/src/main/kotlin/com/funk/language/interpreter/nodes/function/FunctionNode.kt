@@ -178,6 +178,7 @@ class FunkFunctionRootNode(
                     missingParams.add(paramName)
                 }
             }
+
         } else {
             missingParams.addAll(parameterNames)
         }

@@ -5,6 +5,7 @@ import com.oracle.truffle.api.nodes.NodeInfo
 import com.funk.language.interpreter.nodes.FunkNode
 import com.funk.language.interpreter.FunkValue
 import com.funk.language.interpreter.FunkNull
+import com.funk.language.interpreter.FunkTruffleFunction
 
 /**
  * Node for reading variables from the frame (simplified without DSL)
