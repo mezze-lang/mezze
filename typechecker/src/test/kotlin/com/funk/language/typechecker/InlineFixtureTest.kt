@@ -2,6 +2,7 @@ package com.funk.language.typechecker
 
 import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -11,6 +12,11 @@ import kotlin.test.assertTrue
  */
 class InlineFixtureTest {
     private val parser = FunkParser()
+
+    @BeforeEach
+    fun setup() {
+        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
+    }
 
     // === Valid Fixtures ===
 

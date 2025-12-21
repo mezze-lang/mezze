@@ -17,6 +17,7 @@ class PolymorphicEffectsInterpreterTest {
 
     @BeforeEach
     fun setup() {
+        com.funk.language.typechecker.ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         parser = FunkParser()
         typeChecker = TypeChecker()
         interpreter = FunkInterpreter()

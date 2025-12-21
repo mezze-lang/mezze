@@ -16,6 +16,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
 
     @BeforeEach
     fun setup() {
+        com.funk.language.typechecker.ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         parser = FunkParser()
         typeChecker = TypeChecker()
         // Clear native global store for clean state (like Truffle does)

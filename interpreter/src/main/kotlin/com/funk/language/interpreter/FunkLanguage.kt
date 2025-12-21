@@ -118,9 +118,28 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
                 val (typedProgram, projectRoot) = directExecution
                 val monomorphicInstances = getAndClearMonomorphicInstances()
 
+                // DEBUG: Print monomorphic instances
+                if (monomorphicInstances.isNotEmpty()) {
+                    System.err.println("DEBUG: Monomorphic instances being added:")
+                    for ((name, binding) in monomorphicInstances) {
+                        System.err.println("  - $name: ${binding.inferredType?.let { prettyPrintType(it) }}")
+                    }
+                }
+
+                // CRITICAL FIX: Add monomorphic instances to the program
+                // Monomorphic instances are specialized versions of polymorphic functions
+                // (e.g., displayValue$Int is the Int-specialized version of displayValue)
+                // IMPORTANT: Prepend them BEFORE other items so they're registered before being used
+                val programWithMonomorphicInstances = if (monomorphicInstances.isNotEmpty()) {
+                    // PREPEND monomorphic instances so they're executed BEFORE call sites
+                    Program(monomorphicInstances.values.toList() + typedProgram.items)
+                } else {
+                    typedProgram
+                }
+
                 // Extract UseDeclarations from the program to support module loading
-                val useDeclarations: List<UseDeclaration> = typedProgram.items.filterIsInstance<UseDeclaration>()
-                val pubUseDeclarations: List<PubUseDeclaration> = typedProgram.items.filterIsInstance<PubUseDeclaration>()
+                val useDeclarations: List<UseDeclaration> = programWithMonomorphicInstances.items.filterIsInstance<UseDeclaration>()
+                val pubUseDeclarations: List<PubUseDeclaration> = programWithMonomorphicInstances.items.filterIsInstance<PubUseDeclaration>()
 
                 // Extract module paths
                 val usePaths = useDeclarations.map { it.path }.map { usePath ->
@@ -143,7 +162,7 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 
                 // Convert to Truffle nodes
                 val converter = ASTToTruffleConverter()
-                val truffleNode = converter.convertProgram(typedProgram)
+                val truffleNode = converter.convertProgram(programWithMonomorphicInstances)
                 val frameDescriptor = converter.getFrameDescriptor()
                 val effectDeclarations = converter.getEffectDeclarations()
 

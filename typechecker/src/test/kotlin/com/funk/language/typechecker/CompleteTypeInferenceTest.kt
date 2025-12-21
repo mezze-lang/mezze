@@ -14,6 +14,7 @@ class CompleteTypeInferenceTest {
 
     @BeforeEach
     fun setUp() {
+        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         parser = FunkParser()
         typeChecker = TypeChecker()
     }

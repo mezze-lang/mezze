@@ -3,12 +3,19 @@ package com.funk.language.typechecker
 import com.funk.language.ast.*
 import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
 
 class AbilityTypeCheckerTest {
-    
+
     private val parser = FunkParser()
-    private val typeChecker = TypeChecker()
+    private lateinit var typeChecker: TypeChecker
+
+    @BeforeEach
+    fun setup() {
+        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
+        typeChecker = TypeChecker()
+    }
     
     @Test
     fun testSimpleAbilityDeclaration() {
