@@ -3,14 +3,23 @@ package com.funk.language.typechecker
 import com.funk.language.parser.FunkParser
 import com.funk.language.ast.prettyPrintTypeWithAliases
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
 
 /**
  * Tests for printing types with their declaration names instead of expanded variants
  */
 class NamedTypePrintingTest {
-    private val parser = FunkParser()
-    private val typeChecker = TypeChecker()
+    private lateinit var parser: FunkParser
+    private lateinit var typeChecker: TypeChecker
+
+    @BeforeEach
+    fun setup() {
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        parser = FunkParser()
+        typeChecker = TypeChecker()
+    }
 
     @Test
     fun `test Tree type prints with name in function signature`() {

@@ -22,6 +22,7 @@ class OperatorErrorMessageTest {
     @BeforeEach
     fun setup() {
         ModuleResolver.clearCache()
+        TypeChecker.clearCache()
         parser = FunkParser()
         typeChecker = TypeChecker()
     }

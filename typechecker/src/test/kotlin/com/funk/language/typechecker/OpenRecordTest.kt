@@ -18,6 +18,9 @@ class OpenRecordTest {
     @BeforeEach
     fun setup() {
         parser = FunkParser()
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        parser = FunkParser()
         typeChecker = TypeChecker()
     }
 

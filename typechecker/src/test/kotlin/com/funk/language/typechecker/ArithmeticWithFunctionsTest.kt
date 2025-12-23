@@ -1,6 +1,7 @@
 package com.funk.language.typechecker
 
 import com.funk.language.parser.FunkParser
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertTrue
@@ -13,8 +14,16 @@ import kotlin.test.assertTrue
  * don't implement numeric abilities like NumAdd, NumSub, etc.
  */
 class ArithmeticWithFunctionsTest {
-    private val parser = FunkParser()
-    private val typeChecker = TypeChecker()
+    private lateinit var parser: FunkParser
+    private lateinit var typeChecker: TypeChecker
+
+    @BeforeEach
+    fun setup() {
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        parser = FunkParser()
+        typeChecker = TypeChecker()
+    }
 
     private fun typeCheckShouldFail(code: String): String {
         val program = parser.parse(code)

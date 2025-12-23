@@ -160,8 +160,22 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 
                 val allImportedModules = (usePaths + pubUsePaths).distinct()
 
-                // Convert to Truffle nodes
-                val converter = ASTToTruffleConverter()
+                // CRITICAL: Process modules BEFORE converting main program to accumulate handler mappings
+                // Load cached typed modules and extract their handler mappings
+                val accumulatedHandlerMapping = mutableMapOf<String, Pair<String, String>>()
+                for (modulePath in allImportedModules) {
+                    val typedModule = TypeChecker.getTypedModule(modulePath)
+                    if (typedModule != null) {
+                        // Convert module to extract handler mappings (don't execute yet)
+                        val moduleConverter = ASTToTruffleConverter(projectRoot = projectRoot)
+                        moduleConverter.convertProgram(typedModule)
+                        // Extract handler mappings from the module converter
+                        accumulatedHandlerMapping.putAll(moduleConverter.getHandlerMappings())
+                    }
+                }
+
+                // Convert main program with accumulated handler mappings from all modules
+                val converter = ASTToTruffleConverter(parentHandlerMapping = accumulatedHandlerMapping)
                 val truffleNode = converter.convertProgram(programWithMonomorphicInstances)
                 val frameDescriptor = converter.getFrameDescriptor()
                 val effectDeclarations = converter.getEffectDeclarations()
@@ -216,8 +230,22 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 
             val allImportedModules = (usePaths + pubUsePaths).distinct()
 
-            // Always use optimized Truffle nodes for all programs (including modules)
-            val converter = ASTToTruffleConverter()
+            // CRITICAL: Process modules BEFORE converting main program to accumulate handler mappings
+            // Load cached typed modules and extract their handler mappings
+            val accumulatedHandlerMapping = mutableMapOf<String, Pair<String, String>>()
+            for (modulePath in allImportedModules) {
+                val typedModule = TypeChecker.getTypedModule(modulePath)
+                if (typedModule != null) {
+                    // Convert module to extract handler mappings (don't execute yet)
+                    val moduleConverter = ASTToTruffleConverter(projectRoot = projectRoot)
+                    moduleConverter.convertProgram(typedModule)
+                    // Extract handler mappings from the module converter
+                    accumulatedHandlerMapping.putAll(moduleConverter.getHandlerMappings())
+                }
+            }
+
+            // Convert main program with accumulated handler mappings from all modules
+            val converter = ASTToTruffleConverter(parentHandlerMapping = accumulatedHandlerMapping)
             val truffleNode = converter.convertProgram(typedProgram)
             val frameDescriptor = converter.getFrameDescriptor()
             val effectDeclarations = converter.getEffectDeclarations()
@@ -346,14 +374,10 @@ class FunkTruffleRootNode(
                     throw FunkException("Module not found: $modulePath at ${moduleFile.absolutePath}")
                 }
 
-                // Parse and type-check the module
-                val parserImpl = FunkParser()
-                val moduleSource = moduleFile.readText()
-                val moduleAst = parserImpl.parse(moduleSource)
-
-                val typeChecker = TypeChecker()
-                val moduleTypeCheckResult = typeChecker.typeCheck(moduleAst, projectRoot)
-                val typedModule = moduleTypeCheckResult.program
+                // Retrieve the already-typed module from cache (avoids re-parsing/re-type-checking)
+                // The CLI type-checker already processed and cached all modules
+                val typedModule = TypeChecker.getTypedModule(modulePath)
+                    ?: throw FunkException("Module $modulePath not found in typed cache. Ensure the module was type-checked by the CLI.")
 
                 // Convert module to Truffle nodes
                 val moduleConverter = ASTToTruffleConverter(context, projectRoot)

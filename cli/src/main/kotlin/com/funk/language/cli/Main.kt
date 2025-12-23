@@ -384,45 +384,68 @@ private fun handleExecCommand(args: List<String>) {
         }
     }
 
-    try {
-        // Execute using Truffle/Polyglot API for full module loading support
-        val engine = Engine.newBuilder()
-            .allowExperimentalOptions(true)
-            .build()
+    // First, type-check to ensure program returns {} with no unhandled effects
+    val parser = FunkParser()
+    val fileName = filePath?.fileName?.toString()
+    val ast = parser.parse(source, file = fileName)
 
-        val context = Context.newBuilder("funk")
-            .engine(engine)
-            .allowAllAccess(true)
-            .allowExperimentalOptions(true)
-            .build()
+    val typeChecker = TypeChecker()
+    val typeCheckResult = if (filePath != null) {
+        typeChecker.typeCheck(ast, filePath.parent ?: filePath)
+    } else {
+        typeChecker.typeCheck(ast)
+    }
 
-        try {
-            // Create a Polyglot Source from the Funk code
-            val sourceBuilder = if (filePath != null) {
-                Source.newBuilder("funk", filePath.toFile())
-            } else {
-                Source.newBuilder("funk", source, "stdin")
-            }
-            val polyglotSource = sourceBuilder.build()
+    // Get the type of the last expression in the program
+    val lastItem = typeCheckResult.program.items.lastOrNull()
+    val programType = when (lastItem) {
+        is LetBinding -> lastItem.inferredType
+        is TopLevelExpression -> lastItem.expression.inferredType
+        else -> null
+    }
 
-            // Execute the source through Truffle (this will trigger module loading)
-            val result = context.eval(polyglotSource)
+    // Check that program returns {} with NO effects
+    // - Must be RecordType (not SuspendedType which would have unhandled effects)
+    // - Must be empty record
+    // - Must be closed (not open)
+    val isValidMainType = programType is FunkType.RecordType &&
+                          programType.fields.isEmpty() &&
+                          !programType.isOpen
 
-            // Print result if meaningful
-            if (result != null && !result.isNull) {
-                println()
-                println("✅ Execution successful!")
-                println()
-                println(result.toString())
-            } else {
-                println()
-                println("✅ Execution successful!")
-            }
-        } finally {
-            context.close()
-            engine.close()
+    if (!isValidMainType && programType != null) {
+        println("❌ Type Error: Main must return {} with no unhandled effects")
+        println("━".repeat(50))
+        println("Expected: {}")
+        println("Actual:   ${prettyPrintType(programType)}")
+        println()
+
+        if (programType is FunkType.SuspendedType) {
+            println("💡 You have unhandled effects: <${programType.effects.effects.joinToString(", ")}>")
+            println("   Use 'perform <Handler> in' to handle all effects before the program ends")
+        } else {
+            println("💡 Tip: Programs executed with 'funk exec' must return {}")
+            println("   End your program with {} or use an effect that returns {}")
         }
-        
+
+        println()
+        println("Example:")
+        println("  use std::effects::log::{println, Log, Console}")
+        println()
+        println("  perform Console in do")
+        println("    println { msg = \"Hello!\" }")
+        kotlin.system.exitProcess(1)
+    }
+
+    try {
+        // Execute using the interpreter directly with the already type-checked AST
+        // No need to parse/type-check again!
+        val interpreter = com.funk.language.interpreter.FunkInterpreter(skipParserSetup = false)
+        val result = interpreter.execute(typeCheckResult.program)
+
+        // Program should return {}, so we don't print the result
+        println()
+        println("✅ Execution successful!")
+
     } catch (e: TypeCheckError) {
         // Pass source code and file for enhanced error messages with code snippets
         val fileName = filePath?.fileName?.toString()

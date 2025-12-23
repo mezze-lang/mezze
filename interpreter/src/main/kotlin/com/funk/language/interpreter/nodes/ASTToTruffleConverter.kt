@@ -1540,6 +1540,13 @@ class ASTToTruffleConverter(
      */
     fun getEffectDeclarations(): List<EffectDeclaration> = effectDeclarations.toList()
 
+    /**
+     * Get the handler mappings collected during conversion
+     * Maps handler name → (effect name, implementation name)
+     * Used to propagate handler mappings from modules to main program
+     */
+    fun getHandlerMappings(): Map<String, Pair<String, String>> = handlerToEffectMapping.toMap()
+
     // Factory methods for creating specialized nodes
     
     private fun createAddNode(left: FunkNode, right: FunkNode): FunkNode {

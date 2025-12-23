@@ -2,14 +2,23 @@ package com.funk.language.typechecker
 
 import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
 
 /**
  * Tests for multi-parameter type declarations
  */
 class MultiParameterTypeTest {
-    private val parser = FunkParser()
-    private val typeChecker = TypeChecker()
+    private lateinit var parser: FunkParser
+    private lateinit var typeChecker: TypeChecker
+
+    @BeforeEach
+    fun setup() {
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        parser = FunkParser()
+        typeChecker = TypeChecker()
+    }
 
     @Test
     fun `test two parameter type declaration parses correctly`() {

@@ -18,6 +18,9 @@ class ErrorReportingTest {
     @BeforeEach
     fun setup() {
         // Enable strict validation for typechecker tests
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        // Enable strict validation for typechecker tests
         System.setProperty("funk.typecheck.strict", "true")
 
         parser = FunkParser()

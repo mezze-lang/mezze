@@ -3,6 +3,7 @@ package com.funk.language.typechecker
 import com.funk.language.ast.*
 import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -20,6 +21,12 @@ import kotlin.test.assertNotNull
  * ALL effects instead of only the handled effect.
  */
 class ComprehensiveEffectHandlingTest {
+
+    @BeforeEach
+    fun setup() {
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+    }
 
     private fun parseAndTypeCheck(code: String): Program {
         val parser = FunkParser()

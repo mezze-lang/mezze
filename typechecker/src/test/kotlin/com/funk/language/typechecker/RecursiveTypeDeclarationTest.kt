@@ -2,6 +2,7 @@ package com.funk.language.typechecker
 
 import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 
@@ -9,8 +10,16 @@ import org.junit.jupiter.api.Assertions.assertFalse
  * Tests for recursive type declarations to ensure type parameters are preserved correctly
  */
 class RecursiveTypeDeclarationTest {
-    private val parser = FunkParser()
-    private val typeChecker = TypeChecker()
+    private lateinit var parser: FunkParser
+    private lateinit var typeChecker: TypeChecker
+
+    @BeforeEach
+    fun setup() {
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        parser = FunkParser()
+        typeChecker = TypeChecker()
+    }
 
     @Test
     fun `test simple parameterized type preserves type variable`() {

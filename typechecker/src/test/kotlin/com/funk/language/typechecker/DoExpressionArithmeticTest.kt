@@ -2,13 +2,22 @@ package com.funk.language.typechecker
 
 import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
 
 class DoExpressionArithmeticTest {
     
-    private val parser = FunkParser()
-    private val typeChecker = TypeChecker()
+    private lateinit var parser: FunkParser
+    private lateinit var typeChecker: TypeChecker
+
+    @BeforeEach
+    fun setup() {
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        parser = FunkParser()
+        typeChecker = TypeChecker()
+    }
     
     @Test
     fun `test DoExpression with arithmetic should constrain parameters`() {

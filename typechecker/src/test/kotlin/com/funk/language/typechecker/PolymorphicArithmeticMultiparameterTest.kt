@@ -5,13 +5,22 @@ import com.funk.language.ast.LetBinding
 import com.funk.language.ast.prettyPrintType
 import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertNotNull
 
 class PolymorphicArithmeticMultiparameterTest {
-    private val parser = FunkParser()
-    private val typeChecker = TypeChecker()
+    private lateinit var parser: FunkParser
+    private lateinit var typeChecker: TypeChecker
+
+    @BeforeEach
+    fun setup() {
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+        parser = FunkParser()
+        typeChecker = TypeChecker()
+    }
 
     @Test
     fun `three parameter function with arithmetic should be polymorphic`() {

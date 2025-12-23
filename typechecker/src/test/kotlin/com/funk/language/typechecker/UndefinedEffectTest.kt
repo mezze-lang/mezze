@@ -17,6 +17,7 @@ class UndefinedEffectTest {
     @BeforeEach
     fun setup() {
         ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
+        TypeChecker.clearCache()
         parser = FunkParser()
         typeChecker = TypeChecker()
     }
