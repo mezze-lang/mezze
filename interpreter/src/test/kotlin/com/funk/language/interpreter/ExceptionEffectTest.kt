@@ -17,9 +17,8 @@ import java.nio.file.Paths
  * - Ignore handler (ignores all errors)
  * - Custom handlers with specific error types
  *
- * DISABLED: Exception handlers depend on Continuation/Delimited which is not yet implemented
+ * ENABLED: Continuation/Delimited now implemented!
  */
-@Disabled("Exception handlers depend on Continuation/Delimited which is not yet implemented")
 class ExceptionEffectTest {
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
@@ -32,6 +31,9 @@ class ExceptionEffectTest {
         interpreter = FunkInterpreter()
         // Set project root for stdlib module resolution
         System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
+        // Clear module cache for fresh resolution
+        com.funk.language.typechecker.ModuleResolver.clearCache()
+        com.funk.language.typechecker.TypeChecker.clearCache()
     }
 
     private fun executeProgram(source: String): FunkValue {
@@ -49,6 +51,7 @@ class ExceptionEffectTest {
     fun `test basic exception with ToResult handler`() {
         val source = """
             use std::effects::exception::{Exception, ToResult}
+            use std::control::continuation
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -56,7 +59,7 @@ class ExceptionEffectTest {
                 else
                     a / b
 
-            perform ToResult in divide {a = 10, b = 2}
+            perform ToResult {cont = continuation::new {}} in divide {a = 10, b = 2}
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -72,6 +75,7 @@ class ExceptionEffectTest {
     fun `test exception thrown returns Err`() {
         val source = """
             use std::effects::exception::{Exception, ToResult}
+            use std::control::continuation
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -79,7 +83,7 @@ class ExceptionEffectTest {
                 else
                     a / b
 
-            perform ToResult in divide {a = 10, b = 0}
+            perform ToResult {cont = continuation::new {}} in divide {a = 10, b = 0}
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -98,6 +102,7 @@ class ExceptionEffectTest {
     fun `test ToOption handler returns None on exception`() {
         val source = """
             use std::effects::exception::{Exception, ToOption}
+            use std::control::continuation
 
             let divide = {a, b} ->
                 if b == 0 then
@@ -105,7 +110,7 @@ class ExceptionEffectTest {
                 else
                     a / b
 
-            perform ToOption in divide {a = 10, b = 0}
+            perform ToOption {cont = continuation::new {}} in divide {a = 10, b = 0}
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -121,6 +126,7 @@ class ExceptionEffectTest {
     fun `test Ignore handler returns unit on exception`() {
         val source = """
             use std::effects::exception::{Exception, Ignore}
+            use std::control::continuation
 
             let may_fail = {x} ->
                 if x == 0 then
@@ -128,7 +134,7 @@ class ExceptionEffectTest {
                 else
                     x
 
-            perform Ignore in may_fail {x = 0}
+            perform Ignore {cont = continuation::new {}} in may_fail {x = 0}
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -144,6 +150,7 @@ class ExceptionEffectTest {
     fun `test throw helper function`() {
         val source = """
             use std::effects::exception::{throw, ToResult}
+            use std::control::continuation
 
             let check = {x} ->
                 if x < 0 then
@@ -151,7 +158,7 @@ class ExceptionEffectTest {
                 else
                     x
 
-            perform ToResult in check {x = -5}
+            perform ToResult {cont = continuation::new {}} in check {x = -5}
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -170,6 +177,7 @@ class ExceptionEffectTest {
     fun `test exception in if branch`() {
         val source = """
             use std::effects::exception::{Exception, ToResult}
+            use std::control::continuation
 
             let check_value = {x} ->
                 if x > 10 then
@@ -177,7 +185,7 @@ class ExceptionEffectTest {
                 else
                     x
 
-            perform ToResult in check_value {x = 15}
+            perform ToResult {cont = continuation::new {}} in check_value {x = 15}
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -193,13 +201,14 @@ class ExceptionEffectTest {
     fun `test multiple exceptions in sequence - first one wins`() {
         val source = """
             use std::effects::exception::{Exception, ToResult}
+            use std::control::continuation
 
             let multi_throw = {} -> do
                 Exception.throw {error = "First error"}
                 Exception.throw {error = "Second error"}
                 "unreachable"
 
-            perform ToResult in multi_throw {}
+            perform ToResult {cont = continuation::new {}} in multi_throw {}
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -217,9 +226,10 @@ class ExceptionEffectTest {
     fun `test unwrap helper function`() {
         val source = """
             use std::effects::exception::{unwrap, ToResult}
+            use std::control::continuation
 
             let good_result = Ok {val = 42}
-            perform ToResult in unwrap {result = good_result}
+            perform ToResult {cont = continuation::new {}} in unwrap {result = good_result}
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -235,9 +245,10 @@ class ExceptionEffectTest {
     fun `test unwrap with Err throws exception`() {
         val source = """
             use std::effects::exception::{unwrap, ToResult}
+            use std::control::continuation
 
             let bad_result = Err {error = "Something failed"}
-            perform ToResult in unwrap {result = bad_result}
+            perform ToResult {cont = continuation::new {}} in unwrap {result = bad_result}
         """.trimIndent()
 
         val result = executeProgram(source)

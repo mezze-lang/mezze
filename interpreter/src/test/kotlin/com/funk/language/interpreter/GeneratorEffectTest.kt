@@ -20,9 +20,8 @@ import java.nio.file.Paths
  * 4. Generator composition
  * 5. Edge cases and error conditions
  *
- * DISABLED: Generator tests are temporarily disabled while working on other interpreter issues.
+ * ENABLED: Continuation primitives and Generator stdlib now implemented!
  */
-@Disabled("Continuation/Delimited handler not yet implemented")
 class GeneratorEffectTest {
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
@@ -35,6 +34,9 @@ class GeneratorEffectTest {
         interpreter = FunkInterpreter()
         // Set project root for stdlib module resolution
         System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
+        // Clear module cache to ensure fresh module resolution with updated exports
+        com.funk.language.typechecker.ModuleResolver.clearCache()
+        com.funk.language.typechecker.TypeChecker.clearCache()
     }
 
     private fun executeProgram(source: String): FunkValue {
@@ -50,12 +52,12 @@ class GeneratorEffectTest {
 
     @Test
     fun testBasicYield() {
-        // Test that Continuation.suspend_with creates a suspended generator
+        // Test that yield creates a suspended generator
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
 
-            let test = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 42 }
+            let test = {} -> do
+                yield { value = 42 }
 
             test {}
         """.trimIndent()
@@ -69,10 +71,10 @@ class GeneratorEffectTest {
     fun testYieldWithDifferentTypes() {
         // Test that yield works with different value types
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
 
-            let testInt = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 123 }
+            let testInt = {} -> do
+                yield { value =123 }
 
             testInt {}
         """.trimIndent()
@@ -89,10 +91,10 @@ class GeneratorEffectTest {
     fun testMultipleYields() {
         // Test generator with multiple yields - only first yield as final expression suspends
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
 
-            let firstNumber = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 1 }
+            let firstNumber = {} -> do
+                yield { value =1 }
 
             firstNumber {}
         """.trimIndent()
@@ -108,11 +110,11 @@ class GeneratorEffectTest {
     fun testYieldsWithState() {
         // Test generator that yields with state
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
 
-            let counter = { start: Int } -> perform Delimited in do
+            let counter = { start: Int } -> do
                 let count = start
-                Continuation.suspend_with { value = count }
+                yield { value =count }
 
             counter { start = 10 }
         """.trimIndent()
@@ -131,10 +133,10 @@ class GeneratorEffectTest {
     fun testRangeGenerator() {
         // Test a simple range generator - yields first value
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
 
-            let range = { start: Int, end: Int } -> perform Delimited in do
-                Continuation.suspend_with { value = start }
+            let range = { start: Int, end: Int } -> do
+                yield { value =start }
 
             range { start = 0, end = 5 }
         """.trimIndent()
@@ -160,11 +162,11 @@ class GeneratorEffectTest {
     fun testYieldAfterCapture() {
         // Test yield works correctly (capture was tested in continuation tests)
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 10
-                Continuation.suspend_with { value = 42 }
+                yield { value =42 }
 
             test {}
         """.trimIndent()
@@ -179,12 +181,12 @@ class GeneratorEffectTest {
     fun testYieldWithOtherEffects() {
         // Test generator works correctly with other effects (Log)
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::log::{Log, Console}
 
-            let test = {} -> perform Console in perform Delimited in do
+            let test = {} -> perform Console in do
                 Log.println { msg = "Before yield" }
-                Continuation.suspend_with { value = 100 }
+                yield { value =100 }
 
             test {}
         """.trimIndent()
@@ -197,11 +199,11 @@ class GeneratorEffectTest {
     fun testYieldInFunction() {
         // Test yield inside a parameterized function
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
 
-            let makeGenerator = { initial: Int } -> perform Delimited in do
+            let makeGenerator = { initial: Int } -> do
                 let x = initial * 2
-                Continuation.suspend_with { value = x }
+                yield { value =x }
 
             makeGenerator { initial = 5 }
         """.trimIndent()
@@ -214,7 +216,7 @@ class GeneratorEffectTest {
     fun testYieldDoesNotAffectPureCode() {
         // Verify that importing Continuation doesn't affect pure code
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
 
             let pureComputation = { x: Int, y: Int } -> x * y + (x + y)
 
@@ -234,14 +236,14 @@ class GeneratorEffectTest {
     fun testGeneratorNext() {
         // Test that next returns the current value from a single-yield generator
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{next}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 42 }
+            let gen = {} -> do
+                yield { value =42 }
 
             let g = gen {}
-            let result = perform Delimited in next { gen = g }
+            let result = next { gen = g }
             result.value
         """.trimIndent()
 
@@ -255,17 +257,19 @@ class GeneratorEffectTest {
     fun testGeneratorToList() {
         // Test that to_list consumes a single-yield generator
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{to_list}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 42 }
+            let gen = {} -> do
+                yield { value =42 }
 
             let g = gen {}
-            perform Delimited in to_list { gen = g }
+            to_list { gen = g }
         """.trimIndent()
 
         val result = executeProgram(source)
+        println("DEBUG after handler fix: result type = ${result::class.simpleName}")
+        println("DEBUG after handler fix: result value = $result")
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
         assertEquals(1, list.elements.size)
@@ -276,14 +280,14 @@ class GeneratorEffectTest {
     fun testGeneratorTake() {
         // Test that take gets the value from a single-yield generator
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{take}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 99 }
+            let gen = {} -> do
+                yield { value =99 }
 
             let g = gen {}
-            let result = perform Delimited in take { gen = g, n = 3 }
+            let result = take { gen = g, n = 3 }
             result.values
         """.trimIndent()
 
@@ -299,14 +303,14 @@ class GeneratorEffectTest {
     fun testGeneratorToListSingleValue() {
         // Test to_list with generator that yields a single value
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{to_list}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 42 }
+            let gen = {} -> do
+                yield { value =42 }
 
             let g = gen {}
-            perform Delimited in to_list { gen = g }
+            to_list { gen = g }
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -320,14 +324,14 @@ class GeneratorEffectTest {
     fun testGeneratorTakeFromSingleYield() {
         // Test take with n larger than available values (only 1 available)
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{take}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 1 }
+            let gen = {} -> do
+                yield { value =1 }
 
             let g = gen {}
-            let result = perform Delimited in take { gen = g, n = 10 }
+            let result = take { gen = g, n = 10 }
             result.values
         """.trimIndent()
 
@@ -343,14 +347,14 @@ class GeneratorEffectTest {
     fun testGeneratorNextReturnsSome() {
         // Test that next on valid generator returns Some
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{next}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 100 }
+            let gen = {} -> do
+                yield { value =100 }
 
             let g0 = gen {}
-            let r1 = perform Delimited in next { gen = g0 }
+            let r1 = next { gen = g0 }
             r1.value
         """.trimIndent()
 
@@ -368,14 +372,14 @@ class GeneratorEffectTest {
     fun testNextExtractsYieldedValue() {
         // Verify next extracts the actual yielded value
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{next}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 999 }
+            let gen = {} -> do
+                yield { value =999 }
 
             let g = gen {}
-            let result = perform Delimited in next { gen = g }
+            let result = next { gen = g }
             match result.value is
                 Some { val } -> val
                 None -> 0
@@ -390,14 +394,14 @@ class GeneratorEffectTest {
     fun testNextReturnsGenState() {
         // Verify next returns the generator state for chaining
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{next}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 42 }
+            let gen = {} -> do
+                yield { value =42 }
 
             let g = gen {}
-            let result = perform Delimited in next { gen = g }
+            let result = next { gen = g }
             # result.gen should exist (either next state or null)
             result.value
         """.trimIndent()
@@ -411,14 +415,14 @@ class GeneratorEffectTest {
     fun testToListWithStringValue() {
         // Test to_list with string yielded value
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{to_list}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = "hello" }
+            let gen = {} -> do
+                yield { value ="hello" }
 
             let g = gen {}
-            perform Delimited in to_list { gen = g }
+            to_list { gen = g }
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -432,14 +436,14 @@ class GeneratorEffectTest {
     fun testToListWithBooleanValue() {
         // Test to_list with boolean yielded value
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{to_list}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = true }
+            let gen = {} -> do
+                yield { value =true }
 
             let g = gen {}
-            perform Delimited in to_list { gen = g }
+            to_list { gen = g }
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -453,14 +457,14 @@ class GeneratorEffectTest {
     fun testToListWithRecordValue() {
         // Test to_list with record yielded value
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{to_list}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = { x = 10, y = 20 } }
+            let gen = {} -> do
+                yield { value ={ x = 10, y = 20 } }
 
             let g = gen {}
-            let result = perform Delimited in to_list { gen = g }
+            let result = to_list { gen = g }
             __native_arraylist_length { xs = result }
         """.trimIndent()
 
@@ -473,14 +477,14 @@ class GeneratorEffectTest {
     fun testTakeWithZero() {
         // Test take with n = 0
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{take}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 42 }
+            let gen = {} -> do
+                yield { value =42 }
 
             let g = gen {}
-            let result = perform Delimited in take { gen = g, n = 0 }
+            let result = take { gen = g, n = 0 }
             result.values
         """.trimIndent()
 
@@ -494,14 +498,14 @@ class GeneratorEffectTest {
     fun testTakeWithOne() {
         // Test take with n = 1
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{take}
 
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 77 }
+            let gen = {} -> do
+                yield { value =77 }
 
             let g = gen {}
-            let result = perform Delimited in take { gen = g, n = 1 }
+            let result = take { gen = g, n = 1 }
             result.values
         """.trimIndent()
 
@@ -516,17 +520,17 @@ class GeneratorEffectTest {
     fun testGeneratorWithComputation() {
         // Test generator that performs computation before yielding
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{to_list}
 
-            let computeGen = { a: Int, b: Int } -> perform Delimited in do
+            let computeGen = { a: Int, b: Int } -> do
                 let sum = a + b
                 let product = a * b
                 let result = sum + product
-                Continuation.suspend_with { value = result }
+                yield { value =result }
 
             let g = computeGen { a = 3, b = 4 }
-            perform Delimited in to_list { gen = g }
+            to_list { gen = g }
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -541,18 +545,18 @@ class GeneratorEffectTest {
     fun testGeneratorWithNestedLet() {
         // Test generator with nested let bindings
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{next}
 
-            let gen = {} -> perform Delimited in do
+            let gen = {} -> do
                 let x = 10
                 let z = 5
                 let y = z * 2
                 let result = x + y
-                Continuation.suspend_with { value = result }
+                yield { value =result }
 
             let g = gen {}
-            let r = perform Delimited in next { gen = g }
+            let r = next { gen = g }
             match r.value is
                 Some { val } -> val
                 None -> 0
@@ -568,15 +572,15 @@ class GeneratorEffectTest {
     fun testGeneratorWithConditional() {
         // Test generator with conditional expression
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{to_list}
 
-            let gen = { flag: Bool } -> perform Delimited in do
+            let gen = { flag: Bool } -> do
                 let value = if flag then 100 else 200
-                Continuation.suspend_with { value = value }
+                yield { value =value }
 
             let g1 = gen { flag = true }
-            perform Delimited in to_list { gen = g1 }
+            to_list { gen = g1 }
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -590,15 +594,15 @@ class GeneratorEffectTest {
     fun testGeneratorPreservesState() {
         // Test that generator captures local state correctly
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{next}
 
-            let makeCounter = { start: Int, step: Int } -> perform Delimited in do
+            let makeCounter = { start: Int, step: Int } -> do
                 let current = start + step
-                Continuation.suspend_with { value = current }
+                yield { value =current }
 
             let g = makeCounter { start = 100, step = 5 }
-            let r = perform Delimited in next { gen = g }
+            let r = next { gen = g }
             match r.value is
                 Some { val } -> val
                 None -> 0
@@ -611,18 +615,17 @@ class GeneratorEffectTest {
 
     @Test
     fun testNextOnNonGenerator() {
-        // Test that next handles non-generator input gracefully
+        // Test that next handles non-suspended values gracefully (e.g., completed generator)
         val source = """
-            use std::effects::continuation::{Delimited}
             use std::effects::generator::{next}
 
-            # Pass a non-suspended value (just an int wrapped in record)
-            let result = perform Delimited in next { gen = 42 }
+            # Pass a non-suspended value (unit value, like an exhausted generator)
+            let result = next { gen = {} }
             result.value
         """.trimIndent()
 
         val result = executeProgram(source)
-        // Should return None since 42 is not a suspended generator
+        // Should return None since {} is not a suspended generator
         assertTrue(result is FunkVariant)
         assertEquals("None", (result as FunkVariant).constructor)
     }
@@ -631,14 +634,14 @@ class GeneratorEffectTest {
     fun testToListProducesCorrectType() {
         // Verify to_list returns a proper FunkArrayList
         val source = """
-            use std::effects::continuation::{Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{yield, to_list}
 
-            let gen = {} -> perform Delimited in do
+            let gen = {} -> do
                 yield { value = 42 }
 
             let g = gen {}
-            let xs = perform Delimited in to_list { gen = g }
+            let xs = to_list { gen = g }
             __native_arraylist_length { xs = xs }
         """.trimIndent()
 
@@ -651,14 +654,14 @@ class GeneratorEffectTest {
     fun testTakeReturnsRecord() {
         // Verify take returns a record with values field
         val source = """
-            use std::effects::continuation::{Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{yield, take}
 
-            let gen = {} -> perform Delimited in do
+            let gen = {} -> do
                 yield { value = 55 }
 
             let g = gen {}
-            let result = perform Delimited in take { gen = g, n = 1 }
+            let result = take { gen = g, n = 1 }
             result.values
         """.trimIndent()
 
@@ -673,16 +676,16 @@ class GeneratorEffectTest {
     fun testGeneratorWithEffectComposition() {
         // Test generator composed with Log effect
         val source = """
-            use std::effects::continuation::{Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{yield, to_list}
             use std::effects::log::{Log, Console}
 
-            let loggingGen = { msg: String, value: Int } -> perform Console in perform Delimited in do
+            let loggingGen = { msg: String, value: Int } -> perform Console in do
                 Log.println { msg = msg }
                 yield { value = value }
 
             let g = loggingGen { msg = "Yielding value", value = 123 }
-            perform Delimited in to_list { gen = g }
+            to_list { gen = g }
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -696,19 +699,19 @@ class GeneratorEffectTest {
     fun testMultipleGeneratorInstances() {
         // Test creating multiple independent generator instances
         val source = """
-            use std::effects::continuation::{Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{yield, next}
 
-            let makeGen = { value: Int } -> perform Delimited in do
+            let makeGen = { value: Int } -> do
                 yield { value = value }
 
             let g1 = makeGen { value = 10 }
             let g2 = makeGen { value = 20 }
             let g3 = makeGen { value = 30 }
 
-            let r1 = perform Delimited in next { gen = g1 }
-            let r2 = perform Delimited in next { gen = g2 }
-            let r3 = perform Delimited in next { gen = g3 }
+            let r1 = next { gen = g1 }
+            let r2 = next { gen = g2 }
+            let r3 = next { gen = g3 }
 
             let v1 = match r1.value is
                 Some { val } -> val
@@ -732,14 +735,14 @@ class GeneratorEffectTest {
     fun testGeneratorYieldingList() {
         // Test generator that yields an array - verify the array was yielded
         val source = """
-            use std::effects::continuation::{Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{yield, to_list}
 
-            let gen = {} -> perform Delimited in do
+            let gen = {} -> do
                 yield { value = [1, 2, 3] }
 
             let g = gen {}
-            let result = perform Delimited in to_list { gen = g }
+            let result = to_list { gen = g }
             __native_arraylist_length { xs = result }
         """.trimIndent()
 
@@ -752,17 +755,17 @@ class GeneratorEffectTest {
     fun testGeneratorWithArithmetic() {
         // Test generator performing various arithmetic operations
         val source = """
-            use std::effects::continuation::{Delimited}
+            use std::effects::generator::{yield}
             use std::effects::generator::{yield, to_list}
 
-            let mathGen = { x: Int } -> perform Delimited in do
+            let mathGen = { x: Int } -> do
                 let squared = x * x
                 let doubled = x * 2
                 let combined = squared + doubled
                 yield { value = combined }
 
             let g = mathGen { x = 5 }
-            perform Delimited in to_list { gen = g }
+            to_list { gen = g }
         """.trimIndent()
 
         val result = executeProgram(source)

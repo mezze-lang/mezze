@@ -8,13 +8,16 @@ import org.junit.jupiter.api.BeforeEach
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
-@Disabled("Continuation/Delimited handler not yet implemented")
 class StateMachineExecutionTest {
     private lateinit var executor: StateMachineExecutor
 
     @BeforeEach
     fun setUp() {
         executor = StateMachineExecutor()
+        // Set project root for stdlib module resolution
+        System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
+        // Clear module cache for fresh resolution
+        com.funk.language.typechecker.ModuleResolver.clearCache()
     }
 
     @Test

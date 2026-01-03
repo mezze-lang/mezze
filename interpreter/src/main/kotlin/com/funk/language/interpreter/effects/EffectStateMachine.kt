@@ -156,8 +156,7 @@ class EffectStateMachine(
         }
         
         // Return the last computed result
-        val lastStateResult = executionContext.getVariable("last_result")
-        return lastStateResult ?: FunkNull
+        return executionContext.getVariable("last_result") ?: FunkNull
     }
     
     /**

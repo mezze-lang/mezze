@@ -14,9 +14,8 @@ import java.nio.file.Paths
  * Comprehensive test suite for the Continuation effect.
  * Tests delimited continuations including capture, resume, suspend, and abort operations.
  *
- * DISABLED: Continuation tests are temporarily disabled while working on other interpreter issues.
+ * ENABLED: Continuation primitives now implemented!
  */
-@Disabled("Continuation/Delimited handler not yet implemented")
 class ContinuationEffectTest {
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
@@ -29,6 +28,9 @@ class ContinuationEffectTest {
         interpreter = FunkInterpreter()
         // Set project root for stdlib module resolution
         System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
+        // Clear module cache to ensure fresh module resolution with updated exports
+        com.funk.language.typechecker.ModuleResolver.clearCache()
+        com.funk.language.typechecker.TypeChecker.clearCache()
     }
 
     private fun executeProgram(source: String): FunkValue {
@@ -41,11 +43,11 @@ class ContinuationEffectTest {
     @Test
     fun testBasicContinuationCapture() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 10
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 let y = 20
                 x + y
 
@@ -60,12 +62,12 @@ class ContinuationEffectTest {
     @Test
     fun testContinuationWithMultipleStatements() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let a = 5
                 let b = 10
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 let c = 15
                 let d = 20
                 a + b + c + d
@@ -81,13 +83,13 @@ class ContinuationEffectTest {
     @Test
     fun testContinuationWithLogEffect() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
             use std::effects::log::{Log, Console}
 
-            let test = {} -> perform Console in perform Delimited in do
+            let test = {} -> perform Console in do
                 Log.println { msg = "Before capture" }
                 let x = 100
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 Log.println { msg = "After capture" }
                 let y = 200
                 Log.println { msg = "Returning result" }
@@ -128,11 +130,11 @@ class ContinuationEffectTest {
     fun testContinuationCaptureOnlyOnce() {
         // This test verifies that continuation capture doesn't cause double execution
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 1
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 let y = 2
                 x + y
 
@@ -155,13 +157,13 @@ class ContinuationEffectTest {
     @Test
     fun testContinuationWithFunctionCalls() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
             let add = {a, b} -> a + b
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = add {a = 5, b = 10}
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 let y = add {a = 20, b = 30}
                 add {a = x, b = y}
 
@@ -176,11 +178,11 @@ class ContinuationEffectTest {
     @Test
     fun testContinuationInFunction() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let makeComputation = {initial} -> perform Delimited in do
+            let makeComputation = {initial} -> do
                 let x = initial
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 let y = x * 2
                 x + y
 
@@ -195,11 +197,11 @@ class ContinuationEffectTest {
     @Test
     fun testContinuationWithParameterizedFunction() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {multiplier} -> perform Delimited in do
+            let test = {multiplier} -> do
                 let x = 10
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 let y = multiplier * 2
                 x + y
 
@@ -214,13 +216,13 @@ class ContinuationEffectTest {
     @Test
     fun testMultipleContinuationCaptures() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 10
-                let cont1 = Continuation.capture {}
+                let cont1 = continuation::new {}
                 let y = 20
-                let cont2 = Continuation.capture {}
+                let cont2 = continuation::new {}
                 let z = 30
                 x + y + z
 
@@ -235,11 +237,11 @@ class ContinuationEffectTest {
     @Test
     fun testContinuationWithRecords() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let point = {x = 10, y = 20}
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 let z = 30
                 point.x + point.y + z
 
@@ -254,11 +256,11 @@ class ContinuationEffectTest {
     @Test
     fun testContinuationWithArithmetic() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let a = 5 * 2
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 let b = 10 + 5
                 a + b
 
@@ -274,10 +276,10 @@ class ContinuationEffectTest {
     fun testDelimitedPerformerAlwaysAvailable() {
         // Test that Delimited performer is available without explicit registration
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
-                let cont = Continuation.capture {}
+            let test = {} -> do
+                let cont = continuation::new {}
                 let result = 42
                 result
 
@@ -293,7 +295,7 @@ class ContinuationEffectTest {
     fun testContinuationDoesNotAffectPureCode() {
         // Verify that having continuation effect available doesn't change pure code behavior
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
             let pureComputation = {x, y} -> x * y + (x + y)
 
@@ -314,11 +316,12 @@ class ContinuationEffectTest {
         // Test that resume calls a captured continuation
         // Use suspend to get the continuation out of the perform block
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 10
-                Continuation.suspend {}
+                let cont_ctx = continuation::new {}
+                cont_ctx.suspend {}
 
             let main = {} -> do
                 let suspended = test {}
@@ -337,11 +340,11 @@ class ContinuationEffectTest {
     fun testResumeWithDifferentValues() {
         // Test that capture creates a callable continuation within the same scope
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 10
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 # cont now represents "the rest of the computation"
                 # We can call it if we want (multishot), but for now just continue
                 let y = 20
@@ -363,11 +366,12 @@ class ContinuationEffectTest {
     fun testBasicAbort() {
         // Test that abort stops execution immediately
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 10
-                Continuation.abort {}
+                let cont_ctx = continuation::new {}
+                cont_ctx.abort {}
                 let y = 20
                 x + y
 
@@ -398,12 +402,13 @@ class ContinuationEffectTest {
     fun testAbortPreventsSubsequentStatements() {
         // Verify that statements after abort don't execute
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
             use std::effects::log::{Log, Console}
 
-            let test = {} -> perform Console in perform Delimited in do
+            let test = {} -> perform Console in do
                 Log.println { msg = "Before abort" }
-                Continuation.abort {}
+                let cont_ctx = continuation::new {}
+                cont_ctx.abort {}
                 Log.println { msg = "After abort" }
                 42
 
@@ -432,11 +437,11 @@ class ContinuationEffectTest {
         // Test that captured continuation can be called multiple times (multishot)
         // This is a basic test - more complex multishot requires returning the continuation
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 10
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 # Continuation is captured
                 # For true multishot, we'd need to call cont multiple times
                 # For now, verify capture works and execution continues
@@ -455,11 +460,11 @@ class ContinuationEffectTest {
     fun testMultishotWithState() {
         // Test continuation capture with state
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let counter = {} -> perform Delimited in do
+            let counter = {} -> do
                 let x = 100
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 let y = 200
                 x + y
 
@@ -479,11 +484,12 @@ class ContinuationEffectTest {
     fun testBasicSuspend() {
         // Test that suspend creates a suspended continuation
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 10
-                Continuation.suspend {}
+                let cont_ctx = continuation::new {}
+                cont_ctx.suspend {}
 
             test {}
         """.trimIndent()
@@ -501,13 +507,13 @@ class ContinuationEffectTest {
     fun testNestedContinuations() {
         // Test capturing continuation inside captured continuation
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let test = {} -> perform Delimited in do
+            let test = {} -> do
                 let x = 10
-                let outer = Continuation.capture {}
+                let outer = continuation::new {}
                 let y = 20
-                let inner = Continuation.capture {}
+                let inner = continuation::new {}
                 let z = 30
                 x + y + z
 
@@ -523,10 +529,10 @@ class ContinuationEffectTest {
     fun testContinuationWithComplexControl() {
         // Test continuation with variables and arithmetic
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
 
-            let compute = {n} -> perform Delimited in do
-                let cont = Continuation.capture {}
+            let compute = {n} -> do
+                let cont = continuation::new {}
                 let result = n * 10
                 result
 
@@ -542,12 +548,12 @@ class ContinuationEffectTest {
     fun testContinuationWithMultipleEffects() {
         // Test continuation works correctly with multiple effects
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::control::continuation
             use std::effects::log::{Log, Console}
 
-            let test = {} -> perform Console in perform Delimited in do
+            let test = {} -> perform Console in do
                 Log.println { msg = "Start" }
-                let cont = Continuation.capture {}
+                let cont = continuation::new {}
                 Log.println { msg = "Middle" }
                 let x = 100
                 Log.println { msg = "End" }

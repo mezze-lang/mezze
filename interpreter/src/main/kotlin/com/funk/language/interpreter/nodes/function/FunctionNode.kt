@@ -46,18 +46,31 @@ class FunctionDefinitionNode(
     override fun execute(frame: VirtualFrame): FunkValue {
         // Capture closure variables from the current frame
         val closureVariables = mutableMapOf<String, FunkValue>()
+
+        // DEBUG: Log closure capture attempt with stack trace to see where this is being called from
+        val stackTrace = Thread.currentThread().stackTrace
+        val caller = stackTrace.getOrNull(2)?.toString() ?: "unknown"
+        println("\nDEBUG FunctionDef.execute: name=$name, closureVariableNames=$closureVariableNames, slots=$closureVariableSlots")
+        println("DEBUG: Caller = $caller")
+
         for (varName in closureVariableNames) {
+            println("DEBUG: Attempting to capture varName=$varName")
+
             // Try to find the variable in the current frame or context
             val value = try {
                 // CRITICAL FIX: First try to read from the current frame's slots
                 // This allows nested functions to capture parameters and local variables from outer functions
                 val slot = closureVariableSlots[varName]
+                println("DEBUG: slot for $varName = $slot")
+
                 if (slot != null) {
                     // Read from the frame slot
                     val frameValue = frame.getObject(slot)
+                    println("DEBUG: frameValue from slot = ${frameValue?.let { it::class.simpleName }}")
 
                     // If we got a valid value from the frame, use it
                     if (frameValue is FunkValue && frameValue !is FunkNull) {
+                        println("DEBUG: Using frame value for $varName")
                         frameValue
                     } else {
                         // Frame slot is null or FunkNull, fall back to global lookup
@@ -71,7 +84,9 @@ class FunctionDefinitionNode(
                             varName
                         }
 
+                        println("DEBUG: Frame slot null/FunkNull, doing global lookup for $lookupName")
                         val result = context.lookupGlobal(lookupName)
+                        println("DEBUG: Global lookup result = ${result?.let { it::class.simpleName }}")
                         result
                     }
                 } else {
@@ -85,21 +100,30 @@ class FunctionDefinitionNode(
                         varName
                     }
 
+                    println("DEBUG: No slot info, doing global lookup for $lookupName")
                     val result = context.lookupGlobal(lookupName)
+                    println("DEBUG: Global lookup result = ${result?.let { it::class.simpleName }}")
                     result
                 }
             } catch (e: Exception) {
+                println("DEBUG: Exception during capture: ${e.message}")
                 null
             }
             // Only capture non-null values
             // For recursive functions, the function won't exist yet, so we skip it
             // and let the variable read fall back to global lookup at runtime
             if (value != null && value !is FunkNull) {
+                println("DEBUG: Successfully captured $varName = ${value::class.simpleName}")
                 closureVariables[varName] = value
+            } else {
+                println("DEBUG: Skipping $varName (value is null or FunkNull)")
             }
         }
 
-        return FunkTruffleFunction(callTarget, name, closureVariables)
+        println("DEBUG: Final closureVariables.size = ${closureVariables.size}")
+        val result = FunkTruffleFunction(callTarget, name, closureVariables)
+        println("DEBUG: Returning function: $result\n")
+        return result
     }
 }
 
@@ -116,7 +140,7 @@ class FunctionCallNode(
         val function = functionNode.execute(frame)
         val arguments = argumentsNode.execute(frame)
 
-        return when (function) {
+        val result = when (function) {
             is FunkTruffleFunction -> {
                 // Direct call to Truffle function with closure variables
                 // Pass arguments and closure variables to the function
@@ -130,6 +154,8 @@ class FunctionCallNode(
                 throw RuntimeException("Cannot call non-function value: ${function::class.simpleName}")
             }
         }
+
+        return result
     }
 }
 
@@ -149,8 +175,26 @@ class FunkFunctionRootNode(
         // Arguments: [0] = FunkRecord of parameters, [1] = Map<String, FunkValue> of closure variables
         val arguments = frame.getArguments()
 
+        // DEBUG: Log when arguments size is unexpected
+        if (arguments.size < 2) {
+            println("ERROR: FunkFunctionRootNode.execute for function '$name' received ${arguments.size} arguments, expected 2!")
+            println("ERROR: Arguments: ${arguments.contentToString()}")
+            println("ERROR: Stack trace:")
+            Thread.currentThread().stackTrace.take(15).forEach { println("  $it") }
+        }
+
         // Get context for registering variables
         val context = FunkLanguage.getCurrentContext(this)
+
+        // CRITICAL: Propagate handlers from the call site to this function's execution
+        // This ensures that effects called within this function can access the active handlers
+        // Without this, functions in modules can't use effects from perform blocks
+        val effectHandler = context.effectHandler
+        val activeHandlers = effectHandler.getCurrentHandlers()
+        if (activeHandlers != null) {
+            // Store handlers in context so nested effect calls can find them
+            context.defineLocal("__handlers", activeHandlers)
+        }
 
         // Extract closure variables if provided
         @Suppress("UNCHECKED_CAST")
@@ -165,6 +209,11 @@ class FunkFunctionRootNode(
         val providedParams = mutableMapOf<String, FunkValue>()
         val missingParams = mutableListOf<String>()
 
+        // DEBUG: Log parameter checking
+        println("DEBUG FunkFunctionRootNode.execute: name=$name, parameterNames=$parameterNames")
+        println("DEBUG: argsRecord = ${argsRecord?.fields?.keys}")
+        println("DEBUG: argsRecord.fields = ${argsRecord?.fields?.mapValues { it.value::class.simpleName }}")
+
         // Special case: zero-parameter functions should always execute
         if (parameterNames.isEmpty()) {
             // Zero-parameter function - execute normally
@@ -172,16 +221,22 @@ class FunkFunctionRootNode(
         } else if (argsRecord != null) {
             for (paramName in parameterNames) {
                 val value = argsRecord.fields[paramName]
+                println("DEBUG: Checking param '$paramName', value = ${value?.let { it::class.simpleName }}")
                 if (value != null && value !is FunkNull) {
                     providedParams[paramName] = value
+                    println("DEBUG: param '$paramName' is PROVIDED")
                 } else {
                     missingParams.add(paramName)
+                    println("DEBUG: param '$paramName' is MISSING (value is null or FunkNull)")
                 }
             }
 
         } else {
             missingParams.addAll(parameterNames)
+            println("DEBUG: argsRecord is null, all params are MISSING")
         }
+
+        println("DEBUG: providedParams = ${providedParams.keys}, missingParams = $missingParams")
 
         // If not all parameters are provided (and function has > 0 parameters), return a partially applied function
         if (parameterNames.isNotEmpty() && missingParams.isNotEmpty()) {
@@ -293,6 +348,7 @@ class PartiallyAppliedFunctionRootNode(
         val allParamsRecord = FunkRecord(mergedParams)
 
         // Call the original function with all parameters
+        // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments
         return originalCallTarget.call(allParamsRecord, originalClosureVars) as FunkValue
     }
 

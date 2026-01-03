@@ -2,11 +2,13 @@ package com.funk.language.interpreter.stdlib.effects
 
 import com.funk.language.interpreter.*
 import com.funk.language.interpreter.effects.*
-import com.funk.language.interpreter.concurrency.LoomConcurrencyManager
+import com.funk.language.interpreter.continuations.ContinuationStateMachine
+import com.funk.language.interpreter.continuations.ContinuationStateMachineBuilder
+import com.funk.language.interpreter.continuations.ContinuationResumeFn
 import java.util.UUID
 
 /**
- * Native implementations for the Continuation effect using state machines + Loom virtual threads.
+ * Native implementations for the Continuation effect using explicit state machines.
  *
  * This implementation uses explicit state machines (as per docs/implementation/continuation_state_machines.md)
  * instead of closure-based captures, providing:
@@ -17,11 +19,19 @@ import java.util.UUID
  *
  * The continuation effect provides first-class continuations for custom control flow:
  * - Generators (yield/resume)
- * - Async/Await (callback-based APIs)
- * - Backtracking (multi-shot continuations)
+ * - Nondeterministic choice (backtracking/multishot)
  * - Early Exit/Abort
+ *
+ * Note: Loom is NOT used for continuations - only for async I/O primitives (Phase 4).
  */
 object ContinuationImplementations {
+
+    /**
+     * Thread-local stack to track active delimiters.
+     * When a delimiter is activated, it's pushed onto this stack.
+     * Native continuation functions use the top delimiter from this stack.
+     */
+    private val activeDelimiters = ThreadLocal.withInitial { mutableListOf<FunkCont>() }
 
     /**
      * Register all continuation effect native functions.
@@ -31,6 +41,10 @@ object ContinuationImplementations {
         context: MutableMap<String, FunkValue>,
         interpreter: FunkInterpreter?
     ) {
+        registerDelimit(context)
+        registerActivate(context)
+        registerCapture(context)
+        registerSuspend(context)
         registerSuspendWith(context)
         registerResume(context)
         registerFork(context)
@@ -40,66 +54,210 @@ object ContinuationImplementations {
     }
 
     /**
+     * Get the currently active delimiter from thread-local state.
+     */
+    private fun getCurrentDelimiter(): FunkCont? {
+        val stack = activeDelimiters.get()
+        return if (stack.isNotEmpty()) stack.last() else null
+    }
+
+    /**
+     * __native_continuation_delimit - Creates a delimiter for scoped continuations.
+     *
+     * This establishes a delimiter boundary for delimited continuations, returning
+     * an opaque FunkCont handle that cannot be forged or inspected by user code.
+     * The delimiter provides a scope boundary for continuation capture and resume operations.
+     *
+     * In the new continuation architecture, delimiters are explicit boundaries that:
+     * - Define the extent of continuation capture
+     * - Ensure type safety through opaque handles
+     * - Enable proper scoping of effect handlers
+     *
+     * Takes: {}
+     * Returns: FunkCont - Opaque delimiter handle
+     */
+    private fun registerDelimit(context: MutableMap<String, FunkValue>) {
+        context["__native_continuation_delimit"] = NativeFunkFunction("__native_continuation_delimit") { args ->
+            System.err.println("DEBUG: __native_continuation_delimit called")
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_continuation_delimit", "expects FunkRecord")
+
+            // Create a unique delimiter ID
+            val delimiterId = UUID.randomUUID().toString()
+            System.err.println("DEBUG: Created delimiter: $delimiterId")
+
+            // Return opaque delimiter handle
+            // This cannot be forged by user code - only __native_continuation_delimit can create these
+            FunkCont(delimiterId)
+        }
+    }
+
+    /**
+     * __native_continuation_activate - Activates a delimiter in thread-local state.
+     *
+     * This pushes the delimiter onto the thread-local stack, making it the current
+     * active delimiter. Subsequent continuation operations will use this delimiter.
+     *
+     * Takes: { delim: FunkCont }
+     * Returns: {} (unit value)
+     */
+    private fun registerActivate(context: MutableMap<String, FunkValue>) {
+        context["__native_continuation_activate"] = NativeFunkFunction("__native_continuation_activate") { args ->
+            System.err.println("DEBUG: __native_continuation_activate called, args.size=${args.size}")
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_continuation_activate", "expects FunkRecord")
+
+            val delim = record.fields["delim"] as? FunkCont
+                ?: throw NativeFunctionException("__native_continuation_activate", "expects 'delim' field as FunkCont")
+
+            System.err.println("DEBUG: Activating delimiter: ${delim.delimiterId}")
+            // Push delimiter onto thread-local stack
+            activeDelimiters.get().add(delim)
+
+            // Return unit
+            FunkRecord(emptyMap())
+        }
+    }
+
+    /**
+     * __native_continuation_capture - Captures the current delimited continuation.
+     *
+     * This captures "the rest of the computation" up to the delimiter (perform boundary)
+     * as a function that can be called later. This is a DELIMITED continuation.
+     *
+     * Phase 2: Uses compiler-generated state machines. When called from an effect handler,
+     * it captures the CALLER's continuation (not the handler's). The captured continuation
+     * represents "the rest of the caller's computation after the effect call" up to the
+     * perform boundary.
+     *
+     * Example:
+     *   perform AllPaths in do
+     *       let x = Choice.choose { options = [1,2] }  // <- capture happens here
+     *       x + 10                                      // <- this is what gets captured
+     *
+     * The handler (Choice.choose) calls capture, which returns a continuation representing
+     * "x + 10" where x is the hole to fill.
+     *
+     * Takes: {}
+     * Returns: { value: 'a } -> 'b - A function that resumes the captured continuation
+     */
+    private fun registerCapture(context: MutableMap<String, FunkValue>) {
+        context["__native_continuation_capture"] = NativeFunkFunction("__native_continuation_capture") { args ->
+            System.err.println("DEBUG: __native_continuation_capture called")
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_continuation_capture", "expects FunkRecord")
+
+            // Get delimiter from parameter (bound in closure)
+            val delim = record.fields["delim"] as? FunkCont
+                ?: throw NativeFunctionException("__native_continuation_capture", "expects 'delim' field as FunkCont")
+
+            // Get current execution context from state machine
+            val execContext = ContinuationStateMachine.getCurrentContext()
+
+            // If no state machine context exists (e.g., called from test without perform block),
+            // return a trivial continuation that just returns its input
+            if (execContext == null) {
+                System.err.println("DEBUG: capture called outside state machine context, returning trivial continuation")
+                val trivialMachine = ContinuationStateMachineBuilder()
+                    .addComputeState { _, input -> input }
+                    .build(emptyMap())
+
+                val resumeFunction = ContinuationResumeFn(trivialMachine)
+                return@NativeFunkFunction FunkContinuation(resumeFunction, "capture_outside_context@${delim.delimiterId}")
+            }
+
+            val currentMachine = execContext.machine
+            val currentStateId = execContext.currentStateId
+
+            val nextStateId = currentStateId + 1
+
+            if (nextStateId >= currentMachine.states.size) {
+                // No more states - return trivial continuation
+                val trivialMachine = ContinuationStateMachineBuilder()
+                    .addComputeState { _, input -> input }
+                    .build(currentMachine.capturedLocals)
+
+                val resumeFunction = ContinuationResumeFn(trivialMachine)
+                FunkContinuation(resumeFunction, "capture_terminal@${delim.delimiterId}")
+            } else {
+                // Create continuation from next state
+                val continuationMachine = currentMachine.transitionTo(
+                    nextStateId,
+                    currentMachine.capturedLocals
+                )
+
+                val resumeFunction = ContinuationResumeFn(continuationMachine)
+                FunkContinuation(resumeFunction, "capture@${delim.delimiterId}@$currentStateId")
+            }
+        }
+    }
+
+    /**
+     * __native_continuation_suspend - Suspends the current computation without a value.
+     *
+     * This is like suspend_with but doesn't attach a value. Returns a suspended continuation
+     * that can be resumed later.
+     *
+     * Takes: {}
+     * Returns: FunkContinuationSuspended
+     */
+    private fun registerSuspend(context: MutableMap<String, FunkValue>) {
+        context["__native_continuation_suspend"] = NativeFunkFunction("__native_continuation_suspend") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_continuation_suspend", "expects FunkRecord")
+
+            val suspensionId = UUID.randomUUID().toString()
+
+            // Build a continuation state machine
+            val stateMachine = ContinuationStateMachineBuilder()
+                .addComputeState { machine, input ->
+                    // When resumed, return the resume value
+                    input
+                }
+                .build()
+
+            // Create the resume function using the state machine
+            val resumeFunction = ContinuationResumeFn(stateMachine)
+            val continuation = FunkContinuation(resumeFunction, "suspend@$suspensionId")
+
+            // Return suspended continuation without a value (using FunkNull)
+            FunkContinuationSuspended(continuation, FunkNull)
+        }
+    }
+
+    /**
      * __native_continuation_suspend_with - Suspends with a value attached using state machines.
      *
      * This is the key primitive for implementing generators in userland.
-     * Instead of capturing the old map-based interpreter state, we create a continuation
-     * state machine that can be resumed.
+     * We create a continuation state machine that can be resumed.
      *
-     * Takes: { value: 'a }
+     * Takes: { delim: FunkCont, value: 'a }
      * Returns: FunkContinuationSuspended containing both the value and continuation
      */
     private fun registerSuspendWith(context: MutableMap<String, FunkValue>) {
         context["__native_continuation_suspend_with"] = NativeFunkFunction("__native_continuation_suspend_with") { args ->
+            System.err.println("DEBUG: __native_continuation_suspend_with called")
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_continuation_suspend_with", "expects FunkRecord")
 
+            val delim = record.fields["delim"] as? FunkCont
+                ?: throw NativeFunctionException("__native_continuation_suspend_with", "expects 'delim' field as FunkCont")
             val value = record.fields["value"]
                 ?: throw NativeFunctionException("__native_continuation_suspend_with", "expects 'value' field")
 
-            // Create a suspension point using the state machine infrastructure
-            // The continuation is represented as a resumable state machine
             val suspensionId = UUID.randomUUID().toString()
 
-            // Build a simple state machine that can be resumed
-            // In a full implementation, this would capture the actual continuation point
-            val stateMachine = EffectStateMachineBuilder()
-                .addComputeState("resume_point") { effectContext ->
-                    // When resumed, return the resume value
-                    effectContext.getVariable("resume_value") ?: FunkNull
+            // Build a continuation state machine
+            val stateMachine = ContinuationStateMachineBuilder()
+                .addComputeState { machine, input ->
+                    // When resumed, simply return the resume value
+                    input
                 }
-                .setFinalStateId("resume_point")
                 .build()
 
-            // Create a suspension point
-            val suspensionPoint = SuspensionPoint(
-                id = suspensionId,
-                stateMachineId = stateMachine.id,
-                currentStateId = "resume_point",
-                context = EffectContext.empty(),
-                continuationCallback = { resumeValue: FunkValue, ctx: EffectContext ->
-                    ctx.withVariable("resume_value", resumeValue)
-                },
-                abortCallback = { error: Throwable, ctx: EffectContext ->
-                    ctx // Just return context on abort
-                }
-            )
-
-            // Create a continuation function that wraps the state machine
-            val resumeFunction = NativeFunkFunction("suspended_with@$suspensionId") { resumeArgs ->
-                val argRecord = resumeArgs.firstOrNull() as? FunkRecord
-                    ?: throw FunkException("Resume expects record argument")
-
-                val resumeValue = argRecord.fields["value"] ?: FunkNull
-
-                // Resume the state machine with the value
-                val effectContext = EffectContext.empty()
-                    .withVariable("resume_value", resumeValue)
-
-                stateMachine.execute(effectContext)
-            }
-
-            val continuation = FunkContinuation(resumeFunction, suspensionId)
+            // Create the resume function that wraps the state machine
+            val resumeFunction = ContinuationResumeFn(stateMachine)
+            val continuation = FunkContinuation(resumeFunction, "suspend_with@$suspensionId")
 
             // Return suspended continuation with the value attached
             FunkContinuationSuspended(continuation, value)
@@ -117,9 +275,12 @@ object ContinuationImplementations {
      */
     private fun registerResume(context: MutableMap<String, FunkValue>) {
         context["__native_continuation_resume"] = NativeFunkFunction("__native_continuation_resume") { args ->
+            System.err.println("DEBUG: __native_continuation_resume called")
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_continuation_resume", "expects FunkRecord")
 
+            val delim = record.fields["delim"] as? FunkCont
+                ?: throw NativeFunctionException("__native_continuation_resume", "expects 'delim' field as FunkCont")
             val cont = record.fields["cont"]
                 ?: throw NativeFunctionException("__native_continuation_resume", "expects 'cont' field")
             val value = record.fields["value"]
@@ -150,43 +311,49 @@ object ContinuationImplementations {
      * Returns: Array of results from resuming the continuation with each value
      *
      * This enables nondeterministic choice (amb/backtracking) by resuming the same
-     * continuation multiple times with different values using Loom virtual threads.
+     * continuation multiple times with different values using STATE MACHINES (not Loom).
+     *
+     * Nested Fork Handling:
+     * When fork is called from within a forked continuation (nested choice points),
+     * instead of returning an array immediately, it throws ForkedExecutionException.
+     * The top-level fork catches this and recursively forks, flattening all results.
+     * This enables proper cartesian product for nested choices:
+     *   choose [1,2]; choose [10,20] -> [11, 21, 12, 22]
      */
     private fun registerFork(context: MutableMap<String, FunkValue>) {
         context["__native_continuation_fork"] = NativeFunkFunction("__native_continuation_fork") { args ->
+            System.err.println("DEBUG: __native_continuation_fork called")
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_continuation_fork", "expects FunkRecord")
 
+            val delim = record.fields["delim"] as? FunkCont
+                ?: throw NativeFunctionException("__native_continuation_fork", "expects 'delim' field as FunkCont")
             val cont = record.fields["cont"]
                 ?: throw NativeFunctionException("__native_continuation_fork", "expects 'cont' field")
             val values = record.fields["values"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_continuation_fork", "expects 'values' field as array")
 
+            // Check for empty values array - this should abort
+            if (values.elements.isEmpty()) {
+                throw ContinuationAbortedException("Continuation aborted: cannot fork with empty values array")
+            }
+
+            // Check if we're inside a forked continuation using call stack detection
+            if (isInsideFork) {
+                // Nested fork: throw exception instead of executing
+                // This will be caught by the top-level fork
+                throw ForkedExecutionException(cont, values.elements)
+            }
+
             when (cont) {
                 is FunkContinuation -> {
-                    // Use Loom virtual threads to resume the continuation multiple times in parallel
-                    val concurrencyManager = LoomConcurrencyManager()
-
-                    // Create tasks for each resume
-                    val tasks = values.elements.map { value ->
-                        java.util.concurrent.Callable {
-                            try {
-                                val arg = FunkRecord(mapOf("value" to value))
-                                when (val resumeFn = cont.resumeFunction) {
-                                    is NativeFunkFunction -> resumeFn.call(listOf(arg))
-                                    else -> throw NativeFunctionException("__native_continuation_fork", "Invalid continuation")
-                                }
-                            } catch (e: ContinuationAbortedException) {
-                                // If this path aborts, return null (will be filtered)
-                                null
-                            }
-                        }
-                    }
-
-                    // Execute all tasks using virtual threads with structured concurrency
-                    val results = concurrencyManager.executeAll(tasks).filterNotNull()
-
-                    FunkArrayList(results.toMutableList())
+                    // Top-level fork: execute state machine multiple times and throw exception
+                    // to prevent the original state machine from continuing
+                    System.err.println("DEBUG: Top-level fork starting with ${values.elements.size} values")
+                    val results = executeFork(cont, values.elements)
+                    System.err.println("DEBUG: Top-level fork completed, got ${results.elements.size} results: ${results.elements.map { (it as? FunkInt)?.value }}")
+                    // Throw exception to abort the current execution and return fork results
+                    throw ForkedExecutionException(cont, results.elements)
                 }
                 else -> throw NativeFunctionException("__native_continuation_fork", "cont must be a FunkContinuation")
             }
@@ -194,18 +361,86 @@ object ContinuationImplementations {
     }
 
     /**
+     * Flag indicating whether we're currently inside a forked continuation.
+     * Used to detect nested forks.
+     */
+    @Volatile
+    private var isInsideFork = false
+
+    /**
+     * Execute a fork operation using state machines (NO LOOM).
+     *
+     * This executes the continuation state machine multiple times with different values.
+     * Since state machines are immutable, each execution is independent (multishot semantics).
+     *
+     * Returns an array with results from all execution paths.
+     */
+    private fun executeFork(cont: FunkContinuation, values: List<FunkValue>): FunkArrayList {
+        val results = mutableListOf<FunkValue>()
+        System.err.println("DEBUG executeFork: Starting with ${values.size} values: ${values.map { (it as? FunkInt)?.value }}")
+
+        for ((index, value) in values.withIndex()) {
+            try {
+                System.err.println("DEBUG executeFork: Processing value $index: ${(value as? FunkInt)?.value}")
+                // Set flag to indicate we're inside a forked continuation
+                val wasInsideFork = isInsideFork
+                isInsideFork = true
+                try {
+                    val arg = FunkRecord(mapOf("value" to value))
+                    when (val resumeFn = cont.resumeFunction) {
+                        is NativeFunkFunction -> {
+                            val result = resumeFn.call(listOf(arg))
+                            System.err.println("DEBUG executeFork: Value $index completed, result = ${(result as? FunkInt)?.value ?: result::class.simpleName}")
+                            results.add(result)
+                        }
+                        else -> throw NativeFunctionException("__native_continuation_fork", "Invalid continuation")
+                    }
+                } catch (e: ForkedExecutionException) {
+                    // Nested fork detected! Recursively fork the continuation
+                    // from the exception with the values from the exception
+                    System.err.println("DEBUG executeFork: Caught nested fork with ${e.values.size} values")
+                    val nestedCont = e.continuation as? FunkContinuation
+                        ?: throw NativeFunctionException("__native_continuation_fork", "Invalid nested continuation")
+
+                    // Fork the nested continuation
+                    val nestedResults = executeFork(nestedCont, e.values)
+                    System.err.println("DEBUG executeFork: Nested fork returned ${nestedResults.elements.size} results")
+
+                    // Add all nested results (cartesian product)
+                    results.addAll(nestedResults.elements)
+                } finally {
+                    // Restore previous flag state
+                    isInsideFork = wasInsideFork
+                }
+            } catch (e: ContinuationAbortedException) {
+                // If this path aborts, skip it (don't add to results)
+                System.err.println("DEBUG executeFork: Value $index aborted")
+            }
+        }
+
+        System.err.println("DEBUG executeFork: Returning ${results.size} results: ${results.map { (it as? FunkInt)?.value }}")
+        return FunkArrayList(results)
+    }
+
+    /**
      * __native_continuation_abort - Aborts the current computation.
+     *
+     * Takes: {}
      *
      * Throws a ContinuationAbortedException to stop execution.
      * The effect handler should catch this and handle it appropriately.
      */
     private fun registerAbort(context: MutableMap<String, FunkValue>) {
         context["__native_continuation_abort"] = NativeFunkFunction("__native_continuation_abort") { args ->
+            System.err.println("DEBUG: __native_continuation_abort called")
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_continuation_abort", "expects FunkRecord")
 
+            val delim = record.fields["delim"] as? FunkCont
+                ?: throw NativeFunctionException("__native_continuation_abort", "expects 'delim' field as FunkCont")
+
             // Throw exception to abort
-            throw ContinuationAbortedException("Continuation aborted")
+            throw ContinuationAbortedException("Continuation aborted for delimiter ${delim.delimiterId}")
         }
     }
 
@@ -238,15 +473,19 @@ object ContinuationImplementations {
      */
     private fun registerExtractSuspended(context: MutableMap<String, FunkValue>) {
         context["__native_continuation_extract_suspended"] = NativeFunkFunction("__native_continuation_extract_suspended") { args ->
+            System.err.println("DEBUG: __native_continuation_extract_suspended called")
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_continuation_extract_suspended", "expects FunkRecord")
 
+            val delim = record.fields["delim"] as? FunkCont
+                ?: throw NativeFunctionException("__native_continuation_extract_suspended", "expects 'delim' field as FunkCont")
             val suspended = record.fields["suspended"]
                 ?: throw NativeFunctionException("__native_continuation_extract_suspended", "expects 'suspended' field")
 
             when (suspended) {
                 is FunkContinuationSuspended -> {
-                    // Return Some { value: suspended_value, cont: continuation }
+                    // Return Some { val = { value: suspended_value, cont: continuation } }
+                    // The Some variant has a "val" field containing the record
                     FunkVariant("Some", FunkRecord(mapOf(
                         "val" to FunkRecord(mapOf(
                             "value" to suspended.suspendedValue,

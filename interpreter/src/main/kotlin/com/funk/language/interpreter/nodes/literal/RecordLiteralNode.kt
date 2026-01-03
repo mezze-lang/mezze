@@ -5,6 +5,7 @@ import com.oracle.truffle.api.nodes.NodeInfo
 import com.funk.language.interpreter.nodes.FunkNode
 import com.funk.language.interpreter.FunkValue
 import com.funk.language.interpreter.FunkRecord
+import com.funk.language.interpreter.FunkNull
 
 /**
  * Truffle node for record literal construction

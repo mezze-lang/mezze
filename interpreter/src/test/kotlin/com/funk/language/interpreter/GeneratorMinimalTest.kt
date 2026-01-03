@@ -8,7 +8,7 @@ import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertTrue
 import java.nio.file.Paths
 
-@Disabled("Continuation/Delimited handler not yet implemented")
+// Enabled to test continuation primitives implementation
 class GeneratorMinimalTest {
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
@@ -19,7 +19,11 @@ class GeneratorMinimalTest {
         parser = FunkParser()
         typeChecker = TypeChecker()
         interpreter = FunkInterpreter()
+        // Set project root for stdlib module resolution
         System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
+        // Clear both module caches for fresh resolution
+        com.funk.language.typechecker.ModuleResolver.clearCache()
+        com.funk.language.typechecker.TypeChecker.clearCache()
     }
 
     private fun executeProgram(source: String): FunkValue {
@@ -32,26 +36,17 @@ class GeneratorMinimalTest {
     @Test
     fun testMinimalRepro() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield, next}
 
             # Simple generator
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 42 }
-
-            # Inline version of next
-            let inline_next = { gen } -> do
-                let extracted = Continuation.extract_suspended { suspended = gen }
-                match extracted is
-                    Some { val } -> do
-                        let next_state = Continuation.resume { cont = val.cont, value = {} }
-                        { value = Some { val = val.value }, gen = next_state }
-                    None -> { value = None, gen = {} }
+            let gen = {} -> do
+                yield { value = 42 }
 
             # Create generator
             let g = gen {}
 
-            # Call inline_next within perform Delimited in
-            let result = perform Delimited in inline_next { gen = g }
+            # Call next
+            let result = next { gen = g }
 
             # Try to access the value field
             result.value
@@ -66,33 +61,15 @@ class GeneratorMinimalTest {
     @Test
     fun testRecursiveNext() {
         val source = """
-            use std::effects::continuation::{Continuation, Delimited}
+            use std::effects::generator::{yield, next, to_list}
 
             # Generator that yields 42 then completes
-            let gen = {} -> perform Delimited in do
-                Continuation.suspend_with { value = 42 }
+            let gen = {} -> do
+                yield { value = 42 }
 
-            # Inline version of next
-            let inline_next = { gen } -> do
-                let extracted = Continuation.extract_suspended { suspended = gen }
-                match extracted is
-                    Some { val } -> do
-                        let next_state = Continuation.resume { cont = val.cont, value = {} }
-                        { value = Some { val = val.value }, gen = next_state }
-                    None -> { value = None, gen = {} }
-
-            # Recursive helper - like to_list_helper
-            let helper = { gen, acc } -> do
-                let result = inline_next { gen = gen }
-                match result.value is
-                    Some { val } -> do
-                        let new_acc = __native_arraylist_concat { xs = acc, ys = [val] }
-                        helper { gen = result.gen, acc = new_acc }
-                    None -> acc
-
-            # Create generator and call helper
+            # Create generator and convert to list
             let g = gen {}
-            perform Delimited in helper { gen = g, acc = [] }
+            to_list { gen = g }
         """.trimIndent()
 
         val result = executeProgram(source)

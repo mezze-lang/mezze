@@ -1,6 +1,7 @@
 # std/effects/exception.funk - Type-safe exception handling
 
-use std::effects::continuation::{Continuation, Delimited}
+use std::control::continuation
+use std::control::continuation::{Continuation}
 
 pub effect Exception having 'error where {
     throw: {error: 'error} -> 'a <Exception>
@@ -12,13 +13,13 @@ pub effect Exception having 'error where {
 
 # Converts exceptions to Result values (RECOMMENDED for most cases)
 # Uses suspend_with to package the Err value, signaling early return
-pub impl Exception for ToResult having 'error = 'e where {
-    throw = {error} -> Delimited.suspend_with {value = Err {error}}
+pub impl Exception for ToResult { cont: Continuation } having 'error = 'e where {
+    throw = {error} -> cont.suspend_with {value = Err {error}}
 }
 
 # Aborts current computation (testable, catchable by outer handlers)
-pub impl Exception for Abort having 'error = 'e where {
-    throw = {error} -> Delimited.abort {}
+pub impl Exception for Abort { cont: Continuation } having 'error = 'e where {
+    throw = {error} -> cont.abort {}
 }
 
 # Terminates entire program immediately (fatal errors only)
@@ -27,13 +28,13 @@ pub impl Exception for Crash having 'error = 'e where {
 }
 
 # Converts to Option, discarding error details
-pub impl Exception for ToOption having 'error = 'e where {
-    throw = {error} -> Delimited.suspend_with {value = None}
+pub impl Exception for ToOption { cont: Continuation } having 'error = 'e where {
+    throw = {error} -> cont.suspend_with {value = None}
 }
 
 # Silently ignores all errors
-pub impl Exception for Ignore having 'error = 'e where {
-    throw = {error} -> Delimited.suspend_with {value = {}}
+pub impl Exception for Ignore { cont: Continuation } having 'error = 'e where {
+    throw = {error} -> cont.suspend_with {value = {}}
 }
 
 # =============================================================================

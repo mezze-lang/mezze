@@ -69,8 +69,8 @@ class ASTToTruffleConverter(
             is ImplDeclaration -> convertImplDeclaration(item) // Convert effect implementations
             is AbilityDeclaration -> NullLiteralNode() // Ability declarations handled separately
             is ImplAbilityDeclaration -> convertImplAbilityDeclaration(item) // Return implementation record
-            is UseDeclaration -> NullLiteralNode() // Use declarations resolved at type-check time
-            is PubUseDeclaration -> NullLiteralNode() // Pub use declarations resolved at type-check time
+            is UseDeclaration -> convertUseDeclaration(item)
+            is PubUseDeclaration -> convertPubUseDeclaration(item)
             else -> throw RuntimeException("Unsupported program item: ${item::class.simpleName}")
         }
     }
@@ -86,16 +86,95 @@ class ASTToTruffleConverter(
 
         // If we have a context (e.g., during module loading), register immediately
         if (context != null) {
-            val effectRecord = FunkRecord(emptyMap()) // Empty record, just used as a marker
+            // Create a record with all the operations from the effect declaration
+            // Each operation gets a FunkNull placeholder - the actual implementations
+            // come from ImplDeclaration records
+            val operationsMap = effectDecl.operations.associate { op ->
+                op.name to com.funk.language.interpreter.FunkNull
+            }
+            val effectRecord = FunkRecord(operationsMap)
             context.effectHandler?.registerEffect(effectDecl.name, effectRecord)
         }
     }
 
     /**
+     * Convert a use declaration to runtime bindings
+     * This makes imported values available in the current module's scope
+     */
+    private fun convertUseDeclaration(useDecl: UseDeclaration): FunkNode {
+        return when (val usePath = useDecl.path) {
+            is SelectivePath -> {
+                // Selective import like: use std::effects::continuation::{Continuation, Delimited}
+                // Extract the import items and bind each one
+                val bindingNodes = usePath.items.map { importItem ->
+                    val importedName = importItem.name
+                    val localName = importItem.alias ?: importedName
+                    val slot = getOrCreateSlot(localName)
+
+                    object : FunkNode() {
+                        override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
+                            val context = getContext()
+
+                            // Look up the imported value from global context
+                            val value = context.lookupGlobal(importedName)
+                                ?: com.funk.language.interpreter.FunkNull
+
+                            // Bind it in the current frame
+                            frame.setObject(slot, value)
+
+                            // CRITICAL: Define in both locals AND globals
+                            // This ensures module imports are accessible to lambdas in impl declarations
+                            // which execute in different contexts and need global access to imports
+                            context.defineLocal(localName, value)
+                            context.defineGlobal(localName, value)
+
+                            return com.funk.language.interpreter.FunkNull
+                        }
+                    }
+                }
+
+                if (bindingNodes.isEmpty()) {
+                    NullLiteralNode()
+                } else {
+                    SequenceNode(bindingNodes.toTypedArray())
+                }
+            }
+            is ModulePath -> {
+                // Module-level import like: use std::collections::array
+                // For now, this doesn't require runtime binding since module functions
+                // are already registered globally during module loading
+                NullLiteralNode()
+            }
+        }
+    }
+
+    /**
+     * Convert a pub use declaration to runtime bindings
+     */
+    private fun convertPubUseDeclaration(pubUse: PubUseDeclaration): FunkNode {
+        // PubUseDeclaration has the same structure as UseDeclaration
+        // We can create an equivalent UseDeclaration and convert it
+        val equiv = UseDeclaration(pubUse.path, pubUse.alias)
+        return convertUseDeclaration(equiv)
+    }
+
+    /**
      * Convert an effect implementation (ImplDeclaration) to a record containing the operations
      * The record is stored with a mangled name like "Random$NativeRandom"
+     * AND also bound to the performer name for imports
      */
     private fun convertImplDeclaration(impl: ImplDeclaration): FunkNode {
+        // If the implementation has parameters, we need to create a FUNCTION
+        // that takes those parameters and returns a handler record
+        // Example: impl Choice for AllPaths { cont: Continuation }
+        //   becomes: (params) -> { choose = ..., fail = ... }
+
+        if (impl.performerParams.isNotEmpty()) {
+            // Create a wrapper function that takes parameters and returns the handler record
+            return convertParameterizedImplDeclaration(impl)
+        }
+
+        // No parameters - create a direct record
         val fieldNodes = mutableMapOf<String, FunkNode>()
 
         // Each operation becomes a field in the record
@@ -113,9 +192,189 @@ class ASTToTruffleConverter(
         // This allows "perform NativeRandom in ..." to find the Random effect implementation
         handlerToEffectMapping[impl.performerName] = impl.effectName to implName
 
-        // Store the implementation record with the mangled name
-        val slot = getOrCreateSlot(implName)
-        return SimpleWriteVariableNode(slot, recordNode, implName)
+        // CRITICAL: Register the performer globally so effect calls can find it
+        // This allows "Log.println" to find the "Console" performer
+        if (context != null) {
+            context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
+        }
+
+        // Create TWO bindings:
+        // 1. Mangled name (for perform expressions)
+        val mangledSlot = getOrCreateSlot(implName)
+        val mangledBinding = SimpleWriteVariableNode(mangledSlot, recordNode, implName)
+
+        // 2. Performer name (for imports like: use module::{PerformerName})
+        //    This reads from the mangled slot and writes to the performer slot
+        val performerSlot = getOrCreateSlot(impl.performerName)
+        val performerBinding = object : FunkNode() {
+            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
+                // Read the value from the mangled slot
+                val value = frame.getObject(mangledSlot) as FunkValue
+
+                // Write it to the performer slot
+                frame.setObject(performerSlot, value)
+
+                // Also define in context for global lookups
+                val context = getContext()
+                context.defineLocal(impl.performerName, value)
+
+                // Register the performer at runtime too (for hot-reloading scenarios)
+                context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
+
+                return value
+            }
+        }
+
+        // Return a sequence that executes both bindings
+        return SequenceNode(arrayOf(mangledBinding, performerBinding))
+    }
+
+    /**
+     * Convert a parameterized ImplDeclaration to a function that takes parameters
+     * and returns a handler record with operations bound to those parameters.
+     *
+     * Example: impl Choice for AllPaths { cont: Continuation } where { ... }
+     * Creates: {cont} -> { choose = {options} -> cont.fork {...}, fail = {} -> cont.abort {} }
+     */
+    private fun convertParameterizedImplDeclaration(impl: ImplDeclaration): FunkNode {
+        // Create mangled names for storage
+        val implName = "${impl.effectName}\$${impl.performerName}"
+
+        // CRITICAL: Register the handler mapping so perform expressions can find it
+        handlerToEffectMapping[impl.performerName] = impl.effectName to implName
+
+        // CRITICAL: Register the performer with the effect handler
+        if (context != null) {
+            context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
+        }
+
+        // Pre-convert operations with parameters as free variables
+        // Each operation will capture impl parameters (like 'cont') as closure variables
+        val operationConverters = mutableListOf<Pair<String, ASTToTruffleConverter>>()
+        val operationNodes = mutableMapOf<String, FunctionDefinitionNode>()
+
+        for (op in impl.operations) {
+            // Create a converter for this operation
+            val opConverter = ASTToTruffleConverter(
+                context = this.context,
+                projectRoot = this.projectRoot,
+                parentHandlerMapping = this.handlerToEffectMapping
+            )
+
+            // The operation is a lambda like: { options } -> cont.fork { ... }
+            // We need to detect that 'cont' is a free variable (not a parameter)
+            val opExpr = op.implementation
+            if (opExpr !is LambdaExpression) {
+                throw RuntimeException("Operation implementation must be a lambda for parameterized impl")
+            }
+
+            // Get operation parameter names
+            val opParamNames = when (val params = opExpr.parameters) {
+                is UntypedParameters -> params.names
+                is TypedParameters -> params.recordType.entries.map { it.name }
+            }
+
+            // Detect free variables in the operation body
+            // These will include impl parameters like 'cont'
+            val allVars = collectVariableReferences(opExpr.body)
+            val freeVars = allVars.filter { it !in opParamNames }.distinct()
+
+            // Pre-register operation parameters
+            opParamNames.forEach { opConverter.getOrCreateSlot(it) }
+
+            // Pre-register free variables (impl parameters will be here)
+            freeVars.forEach { opConverter.getOrCreateSlot(it) }
+
+            // Convert the operation body
+            val bodyNode = opConverter.convertExpression(opExpr.body)
+            val frameDesc = opConverter.getFrameDescriptor()
+
+            // Create slots mapping for closure variables
+            val closureSlots = freeVars.mapNotNull { varName ->
+                val slot = opConverter.variableSlots[varName]
+                if (slot != null) varName to slot else null
+            }.toMap()
+
+            // Create the function definition node
+            val funcNode = FunctionDefinitionNode(
+                name = "${impl.performerName}_${op.name}",
+                parameterNames = opParamNames,
+                bodyNode = bodyNode,
+                frameDescriptor = frameDesc,
+                closureVariableNames = freeVars,
+                closureVariableSlots = closureSlots
+            )
+
+            operationNodes[op.name] = funcNode
+            operationConverters.add(op.name to opConverter)
+        }
+
+        // Create a node that builds the handler record with operations bound to parameters
+        val wrapperNode = object : FunkNode() {
+            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
+                // This creates a function that takes impl parameters and returns a handler record
+                return com.funk.language.interpreter.NativeFunkFunction("impl_${impl.performerName}") { args ->
+                    if (args.isEmpty() || args[0] !is FunkRecord) {
+                        throw RuntimeException("Wrapper function expects a record parameter")
+                    }
+
+                    val paramsRecord = args[0] as FunkRecord
+
+                    // Execute each operation function node to create FunkTruffleFunction instances
+                    // with impl parameters captured as closure variables
+                    val operationFields = mutableMapOf<String, FunkValue>()
+                    try {
+                        for ((opName, funcNode) in operationNodes) {
+                            // Create a frame with 2-element arguments array per Truffle convention
+                            val converter = operationConverters.find { it.first == opName }!!.second
+                            val frameDesc = converter.getFrameDescriptor()
+                            val args = arrayOf<Any?>(FunkRecord(emptyMap()), emptyMap<String, FunkValue>())
+                            val tempFrame = com.oracle.truffle.api.Truffle.getRuntime()
+                                .createMaterializedFrame(args, frameDesc)
+
+                            // Write impl parameters to the frame so they can be captured as closures
+                            for ((paramName, paramValue) in paramsRecord.fields) {
+                                val slot = converter.variableSlots[paramName]
+                                if (slot != null) {
+                                    tempFrame.setObject(slot, paramValue)
+                                }
+                            }
+
+                            // Execute the function definition to get a FunkTruffleFunction
+                            // with parameters captured
+                            val opFunc = funcNode.execute(tempFrame)
+                            operationFields[opName] = opFunc
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        throw RuntimeException("Failed to create parameterized handler operations: ${e.message}", e)
+                    }
+
+                    FunkRecord(operationFields)
+                }
+            }
+        }
+
+        // Store the wrapper function with the mangled name
+        val mangledSlot = getOrCreateSlot(implName)
+        val mangledBinding = SimpleWriteVariableNode(mangledSlot, wrapperNode, implName)
+
+        // Also store under performer name for imports
+        val performerSlot = getOrCreateSlot(impl.performerName)
+        val performerBinding = object : FunkNode() {
+            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
+                val value = frame.getObject(mangledSlot) as FunkValue
+                frame.setObject(performerSlot, value)
+
+                val context = getContext()
+                context.defineLocal(impl.performerName, value)
+                context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
+
+                return value
+            }
+        }
+
+        return SequenceNode(arrayOf(mangledBinding, performerBinding))
     }
 
     /**
@@ -316,6 +575,7 @@ class ASTToTruffleConverter(
             is VariantConstruction -> convertVariantConstruction(expr)
             is DoExpression -> convertDoExpression(expr)
             is PerformExpression -> convertPerformExpression(expr)
+            is StateMachineExpression -> StateMachineNode(expr, this)
             else -> throw RuntimeException("Unsupported expression: ${expr::class.simpleName}")
         }
     }
@@ -324,6 +584,17 @@ class ASTToTruffleConverter(
      * Convert an identifier to a variable read node or global lookup
      */
     private fun convertIdentifier(identifier: Identifier): FunkNode {
+        // Special handling for state machine input placeholder
+        // This identifier is used by the ContinuationTransformer to access input values
+        // passed to continuation states when they are resumed
+        if (identifier.name == "__state_machine_input__") {
+            if (!variableSlots.containsKey("__state_machine_input__")) {
+                getOrCreateSlot("__state_machine_input__")
+            }
+            val slot = variableSlots["__state_machine_input__"]!!
+            return SimpleReadVariableNode(slot, "__state_machine_input__")
+        }
+
         // CRITICAL: Check if this variable is already in the frame FIRST
         // This ensures parameters and local variables take precedence over builtins
         if (variableSlots.containsKey(identifier.name)) {
@@ -617,7 +888,8 @@ class ASTToTruffleConverter(
                     }
 
                     val arguments = argsChild.execute(frame)
-                    return operation.callTarget.call(arguments) as FunkValue
+                    // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments
+                    return operation.callTarget.call(arguments, operation.closureVariables) as FunkValue
                 }
             }
         }
@@ -763,7 +1035,8 @@ class ASTToTruffleConverter(
 
                             // Call the operation with the arguments
                             val args = argumentsChild.execute(frame)
-                            return operation.callTarget.call(args) as FunkValue
+                            // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments
+                            return operation.callTarget.call(args, operation.closureVariables) as FunkValue
                         }
                     }
                 } else {
@@ -1124,7 +1397,23 @@ class ASTToTruffleConverter(
             when (e) {
                 is Identifier -> variables.add(e.name)
                 is IntLiteral, is NatLiteral, is FloatLiteral, is FractionLiteral,
-                is StringLiteral, is BooleanLiteral -> Unit // Literals don't reference variables
+                is BooleanLiteral -> Unit // Literals don't reference variables
+                is StringLiteral -> {
+                    // CRITICAL: String literals can contain interpolated expressions that reference variables
+                    // Example: "$(path): $(msg)" references both path and msg
+                    if (e.isInterpolated) {
+                        val parts = e.parts
+                        if (parts != null) {
+                            parts.forEach { part ->
+                                when (part) {
+                                    is StringPart -> Unit // String parts don't reference variables
+                                    is ExpressionPart -> visit(part.expression) // Visit interpolated expressions
+                                }
+                            }
+                        }
+                    }
+                    Unit
+                }
                 is IfExpression -> {
                     visit(e.condition)
                     visit(e.thenBranch)
@@ -1232,7 +1521,15 @@ class ASTToTruffleConverter(
 
         // Handle field entries
         for (entry in recordLit.getFieldEntries()) {
-            fieldNodes[entry.name] = entry.value?.let { convertExpression(it) } ?: NullLiteralNode()
+            val entryValue = entry.value
+            fieldNodes[entry.name] = if (entryValue != null) {
+                // Explicit value: {x = expr}
+                convertExpression(entryValue)
+            } else {
+                // Shorthand syntax: {x} means {x = x}
+                // Create a variable read for the field name
+                convertIdentifier(Identifier(entry.name))
+            }
         }
 
         // If there are spread entries, create a node that merges records at runtime
@@ -1430,6 +1727,12 @@ class ASTToTruffleConverter(
         // Capture the mapping for use at runtime
         val capturedMapping = handlerToEffectMapping.toMap()
 
+        // CRITICAL: Pre-convert handler parameters at node construction time
+        // This maps handler name -> parameter node (or null if no parameters)
+        val handlerParamNodes = performExpr.handlers.associate { handler ->
+            handler.name to (handler.parameters?.let { convertExpression(it) })
+        }
+
         // For now, create a simplified PerformNode that looks up handlers at runtime
         return object : com.funk.language.interpreter.nodes.FunkNode() {
             @field:Child private var exprChild = expressionNode
@@ -1467,27 +1770,39 @@ class ASTToTruffleConverter(
 
                         val (effectName, implName) = mapping
 
-                        // Look up the implementation record
+                        // Look up the implementation (might be a function or a record)
                         var performerValue = context.lookupGlobal(implName)
                             ?: throw RuntimeException("Handler implementation not found: $implName for handler $handlerName")
 
-
-                        // If the handler has parameters (e.g., FileLogger {path = "app.log"}),
-                        // we need to inject those parameters into the implementation functions
-                        val handlerParameters = handler.parameters
-                        if (handlerParameters != null) {
-                            // Evaluate the parameters to get a FunkRecord
-                            val paramsNode = convertExpression(handlerParameters)
+                        // If the handler has parameters (e.g., AllPaths {cont = continuation::new {}}),
+                        // the performer is a FUNCTION that needs to be called with those parameters
+                        val paramsNode = handlerParamNodes[handlerName]
+                        if (paramsNode != null) {
+                            // Evaluate the pre-converted parameter node
                             val paramsValue = paramsNode.execute(frame)
 
                             if (paramsValue !is FunkRecord) {
                                 throw RuntimeException("Handler parameters must be a record, got: ${paramsValue::class.simpleName}")
                             }
 
-
-                            // Inject parameters into the context so they're available to the implementation
-                            for ((paramName, paramValue) in paramsValue.fields) {
-                                context.defineLocal(paramName, paramValue)
+                            // Check if the performer is a function (parameterized implementation)
+                            when (performerValue) {
+                                is com.funk.language.interpreter.NativeFunkFunction -> {
+                                    // Native wrapper function - call it with the parameters
+                                    performerValue = performerValue.call(listOf(paramsValue))
+                                }
+                                is com.funk.language.interpreter.FunkTruffleFunction -> {
+                                    // Truffle function - call via CallTarget
+                                    // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments
+                                    performerValue = performerValue.callTarget.call(paramsValue, performerValue.closureVariables) as FunkValue
+                                }
+                                else -> {
+                                    // Fallback: Old behavior for non-parameterized handlers
+                                    // Inject parameters into the context
+                                    for ((paramName, paramValue) in paramsValue.fields) {
+                                        context.defineLocal(paramName, paramValue)
+                                    }
+                                }
                             }
                         }
 
@@ -1498,13 +1813,74 @@ class ASTToTruffleConverter(
 
                 // Use the shared effect handler from context
                 val effectHandler = context.effectHandler
-                val handlersRecord = FunkRecord(runtimeHandlers)
 
-                // Push handlers onto stack
+                // CRITICAL: Merge with existing handlers from the stack
+                // This ensures nested perform expressions accumulate handlers
+                // Example: `perform Console in perform Delimited` should have BOTH handlers available
+                val existingHandlers = effectHandler.getCurrentHandlers()
+                val mergedHandlers = if (existingHandlers != null) {
+                    // Merge: new handlers override existing ones with same name
+                    existingHandlers.fields.toMutableMap().apply {
+                        putAll(runtimeHandlers)
+                    }
+                } else {
+                    runtimeHandlers
+                }
+
+                val handlersRecord = FunkRecord(mergedHandlers)
+
+                // Push merged handlers onto stack
                 effectHandler.pushHandlers(handlersRecord)
 
                 try {
-                    return exprChild.execute(frame)
+                    val result = exprChild.execute(frame)
+
+                    // CRITICAL: Check if result is FunkContinuationSuspended (for early return)
+                    // ONLY unwrap for WithReturn performer (Return effect), NOT for Delimited (generators)
+                    // - perform WithReturn: unwraps and returns suspended value (early return semantics)
+                    // - perform Delimited: returns FunkContinuationSuspended as-is (generator semantics)
+                    if (result is com.funk.language.interpreter.FunkContinuationSuspended) {
+                        // Check if we're handling the Return effect (early return)
+                        if (runtimeHandlers.containsKey("Return")) {
+                            // WithReturn performer: extract the suspended value and return it immediately
+                            // This implements early return semantics
+                            return result.suspendedValue
+                        }
+
+                        // Check if we're handling the Exception effect with ToResult, ToOption, or Ignore
+                        // These performers suspend with Err/None/{}, so just return the suspended value
+                        if (runtimeHandlers.containsKey("Exception")) {
+                            return result.suspendedValue
+                        }
+
+                        // Otherwise (Delimited performer for generators): return the suspended continuation as-is
+                        // so callers can resume it with next(), to_list(), etc.
+                        return result
+                    }
+
+                    // LAZY EFFECTS MODEL: Check if result is FunkSuspended
+                    // If all effects are now handled, execute the deferred computation
+                    if (result is com.funk.language.interpreter.FunkSuspended) {
+                        // Try to execute the suspended computation with available handlers
+                        return result.executeWith(runtimeHandlers, context, frame)
+                    }
+
+                    // EXCEPTION EFFECT: Wrap successful results in Ok for ToResult handler
+                    if (runtimeHandlers.containsKey("Exception")) {
+                        // If we reach here, no exception was thrown, so wrap the result in Ok
+                        return com.funk.language.interpreter.FunkVariant(
+                            "Ok",
+                            FunkRecord(mapOf("val" to result))
+                        )
+                    }
+
+                    return result
+                } catch (e: com.funk.language.interpreter.stdlib.effects.ForkedExecutionException) {
+                    // CRITICAL: Fork exception thrown from within the perform block
+                    // This means the continuation was forked with multiple values
+                    // Return the collected results as an array (this is the final result of the perform block)
+                    System.err.println("DEBUG: Caught ForkedExecutionException in perform block, returning ${e.values.size} results")
+                    return com.funk.language.interpreter.FunkArrayList(e.values)
                 } finally {
                     // Always pop handlers, even if exception occurs
                     effectHandler.popHandlers()

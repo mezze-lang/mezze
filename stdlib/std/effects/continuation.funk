@@ -1,62 +1,10 @@
-# std/effects/continuation.funk - Continuation-based control flow
-
-# Continuation effect provides first-class continuations for custom control flow.
-# This is a low-level effect for implementing generators, backtracking, async/await, etc.
+# std/effects/continuation.funk - DEPRECATED
 #
-# Most users should use higher-level effects (Generator, Choice, Async) instead.
-# Only use Continuation directly when implementing new control flow abstractions.
-
-pub effect Continuation where {
-    # Capture the current continuation as a function { value: 'a } -> 'b
-    # The continuation represents "the rest of the computation"
-    capture: {} -> ({ value: 'a } -> 'b) <Continuation>,
-
-    # Resume a continuation with a value
-    # Calls the continuation function, continuing execution from where it was captured
-    resume: { cont: { value: 'a } -> 'b, value: 'a } -> 'b <Continuation>,
-
-    # Suspend the current computation
-    # Returns a suspended continuation that can be resumed later
-    suspend: {} -> 'a <Continuation>,
-
-    # Suspend with a value attached
-    # Like suspend, but packages the value with the suspended continuation
-    # This enables building generators: suspend_with { value = x } returns
-    # a suspended state containing both x and the continuation
-    suspend_with: { value: 'a } -> 'b <Continuation>,
-
-    # Multi-shot continuation: resume continuation once for each value, collect results
-    # This is the key primitive for implementing nondeterministic choice (amb/backtracking)
-    # Takes a continuation and an array of values, resumes the continuation with each value,
-    # and returns an array of all the results
-    fork: { cont: { value: 'a } -> 'b, values: ['a] } -> ['b] <Continuation>,
-
-    # Abort the current computation
-    # Stops execution without resuming
-    abort: {} -> 'b <Continuation>,
-
-    # Check if a value is a suspended continuation
-    # Returns true if the value is FunkContinuationSuspended, false otherwise
-    is_suspended: { value: 'a } -> Bool <Continuation>,
-
-    # Extract the suspended value and continuation from a suspended state
-    # Returns { value: 'v, cont: 'c } if suspended, None if not suspended
-    # This allows working with suspended continuations in userland code
-    extract_suspended: { suspended: 'a } -> Option { value: 'v, cont: 'c } <Continuation>
-}
-
-# Built-in Delimited performer
-# Provides delimited continuations - captures only up to the perform block boundary
-# Automatically supports both oneshot (resume once) and multishot (resume many times)
+# This module is deprecated. Use std::control::continuation instead.
 #
-# Users can import Delimited and use it via `perform Delimited in ...`
-pub impl Continuation for Delimited where {
-    capture = {} -> __native_continuation_capture {},
-    resume = { cont, value } -> __native_continuation_resume { cont = cont, value = value },
-    suspend = {} -> __native_continuation_suspend {},
-    suspend_with = { value } -> __native_continuation_suspend_with { value = value },
-    fork = { cont, values } -> __native_continuation_fork { cont = cont, values = values },
-    abort = {} -> __native_continuation_abort {},
-    is_suspended = { value } -> __native_continuation_is_suspended { value = value },
-    extract_suspended = { suspended } -> __native_continuation_extract_suspended { suspended = suspended }
-}
+# Old: use std::effects::continuation
+# New: use std::control::continuation
+#
+# Usage:
+#   let cont = continuation::new {}
+#   let suspended = cont.suspend_with { value = 42 }

@@ -136,4 +136,10 @@ class NewEffectSystemTest {
         assertTrue(result is FunkString)
         assertEquals("App result for TestApp", (result as FunkString).value)
     }
+
+    // Note: Full lazy effects (effects without handlers returning FunkSuspended)
+    // are not yet fully implemented. The current architecture focuses on the hot path:
+    // effects inside `perform` blocks execute immediately with zero overhead.
+    // Lazy effects will be implemented when needed for advanced use cases.
+    // For now, FunkSuspended is implemented and ready for continuation-based effects.
 }

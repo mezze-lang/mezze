@@ -520,12 +520,23 @@ data class FunkTruffleFunction(
 
     @ExportMessage
     fun execute(arguments: Array<Any?>): Any {
-        // Pass closure variables along with arguments
-        return if (closureVariables.isNotEmpty()) {
-            callTarget.call(*arguments, closureVariables)
-        } else {
-            callTarget.call(*arguments)
+        // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments:
+        // [0] = FunkRecord of parameters
+        // [1] = Map<String, FunkValue> of closure variables (can be empty)
+        // We must ALWAYS pass both arguments
+
+        // Convert interop arguments to FunkRecord if needed
+        val argsRecord = when {
+            arguments.isEmpty() -> FunkRecord(emptyMap())
+            arguments[0] is FunkRecord -> arguments[0] as FunkRecord
+            else -> {
+                // If arguments is a single value, wrap it in a record with "value" key
+                // This handles the case where continuation resume passes a value
+                FunkRecord(mapOf("value" to (arguments[0] as? FunkValue ?: FunkNull)))
+            }
         }
+
+        return callTarget.call(argsRecord, closureVariables)
     }
 
     override fun toString(): String = "FunkTruffleFunction(${name ?: "anonymous"}, ${closureVariables.size} closure vars)"
@@ -801,21 +812,35 @@ data class NativeFunkFunction(
 }
 
 /**
- * Suspended computation - a value with unhandled effects that cannot be used
- * until all effects are handled via perform expressions.
+ * Suspended computation - a deferred computation with unhandled effects.
  *
- * This is distinct from FunkFunction - it's not a function to be called,
- * but rather an already-computed value that has unhandled effects.
+ * CRITICAL: This is the lazy effects model - effects don't execute immediately!
+ * Instead, they create a FunkSuspended containing:
+ * 1. A thunk (FunkThunk) - the deferred computation to execute later
+ * 2. Unhandled effects - which effects need handlers to execute the thunk
+ * 3. Captured handlers - handlers already applied (for partial handling)
+ *
+ * Example flow:
+ *   let a: String <Db> = Db.read {key = "name"}
+ *   # Without Db handler → creates FunkSuspended(thunk=Db.read{...}, effects={Db})
+ *   # The computation doesn't execute! It's deferred until perform.
+ *
+ *   perform DbHandler in do
+ *     print {msg = a}  # NOW the thunk executes with DbHandler available
+ *
+ * Operations on FunkSuspended compose thunks:
+ *   let b = "$(a) world"
+ *   # Creates new FunkSuspended with composed thunk: concat(execute_a(), " world")
  */
 @ExportLibrary(InteropLibrary::class)
 data class FunkSuspended(
-    val value: FunkValue,
-    val unhandledEffects: Set<String>,
+    val computation: FunkThunk,              // Deferred computation to execute
+    val unhandledEffects: Set<String>,       // Effects that need handlers
     val capturedHandlers: Map<String, FunkValue> = emptyMap()  // Handlers already applied
 ) : FunkValue() {
     override fun getDisplayString(): String {
         val effectList = unhandledEffects.sorted().joinToString(", ")
-        return "${value.getDisplayString()} <$effectList>"
+        return "<suspended <$effectList>>"
     }
 
     @ExportMessage
@@ -828,13 +853,60 @@ data class FunkSuspended(
     }
 
     /**
-     * Attempting to use a suspended value should fail
+     * Attempting to use a suspended value directly should fail with helpful error
      */
     fun unwrap(): FunkValue {
         throw FunkException(
-            "Cannot use suspended value with unhandled effects: ${unhandledEffects.sorted().joinToString(", ")}. " +
-            "Use 'perform' to handle these effects first."
+            "Cannot use suspended computation with unhandled effects: ${unhandledEffects.sorted().joinToString(", ")}. " +
+            "Use 'perform' to provide handlers for these effects first."
         )
+    }
+
+    /**
+     * Execute the suspended computation with handlers available in context.
+     * This is called by perform when all handlers are available.
+     */
+    fun executeWith(
+        handlers: Map<String, FunkValue>,
+        context: FunkContext,
+        frame: com.oracle.truffle.api.frame.VirtualFrame
+    ): FunkValue {
+        // Merge captured handlers with new handlers
+        val allHandlers = capturedHandlers + handlers
+
+        // Check if all required effects are now handled
+        val stillUnhandled = unhandledEffects - allHandlers.keys
+        if (stillUnhandled.isNotEmpty()) {
+            // Still missing handlers - return new FunkSuspended with remaining effects
+            return FunkSuspended(
+                computation = computation,
+                unhandledEffects = stillUnhandled,
+                capturedHandlers = allHandlers
+            )
+        }
+
+        // All handlers available - execute the thunk!
+        // Push handlers onto effect handler stack
+        val effectHandler = context.effectHandler
+        val handlersRecord = FunkRecord(allHandlers)
+        effectHandler.pushHandlers(handlersRecord)
+
+        try {
+            // Execute the thunk's function with its arguments
+            return when (val func = computation.function) {
+                is FunkTruffleFunction -> {
+                    func.callTarget.call(computation.arguments, func.closureVariables) as FunkValue
+                }
+                is NativeFunkFunction -> {
+                    func.call(listOf(computation.arguments))
+                }
+                else -> {
+                    throw FunkException("Cannot execute thunk with function type: ${func::class.simpleName}")
+                }
+            }
+        } finally {
+            effectHandler.popHandlers()
+        }
     }
 }
 
@@ -863,6 +935,31 @@ data class FunkThunk(
 
     @ExportMessage
     fun isExecutable(): Boolean = false  // Not directly executable - must be unwrapped first
+
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun execute(arguments: Array<Any?>): Any {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+}
+
+/**
+ * Opaque continuation delimiter handle.
+ *
+ * This is an OPAQUE type that users cannot create, inspect, or manipulate directly.
+ * Only __native_continuation_delimit can create these handles.
+ * They provide type safety by preventing forgery or mixing of continuations.
+ *
+ * The handle ID is used to match delimiters with their corresponding suspend/resume operations.
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkCont(
+    val delimiterId: String  // Opaque delimiter ID
+) : FunkValue() {
+    override fun getDisplayString(): String = "<cont:$delimiterId>"
+
+    @ExportMessage
+    fun isExecutable(): Boolean = false
 
     @ExportMessage
     @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
@@ -921,6 +1018,61 @@ data class FunkContinuationSuspended(
     fun execute(arguments: Array<Any?>): Any {
         throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
     }
+}
+
+/**
+ * Promise value - represents an async computation result that may not be available yet.
+ *
+ * Used by the Concurrency effect to spawn computations on virtual threads.
+ * Wraps a CompletableFuture that will eventually contain the result.
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkPromise(
+    val future: java.util.concurrent.CompletableFuture<FunkValue>,
+    val promiseId: String = java.util.UUID.randomUUID().toString()
+) : FunkValue() {
+    override fun getDisplayString(): String {
+        return if (future.isDone) {
+            try {
+                val value = future.get()
+                "<promise:resolved($value)>"
+            } catch (e: Exception) {
+                "<promise:rejected(${e.message})>"
+            }
+        } else {
+            "<promise:pending>"
+        }
+    }
+
+    @ExportMessage
+    fun isExecutable(): Boolean = false
+
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun execute(arguments: Array<Any?>): Any {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+
+    /**
+     * Block until the promise resolves and return the value
+     */
+    fun await(): FunkValue {
+        return try {
+            future.get()
+        } catch (e: java.util.concurrent.ExecutionException) {
+            throw FunkException("Promise rejected: ${e.cause?.message ?: e.message}")
+        }
+    }
+
+    /**
+     * Check if the promise is resolved
+     */
+    fun isDone(): Boolean = future.isDone
+
+    /**
+     * Check if the promise was rejected
+     */
+    fun isRejected(): Boolean = future.isCompletedExceptionally
 }
 
 /**

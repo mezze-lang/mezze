@@ -121,4 +121,11 @@ class FunkContext(
         return all
     }
 
+    /**
+     * Get all local variables (for debugging)
+     */
+    fun getLocals(): Map<String, FunkValue> {
+        return locals.toMap()
+    }
+
 }

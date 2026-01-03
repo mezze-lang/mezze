@@ -450,22 +450,22 @@ class ModuleResolver(
                     }
                 }
                 is ImplDeclaration -> {
-                    // Export handler names (performer names) from public impl declarations
-                    // Note: ImplDeclaration doesn't have a visibility field yet, so we treat them as public if marked with 'pub' in source
-                    // For now, we'll check if there's a type in the context for the performer name
+                    // Export handler names (performer names) from impl declarations
+                    // Note: ImplDeclaration doesn't have a visibility field yet, so we always export them
+                    // The type will be updated later when updateModuleExports is called with typeContext
                     val performerName = item.performerName
                     val fromContext = typeContext?.get(performerName)
 
-                    // If the performer is in the context, export it
-                    // The type will be the handler type (which is essentially a marker)
-                    if (fromContext != null) {
-                        exports[performerName] = ExportedItem(
-                            name = performerName,
-                            type = ExportedItemType.FUNCTION, // Handlers are treated as values
-                            funkType = fromContext,
-                            originalName = performerName
-                        )
-                    }
+                    // Always export the performer - if typeContext is not available yet,
+                    // use a placeholder type that will be updated later
+                    val funkType = fromContext ?: item.inferredType ?: FunkType.VarType(TypeVar.fresh())
+
+                    exports[performerName] = ExportedItem(
+                        name = performerName,
+                        type = ExportedItemType.FUNCTION, // Handlers are treated as values
+                        funkType = funkType,
+                        originalName = performerName
+                    )
                 }
                 else -> {
                     // Other items are not exported for now

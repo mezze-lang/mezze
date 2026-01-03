@@ -1,13 +1,14 @@
 # std/effects/async.funk - Promise-based async built on continuations
 
-use std::effects::continuation::{Continuation, Delimited}
+use std::control::continuation
+use std::control::continuation::{Continuation}
 
 # Promise type - wraps a suspended continuation
 pub type Promise 'a = Promise {
   suspended: Suspended 'a
 }
 
-# Suspended type - what Continuation.suspend_with returns
+# Suspended type - what continuation::suspend_with returns
 type Suspended 'a = Suspended {
   continuation: {value: 'a} -> 'a,
   value: 'a
@@ -26,24 +27,22 @@ pub effect Async where {
 }
 
 # Implementation built on Continuation primitives
-pub impl Async for AsyncRunner where {
+pub impl Async for AsyncRunner { cont: Continuation } where {
   # async - wraps computation in Promise using suspend_with
-  async = {computation} ->
-    perform Delimited in do
-      # Suspend with the computation result
-      let suspended = Continuation.suspend_with {
-        value = computation {}
-      }
-      # Wrap in Promise type
-      Promise {suspended = suspended}
+  async = {computation} -> do
+    # Suspend with the computation result
+    let suspended = cont.suspend_with {
+      value = computation {}
+    }
+    # Wrap in Promise type
+    Promise {suspended = suspended}
 
   # await - resumes the Promise's continuation
   await = {promise} ->
-    perform Delimited in
-      Continuation.resume {
-        cont = promise.suspended.continuation,
-        value = promise.suspended.value
-      }
+    cont.resume {
+      cont = promise.suspended.continuation,
+      value = promise.suspended.value
+    }
 
   # await_all - wait for all promises sequentially
   await_all = {promises} ->
@@ -52,8 +51,8 @@ pub impl Async for AsyncRunner where {
 
 # Helper: Create already-resolved Promise
 pub let resolved: {'a} -> Promise 'a = {value} ->
-  perform Delimited in do
-    let suspended = Continuation.suspend_with {value = value}
+  do
+    let suspended = continuation::suspend_with {value = value}
     Promise {suspended = suspended}
 
 # Helper: Create rejected Promise

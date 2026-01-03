@@ -324,7 +324,12 @@ class FunkTruffleRootNode(
             if (!effectsRegistered) {
                 val effectHandler = context.effectHandler
                 for (effectDecl in effectDeclarations) {
-                    val effectRecord = FunkRecord(emptyMap()) // Empty record, just used as a marker
+                    // Create a record with all operations as FunkNull placeholders
+                    // This allows createSuspendedEffectCall to validate operations exist
+                    val operationsMap = effectDecl.operations.associate { op ->
+                        op.name to FunkNull
+                    }
+                    val effectRecord = FunkRecord(operationsMap)
                     effectHandler.registerEffect(effectDecl.name, effectRecord)
                 }
                 effectsRegistered = true
@@ -351,6 +356,12 @@ class FunkTruffleRootNode(
                 else -> result.getDisplayString()
             }
         } catch (e: Exception) {
+            // Print full exception chain for debugging
+            System.err.println("ERROR: Exception in FunkTruffleRootNode.execute:")
+            System.err.println("  Message: ${e.message}")
+            System.err.println("  Class: ${e.javaClass.name}")
+            System.err.println("  Cause: ${e.cause}")
+            e.printStackTrace(System.err)
             throw FunkException("Execution error in Truffle node: ${e.message}", e)
         }
     }
@@ -361,63 +372,112 @@ class FunkTruffleRootNode(
      */
     private fun loadModules(modulePaths: List<String>, context: FunkContext, frame: VirtualFrame) {
         for (modulePath in modulePaths) {
-            // Skip if already loaded
-            if (modulePath in loadedModules) {
-                continue
+            loadModuleRecursively(modulePath, context, frame)
+        }
+    }
+
+    /**
+     * Load a module and all its dependencies recursively
+     */
+    private fun loadModuleRecursively(modulePath: String, context: FunkContext, frame: VirtualFrame) {
+        // Skip if already loaded
+        if (modulePath in loadedModules) {
+            return
+        }
+
+        try {
+            // Load the module using ModuleResolver
+            val moduleFile = resolveModulePath(modulePath)
+
+            if (!moduleFile.exists()) {
+                throw FunkException("Module not found: $modulePath at ${moduleFile.absolutePath}")
             }
 
-            try {
-                // Load the module using ModuleResolver
-                val moduleFile = resolveModulePath(modulePath)
+            // Retrieve the already-typed module from cache (avoids re-parsing/re-type-checking)
+            // The CLI type-checker already processed and cached all modules
+            val typedModule = TypeChecker.getTypedModule(modulePath)
+                ?: throw FunkException("Module $modulePath not found in typed cache. Ensure the module was type-checked by the CLI.")
 
-                if (!moduleFile.exists()) {
-                    throw FunkException("Module not found: $modulePath at ${moduleFile.absolutePath}")
-                }
-
-                // Retrieve the already-typed module from cache (avoids re-parsing/re-type-checking)
-                // The CLI type-checker already processed and cached all modules
-                val typedModule = TypeChecker.getTypedModule(modulePath)
-                    ?: throw FunkException("Module $modulePath not found in typed cache. Ensure the module was type-checked by the CLI.")
-
-                // Convert module to Truffle nodes
-                val moduleConverter = ASTToTruffleConverter(context, projectRoot)
-                val moduleNode = moduleConverter.convertProgram(typedModule)
-                val moduleFrameDescriptor = moduleConverter.getFrameDescriptor()
-
-                // Execute the module to register its functions
-                // We need to create a frame for the module execution
-                // MaterializedFrame extends VirtualFrame, so we can use it directly
-                val moduleFrame: VirtualFrame = com.oracle.truffle.api.Truffle.getRuntime()
-                    .createMaterializedFrame(emptyArray(), moduleFrameDescriptor)
-
-                moduleNode.execute(moduleFrame)
-
-                // After module execution, its functions are registered with unqualified names
-                // We need to also register them with qualified names (e.g., "int::abs")
-                val modulePrefix = modulePath.split("::").last() // e.g., "int" from "std::int"
-                val moduleExports = context.locals.toMap() // Get all locally defined values
-
-                // Identify which exports came from this module (pub let declarations)
-                val publicExports = typedModule.items.filterIsInstance<LetBinding>()
-                    .filter { it.visibility == Visibility.PUBLIC }
-                    .map { it.variableName }
-                    .toSet()
-
-                // Register public exports with qualified names
-                for (exportName in publicExports) {
-                    val exportValue = moduleExports[exportName]
-                    if (exportValue != null) {
-                        val qualifiedName = "$modulePrefix::$exportName"
-                        context.defineGlobal(qualifiedName, exportValue)
+            // CRITICAL: Load all dependencies FIRST before loading this module
+            // Extract UseDeclarations to find dependencies
+            val dependencies = mutableSetOf<String>()
+            for (item in typedModule.items) {
+                when (item) {
+                    is UseDeclaration -> {
+                        val depPath = when (val path = item.path) {
+                            is ModulePath -> path.segments.joinToString("::")
+                            is SelectivePath -> path.module.joinToString("::")
+                            else -> null
+                        }
+                        if (depPath != null) dependencies.add(depPath)
+                    }
+                    is PubUseDeclaration -> {
+                        val depPath = when (val path = item.path) {
+                            is ModulePath -> path.segments.joinToString("::")
+                            is SelectivePath -> path.module.joinToString("::")
+                            else -> null
+                        }
+                        if (depPath != null) dependencies.add(depPath)
+                    }
+                    else -> {
+                        // Ignore other program items (LetBinding, ImplDeclaration, etc.)
                     }
                 }
-
-                // Mark as loaded
-                loadedModules.add(modulePath)
-
-            } catch (e: Exception) {
-                throw FunkException("Failed to load module '$modulePath': ${e.message}", e)
             }
+
+            // Recursively load all dependencies first
+            for (dependency in dependencies) {
+                loadModuleRecursively(dependency, context, frame)
+            }
+
+            // Now load this module
+            // Convert module to Truffle nodes
+            val moduleConverter = ASTToTruffleConverter(context, projectRoot)
+            val moduleNode = moduleConverter.convertProgram(typedModule)
+            val moduleFrameDescriptor = moduleConverter.getFrameDescriptor()
+
+            // Execute the module to register its functions
+            // Create a frame with 2-element arguments array per Truffle convention
+            val args = arrayOf<Any?>(FunkRecord(emptyMap()), emptyMap<String, FunkValue>())
+            val moduleFrame: VirtualFrame = com.oracle.truffle.api.Truffle.getRuntime()
+                .createMaterializedFrame(args, moduleFrameDescriptor)
+
+            moduleNode.execute(moduleFrame)
+
+            // After module execution, its functions are registered with unqualified names
+            // We need to also register them with qualified names (e.g., "int::abs")
+            val modulePrefix = modulePath.split("::").last() // e.g., "int" from "std::int"
+            val moduleExports = context.locals.toMap() // Get all locally defined values
+
+            // Identify which exports came from this module (pub let declarations)
+            val publicExports = typedModule.items.filterIsInstance<LetBinding>()
+                .filter { it.visibility == Visibility.PUBLIC }
+                .map { it.variableName }
+                .toSet()
+
+            // ALSO export impl declarations (effect handlers/performers)
+            // NOTE: ImplDeclaration doesn't have a visibility field, so we export all of them
+            // In practice, only pub impl declarations should be imported
+            val publicPerformers = typedModule.items.filterIsInstance<ImplDeclaration>()
+                .map { it.performerName }
+                .toSet()
+
+            val allExports = publicExports + publicPerformers
+
+            // Register public exports with qualified names
+            for (exportName in allExports) {
+                val exportValue = moduleExports[exportName]
+                if (exportValue != null) {
+                    val qualifiedName = "$modulePrefix::$exportName"
+                    context.defineGlobal(qualifiedName, exportValue)
+                }
+            }
+
+            // Mark as loaded
+            loadedModules.add(modulePath)
+
+        } catch (e: Exception) {
+            throw FunkException("Failed to load module '$modulePath': ${e.message}", e)
         }
     }
 

@@ -1,0 +1,57 @@
+# std/control/continuation.funk - Delimited continuations with opaque handles
+#
+# This module provides the NEW continuation architecture using delimited continuations.
+# Unlike the old effect-based model, continuations are now explicit values with
+# delimiter boundaries.
+#
+# Key concepts:
+# - Opaque Cont handles: Unforgeable delimiter handles created by __native_continuation_delimit
+# - Continuation record: Public API with bound methods (capture, suspend_with, resume, etc.)
+# - Delimiter scoping: Each continuation has an explicit delimiter boundary
+#
+# Usage:
+#   use std::control::continuation
+#
+#   let cont = continuation::new {}
+#   let k = cont.capture {}
+#   let result = cont.resume { cont = k, value = 42 }
+
+# Type alias for continuation record
+pub type Continuation = {
+    capture: {} -> ({ value: 'a } -> 'b),
+    suspend: {} -> 'suspended,
+    suspend_with: { value: 'a } -> 'suspended,
+    resume: { cont: { value: 'a } -> 'b, value: 'a } -> 'b,
+    fork: { cont: { value: 'a } -> 'b, values: ['a] } -> ['b],
+    abort: {} -> 'never,
+    is_suspended: { value: 'a } -> Bool,
+    extract_suspended: { suspended: 'a } -> (Option { value: 'v, cont: { value: 'x } -> 'c })
+}
+
+# Create a new Continuation record with bound methods
+#
+# This creates a continuation context and returns a record with methods
+# that are bound to that context's delimiter. All operations on continuations
+# MUST go through this record - native methods are not exposed directly.
+#
+# Returns: A Continuation record with all methods bound to the same delimiter
+pub let new: {} -> Continuation = {} -> do
+    # Create delimiter - this is the unique identifier for this continuation
+    let delim_handle = __native_continuation_delimit {}
+
+    # Activate delimiter in thread-local state (for state machine context)
+    let _ = __native_continuation_activate { delim = delim_handle }
+
+    # Return a record with bound methods
+    # ALL methods share the SAME delim_handle captured in their closures
+    {
+        capture = {} -> __native_continuation_capture { delim = delim_handle },
+        suspend = {} -> __native_continuation_suspend {},
+        suspend_with = { value } -> __native_continuation_suspend_with { delim = delim_handle, value = value },
+        resume = { cont, value } -> __native_continuation_resume { delim = delim_handle, cont = cont, value = value },
+        fork = { cont, values } -> __native_continuation_fork { delim = delim_handle, cont = cont, values = values },
+        abort = {} -> __native_continuation_abort { delim = delim_handle },
+        is_suspended = { value } -> false,  # TODO: implement
+        extract_suspended = { suspended } -> __native_continuation_extract_suspended { delim = delim_handle, suspended = suspended }
+    }
+

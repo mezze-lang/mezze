@@ -6,21 +6,28 @@
 # This is a pure userland library. Generators are just functions that use
 # Continuation.suspend_with to yield values. No effect declaration needed!
 
-use std::effects::continuation::{Continuation, Delimited}
+use std::control::continuation
+use std::control::continuation::{Continuation}
 
 # =============================================================================
 # Creating Generators
 # =============================================================================
 
-# Yield a value from a generator
-# This is a convenience wrapper around Continuation.suspend_with
-# Must be called within a `perform Delimited in` block
-pub let yield = { value } -> Continuation.suspend_with { value = value }
+# Create a generator continuation context
+# This should be called once at the start of a generator function
+# Returns a Continuation record that can be used to yield values
+pub let new_generator: {} -> Continuation = {} ->
+    continuation::new {}
 
-# To create a generator, write a function that uses perform Delimited in and
-# calls yield to produce values. For example:
+# Yield a value from a generator
+# Creates its own continuation context and suspends with the given value
+pub let yield = { value } -> do
+    let cont = continuation::new {}
+    cont.suspend_with { value = value }
+
+# To create a generator, write a function that calls yield to produce values.
+# For example:
 #
-# use std::effects::continuation::{Continuation, Delimited}
 # use std::effects::generator::{yield, to_list}
 #
 # let yield_helper = { i, n } -> do
@@ -29,51 +36,50 @@ pub let yield = { value } -> Continuation.suspend_with { value = value }
 #         yield_helper { i = i + 1, n = n }
 #     else {}
 #
-# let count_up_to = { n } -> perform Delimited in
+# let count_up_to = { n } ->
 #     yield_helper { i = 0, n = n }
 #
 # # Then consume it:
 # let my_gen = count_up_to { n = 5 }
-# let values = perform Delimited in to_list { gen = my_gen }
-#
-# The generator function wraps in `perform Delimited in`, and consumers also
-# need to wrap in `perform Delimited in` when calling library functions.
+# let values = to_list { gen = my_gen }
 
 # =============================================================================
 # Generator Consumption Functions
 # =============================================================================
 
 # Get the next value from a generator
-# Takes a suspended generator and returns { value: Option 'a, gen: next_state }
+# Takes a suspended generator state
+# Returns { value: Option 'a, gen: next_state }
 # - value is Some { val } if there's a yielded value, None if done
 # - gen is the next generator state to use for subsequent calls
-# NOTE: Must be called within a `perform Delimited in` block!
 pub let next = { gen } -> do
-    let extracted = Continuation.extract_suspended { suspended = gen }
+    let cont = continuation::new {}
+    let extracted = cont.extract_suspended { suspended = gen }
     match extracted is
-        Some { val } -> do
+        Some { val = { value, cont = k } } -> do
             # Resume the continuation to get the next state
-            let next_state = Continuation.resume { cont = val.cont, value = {} }
-            { value = Some { val = val.value }, gen = next_state }
+            let next_state = cont.resume { cont = k, value = {} }
+            { value = Some { val = value }, gen = next_state }
         None -> { value = None, gen = {} }
 
 # Consume entire generator into an array
 # Warning: Will not terminate for infinite generators!
 # Implemented using recursion over next
-let to_list_helper = { gen, acc } -> do
+pub let to_list_helper = { gen, acc } -> do
     let result = next { gen = gen }
     match result.value is
         Some { val } ->
             to_list_helper { gen = result.gen, acc = __native_arraylist_concat { xs = acc, ys = [val] } }
         None -> acc
 
-pub let to_list = { gen } -> to_list_helper { gen = gen, acc = [] }
+pub let to_list = { gen } ->
+    to_list_helper { gen = gen, acc = [] }
 
 # Take first n values from a generator
 # Returns { values: ['elem], gen: remaining_state }
 # - values is an array of up to n yielded values
 # - gen is the remaining generator state (can be used to continue)
-let take_helper = { gen, n, acc } -> do
+pub let take_helper = { gen, n, acc } -> do
     if n <= 0 then
         { values = acc, gen = gen }
     else do
@@ -90,7 +96,7 @@ pub let take = { gen, n } -> take_helper { gen = gen, n = n, acc = [] }
 # =============================================================================
 
 # Internal helper for map - accumulates transformed values
-let map_helper = { gen, f, acc } -> do
+pub let map_helper = { gen, f, acc } -> do
     let result = next { gen = gen }
     match result.value is
         Some { val } ->
@@ -103,7 +109,7 @@ let map_helper = { gen, f, acc } -> do
 pub let map = { gen, f } -> map_helper { gen = gen, f = f, acc = [] }
 
 # Internal helper for filter - accumulates filtered values
-let filter_helper = { gen, p, acc } -> do
+pub let filter_helper = { gen, p, acc } -> do
     let result = next { gen = gen }
     match result.value is
         Some { val } ->
@@ -128,7 +134,7 @@ pub let fold = { gen, init, f } -> do
         None -> init
 
 # Internal helper for count - accumulates count
-let count_helper = { gen, cnt } -> do
+pub let count_helper = { gen, cnt } -> do
     let result = next { gen = gen }
     match result.value is
         Some { val } -> count_helper { gen = result.gen, cnt = cnt + 1 }
