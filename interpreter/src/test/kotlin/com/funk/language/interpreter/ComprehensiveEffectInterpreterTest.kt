@@ -427,8 +427,8 @@ class ComprehensiveEffectInterpreterTest {
               log : {msg: String} -> {} = {msg} -> native_print {msg = "[FILE] $(msg)"}
             }
             
-            # For now, this will use empty parameters
-            perform FileLogger in Logging.log {msg = "Parameterized test"}
+            # Test parameterized handler with path parameter
+            perform FileLogger {path = "app.log"} in Logging.log {msg = "Parameterized test"}
         """.trimIndent()
         
         val program = parser.parse(source)

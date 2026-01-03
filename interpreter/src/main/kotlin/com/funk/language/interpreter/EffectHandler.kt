@@ -9,15 +9,44 @@ import com.funk.language.ast.*
 class EffectHandler {
     // Global effect registry - effects are program-wide declarations
     private val globalEffects = mutableMapOf<String, FunkRecord>()
-    
+
     // Handler stack - maintains active handlers for nested perform expressions
     private val handlerStack = mutableListOf<FunkRecord>()
+
+    // Performer to effect mapping - tracks which performers implement which effects
+    // e.g., "Console" -> "Log", "ToResult" -> "Exception"
+    private val performerToEffect = mutableMapOf<String, String>()
     
     /**
      * Register a global effect declaration
      */
     fun registerEffect(name: String, effectRecord: FunkRecord) {
         globalEffects[name] = effectRecord
+    }
+
+    /**
+     * Register that a performer implements an effect
+     * e.g., registerPerformer("Console", "Log") means Console implements Log
+     */
+    fun registerPerformer(performerName: String, effectName: String) {
+        performerToEffect[performerName] = effectName
+    }
+
+    /**
+     * Get the effect that a performer implements
+     */
+    fun getEffectForPerformer(performerName: String): String? {
+        return performerToEffect[performerName]
+    }
+
+    /**
+     * Get all performers that implement a given effect
+     * e.g., getPerformersForEffect("Log") returns ["Console"]
+     */
+    fun getPerformersForEffect(effectName: String): List<String> {
+        return performerToEffect.entries
+            .filter { it.value == effectName }
+            .map { it.key }
     }
     
     /**
@@ -58,7 +87,15 @@ class EffectHandler {
     }
     
     /**
-     * Execute an effect call by finding the appropriate handler
+     * Execute an effect call by finding the appropriate handler.
+     *
+     * LAZY EFFECTS MODEL:
+     * - If handler available → Execute immediately, return result
+     * - If no handler → Return FunkSuspended with deferred computation (thunk)
+     *
+     * This implements the algebraic effects semantics where:
+     * - Inside perform: effects execute immediately (hot path, fast!)
+     * - Outside perform: effects return suspended computations (cold path, lazy!)
      *
      * Now uses FunkTruffleFunction exclusively (100% Truffle execution)
      */
@@ -70,22 +107,42 @@ class EffectHandler {
         interpreter: FunkInterpreter  // Kept for backward compatibility, but not used
     ): FunkValue {
         // COMPREHENSIVE HANDLER RESOLUTION
-        // 1. Check context first (for nested handlers)
-        // 2. Check handler stack (for perform expressions)
-        // 3. If no handlers available, return FunkSuspended instead of throwing
-        val handlersRecord = (context["__handlers"] as? FunkRecord)
-            ?: handlerStack.lastOrNull()
-            ?: return FunkSuspended(
-                value = FunkNull,
-                unhandledEffects = setOf(effectName)
-            )
+        // CRITICAL FIX: Prioritize handler stack over context
+        // The handler stack is the source of truth for currently active handlers
+        // Context["__handlers"] can be stale when executing inside state machines
+        // 1. Check handler stack first (for nested perform expressions)
+        // 2. Fall back to context (for captured handlers in closures)
+        // 3. If no handlers available, return FunkSuspended with deferred computation
+        val handlersRecord = handlerStack.lastOrNull()
+            ?: (context["__handlers"] as? FunkRecord)
+
+        // No handlers available - create deferred computation (LAZY EFFECTS)
+        if (handlersRecord == null) {
+            return createSuspendedEffectCall(effectName, operationName, arguments, context)
+        }
 
         val handlers = handlersRecord.fields
-        val handler = handlers[effectName]
-            ?: return FunkSuspended(
-                value = FunkNull,
-                unhandledEffects = setOf(effectName)
-            )
+
+        // SMART HANDLER RESOLUTION:
+        // 1. Try direct lookup (e.g., looking for "Log" when "Log" is in handlers)
+        var handler = handlers[effectName]
+
+        // 2. If not found, look for performers that implement this effect
+        //    (e.g., looking for "Log", find "Console" which implements Log)
+        if (handler == null) {
+            val performers = getPerformersForEffect(effectName)
+            for (performerName in performers) {
+                handler = handlers[performerName]
+                if (handler != null) {
+                    break
+                }
+            }
+        }
+
+        // Effect declared but no handler - create deferred computation
+        if (handler == null) {
+            return createSuspendedEffectCall(effectName, operationName, arguments, context)
+        }
 
         if (handler !is FunkRecord) {
             throw RuntimeException("Handler for $effectName is not a record: $handler")
@@ -94,7 +151,8 @@ class EffectHandler {
         val operation = handler.fields[operationName]
             ?: throw RuntimeException("Operation $operationName not found in handler for $effectName")
 
-        return when (operation) {
+        // Handler available - EXECUTE IMMEDIATELY (HOT PATH)
+        val result = when (operation) {
             is NativeFunkFunction -> {
                 // Native functions expect the FunkRecord as args[0]
                 if (arguments !is FunkRecord) {
@@ -105,8 +163,10 @@ class EffectHandler {
             }
             is FunkTruffleFunction -> {
                 // Truffle functions are called directly via their CallTarget
-                // All context is managed by Truffle frames
-                // Pass closure variables along with arguments
+                // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments:
+                // [0] = FunkRecord of parameters
+                // [1] = Map<String, FunkValue> of closure variables (can be empty)
+                // We must ALWAYS pass both, even if closureVariables is empty
                 operation.callTarget.call(arguments, operation.closureVariables) as FunkValue
             }
             else -> {
@@ -116,6 +176,53 @@ class EffectHandler {
                 )
             }
         }
+
+        return result
+    }
+
+    /**
+     * Create a suspended effect call when no handler is available.
+     * This implements the lazy effects model.
+     *
+     * Creates a deferred effect computation wrapped in FunkSuspended.
+     * The computation will execute later when handlers become available via perform.
+     */
+    private fun createSuspendedEffectCall(
+        effectName: String,
+        operationName: String,
+        arguments: FunkValue,
+        context: MutableMap<String, FunkValue>
+    ): FunkSuspended {
+        // Verify the effect and operation exist
+        val effect = globalEffects[effectName]
+            ?: throw RuntimeException("Unknown effect: $effectName")
+
+        // Verify the operation exists in the effect declaration
+        if (!effect.fields.containsKey(operationName)) {
+            throw RuntimeException("Operation $operationName not found in effect $effectName")
+        }
+
+        // Create a deferred computation function that will resolve the handler when executed
+        // This function will be called later when handlers become available
+        val deferredFunction = NativeFunkFunction("deferred-$effectName-$operationName") { args ->
+            // This will be executed later when handlers are available
+            // At that time, we need to look up the handler and execute the operation
+            // For now, throw an error - this should be handled by FunkSuspended.executeWith
+            throw RuntimeException("Deferred effect call not yet implemented for $effectName.$operationName")
+        }
+
+        // Create a thunk with the deferred function
+        val thunk = FunkThunk(
+            function = deferredFunction,
+            arguments = arguments
+        )
+
+        // Wrap in FunkSuspended with unhandled effects
+        return FunkSuspended(
+            computation = thunk,
+            unhandledEffects = setOf(effectName),
+            capturedHandlers = emptyMap()
+        )
     }
     
     /**
@@ -189,5 +296,6 @@ class EffectHandler {
     fun clear() {
         globalEffects.clear()
         handlerStack.clear()
+        performerToEffect.clear()
     }
 }

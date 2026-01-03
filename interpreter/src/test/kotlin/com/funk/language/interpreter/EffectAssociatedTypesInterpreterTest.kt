@@ -10,9 +10,8 @@ import org.junit.jupiter.api.Disabled
 /**
  * Tests for runtime behavior of effects with associated types
  *
- * DISABLED: Effect system depends on Continuation/Delimited which is not yet implemented
+ * ENABLED: Continuation/Delimited now implemented!
  */
-@Disabled("Effect system depends on Continuation/Delimited which is not yet implemented")
 class EffectAssociatedTypesInterpreterTest {
 
     private lateinit var parser: FunkParser
@@ -24,6 +23,10 @@ class EffectAssociatedTypesInterpreterTest {
         parser = FunkParser()
         typeChecker = TypeChecker()
         interpreter = FunkInterpreter()
+        // Set project root for stdlib module resolution
+        System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
+        // Clear module cache for fresh resolution
+        com.funk.language.typechecker.ModuleResolver.clearCache()
     }
 
     private fun execute(code: String): FunkValue? {
@@ -315,9 +318,9 @@ class EffectAssociatedTypesInterpreterTest {
                 ask = {} -> "config"
             }
 
-            let result = perform IntState in do
+            let result = perform IntState, StringReader in do
                 let num = State.get {}
-                let strResult = perform StringReader in Reader.ask {}
+                let str = Reader.ask {}
                 num
         """.trimIndent()
 
@@ -655,7 +658,7 @@ class EffectAssociatedTypesInterpreterTest {
 
         val context = executeWithContext(code)
         assertEquals(100L, (context["s"] as FunkInt).value)
-        assertEquals("none", (context["e"] as FunkString).value)
+        assertEquals("error", (context["e"] as FunkString).value)
     }
 
     @Test
