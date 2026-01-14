@@ -20,10 +20,14 @@ class RecordLiteralNode(
     
     override fun execute(frame: VirtualFrame): FunkValue {
         val fields = mutableMapOf<String, FunkValue>()
+        println("DEBUG RecordLiteralNode: fieldNodes.keys = ${fieldNodes.keys}")
         for ((fieldName, fieldNode) in fieldNodes) {
+            println("DEBUG RecordLiteralNode: executing field '$fieldName', node type = ${fieldNode::class.simpleName}")
             val fieldValue = fieldNode.execute(frame)
+            println("DEBUG RecordLiteralNode: field '$fieldName' = ${fieldValue::class.simpleName}")
             fields[fieldName] = fieldValue
         }
+        println("DEBUG RecordLiteralNode: final fields = ${fields.keys}")
         return FunkRecord(fields)
     }
 }

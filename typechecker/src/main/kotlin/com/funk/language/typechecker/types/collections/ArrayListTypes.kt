@@ -76,9 +76,15 @@ object ArrayListTypes {
             FunkType.BooleanType
         )
 
+        // CRITICAL FIX: Map function should allow transformation from 'a to 'b
+        // Not just 'a to 'a. This allows mapping [Int] -> [Promise] for example.
+        val arrayMapResultTypeVar = com.funk.language.ast.TypeVar("b")
+        val arrayMapResultType = FunkType.VarType(arrayMapResultTypeVar)
+        val arrayMapResultArrayType = FunkType.ArrayType(arrayMapResultType)
+
         val arrayMapFuncType = FunkType.FunctionType(
             FunkType.RecordType(mapOf("x" to arrayElemType)),
-            arrayElemType
+            arrayMapResultType
         )
 
         context["__native_arraylist_map"] = FunkType.FunctionType(
@@ -86,7 +92,7 @@ object ArrayListTypes {
                 "xs" to arrayType,
                 "f" to arrayMapFuncType
             )),
-            arrayType
+            arrayMapResultArrayType
         )
 
         val arrayPredicateType = FunkType.FunctionType(

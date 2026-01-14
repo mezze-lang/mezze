@@ -38,92 +38,47 @@ class FunctionDefinitionNode(
             parameterNames = parameterNames,
             bodyNode = bodyNode,
             frameDescriptor = frameDescriptor,
-            closureVariableNames = closureVariableNames
+            closureVariableNames = closureVariableNames,
+            closureVariableSlots = closureVariableSlots
         )
         rootNode.callTarget
     }
 
     override fun execute(frame: VirtualFrame): FunkValue {
-        // Capture closure variables from the current frame
-        val closureVariables = mutableMapOf<String, FunkValue>()
+        // TRUFFLE BEST PRACTICE: Materialize the frame to capture lexical scope
+        // This stores the entire frame (with all local variables and parameters) on the heap
+        // so it can be accessed by nested functions, even after this function returns.
+        // This is the standard approach used by functional languages like Enso.
 
-        // DEBUG: Log closure capture attempt with stack trace to see where this is being called from
-        val stackTrace = Thread.currentThread().stackTrace
-        val caller = stackTrace.getOrNull(2)?.toString() ?: "unknown"
-        println("\nDEBUG FunctionDef.execute: name=$name, closureVariableNames=$closureVariableNames, slots=$closureVariableSlots")
-        println("DEBUG: Caller = $caller")
-
-        for (varName in closureVariableNames) {
-            println("DEBUG: Attempting to capture varName=$varName")
-
-            // Try to find the variable in the current frame or context
-            val value = try {
-                // CRITICAL FIX: First try to read from the current frame's slots
-                // This allows nested functions to capture parameters and local variables from outer functions
-                val slot = closureVariableSlots[varName]
-                println("DEBUG: slot for $varName = $slot")
-
-                if (slot != null) {
-                    // Read from the frame slot
-                    val frameValue = frame.getObject(slot)
-                    println("DEBUG: frameValue from slot = ${frameValue?.let { it::class.simpleName }}")
-
-                    // If we got a valid value from the frame, use it
-                    if (frameValue is FunkValue && frameValue !is FunkNull) {
-                        println("DEBUG: Using frame value for $varName")
-                        frameValue
-                    } else {
-                        // Frame slot is null or FunkNull, fall back to global lookup
-                        // This handles recursive functions and module-imported functions
-                        val context = FunkLanguage.getCurrentContext(this)
-
-                        val lookupName = if (varName.contains("$")) {
-                            // Strip monomorphic suffix to get generic name
-                            varName.substringBefore("$")
-                        } else {
-                            varName
-                        }
-
-                        println("DEBUG: Frame slot null/FunkNull, doing global lookup for $lookupName")
-                        val result = context.lookupGlobal(lookupName)
-                        println("DEBUG: Global lookup result = ${result?.let { it::class.simpleName }}")
-                        result
-                    }
-                } else {
-                    // No slot information, fall back to global lookup
-                    val context = FunkLanguage.getCurrentContext(this)
-
-                    val lookupName = if (varName.contains("$")) {
-                        // Strip monomorphic suffix to get generic name
-                        varName.substringBefore("$")
-                    } else {
-                        varName
-                    }
-
-                    println("DEBUG: No slot info, doing global lookup for $lookupName")
-                    val result = context.lookupGlobal(lookupName)
-                    println("DEBUG: Global lookup result = ${result?.let { it::class.simpleName }}")
-                    result
-                }
-            } catch (e: Exception) {
-                println("DEBUG: Exception during capture: ${e.message}")
-                null
-            }
-            // Only capture non-null values
-            // For recursive functions, the function won't exist yet, so we skip it
-            // and let the variable read fall back to global lookup at runtime
-            if (value != null && value !is FunkNull) {
-                println("DEBUG: Successfully captured $varName = ${value::class.simpleName}")
-                closureVariables[varName] = value
-            } else {
-                println("DEBUG: Skipping $varName (value is null or FunkNull)")
-            }
+        val materializedFrame = if (closureVariableNames.isNotEmpty()) {
+            frame.materialize()
+        } else {
+            null
         }
 
-        println("DEBUG: Final closureVariables.size = ${closureVariables.size}")
-        val result = FunkTruffleFunction(callTarget, name, closureVariables)
-        println("DEBUG: Returning function: $result\n")
-        return result
+        // CRITICAL: Build the lexical scope slot map
+        // This maps each closure variable name to its slot number IN THIS FRAME (the one being materialized)
+        // This is different from closureVariableSlots which are relative to the parent
+        val lexicalScopeSlotMap = if (materializedFrame != null) {
+            // The closure variable slots tell us which slots in THIS frame contain the values we need
+            closureVariableSlots
+        } else {
+            emptyMap()
+        }
+
+        println("\nDEBUG FunctionDef.execute: name=$name, closureVariableNames=$closureVariableNames")
+        println("DEBUG: closureVariableSlots = $closureVariableSlots")
+        println("DEBUG: lexicalScopeSlotMap = $lexicalScopeSlotMap")
+        println("DEBUG: Materialized frame = ${materializedFrame != null}")
+
+        // Create function with lexical scope (MaterializedFrame) and slot mapping
+        return FunkTruffleFunction(
+            callTarget,
+            name,
+            emptyMap(), // No longer needed - lexical scope handles variable lookup
+            materializedFrame,
+            lexicalScopeSlotMap
+        )
     }
 }
 
@@ -143,8 +98,15 @@ class FunctionCallNode(
         val result = when (function) {
             is FunkTruffleFunction -> {
                 // Direct call to Truffle function with closure variables
-                // Pass arguments and closure variables to the function
-                function.callTarget.call(arguments, function.closureVariables) as FunkValue
+                // CRITICAL: FunkFunctionRootNode expects 4 arguments:
+                // [0] = args record, [1] = closure variables map (legacy),
+                // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
+                function.callTarget.call(
+                    arguments,
+                    function.closureVariables,
+                    function.lexicalScope,
+                    function.lexicalScopeSlotMap
+                ) as FunkValue
             }
             is NativeFunkFunction -> {
                 // Call native function
@@ -168,20 +130,19 @@ class FunkFunctionRootNode(
     private val parameterNames: List<String>,
     @field:Child private var bodyNode: FunkNode,
     frameDescriptor: FrameDescriptor,
-    private val closureVariableNames: List<String> = emptyList()
+    private val closureVariableNames: List<String> = emptyList(),
+    private val closureVariableSlots: Map<String, Int> = emptyMap()
 ) : RootNode(language, frameDescriptor) {
 
     override fun execute(frame: VirtualFrame): Any {
-        // Arguments: [0] = FunkRecord of parameters, [1] = Map<String, FunkValue> of closure variables
+        // Arguments:
+        // [0] = FunkRecord of parameters
+        // [1] = Map<String, FunkValue> of closure variables (legacy, for backward compat)
+        // [2] = MaterializedFrame lexical scope (new approach)
+        // [3] = Map<String, Int> lexical scope slot mapping
         val arguments = frame.getArguments()
 
-        // DEBUG: Log when arguments size is unexpected
-        if (arguments.size < 2) {
-            println("ERROR: FunkFunctionRootNode.execute for function '$name' received ${arguments.size} arguments, expected 2!")
-            println("ERROR: Arguments: ${arguments.contentToString()}")
-            println("ERROR: Stack trace:")
-            Thread.currentThread().stackTrace.take(15).forEach { println("  $it") }
-        }
+        println("DEBUG FunkFunctionRootNode.execute: name=$name, arguments.size=${arguments.size}")
 
         // Get context for registering variables
         val context = FunkLanguage.getCurrentContext(this)
@@ -196,7 +157,23 @@ class FunkFunctionRootNode(
             context.defineLocal("__handlers", activeHandlers)
         }
 
-        // Extract closure variables if provided
+        // Extract lexical scope (MaterializedFrame) from argument [2]
+        @Suppress("UNCHECKED_CAST")
+        val lexicalScope = if (arguments.size > 2) {
+            arguments[2] as? com.oracle.truffle.api.frame.MaterializedFrame
+        } else {
+            null
+        }
+
+        // Extract lexical scope slot mapping from argument [3]
+        @Suppress("UNCHECKED_CAST")
+        val lexicalScopeSlotMap = if (arguments.size > 3) {
+            arguments[3] as? Map<String, Int> ?: emptyMap()
+        } else {
+            emptyMap()
+        }
+
+        // Extract closure variables map from argument [1] (for backward compatibility)
         @Suppress("UNCHECKED_CAST")
         val closureVariables = if (arguments.size > 1) {
             arguments[1] as? Map<String, FunkValue> ?: emptyMap()
@@ -245,7 +222,9 @@ class FunkFunctionRootNode(
             val partiallyAppliedFunc = createPartiallyAppliedFunction(
                 providedParams,
                 missingParams,
-                closureVariables
+                closureVariables,
+                lexicalScope,
+                lexicalScopeSlotMap
             )
             return partiallyAppliedFunc
         }
@@ -260,21 +239,50 @@ class FunkFunctionRootNode(
             frame.setObject(index, value)
         }
 
-        // Bind closure variables to frame slots only (after parameters)
+        // TRUFFLE BEST PRACTICE: Bind closure variables from lexical scope
+        // Use the lexicalScopeSlotMap to find the correct slot numbers in the lexical scope frame
         val paramCount = parameterNames.size
-        for ((index, varName) in closureVariableNames.withIndex()) {
-            val slotIndex = paramCount + index
-            val value = closureVariables[varName]
-            // Only bind closure variables that were actually captured
-            // For recursive functions, the function won't be in the closure map,
-            // and the variable read will fall back to global lookup
-            if (value != null && value !is FunkNull) {
-                // Write to frame slot only
-                // Closure variables should NOT be written to context.locals as they're function-local
-                frame.setObject(slotIndex, value)
-            } else {
-                // Set slot to FunkNull so reads will fall back to global lookup
-                frame.setObject(slotIndex, FunkNull)
+        if (lexicalScope != null && lexicalScopeSlotMap.isNotEmpty()) {
+            println("DEBUG: Binding closure variables from lexical scope with slot map")
+            println("DEBUG: lexicalScopeSlotMap = $lexicalScopeSlotMap")
+
+            for ((index, varName) in closureVariableNames.withIndex()) {
+                val slotIndex = paramCount + index
+
+                // Look up the variable in the lexical scope frame using the slot map
+                val lexicalSlot = lexicalScopeSlotMap[varName]
+                println("DEBUG: Looking up closure var '$varName' from lexical scope, slot=$lexicalSlot")
+
+                if (lexicalSlot != null && lexicalSlot < lexicalScope.frameDescriptor.numberOfSlots) {
+                    try {
+                        val value = lexicalScope.getObject(lexicalSlot) as? FunkValue
+                        println("DEBUG: Found value in lexical scope: ${value?.let { it::class.simpleName }}")
+                        if (value != null && value !is FunkNull) {
+                            frame.setObject(slotIndex, value)
+                        } else {
+                            frame.setObject(slotIndex, FunkNull)
+                        }
+                    } catch (e: Exception) {
+                        println("DEBUG: Exception reading from lexical scope: ${e.message}")
+                        frame.setObject(slotIndex, FunkNull)
+                    }
+                } else {
+                    // No valid slot in lexical scope - will fall back to global lookup
+                    println("DEBUG: No valid slot for '$varName', setting to FunkNull")
+                    frame.setObject(slotIndex, FunkNull)
+                }
+            }
+        } else {
+            println("DEBUG: No lexical scope, using legacy closure variables map")
+            // Fallback to legacy approach for backward compatibility
+            for ((index, varName) in closureVariableNames.withIndex()) {
+                val slotIndex = paramCount + index
+                val value = closureVariables[varName]
+                if (value != null && value !is FunkNull) {
+                    frame.setObject(slotIndex, value)
+                } else {
+                    frame.setObject(slotIndex, FunkNull)
+                }
             }
         }
 
@@ -288,7 +296,9 @@ class FunkFunctionRootNode(
     private fun createPartiallyAppliedFunction(
         providedParams: Map<String, FunkValue>,
         missingParams: List<String>,
-        originalClosureVars: Map<String, FunkValue>
+        originalClosureVars: Map<String, FunkValue>,
+        lexicalScope: com.oracle.truffle.api.frame.MaterializedFrame?,
+        lexicalScopeSlotMap: Map<String, Int>
     ): FunkTruffleFunction {
         // Create a new root node for the partially applied function
         val partialRootNode = PartiallyAppliedFunctionRootNode(
@@ -296,7 +306,9 @@ class FunkFunctionRootNode(
             originalFunctionName = this.name,
             providedParams = providedParams,
             missingParams = missingParams,
-            originalClosureVars = originalClosureVars
+            originalClosureVars = originalClosureVars,
+            lexicalScope = lexicalScope,
+            lexicalScopeSlotMap = lexicalScopeSlotMap
         )
 
         val partialCallTarget = partialRootNode.callTarget
@@ -305,7 +317,9 @@ class FunkFunctionRootNode(
         return FunkTruffleFunction(
             partialCallTarget,
             "$name(partial)",
-            emptyMap() // Closure variables are handled internally
+            emptyMap(), // Closure variables are handled internally
+            null, // Lexical scope is handled internally
+            emptyMap() // Slot mapping is handled internally
         )
     }
 
@@ -323,7 +337,9 @@ class PartiallyAppliedFunctionRootNode(
     private val originalFunctionName: String,
     private val providedParams: Map<String, FunkValue>,
     private val missingParams: List<String>,
-    private val originalClosureVars: Map<String, FunkValue>
+    private val originalClosureVars: Map<String, FunkValue>,
+    private val lexicalScope: com.oracle.truffle.api.frame.MaterializedFrame?,
+    private val lexicalScopeSlotMap: Map<String, Int>
 ) : RootNode(null, FrameDescriptor()) {
 
     override fun execute(frame: VirtualFrame): Any {
@@ -348,8 +364,8 @@ class PartiallyAppliedFunctionRootNode(
         val allParamsRecord = FunkRecord(mergedParams)
 
         // Call the original function with all parameters
-        // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments
-        return originalCallTarget.call(allParamsRecord, originalClosureVars) as FunkValue
+        // FunkFunctionRootNode expects 4 arguments now: params, closureVars, lexicalScope, slot map
+        return originalCallTarget.call(allParamsRecord, originalClosureVars, lexicalScope, lexicalScopeSlotMap) as FunkValue
     }
 
     override fun getName(): String = "${originalFunctionName}(partial)"

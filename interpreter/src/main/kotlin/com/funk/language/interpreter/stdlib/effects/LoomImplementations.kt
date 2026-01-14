@@ -3,6 +3,7 @@ package com.funk.language.interpreter.stdlib.effects
 import com.funk.language.interpreter.*
 import com.funk.language.interpreter.concurrency.LoomConcurrencyManager
 import java.util.concurrent.CompletableFuture
+import com.oracle.truffle.api.CallTarget
 
 /**
  * Native implementations for Project Loom virtual thread concurrency.
@@ -57,31 +58,51 @@ object LoomImplementations {
                     // Create a CompletableFuture to represent the Promise
                     val future = CompletableFuture<FunkValue>()
 
-                    // Create Loom concurrency manager
-                    val loomManager = LoomConcurrencyManager()
-
-                    // Spawn virtual thread to execute the computation
-                    loomManager.spawnVirtualThread("funk-spawn-${System.nanoTime()}") {
-                        try {
-                            // Call the computation with empty arguments
-                            val result = when (computation) {
-                                is FunkTruffleFunction -> {
-                                    // Zero-parameter function - pass empty record
-                                    val emptyArgs = FunkRecord(emptyMap())
-                                    computation.callTarget.call(emptyArgs, computation.closureVariables) as FunkValue
-                                }
-                                is NativeFunkFunction -> {
-                                    // Call with empty list
-                                    computation.call(emptyList())
-                                }
-                                else -> throw FunkException("Unexpected function type")
+                    // WORKAROUND: Truffle functions cannot be called across thread boundaries
+                    // due to context sharing restrictions. We execute them synchronously
+                    // on the current thread but wrap the result in a CompletableFuture
+                    // to maintain the async API contract.
+                    //
+                    // This means "spawn" is effectively synchronous for Truffle functions,
+                    // but still allows the Promise/await pattern to work.
+                    //
+                    // TODO: Implement proper multi-context support using TruffleContext API
+                    // for true concurrent execution.
+                    when (computation) {
+                        is FunkTruffleFunction -> {
+                            // Execute synchronously on current thread (Truffle requirement)
+                            try {
+                                val emptyArgs = FunkRecord(emptyMap())
+                                // CRITICAL: FunkFunctionRootNode expects 4 arguments:
+                                // [0] = args record, [1] = closure variables map (legacy),
+                                // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
+                                val result = computation.callTarget.call(
+                                    emptyArgs,
+                                    computation.closureVariables,
+                                    computation.lexicalScope,
+                                    computation.lexicalScopeSlotMap
+                                ) as FunkValue
+                                future.complete(result)
+                            } catch (e: Exception) {
+                                future.completeExceptionally(e)
                             }
-
-                            // Complete the future with the result
-                            future.complete(result)
-                        } catch (e: Exception) {
-                            // Complete exceptionally on error
-                            future.completeExceptionally(e)
+                        }
+                        is NativeFunkFunction -> {
+                            // Native functions CAN run on virtual threads safely
+                            val loomManager = LoomConcurrencyManager()
+                            loomManager.spawnVirtualThread("funk-spawn-${System.nanoTime()}") {
+                                try {
+                                    val result = computation.call(emptyList())
+                                    future.complete(result)
+                                } catch (e: Exception) {
+                                    future.completeExceptionally(e)
+                                }
+                            }
+                        }
+                        else -> {
+                            future.completeExceptionally(
+                                FunkException("Unexpected function type: ${computation::class.simpleName}")
+                            )
                         }
                     }
 

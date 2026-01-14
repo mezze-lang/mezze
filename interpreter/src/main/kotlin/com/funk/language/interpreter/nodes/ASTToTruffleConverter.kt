@@ -22,7 +22,8 @@ import com.funk.language.interpreter.FunkRecord
 class ASTToTruffleConverter(
     private val context: com.funk.language.interpreter.FunkContext? = null,
     private val projectRoot: java.nio.file.Path? = null,
-    parentHandlerMapping: Map<String, Pair<String, String>>? = null
+    parentHandlerMapping: Map<String, Pair<String, String>>? = null,
+    private val parentVariableSlots: Map<String, Int>? = null
 ) {
 
     private var frameDescriptorBuilder = FrameDescriptor.newBuilder()
@@ -258,7 +259,8 @@ class ASTToTruffleConverter(
             val opConverter = ASTToTruffleConverter(
                 context = this.context,
                 projectRoot = this.projectRoot,
-                parentHandlerMapping = this.handlerToEffectMapping
+                parentHandlerMapping = this.handlerToEffectMapping,
+                parentVariableSlots = this.variableSlots.toMap()
             )
 
             // The operation is a lambda like: { options } -> cont.fork { ... }
@@ -541,6 +543,11 @@ class ASTToTruffleConverter(
      * Convert an expression to a Truffle node
      */
     fun convertExpression(expr: Expression): FunkNode {
+        println("DEBUG convertExpression: expr class = ${expr::class.simpleName}")
+        if (expr is FunctionCall && expr.function is MemberAccess) {
+            val ma = expr.function as MemberAccess
+            println("DEBUG FunctionCall with MemberAccess: receiver=${ma.receiver::class.simpleName}, member=${ma.member}")
+        }
         return when (expr) {
             is IntLiteral -> IntLiteralNode(expr.value)
             is NatLiteral -> IntLiteralNode(expr.value)  // Nat values are represented as Int at runtime
@@ -678,7 +685,10 @@ class ASTToTruffleConverter(
      */
     private fun convertPattern(pattern: Pattern): PatternNode {
         return when (pattern) {
-            is VariablePattern -> VariablePatternNode(pattern.name)
+            is VariablePattern -> {
+                val slot = getOrCreateSlot(pattern.name)
+                VariablePatternNode(pattern.name, slot)
+            }
             is WildcardPattern -> WildcardPatternNode()
             is LiteralPattern -> {
                 // Convert literal patterns to LiteralPatternNode with the appropriate FunkValue
@@ -719,6 +729,24 @@ class ASTToTruffleConverter(
                 // This is a simplified implementation
                 WildcardPatternNode()
             }
+            is ArrayPattern -> {
+                // Array pattern matches arrays with specific length and optional rest pattern
+                // Examples: [], [x], [x, y], [head, ...tail]
+                val elementPatterns = pattern.elements.map { convertPattern(it) }.toTypedArray()
+                val restPatternName = pattern.restPattern
+
+                // Pre-allocate slots for element bindings and rest pattern
+                val elementSlots = pattern.elements.flatMap { p ->
+                    when (p) {
+                        is VariablePattern -> listOf(p.name to getOrCreateSlot(p.name))
+                        else -> emptyList()
+                    }
+                }.toMap()
+
+                val restSlot = restPatternName?.let { getOrCreateSlot(it) }
+
+                ArrayPatternNode(elementPatterns, restPatternName, elementSlots, restSlot)
+            }
         }
     }
     
@@ -728,10 +756,12 @@ class ASTToTruffleConverter(
      */
     private fun convertFunctionCall(funcCall: FunctionCall): FunkNode {
         val functionClass = funcCall.function::class.simpleName
+        println("DEBUG convertFunctionCall: function=${functionClass}, resolvedFunctionName=${funcCall.resolvedFunctionName}, resolvedAbilities=${funcCall.resolvedAbilities.keys}")
 
         // PRIORITY 1: Check for monomorphic function call (Rust-style)
         // Monomorphic functions are specialized and should be called directly
         if (funcCall.resolvedFunctionName != null) {
+            println("DEBUG: Taking monomorphic path")
             return convertMonomorphicFunctionCall(funcCall)
         }
 
@@ -802,10 +832,12 @@ class ASTToTruffleConverter(
                 // CRITICAL: Check if the receiver is a local variable/parameter
                 // If it's in the frame, it's a regular record field access, not an effect call
                 if (variableSlots.containsKey(receiverName)) {
+                    println("DEBUG: receiverName '$receiverName' is in variableSlots, taking record field access path")
                     // This is a regular function call on a record field (e.g., cfg.handler)
                     // Use default dispatch
                     val functionNode = convertExpression(funcCall.function)
                     val argumentsNode = convertExpression(funcCall.arguments)
+                    println("DEBUG: Creating FunctionCallNode for record field access")
                     return createFunctionCallNode(functionNode, argumentsNode)
                 }
 
@@ -888,8 +920,15 @@ class ASTToTruffleConverter(
                     }
 
                     val arguments = argsChild.execute(frame)
-                    // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments
-                    return operation.callTarget.call(arguments, operation.closureVariables) as FunkValue
+                    // CRITICAL: FunkFunctionRootNode expects 4 arguments:
+                    // [0] = args record, [1] = closure variables map (legacy),
+                    // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
+                    return operation.callTarget.call(
+                        arguments,
+                        operation.closureVariables,
+                        operation.lexicalScope,
+                        operation.lexicalScopeSlotMap
+                    ) as FunkValue
                 }
             }
         }
@@ -1035,8 +1074,15 @@ class ASTToTruffleConverter(
 
                             // Call the operation with the arguments
                             val args = argumentsChild.execute(frame)
-                            // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments
-                            return operation.callTarget.call(args, operation.closureVariables) as FunkValue
+                            // CRITICAL: FunkFunctionRootNode expects 4 arguments:
+                            // [0] = args record, [1] = closure variables map (legacy),
+                            // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
+                            return operation.callTarget.call(
+                                args,
+                                operation.closureVariables,
+                                operation.lexicalScope,
+                                operation.lexicalScopeSlotMap
+                            ) as FunkValue
                         }
                     }
                 } else {
@@ -1102,8 +1148,11 @@ class ASTToTruffleConverter(
                     throw RuntimeException("Binary operation arguments must be a record, got: ${argsValue::class.simpleName}")
                 }
 
-                val left = argsValue.fields["l"] ?: throw RuntimeException("Missing 'l' field in binary operation")
-                val right = argsValue.fields["r"] ?: throw RuntimeException("Missing 'r' field in binary operation")
+                // DEBUG: Print record fields
+                System.err.println("DEBUG binary op '$operation': record fields = ${argsValue.fields.keys}, values = ${argsValue.fields.values.map { it::class.simpleName }}")
+
+                val left = argsValue.fields["l"] ?: throw RuntimeException("Missing 'l' field in binary operation (available fields: ${argsValue.fields.keys})")
+                val right = argsValue.fields["r"] ?: throw RuntimeException("Missing 'r' field in binary operation (available fields: ${argsValue.fields.keys})")
 
                 return when (operation) {
                     // Arithmetic operations
@@ -1349,19 +1398,28 @@ class ASTToTruffleConverter(
         val freeVariables = allVariables.filter { it !in paramNames }.distinct()
 
         // Create a new converter for the function body to manage its own frame
-        // Pass the parent handler mapping so nested perform expressions can find handlers
+        // CRITICAL FIX: Pass BOTH the handler mapping AND the current variable slots as parent context
         val functionConverter = ASTToTruffleConverter(
             context = this.context,
             projectRoot = this.projectRoot,
-            parentHandlerMapping = this.handlerToEffectMapping
+            parentHandlerMapping = this.handlerToEffectMapping,
+            parentVariableSlots = this.variableSlots.toMap()
         )
 
-        // Pre-register parameter names in the function's frame
+        // Pre-register parameter names in the function's frame FIRST
+        // Parameters get the lowest slot numbers
         paramNames.forEach { paramName ->
             functionConverter.getOrCreateSlot(paramName)
         }
 
+        // Pre-register a special slot for storing the closure map AFTER parameters
+        // This allows nested lambdas to access parent closures without slot number collisions
+        functionConverter.getOrCreateSlot("__closure_map__")
+
         // Pre-register closure variables in the function's frame (after parameters)
+        // This ensures each converter has its own slot numbers for closure variables
+        // CRITICAL: This creates NEW slots for closure variables in THIS frame
+        // even if they have slots in parent frames (avoiding slot number collisions)
         freeVariables.forEach { varName ->
             functionConverter.getOrCreateSlot(varName)
         }
@@ -1369,20 +1427,34 @@ class ASTToTruffleConverter(
         val bodyNode = functionConverter.convertExpression(lambda.body)
         val functionFrameDescriptor = functionConverter.getFrameDescriptor()
 
-        // CRITICAL FIX: Build a map of closure variable names to their slots in the OUTER frame
-        // This allows nested functions to capture parameters and local variables from outer functions
+        // CRITICAL FIX: Build slot mappings for closure variables
+        // We need to map each closure variable to its slot in the CURRENT frame (where the lambda is being created)
+        // The child converter (functionConverter) has already allocated slots for these variables,
+        // but we need to know which slot in the CURRENT frame (this converter) they come from
         val closureVariableSlots = freeVariables.mapNotNull { varName ->
-            // Look up the slot in the OUTER frame (this converter, not functionConverter)
+            // Look in the immediate parent frame (this converter)
             val slot = variableSlots[varName]
             if (slot != null) {
+                // This variable is in the current frame - we can capture it via slot number
                 varName to slot
             } else {
-                // Variable not found in outer frame - it might be a global
-                null
+                // Variable not in immediate parent frame
+                // Check if it's in the child converter's frame (meaning it will be bound from closure at runtime)
+                val childSlot = functionConverter.variableSlots[varName]
+                if (childSlot != null && childSlot >= paramNames.size) {
+                    // This is a closure variable in the child frame (slot index >= parameter count)
+                    // It will be bound from the parent function's closure variables
+                    // We need to find it in the parent function's frame
+                    // For now, mark it as needing global/closure lookup by not including it in the map
+                    null
+                } else {
+                    // Variable not found - will use global lookup at runtime
+                    null
+                }
             }
         }.toMap()
 
-        // Pass closure variable names AND their outer frame slots to function definition node
+        // Pass closure variable names AND their CURRENT frame slots to function definition node
         return FunctionDefinitionNode("lambda", paramNames, bodyNode, functionFrameDescriptor, freeVariables, closureVariableSlots)
     }
 
@@ -1509,6 +1581,8 @@ class ASTToTruffleConverter(
      * Convert a record literal to a record construction node
      */
     private fun convertRecordLiteral(recordLit: RecordLiteral): FunkNode {
+        println("DEBUG convertRecordLiteral: fieldEntries = ${recordLit.getFieldEntries().map { it.name }}")
+        println("DEBUG convertRecordLiteral: spreadEntries = ${recordLit.getSpreadEntries().size}")
         val fieldNodes = mutableMapOf<String, FunkNode>()
         val spreadNodes = mutableListOf<FunkNode>()
 
@@ -1793,8 +1867,15 @@ class ASTToTruffleConverter(
                                 }
                                 is com.funk.language.interpreter.FunkTruffleFunction -> {
                                     // Truffle function - call via CallTarget
-                                    // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments
-                                    performerValue = performerValue.callTarget.call(paramsValue, performerValue.closureVariables) as FunkValue
+                                    // CRITICAL: FunkFunctionRootNode expects 4 arguments:
+                                    // [0] = args record, [1] = closure variables map (legacy),
+                                    // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
+                                    performerValue = performerValue.callTarget.call(
+                                        paramsValue,
+                                        performerValue.closureVariables,
+                                        performerValue.lexicalScope,
+                                        performerValue.lexicalScopeSlotMap
+                                    ) as FunkValue
                                 }
                                 else -> {
                                     // Fallback: Old behavior for non-parameterized handlers
@@ -1894,9 +1975,9 @@ class ASTToTruffleConverter(
      */
     fun getOrCreateSlot(variableName: String): Int {
         return variableSlots.getOrPut(variableName) {
-            val slotIndex = variableSlots.size
+            val localSlot = variableSlots.size
             frameDescriptorBuilder.addSlot(com.oracle.truffle.api.frame.FrameSlotKind.Object, variableName, null)
-            slotIndex
+            localSlot
         }
     }
     

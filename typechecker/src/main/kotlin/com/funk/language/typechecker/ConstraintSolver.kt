@@ -1107,11 +1107,43 @@ class ConstraintSolver(
             println("  Record1: {${record1.fields.map { "${it.key}: ${prettyPrintType(it.value)}" }.joinToString(", ")}}")
             println("  Record2: {${record2.fields.map { "${it.key}: ${prettyPrintType(it.value)}" }.joinToString(", ")}}")
         }
-        
+
         // Handle record unification with proper open/closed semantics
         val fields1 = record1.fields.keys.toSet()
         val fields2 = record2.fields.keys.toSet()
-        
+        val commonFields = fields1.intersect(fields2)
+        val disjointFields1 = fields1 - fields2
+        val disjointFields2 = fields2 - fields1
+
+        // CRITICAL FIX: When unifying two CLOSED records with disjoint fields,
+        // this represents accumulation of field accesses on the same variable.
+        // Example: rest.yes and rest.no should merge into {yes: 'a, no: 'b}
+        //
+        // This is distinct from traditional record unification which requires exact field matches.
+        // Here, we MERGE disjoint fields when both records are closed.
+        if (record1.isClosed && record2.isClosed && disjointFields1.isNotEmpty() && disjointFields2.isNotEmpty()) {
+            if (System.getProperty("funk.typecheck.debug") == "true") {
+                println("DEBUG: Merging disjoint closed records")
+                println("  Fields only in record1: $disjointFields1")
+                println("  Fields only in record2: $disjointFields2")
+                println("  Common fields: $commonFields")
+            }
+
+            // Unify common fields first
+            var substitution = Substitution.empty()
+            for (fieldName in commonFields) {
+                val fieldType1 = record1.fields[fieldName]!!
+                val fieldType2 = record2.fields[fieldName]!!
+                val fieldUnifier = unify(substitution.apply(fieldType1), substitution.apply(fieldType2))
+                substitution = substitution.compose(fieldUnifier)
+            }
+
+            // The merged fields will be created by the type inference system
+            // We don't need to create a new record type here - just return the substitution
+            // from unifying common fields
+            return substitution
+        }
+
         if (fields1 != fields2) {
             // Check if this is a valid subtyping relationship
             when {
@@ -1123,7 +1155,7 @@ class ConstraintSolver(
                         println("Warning: Unifying closed records with different fields: $fields1 vs $fields2")
                     }
                 }
-                
+
                 // One closed, one open - this should generally work (structural subtyping)
                 record1.isClosed && record2.isOpen -> {
                     // Closed record can be used where open record is expected if it has required fields
@@ -1134,51 +1166,48 @@ class ConstraintSolver(
                         }
                     }
                 }
-                
+
                 record1.isOpen && record2.isClosed -> {
                     // Open record can be used where closed record is expected if it has all required fields
                     val missingFields = fields2 - fields1
                     if (missingFields.isNotEmpty()) {
                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                            println("Warning: Open record missing required fields: $missingFields")
+                            println("WARNING: Open record missing required fields: $missingFields")
                         }
                     }
                 }
-                
+
                 // Both open - unify common fields (always allowed)
                 record1.isOpen && record2.isOpen -> {
                     // This is always allowed - structural subtyping
                 }
             }
         }
-        
+
         // Unify common fields
-        val commonFields = fields1.intersect(fields2)
         var substitution = Substitution.empty()
-        
+
         for (fieldName in commonFields) {
             val fieldType1 = record1.fields[fieldName]!!
             val fieldType2 = record2.fields[fieldName]!!
-            
+
             if (System.getProperty("funk.typecheck.debug") == "true") {
                 println("DEBUG: Unifying field $fieldName: ${prettyPrintType(fieldType1)} = ${prettyPrintType(fieldType2)}")
             }
-            
+
             val fieldUnifier = unify(substitution.apply(fieldType1), substitution.apply(fieldType2))
             substitution = substitution.compose(fieldUnifier)
-            
+
             if (System.getProperty("funk.typecheck.debug") == "true") {
                 println("DEBUG: Field unifier for $fieldName: ${fieldUnifier.mapping}")
                 println("DEBUG: Composed substitution: ${substitution.mapping}")
             }
         }
-        
+
         if (System.getProperty("funk.typecheck.debug") == "true") {
             println("DEBUG: Final record substitution: ${substitution.mapping}")
         }
-        
-        return substitution
-        
+
         return substitution
     }
     

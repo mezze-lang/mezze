@@ -13,6 +13,8 @@ import com.funk.language.interpreter.FunkBool
 import com.funk.language.interpreter.FunkVariant
 import com.funk.language.interpreter.FunkRecord
 import com.funk.language.interpreter.FunkNull
+import com.funk.language.interpreter.FunkArrayList
+import com.funk.language.interpreter.FunkList
 
 /**
  * Pattern matching node with manual type-specific optimizations
@@ -205,43 +207,43 @@ class LiteralPatternNode(private val expectedValue: FunkValue) : PatternNode() {
  * Variable pattern node (matches anything and binds to variable)
  */
 @NodeInfo(shortName = "variable-pattern")
-class VariablePatternNode(private val variableName: String) : PatternNode() {
-    
+class VariablePatternNode(
+    private val variableName: String,
+    private val variableSlot: Int
+) : PatternNode() {
+
     override fun matchesInt(frame: VirtualFrame, value: FunkInt): Boolean {
         bindVariable(frame, value)
         return true
     }
-    
+
     override fun matchesString(frame: VirtualFrame, value: FunkString): Boolean {
         bindVariable(frame, value)
         return true
     }
-    
+
     override fun matchesBoolean(frame: VirtualFrame, value: FunkBool): Boolean {
         bindVariable(frame, value)
         return true
     }
-    
+
     override fun matchesVariant(frame: VirtualFrame, value: FunkVariant): Boolean {
         bindVariable(frame, value)
         return true
     }
-    
+
     override fun matchesRecord(frame: VirtualFrame, value: FunkRecord): Boolean {
         bindVariable(frame, value)
         return true
     }
-    
+
     override fun matchesGeneric(frame: VirtualFrame, value: FunkValue): Boolean {
         bindVariable(frame, value)
         return true
     }
-    
+
     private fun bindVariable(frame: VirtualFrame, value: FunkValue) {
-        // For now, we'll use a simple approach - in a real implementation,
-        // we'd need to track variable slots properly
-        // This is a placeholder that would need proper slot management
-        frame.setObject(0, value) // Simplified - would need proper slot allocation
+        frame.setObject(variableSlot, value)
     }
 }
 
@@ -361,5 +363,87 @@ class ConstructorPatternNode(
         }
 
         return bindings
+    }
+}
+
+/**
+ * Array pattern node (matches arrays/lists with specific structure)
+ * Examples:
+ * - [] -> matches empty array
+ * - [x] -> matches single element array, binds x
+ * - [x, y] -> matches two element array, binds x and y
+ * - [head, ...tail] -> matches array with at least one element, binds head and tail
+ */
+@NodeInfo(shortName = "array-pattern")
+class ArrayPatternNode(
+    @field:Children private val elementPatterns: Array<PatternNode>,
+    private val restPatternName: String?,
+    private val elementSlots: Map<String, Int>,  // Pre-allocated slots for element bindings
+    private val restSlot: Int?  // Pre-allocated slot for rest pattern
+) : PatternNode() {
+
+    override fun matchesInt(frame: VirtualFrame, value: FunkInt): Boolean = false
+    override fun matchesString(frame: VirtualFrame, value: FunkString): Boolean = false
+    override fun matchesBoolean(frame: VirtualFrame, value: FunkBool): Boolean = false
+    override fun matchesVariant(frame: VirtualFrame, value: FunkVariant): Boolean = false
+    override fun matchesRecord(frame: VirtualFrame, value: FunkRecord): Boolean = false
+
+    override fun matchesGeneric(frame: VirtualFrame, value: FunkValue): Boolean {
+        // Check if value is an array or list
+        val arrayElements = when (value) {
+            is FunkArrayList -> value.elements.toList()
+            is FunkList -> value.elements
+            else -> return false
+        }
+
+        // Check if array length is compatible with pattern
+        val minLength = elementPatterns.size
+        if (restPatternName == null) {
+            // No rest pattern - array must have exactly the right number of elements
+            if (arrayElements.size != minLength) {
+                return false
+            }
+        } else {
+            // Rest pattern present - array must have at least the required elements
+            if (arrayElements.size < minLength) {
+                return false
+            }
+        }
+
+        // Match each element pattern
+        for (i in elementPatterns.indices) {
+            val elementValue = arrayElements[i]
+            val elementPattern = elementPatterns[i]
+
+            // Try to match the element
+            val matched = when (elementValue) {
+                is FunkInt -> elementPattern.matchesInt(frame, elementValue)
+                is FunkString -> elementPattern.matchesString(frame, elementValue)
+                is FunkBool -> elementPattern.matchesBoolean(frame, elementValue)
+                is FunkVariant -> elementPattern.matchesVariant(frame, elementValue)
+                is FunkRecord -> elementPattern.matchesRecord(frame, elementValue)
+                else -> elementPattern.matchesGeneric(frame, elementValue)
+            }
+
+            if (!matched) {
+                return false
+            }
+        }
+
+        // Bind rest pattern if present (anonymous rest patterns have null name)
+        if (restPatternName != null && restSlot != null) {
+            val restElements = arrayElements.drop(elementPatterns.size)
+            // Create the same type of collection as the input
+            val restValue = when (value) {
+                is FunkArrayList -> FunkArrayList(restElements)
+                is FunkList -> FunkList(restElements)
+                else -> FunkList(restElements)  // Fallback
+            }
+            frame.setObject(restSlot, restValue)
+        }
+        // For anonymous rest patterns ([x, ...]), we still check length compatibility
+        // but don't bind the rest elements
+
+        return true
     }
 }

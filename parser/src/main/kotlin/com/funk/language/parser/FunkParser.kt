@@ -2239,18 +2239,68 @@ class FunkParser {
         }
     }
 
+    // Parser for a single lambda parameter entry with optional type annotation
+    // Accepts: x, x: Int, x: String, etc.
+    private val lambdaParameterEntry: Parser<Pair<String, TypeAnnotation?>> = { stream ->
+        val ident = identifierParser(stream)
+        when (ident) {
+            is ParseResult.Success -> {
+                val paramName = (ident as ParseResult.Success).value.text
+                val stream1 = ident.remaining
+
+                // Check if there's a colon (type annotation)
+                if (stream1.current()?.type == TokenType.COLON) {
+                    // Parse type annotation
+                    val colon = tok(TokenType.COLON)(stream1)
+                    when (colon) {
+                        is ParseResult.Success -> {
+                            val typeAnnotation = typeAnnotationParser((colon as ParseResult.Success).remaining)
+                            when (typeAnnotation) {
+                                is ParseResult.Success -> {
+                                    ParseResult.Success(
+                                        Pair(paramName, (typeAnnotation as ParseResult.Success).value),
+                                        typeAnnotation.remaining
+                                    )
+                                }
+                                is ParseResult.Failure -> typeAnnotation
+                            }
+                        }
+                        is ParseResult.Failure -> colon
+                    }
+                } else {
+                    // No type annotation - this is an untyped parameter
+                    ParseResult.Success(Pair(paramName, null), stream1)
+                }
+            }
+            is ParseResult.Failure -> ident
+        }
+    }
+
     private val typedLambdaParams: Parser<LambdaParameters> = { stream ->
-        // {x: Int, y: String} - must have at least one typed parameter with colon
-        val entries = Parsers.sepBy(recordTypeEntryParser, tok(TokenType.COMMA))(stream)
+        // {x: Int, y, z: String} - allows mixed typed/untyped parameters
+        // At least one parameter must have a type annotation for this to be considered typed
+        val entries = Parsers.sepBy(lambdaParameterEntry, tok(TokenType.COMMA))(stream)
         when (entries) {
             is ParseResult.Success -> {
                 val entryList = (entries as ParseResult.Success).value
                 if (entryList.isEmpty()) {
-                    // No typed parameters found, fail so we can try untyped
+                    // No parameters found
                     ParseResult.Failure("Expected typed parameters", stream.getSourcePosition())
                 } else {
-                    val recordType = RecordTypeAnnotation(entryList, null)
-                    ParseResult.Success(TypedParameters(recordType), entries.remaining)
+                    // Check if at least one parameter has a type annotation
+                    val hasTypedParam = entryList.any { it.second != null }
+                    if (hasTypedParam) {
+                        // Convert to RecordTypeEntry list, generating inferred type annotations for untyped params
+                        val recordEntries = entryList.map { (name, typeAnnotation) ->
+                            val finalType = typeAnnotation ?: IdentifierTypeAnnotation("'${name}")
+                            RecordTypeEntry(name, finalType)
+                        }
+                        val recordType = RecordTypeAnnotation(recordEntries, null)
+                        ParseResult.Success(TypedParameters(recordType), entries.remaining)
+                    } else {
+                        // All parameters are untyped, fail so we can try untyped parser
+                        ParseResult.Failure("Expected at least one typed parameter", stream.getSourcePosition())
+                    }
                 }
             }
             is ParseResult.Failure -> entries
@@ -3006,10 +3056,121 @@ class FunkParser {
 
     // ===== PATTERN PARSING =====
 
+    private val arrayPattern: Parser<Pattern> = { stream ->
+        // Parse: [] or [x] or [x, y] or [x, ...rest]
+        val lbracket = tok(TokenType.LBRACKET)(stream)
+        when (lbracket) {
+            is ParseResult.Success -> {
+                val stream1 = skipNewlines(lbracket.remaining)
+
+                // Check for empty array pattern []
+                if (stream1.current()?.type == TokenType.RBRACKET) {
+                    ParseResult.Success(
+                        ArrayPattern(emptyList(), null),
+                        stream1.advance()
+                    )
+                } else {
+                    // Use recursive parsing approach to avoid labeled returns in loops
+                    fun parseArrayElements(
+                        s: TokenStream,
+                        accum: List<Pattern>
+                    ): ParseResult<Pair<List<Pattern>, Pair<String?, TokenStream>>> {
+                        // Check for rest pattern: ...name or just ... (anonymous)
+                        return if (s.current()?.type == TokenType.ELLIPSIS) {
+                            val ellipsisStream = s.advance()
+                            val afterEllipsis = skipNewlines(ellipsisStream)
+
+                            // Try to parse identifier after ...
+                            val restName = identifierParser(ellipsisStream)
+                            when (restName) {
+                                is ParseResult.Success -> {
+                                    // Named rest pattern: [x, ...tail]
+                                    val name = restName.value.text
+                                    val remaining = skipNewlines(restName.remaining)
+                                    ParseResult.Success(Pair(accum, Pair(name, remaining)), remaining)
+                                }
+                                is ParseResult.Failure -> {
+                                    // No identifier after ... - this is an anonymous rest pattern: [x, ...]
+                                    // Check if we're at ] or , which indicates end of pattern
+                                    when (afterEllipsis.current()?.type) {
+                                        TokenType.RBRACKET, TokenType.COMMA -> {
+                                            // Anonymous rest pattern is valid
+                                            ParseResult.Success(Pair(accum, Pair(null, afterEllipsis)), afterEllipsis)
+                                        }
+                                        else -> {
+                                            // Expected identifier or end of pattern
+                                            ParseResult.Failure(
+                                                "Expected identifier or ']' after ... in array pattern",
+                                                ellipsisStream.getSourcePosition()
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (s.current()?.type == TokenType.RBRACKET) {
+                            // End of array pattern
+                            ParseResult.Success(Pair(accum, Pair(null, s)), s)
+                        } else {
+                            // Parse pattern element
+                            val pattern = patternParser(s)
+                            when (pattern) {
+                                is ParseResult.Success -> {
+                                    val newAccum = accum + pattern.value
+                                    val afterPattern = skipNewlines(pattern.remaining)
+
+                                    when (afterPattern.current()?.type) {
+                                        TokenType.COMMA -> {
+                                            val afterComma = skipNewlines(afterPattern.advance())
+                                            // Check if closing bracket (trailing comma)
+                                            if (afterComma.current()?.type == TokenType.RBRACKET) {
+                                                ParseResult.Success(Pair(newAccum, Pair(null, afterComma)), afterComma)
+                                            } else {
+                                                // Continue parsing
+                                                parseArrayElements(afterComma, newAccum)
+                                            }
+                                        }
+                                        TokenType.RBRACKET -> {
+                                            ParseResult.Success(Pair(newAccum, Pair(null, afterPattern)), afterPattern)
+                                        }
+                                        else -> ParseResult.Failure(
+                                            "Expected ',' or ']' in array pattern",
+                                            afterPattern.getSourcePosition()
+                                        )
+                                    }
+                                }
+                                is ParseResult.Failure -> pattern
+                            }
+                        }
+                    }
+
+                    val elementsResult = parseArrayElements(stream1, emptyList())
+                    when (elementsResult) {
+                        is ParseResult.Success -> {
+                            val (elements, restAndStream) = elementsResult.value
+                            val (restPat, currentStream) = restAndStream
+                            // Parse closing bracket
+                            val rbracket = tok(TokenType.RBRACKET)(currentStream)
+                            when (rbracket) {
+                                is ParseResult.Success -> ParseResult.Success(
+                                    ArrayPattern(elements, restPat),
+                                    rbracket.remaining
+                                )
+                                is ParseResult.Failure -> rbracket
+                            }
+                        }
+                        is ParseResult.Failure -> elementsResult
+                    }
+                }
+            }
+            is ParseResult.Failure -> lbracket
+        }
+    }
+
     private val patternParser: Parser<Pattern> = { stream ->
         Parsers.oneOf(
             wildcardPattern,
             literalPattern,
+            arrayPattern,
             standaloneRecordPattern,
             constructorPattern,
             variablePattern

@@ -77,6 +77,7 @@ class SimpleReadVariableNode(private val slot: Int, private val variableName: St
 
     override fun execute(frame: VirtualFrame): FunkValue {
         // First try reading from frame slot
+        println("DEBUG SimpleReadVariableNode: reading '$variableName' from slot $slot (frame has ${frame.frameDescriptor.numberOfSlots} slots)")
         val value = try {
             frame.getObject(slot)
         } catch (e: ArrayIndexOutOfBoundsException) {
@@ -88,10 +89,13 @@ class SimpleReadVariableNode(private val slot: Int, private val variableName: St
             throw RuntimeException("Cannot access frame slot $slot for variable '$variableName' (frame has ${frame.frameDescriptor.numberOfSlots} slots)", e)
         }
 
+        println("DEBUG SimpleReadVariableNode: slot $slot contains ${value?.let { it::class.simpleName } ?: "null"}")
+
         // Return the value if it's a valid FunkValue (but NOT FunkNull)
         // FunkNull closure variables can occur with recursive functions where the function
         // references itself before it's defined
         if (value is FunkValue && value !is FunkNull) {
+            println("DEBUG SimpleReadVariableNode: returning $variableName = ${value::class.simpleName}")
             return value
         }
 

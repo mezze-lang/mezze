@@ -511,7 +511,9 @@ data class FunkSet(val elements: Set<FunkValue>) : FunkValue() {
 data class FunkTruffleFunction(
     val callTarget: CallTarget,
     val name: String? = null,
-    val closureVariables: Map<String, FunkValue> = emptyMap()
+    val closureVariables: Map<String, FunkValue> = emptyMap(),
+    val lexicalScope: com.oracle.truffle.api.frame.MaterializedFrame? = null,  // TRUFFLE BEST PRACTICE: Store lexical scope
+    val lexicalScopeSlotMap: Map<String, Int> = emptyMap()  // Maps variable names to slot numbers in lexical scope frame
 ) : FunkValue() {
     override fun getDisplayString(): String = name ?: "<function>"
 
@@ -520,10 +522,11 @@ data class FunkTruffleFunction(
 
     @ExportMessage
     fun execute(arguments: Array<Any?>): Any {
-        // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments:
+        // CRITICAL: FunkFunctionRootNode expects 4 arguments for lexical scope support:
         // [0] = FunkRecord of parameters
-        // [1] = Map<String, FunkValue> of closure variables (can be empty)
-        // We must ALWAYS pass both arguments
+        // [1] = Map<String, FunkValue> of closure variables (can be empty, for backward compat)
+        // [2] = MaterializedFrame lexical scope (null if not needed)
+        // [3] = Map<String, Int> lexical scope slot mapping (empty if not needed)
 
         // Convert interop arguments to FunkRecord if needed
         val argsRecord = when {
@@ -536,10 +539,10 @@ data class FunkTruffleFunction(
             }
         }
 
-        return callTarget.call(argsRecord, closureVariables)
+        return callTarget.call(argsRecord, closureVariables, lexicalScope, lexicalScopeSlotMap)
     }
 
-    override fun toString(): String = "FunkTruffleFunction(${name ?: "anonymous"}, ${closureVariables.size} closure vars)"
+    override fun toString(): String = "FunkTruffleFunction(${name ?: "anonymous"}, ${closureVariables.size} closure vars, lexicalScope=${lexicalScope != null})"
 }
 
 /**
@@ -895,7 +898,7 @@ data class FunkSuspended(
             // Execute the thunk's function with its arguments
             return when (val func = computation.function) {
                 is FunkTruffleFunction -> {
-                    func.callTarget.call(computation.arguments, func.closureVariables) as FunkValue
+                    func.callTarget.call(computation.arguments, func.closureVariables, func.lexicalScope, func.lexicalScopeSlotMap) as FunkValue
                 }
                 is NativeFunkFunction -> {
                     func.call(listOf(computation.arguments))
