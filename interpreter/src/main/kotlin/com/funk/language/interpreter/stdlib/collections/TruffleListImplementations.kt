@@ -16,8 +16,17 @@ object TruffleListImplementations {
         return when (f) {
             is FunkTruffleFunction -> {
                 // Call Truffle function directly via CallTarget
-                // Pass closure variables along with arguments
-                f.callTarget.call(arg, f.closureVariables) as FunkValue
+                // CRITICAL: FunkFunctionRootNode expects 4 arguments:
+                // [0] = FunkRecord of parameters
+                // [1] = Map<String, FunkValue> of closure variables (legacy, for backward compat)
+                // [2] = MaterializedFrame (lexical scope)
+                // [3] = Map<String, Int> lexical scope slot mapping
+                f.callTarget.call(
+                    arg,
+                    f.closureVariables,
+                    f.lexicalScope,
+                    f.lexicalScopeSlotMap
+                ) as FunkValue
             }
             is NativeFunkFunction -> {
                 // Call native function
@@ -369,6 +378,12 @@ object TruffleListImplementations {
         context["__native_list_from_array"] = NativeFunkFunction("__native_list_from_array") { args ->
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_list_from_array", "expects FunkRecord")
+            println("DEBUG __native_list_from_array: record.fields = ${record.fields.keys}")
+            println("DEBUG __native_list_from_array: record.fields[\"xs\"] = ${record.fields["xs"]?.let { it::class.simpleName }}")
+            if (record.fields["xs"] is FunkTruffleFunction) {
+                val fn = record.fields["xs"] as FunkTruffleFunction
+                println("DEBUG: It's a function with name=${fn.name}, closureVars=${fn.closureVariables.keys}")
+            }
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_list_from_array", "expects 'xs' as Array, got ${record.fields["xs"]?.let { it::class.simpleName } ?: "null"}")
             FunkList(xs.elements.toList())
