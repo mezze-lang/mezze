@@ -115,14 +115,31 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_map", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_arraylist_map", "expects 'xs' as ArrayList")
-            val f = record.fields["f"] as? FunkFunction
+            val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_arraylist_map", "expects 'f' as Function")
 
-            val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
-                ?: throw NativeFunctionException("__native_arraylist_map", "interpreter not available")
-
             val mapped = xs.elements.map { element ->
-                interpreter.callFunctionWithRecord(f, FunkRecord(mapOf("x" to element)), context.toMutableMap())
+                val argRecord = FunkRecord(mapOf("x" to element))
+                when (f) {
+                    is FunkTruffleFunction -> {
+                        // CRITICAL: FunkFunctionRootNode expects 4 arguments:
+                        // [0] = args record, [1] = closure variables map (legacy),
+                        // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
+                        f.callTarget.call(
+                            argRecord,
+                            f.closureVariables,
+                            f.lexicalScope,
+                            f.lexicalScopeSlotMap
+                        ) as FunkValue
+                    }
+                    is NativeFunkFunction -> {
+                        f.call(listOf(argRecord))
+                    }
+                    else -> throw NativeFunctionException(
+                        "__native_arraylist_map",
+                        "f must be a function, got: ${f::class.simpleName}"
+                    )
+                }
             }
             FunkArrayList(mapped)
         }
@@ -132,14 +149,29 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_filter", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_arraylist_filter", "expects 'xs' as ArrayList")
-            val p = record.fields["p"] as? FunkFunction
+            val p = record.fields["p"]
                 ?: throw NativeFunctionException("__native_arraylist_filter", "expects 'p' as Function")
 
-            val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
-                ?: throw NativeFunctionException("__native_arraylist_filter", "interpreter not available")
-
             val filtered = xs.elements.filter { element ->
-                val result = interpreter.callFunctionWithRecord(p, FunkRecord(mapOf("x" to element)), context.toMutableMap())
+                val argRecord = FunkRecord(mapOf("x" to element))
+                val result = when (p) {
+                    is FunkTruffleFunction -> {
+                        // CRITICAL: FunkFunctionRootNode expects 4 arguments
+                        p.callTarget.call(
+                            argRecord,
+                            p.closureVariables,
+                            p.lexicalScope,
+                            p.lexicalScopeSlotMap
+                        ) as FunkValue
+                    }
+                    is NativeFunkFunction -> {
+                        p.call(listOf(argRecord))
+                    }
+                    else -> throw NativeFunctionException(
+                        "__native_arraylist_filter",
+                        "p must be a function, got: ${p::class.simpleName}"
+                    )
+                }
                 (result as? FunkBool)?.value ?: false
             }
             FunkArrayList(filtered)
@@ -152,14 +184,29 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_fold", "expects 'xs' as ArrayList")
             val init = record.fields["init"]
                 ?: throw NativeFunctionException("__native_arraylist_fold", "expects 'init' field")
-            val f = record.fields["f"] as? FunkFunction
+            val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_arraylist_fold", "expects 'f' as Function")
 
-            val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
-                ?: throw NativeFunctionException("__native_arraylist_fold", "interpreter not available")
-
             xs.elements.fold(init) { acc, element ->
-                interpreter.callFunctionWithRecord(f, FunkRecord(mapOf("acc" to acc, "x" to element)), context.toMutableMap())
+                val argRecord = FunkRecord(mapOf("acc" to acc, "x" to element))
+                when (f) {
+                    is FunkTruffleFunction -> {
+                        // CRITICAL: FunkFunctionRootNode expects 4 arguments
+                        f.callTarget.call(
+                            argRecord,
+                            f.closureVariables,
+                            f.lexicalScope,
+                            f.lexicalScopeSlotMap
+                        ) as FunkValue
+                    }
+                    is NativeFunkFunction -> {
+                        f.call(listOf(argRecord))
+                    }
+                    else -> throw NativeFunctionException(
+                        "__native_arraylist_fold",
+                        "f must be a function, got: ${f::class.simpleName}"
+                    )
+                }
             }
         }
 
@@ -170,14 +217,29 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'xs' as ArrayList")
             val init = record.fields["init"]
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'init' field")
-            val f = record.fields["f"] as? FunkFunction
+            val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'f' as Function")
 
-            val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
-                ?: throw NativeFunctionException("__native_arraylist_reduce", "interpreter not available")
-
             xs.elements.fold(init) { acc, element ->
-                interpreter.callFunctionWithRecord(f, FunkRecord(mapOf("a" to acc, "b" to element)), context.toMutableMap())
+                val argRecord = FunkRecord(mapOf("a" to acc, "b" to element))
+                when (f) {
+                    is FunkTruffleFunction -> {
+                        // CRITICAL: FunkFunctionRootNode expects 4 arguments
+                        f.callTarget.call(
+                            argRecord,
+                            f.closureVariables,
+                            f.lexicalScope,
+                            f.lexicalScopeSlotMap
+                        ) as FunkValue
+                    }
+                    is NativeFunkFunction -> {
+                        f.call(listOf(argRecord))
+                    }
+                    else -> throw NativeFunctionException(
+                        "__native_arraylist_reduce",
+                        "f must be a function, got: ${f::class.simpleName}"
+                    )
+                }
             }
         }
 
@@ -187,14 +249,29 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_find", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_arraylist_find", "expects 'xs' as ArrayList")
-            val p = record.fields["p"] as? FunkFunction
+            val p = record.fields["p"]
                 ?: throw NativeFunctionException("__native_arraylist_find", "expects 'p' as Function")
 
-            val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
-                ?: throw NativeFunctionException("__native_arraylist_find", "interpreter not available")
-
             val found = xs.elements.find { element ->
-                val result = interpreter.callFunctionWithRecord(p, FunkRecord(mapOf("x" to element)), context.toMutableMap())
+                val argRecord = FunkRecord(mapOf("x" to element))
+                val result = when (p) {
+                    is FunkTruffleFunction -> {
+                        // CRITICAL: FunkFunctionRootNode expects 4 arguments
+                        p.callTarget.call(
+                            argRecord,
+                            p.closureVariables,
+                            p.lexicalScope,
+                            p.lexicalScopeSlotMap
+                        ) as FunkValue
+                    }
+                    is NativeFunkFunction -> {
+                        p.call(listOf(argRecord))
+                    }
+                    else -> throw NativeFunctionException(
+                        "__native_arraylist_find",
+                        "p must be a function, got: ${p::class.simpleName}"
+                    )
+                }
                 (result as? FunkBool)?.value ?: false
             }
 
@@ -252,14 +329,29 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_sort_by", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_arraylist_sort_by", "expects 'xs' as ArrayList")
-            val cmp = record.fields["cmp"] as? FunkFunction
+            val cmp = record.fields["cmp"]
                 ?: throw NativeFunctionException("__native_arraylist_sort_by", "expects 'cmp' as Function")
 
-            val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
-                ?: throw NativeFunctionException("__native_arraylist_sort_by", "interpreter not available")
-
             val sorted = xs.elements.sortedWith { a, b ->
-                val result = interpreter.callFunctionWithRecord(cmp, FunkRecord(mapOf("l" to a, "r" to b)), context.toMutableMap())
+                val argRecord = FunkRecord(mapOf("l" to a, "r" to b))
+                val result = when (cmp) {
+                    is FunkTruffleFunction -> {
+                        // CRITICAL: FunkFunctionRootNode expects 4 arguments
+                        cmp.callTarget.call(
+                            argRecord,
+                            cmp.closureVariables,
+                            cmp.lexicalScope,
+                            cmp.lexicalScopeSlotMap
+                        ) as FunkValue
+                    }
+                    is NativeFunkFunction -> {
+                        cmp.call(listOf(argRecord))
+                    }
+                    else -> throw NativeFunctionException(
+                        "__native_arraylist_sort_by",
+                        "cmp must be a function, got: ${cmp::class.simpleName}"
+                    )
+                }
                 ((result as? FunkInt)?.value ?: 0L).toInt()
             }
             FunkArrayList(sorted)
