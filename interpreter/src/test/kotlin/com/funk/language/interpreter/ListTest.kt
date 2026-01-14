@@ -2,6 +2,7 @@ package com.funk.language.interpreter
 
 import com.funk.language.parser.FunkParser
 import com.funk.language.typechecker.TypeChecker
+import com.funk.language.typechecker.ModuleResolver
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
@@ -21,8 +22,11 @@ class ListTest {
 
     @BeforeEach
     fun setup() {
-        // Clear TypeChecker module cache to force re-type-checking with new fixes
+        // CRITICAL: Clear BOTH module caches to ensure clean state
+        // TypeChecker has its own cache for typed modules
+        // ModuleResolver has its own cache for parsed modules
         TypeChecker.clearCache()
+        ModuleResolver.clearCache()
 
         parser = FunkParser()
         typeChecker = TypeChecker()
