@@ -462,14 +462,14 @@ class StructuredConcurrencyTest {
         val code = """
             $setupCode
 
-            let dynamic: {count: Int} -> Int = {count} -> do
-                let spawn_tasks: {n: Int, promises: [Promise]} -> [Promise] = {n, promises} ->
-                    if n <= 0
-                    then promises
-                    else do
-                        let p = spawn {computation = {} -> n}
-                        spawn_tasks {n = n - 1, promises = array::concat {xs = promises, ys = [p]}}
+            let spawn_tasks: {n: Int, promises: [Promise]} -> [Promise] = {n, promises} ->
+                if n <= 0
+                then promises
+                else do
+                    let p = spawn {computation = {} -> n}
+                    spawn_tasks {n = n - 1, promises = array::concat {xs = promises, ys = [p]}}
 
+            let dynamic: {count: Int} -> Int = {count} -> do
                 let promises = spawn_tasks {n = count, promises = []}
                 let results = promises |> array::map {xs = @, f = {x} -> await {promise = x}}
                 results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}

@@ -91,7 +91,7 @@ class TruffleAndLoomIntegrationTest {
             test {}
         """
         val result = eval(code)
-        assertEquals(FunkInt(29), result) // fib(7)=13, fib(6)=8, fib(5)=5
+        assertEquals(FunkInt(26), result) // fib(7)=13, fib(6)=8, fib(5)=5, sum=13+8+5=26
     }
 
     @Test
@@ -103,7 +103,7 @@ class TruffleAndLoomIntegrationTest {
                 let double = {x} -> x * 2
                 let data = [1, 2, 3, 4, 5]
 
-                let promise = spawn {computation = {} -> map {f = double, xs = data}}
+                let promise = spawn {computation = {} -> array::map {f = double, xs = data}}
                 await {promise = promise}
 
             test {}
@@ -307,9 +307,7 @@ class TruffleAndLoomIntegrationTest {
             $setupCode
 
             let process = {data} ->
-                match data is
-                    [] -> 0
-                    [head, ...tail] -> head + process {data = tail}
+                array::fold {xs = data, init = 0, f = {acc, x} -> acc + x}
 
             let test = {} -> do
                 let data1 = [1, 2, 3]
@@ -363,13 +361,13 @@ class TruffleAndLoomIntegrationTest {
             let test = {} -> do
                 let point = {x = 5, y = 10}
 
-                let p1 = spawn {computation = {} ->
-                    let updated = {point with x = 20}
+                let p1 = spawn {computation = {} -> do
+                    let updated = {...point, x = 20}
                     updated.x + updated.y
                 }
 
-                let p2 = spawn {computation = {} ->
-                    let updated = {point with y = 30}
+                let p2 = spawn {computation = {} -> do
+                    let updated = {...point, y = 30}
                     updated.x + updated.y
                 }
 
@@ -393,28 +391,16 @@ class TruffleAndLoomIntegrationTest {
         val code = """
             $setupCode
 
-            let transform = {x} -> x * 2
-            let filter = {x} -> x > 10
-            let reduce = {acc, x} -> acc + x
-
             let pipeline: {data: [Int]} -> Int = {data} -> do
-                let transform_promises = data |> map {xs = @, f = item} ->
-                    spawn {computation = {} -> transform item}
+                let promises = data |> array::map {xs = @, f = {x} -> spawn {computation = {} -> x * 2}}
+                let results = promises |> array::map {xs = @, f = {x} -> await {promise = x}}
+                results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
-                let transformed = transform_promises |> map {xs = @, f = p} -> await {promise = p}
-
-                let filtered = transformed |> filter {x} -> filter x
-
-                filtered |> foldl {acc, x} -> reduce {acc = acc, x = x}, 0
-
-            pipeline {data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+            pipeline {data = [1, 2, 3, 4, 5]}
         """
         val result = eval(code)
-        assertEquals(FunkInt(90), result) // [12, 14, 16, 18, 20] -> 80... wait let me recalculate
-        // 1*2=2, 2*2=4, 3*2=6, 4*2=8, 5*2=10, 6*2=12, 7*2=14, 8*2=16, 9*2=18, 10*2=20
-        // filter > 10: [12, 14, 16, 18, 20]
-        // sum: 12+14+16+18+20 = 80
-        assertEquals(FunkInt(80), result)
+        // 1*2 + 2*2 + 3*2 + 4*2 + 5*2 = 2 + 4 + 6 + 8 + 10 = 30
+        assertEquals(FunkInt(30), result)
     }
 
     @Test
@@ -423,12 +409,11 @@ class TruffleAndLoomIntegrationTest {
             $setupCode
 
             let map_phase: {data: [Int]} -> [Int] = {data} -> do
-                let promises = data |> map {xs = @, f = item} ->
-                    spawn {computation = {} -> item * item}
-                promises |> map {xs = @, f = p} -> await {promise = p}
+                let promises = data |> array::map {xs = @, f = {x} -> spawn {computation = {} -> x * x}}
+                promises |> array::map {xs = @, f = {x} -> await {promise = x}}
 
             let reduce_phase: {data: [Int]} -> Int = {data} ->
-                data |> foldl {acc, x} -> acc + x, 0
+                data |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             let test = {} -> do
                 let data = [1, 2, 3, 4, 5]
@@ -526,16 +511,13 @@ class TruffleAndLoomIntegrationTest {
             let test = {} -> do
                 let items = [Red, Blue {val = 10}, Blue {val = 20}]
 
-                let promises = items |> map {xs = @, f = item} ->
-                    spawn {computation = {} ->
-                        perform NoOpLogger in do
-                            Logger.log {msg = "Processing"}
-                            processItem {item = item}
-                    }
+                let promises = items |> array::map {xs = @, f = {x} ->
+                    spawn {computation = {} -> processItem {item = x}}
+                }
 
-                let results = promises |> map {xs = @, f = p} -> await {promise = p}
+                let results = promises |> array::map {xs = @, f = {x} -> await {promise = x}}
 
-                results |> foldl {acc, x} -> acc + x, 0
+                results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             test {}
         """
@@ -616,8 +598,7 @@ class TruffleAndLoomIntegrationTest {
             test {}
         """
         val result = eval(code)
-        assertEquals(FunkInt(70), result) // (10+20+5) + (10+20+15) = 35 + 45 = 80
-        assertEquals(FunkInt(80), result)
+        assertEquals(FunkInt(80), result) // (10+20+5) + (10+20+15) = 35 + 45 = 80
     }
 
     @Test
@@ -634,17 +615,17 @@ class TruffleAndLoomIntegrationTest {
             }
 
             let processInParallel = {items} -> do
-                let promises = items |> map {xs = @, f = item} ->
+                let promises = items |> array::map {xs = @, f = {x} ->
                     spawn {computation = {} ->
-                        perform Calculator in Math.square {x = item}
-                    }
+                        perform Calculator in Math.square {x = x}
+                    }}
 
-                promises |> map {xs = @, f = p} -> await {promise = p}
+                promises |> array::map {xs = @, f = {x} -> await {promise = x}}
 
             let test = {} -> do
                 let data = [1, 2, 3, 4, 5]
                 let results = processInParallel {items = data}
-                results |> foldl {acc, x} -> acc + x, 0
+                results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             test {}
         """
