@@ -596,6 +596,20 @@ class ModuleResolver(
      * @param typeContext Optional context from TypeChecker with inferred types for exports
      */
     fun updateModuleExports(modulePath: String, typedProgram: Program, typeContext: Map<String, FunkType>? = null) {
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("\nDEBUG updateModuleExports: modulePath=$modulePath")
+            println("DEBUG updateModuleExports: Program has ${typedProgram.items.size} items")
+
+            // Check if identifiers are qualified
+            typedProgram.items.forEach { item ->
+                if (item is LetBinding) {
+                    println("DEBUG updateModuleExports: LetBinding '${item.variableName}' expression type: ${item.expression.javaClass.simpleName}")
+                    // Check for identifiers in the expression
+                    checkIdentifiersInExpression(item.expression, "  ")
+                }
+            }
+        }
+
         val module = moduleCache[modulePath]
         val updatedModule = if (module != null) {
             module.copy(
@@ -613,6 +627,29 @@ class ModuleResolver(
             )
         }
         moduleCache[modulePath] = updatedModule
+
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("DEBUG updateModuleExports: Cached module with ${updatedModule.exports.size} exports")
+        }
+    }
+
+    private fun checkIdentifiersInExpression(expr: Expression, indent: String) {
+        when (expr) {
+            is Identifier -> {
+                println("${indent}Identifier: '${expr.name}'")
+            }
+            is FunctionCall -> {
+                println("${indent}FunctionCall:")
+                checkIdentifiersInExpression(expr.function, "$indent  ")
+                checkIdentifiersInExpression(expr.arguments, "$indent  ")
+            }
+            is RecordLiteral -> {
+                // Don't recurse into record literals for now
+            }
+            else -> {
+                // Don't recurse into other expressions for now
+            }
+        }
     }
 
     /**
