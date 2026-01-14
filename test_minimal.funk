@@ -1,0 +1,4 @@
+use std::collections::array
+
+let items = [1, 2, 3]
+items |> array::map {xs = @, f = {x} -> x * 2}

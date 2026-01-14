@@ -1412,10 +1412,6 @@ class ASTToTruffleConverter(
             functionConverter.getOrCreateSlot(paramName)
         }
 
-        // Pre-register a special slot for storing the closure map AFTER parameters
-        // This allows nested lambdas to access parent closures without slot number collisions
-        functionConverter.getOrCreateSlot("__closure_map__")
-
         // Pre-register closure variables in the function's frame (after parameters)
         // This ensures each converter has its own slot numbers for closure variables
         // CRITICAL: This creates NEW slots for closure variables in THIS frame
@@ -1515,8 +1511,33 @@ class ASTToTruffleConverter(
                     Unit
                 }
                 is LambdaExpression -> {
-                    // Don't traverse into nested lambdas - they have their own scope
-                    // We only want free variables at this level
+                    // CRITICAL FIX: Recursively collect free variables from nested lambdas
+                    // Nested lambdas can reference variables from outer scopes, and those variables
+                    // need to be available in the parent lambda's lexical scope (MaterializedFrame)
+                    //
+                    // Example: {x} -> spawn {computation = {} -> fn {x = x}}
+                    // The innermost lambda {} -> fn {x = x} references:
+                    // - fn (from parent scope, 2 levels up)
+                    // - x (from immediate parent lambda, 1 level up)
+                    // Both need to be in the parent lambda's free variables so they're captured
+                    // in the MaterializedFrame
+
+                    // Get nested lambda's parameters
+                    val nestedParams = when (val params = e.parameters) {
+                        is UntypedParameters -> params.names
+                        is TypedParameters -> params.recordType.entries.map { it.name }
+                    }
+
+                    // Recursively collect variables from nested lambda body
+                    val nestedVars = collectVariableReferences(e.body)
+
+                    // Filter out the nested lambda's parameters - those are local to that lambda
+                    val nestedFreeVars = nestedVars.filter { it !in nestedParams }
+
+                    // Add nested free variables to the current lambda's variables
+                    // These become free variables of the parent lambda
+                    variables.addAll(nestedFreeVars)
+
                     Unit
                 }
                 is RecordLiteral -> {

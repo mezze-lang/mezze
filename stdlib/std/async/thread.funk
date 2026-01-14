@@ -1,0 +1,112 @@
+# =============================================================================
+# std/async/thread.funk - Virtual Thread Operations
+# =============================================================================
+
+# Import the Thread newtype from async module
+use std::async::async::{Thread}
+
+# =============================================================================
+# Low-Level Thread Operations
+# =============================================================================
+
+# Park the current virtual thread
+# Thread will sleep until unparked (no CPU usage)
+#
+# Use this for custom synchronization primitives
+#
+# Example:
+#   let wait_for_signal: {condition: {} -> Bool} -> {} =
+#       {condition} -> do
+#           while not condition {} do
+#               park {}  # Efficiently wait
+pub let park: {} -> {} =
+    {} -> __native_loom_park {}
+
+# Unpark a virtual thread
+# Wakes up a parked thread
+#
+# Example:
+#   let signal_thread: {thread: Thread} -> {} =
+#       {thread} -> unpark {thread = thread}
+pub let unpark: {thread: Thread} -> {} =
+    {thread} -> __native_loom_unpark {thread = thread}
+
+# Get the current virtual thread
+# Returns a handle that can be passed to other threads for signaling
+#
+# Example:
+#   let current = current_thread {}
+#   # Pass 'current' to another computation for coordination
+pub let current_thread: {} -> Thread =
+    {} -> __native_loom_current_thread {}
+
+# =============================================================================
+# Higher-Level Synchronization Primitives
+# =============================================================================
+
+# Sleep for specified milliseconds
+# More convenient than manual park/unpark for simple delays
+#
+# Example:
+#   sleep {millis = 1000}  # Sleep for 1 second
+pub let sleep: {millis: Int} -> {} =
+    {millis} -> do
+        # Park with timeout
+        # TODO: Implement native sleep with timeout
+        park {}
+
+# Yield execution to other virtual threads
+# Hint to scheduler that this thread can be preempted
+pub let yield: {} -> {} =
+    {} -> do
+        # Park and immediately unpark - gives scheduler a chance
+        let current = current_thread {}
+        unpark {thread = current}
+
+# =============================================================================
+# Examples
+# =============================================================================
+
+# Example 1: Simple signal between threads
+let signal_example: {} -> {} =
+    {} -> do
+        use std::async::async::{spawn, run_fast, Async}
+
+        let receiver_thread = current_thread {}
+
+        # Spawn a thread that will signal us
+        let promise = spawn {computation = {} -> do
+            # Do some work
+            let result = 42
+
+            # Signal the waiting thread
+            unpark {thread = receiver_thread}
+
+            result
+        }
+
+        # Wait for signal
+        park {}
+
+        # Now we've been signaled, can continue
+        {}
+
+# Example 2: Custom semaphore using park/unpark
+#
+# Note: This is a simplified example - real semaphores need atomics
+# let semaphore_wait: {sem: Semaphore} -> {} =
+#     {sem} -> do
+#         if sem.count > 0 then
+#             # Decrement and proceed
+#             {}
+#         else
+#             # Park until count increases
+#             park {}
+#
+# let semaphore_signal: {sem: Semaphore} -> {} =
+#     {sem} -> do
+#         # Increment count
+#         # Unpark one waiting thread
+#         match sem.waiting_threads is
+#             | [] -> {}
+#             | [thread, ...rest] -> unpark {thread = thread}
