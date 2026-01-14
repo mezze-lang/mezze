@@ -21,6 +21,9 @@ class ListTest {
 
     @BeforeEach
     fun setup() {
+        // Clear TypeChecker module cache to force re-type-checking with new fixes
+        TypeChecker.clearCache()
+
         parser = FunkParser()
         typeChecker = TypeChecker()
         interpreter = FunkInterpreter()
