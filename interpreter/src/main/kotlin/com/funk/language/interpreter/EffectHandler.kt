@@ -163,11 +163,17 @@ class EffectHandler {
             }
             is FunkTruffleFunction -> {
                 // Truffle functions are called directly via their CallTarget
-                // CRITICAL: FunkFunctionRootNode ALWAYS expects 2 arguments:
+                // CRITICAL: FunkFunctionRootNode expects 4 arguments:
                 // [0] = FunkRecord of parameters
-                // [1] = Map<String, FunkValue> of closure variables (can be empty)
-                // We must ALWAYS pass both, even if closureVariables is empty
-                operation.callTarget.call(arguments, operation.closureVariables) as FunkValue
+                // [1] = Map<String, FunkValue> of closure variables (legacy, for backward compat)
+                // [2] = MaterializedFrame (lexical scope)
+                // [3] = Map<String, Int> lexical scope slot mapping
+                operation.callTarget.call(
+                    arguments,
+                    operation.closureVariables,
+                    operation.lexicalScope,
+                    operation.lexicalScopeSlotMap
+                ) as FunkValue
             }
             else -> {
                 throw RuntimeException(
