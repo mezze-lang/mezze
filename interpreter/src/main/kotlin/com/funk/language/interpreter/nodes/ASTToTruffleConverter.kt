@@ -1397,6 +1397,11 @@ class ASTToTruffleConverter(
         val allVariables = collectVariableReferences(lambda.body)
         val freeVariables = allVariables.filter { it !in paramNames }.distinct()
 
+        // DEBUG: Log free variable collection
+        if (freeVariables.isNotEmpty()) {
+            println("DEBUG convertLambdaExpression: paramNames=$paramNames, allVariables=$allVariables, freeVariables=$freeVariables")
+        }
+
         // Create a new converter for the function body to manage its own frame
         // CRITICAL FIX: Pass BOTH the handler mapping AND the current variable slots as parent context
         val functionConverter = ASTToTruffleConverter(
@@ -1451,6 +1456,7 @@ class ASTToTruffleConverter(
         }.toMap()
 
         // Pass closure variable names AND their CURRENT frame slots to function definition node
+        println("DEBUG creating FunctionDefinitionNode: paramNames=$paramNames, freeVariables=$freeVariables, closureVariableSlots=$closureVariableSlots")
         return FunctionDefinitionNode("lambda", paramNames, bodyNode, functionFrameDescriptor, freeVariables, closureVariableSlots)
     }
 
