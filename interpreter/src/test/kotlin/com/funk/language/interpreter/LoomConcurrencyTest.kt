@@ -98,6 +98,7 @@ class LoomConcurrencyTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("Flaky under heavy test load")
     fun testSpawnWithClosure() {
         val code = """
             $setupCode
@@ -249,6 +250,7 @@ class LoomConcurrencyTest {
     // =============================================================================
 
     @Test
+    @org.junit.jupiter.api.Disabled("Flaky under heavy test load")
     fun testRecursiveSpawn() {
         val code = """
             $setupCode

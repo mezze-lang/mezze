@@ -135,15 +135,18 @@ class LoomVirtualThreadsTest {
 
     @Test
     fun testProducerConsumer() {
+        // Tests producer-consumer pattern using CompletableFuture for proper synchronization.
+        // Avoids park/unpark race conditions under heavy load.
         val data = AtomicInteger(0)
-        val consumerThread = Thread.currentThread()
+        val producerDone = CompletableFuture<Void>()
 
         loom.spawnVirtualThread("producer") {
             data.set(42)
-            java.util.concurrent.locks.LockSupport.unpark(consumerThread)
+            producerDone.complete(null)
         }
 
-        java.util.concurrent.locks.LockSupport.park()
+        // Wait for producer to complete (proper synchronization)
+        producerDone.get(1, TimeUnit.SECONDS)
         assertEquals(42, data.get())
     }
 

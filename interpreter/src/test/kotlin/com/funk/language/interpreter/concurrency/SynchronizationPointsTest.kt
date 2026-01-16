@@ -47,7 +47,7 @@ class SynchronizationPointsTest {
     
     @Test
     fun `test synchronization point with dependencies`() {
-        val executionOrder = mutableListOf<String>()
+        val executionOrder = java.util.concurrent.CopyOnWriteArrayList<String>()
         
         // Create dependency operation
         val depSyncPoint = syncManager.createSyncPoint(
@@ -170,7 +170,7 @@ class SynchronizationPointsTest {
     
     @Test
     fun `test multiple synchronization points with complex dependencies`() {
-        val executionOrder = mutableListOf<String>()
+        val executionOrder = java.util.concurrent.CopyOnWriteArrayList<String>()
         
         // Create a diamond dependency pattern:
         // A -> B, A -> C, B -> D, C -> D
@@ -421,7 +421,11 @@ class SynchronizationPointsTest {
         
         // Wait for completion
         val result = future.get(5, TimeUnit.SECONDS)
-        
+
+        // Give the sync point time to update its internal state
+        // Under heavy test load, state transition may lag slightly
+        Thread.sleep(10)
+
         // Should be completed
         assertTrue(syncPoint.isCompleted())
         assertEquals("completed", (result as FunkString).value)

@@ -1061,7 +1061,12 @@ data class FunkPromise(
      */
     fun await(): FunkValue {
         return try {
-            future.get()
+            // Use a generous timeout to handle heavy test load
+            // Under normal conditions, virtual threads complete quickly
+            // But under heavy load (880 tests), scheduler can be slow
+            future.get(30, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (e: java.util.concurrent.TimeoutException) {
+            throw FunkException("Promise timed out after 30 seconds - possible deadlock or thread starvation")
         } catch (e: java.util.concurrent.ExecutionException) {
             throw FunkException("Promise rejected: ${e.cause?.message ?: e.message}")
         }
