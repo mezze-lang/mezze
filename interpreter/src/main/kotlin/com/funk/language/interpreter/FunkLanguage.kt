@@ -100,7 +100,46 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
     }
     
     override fun createContext(env: Env): FunkContext {
+        // Store the Truffle environment in ThreadLocal for cross-thread execution
+        TruffleContextHolder.setEnv(env)
         return FunkContext(this, env)
+    }
+
+    /**
+     * Allow multi-threaded access to Funk contexts.
+     * This is required for Loom concurrency support where virtual threads
+     * need to access the same context concurrently.
+     */
+    override fun isThreadAccessAllowed(thread: Thread, singleThreaded: Boolean): Boolean {
+        // Always allow multi-threaded access for Loom concurrency
+        return true
+    }
+
+    /**
+     * Initialize multi-threading support for a context.
+     * Called before the context is accessed from multiple threads simultaneously.
+     * This allows the language to disable single-threaded optimizations.
+     */
+    override fun initializeMultiThreading(context: FunkContext) {
+        // No single-threaded optimizations to disable currently
+        // Future optimizations that assume single-threaded access should be disabled here
+    }
+
+    /**
+     * Initialize thread-local state before a context is accessed from a new thread.
+     * Called for each new thread (including virtual threads created via Loom).
+     */
+    override fun initializeThread(context: FunkContext, thread: Thread) {
+        // Store the Truffle environment for this thread
+        TruffleContextHolder.setEnv(context.env)
+    }
+
+    /**
+     * Clean up thread-local state when a thread stops accessing the context.
+     */
+    override fun disposeThread(context: FunkContext, thread: Thread) {
+        // Clear the thread-local environment
+        TruffleContextHolder.clearEnv()
     }
     
     override fun parse(request: ParsingRequest): CallTarget {
@@ -117,14 +156,6 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             if (directExecution != null) {
                 val (typedProgram, projectRoot) = directExecution
                 val monomorphicInstances = getAndClearMonomorphicInstances()
-
-                // DEBUG: Print monomorphic instances
-                if (monomorphicInstances.isNotEmpty()) {
-                    System.err.println("DEBUG: Monomorphic instances being added:")
-                    for ((name, binding) in monomorphicInstances) {
-                        System.err.println("  - $name: ${binding.inferredType?.let { prettyPrintType(it) }}")
-                    }
-                }
 
                 // CRITICAL FIX: Add monomorphic instances to the program
                 // Monomorphic instances are specialized versions of polymorphic functions

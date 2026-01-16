@@ -24,6 +24,9 @@ object LoomImplementations {
     fun registerAll(context: MutableMap<String, FunkValue>) {
         registerSpawn(context)
         registerAwait(context)
+        registerCurrentThread(context)
+        registerPark(context)
+        registerUnpark(context)
     }
 
     /**
@@ -58,53 +61,52 @@ object LoomImplementations {
                     // Create a CompletableFuture to represent the Promise
                     val future = CompletableFuture<FunkValue>()
 
-                    // WORKAROUND: Truffle functions cannot be called across thread boundaries
-                    // due to context sharing restrictions. We execute them synchronously
-                    // on the current thread but wrap the result in a CompletableFuture
-                    // to maintain the async API contract.
-                    //
-                    // This means "spawn" is effectively synchronous for Truffle functions,
-                    // but still allows the Promise/await pattern to work.
-                    //
-                    // TODO: Implement proper multi-context support using TruffleContext API
-                    // for true concurrent execution.
-                    when (computation) {
-                        is FunkTruffleFunction -> {
-                            // Execute synchronously on current thread (Truffle requirement)
-                            try {
-                                val emptyArgs = FunkRecord(emptyMap())
-                                // CRITICAL: FunkFunctionRootNode expects 4 arguments:
-                                // [0] = args record, [1] = closure variables map (legacy),
-                                // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
-                                val result = computation.callTarget.call(
-                                    emptyArgs,
-                                    computation.closureVariables,
-                                    computation.lexicalScope,
-                                    computation.lexicalScopeSlotMap
-                                ) as FunkValue
-                                future.complete(result)
-                            } catch (e: Exception) {
-                                future.completeExceptionally(e)
-                            }
-                        }
-                        is NativeFunkFunction -> {
-                            // Native functions CAN run on virtual threads safely
-                            val loomManager = LoomConcurrencyManager()
-                            loomManager.spawnVirtualThread("funk-spawn-${System.nanoTime()}") {
-                                try {
-                                    val result = computation.call(emptyList())
-                                    future.complete(result)
-                                } catch (e: Exception) {
-                                    future.completeExceptionally(e)
+                    // Capture the current Truffle environment for thread creation
+                    val env = TruffleContextHolder.getEnv()
+                        ?: throw NativeFunctionException("__native_loom_spawn", "No Truffle environment available")
+
+                    // CRITICAL: Use TruffleThreadBuilder to create threads properly
+                    // This ensures the thread has proper access to the TruffleContext
+                    // and avoids "Multi threaded access not allowed" errors
+                    val thread = env.newTruffleThreadBuilder {
+
+                        try {
+                            val result = when (computation) {
+                                is FunkTruffleFunction -> {
+                                    // The TruffleThreadBuilder automatically enters the context
+                                    // so we can call CallTargets directly
+                                    val emptyArgs = FunkRecord(emptyMap())
+                                    // CRITICAL: FunkFunctionRootNode expects 4 arguments:
+                                    // [0] = args record, [1] = closure variables map (legacy),
+                                    // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
+
+                                    val value = computation.callTarget.call(
+                                        emptyArgs,
+                                        computation.closureVariables,
+                                        computation.lexicalScope,
+                                        computation.lexicalScopeSlotMap
+                                    ) as FunkValue
+
+                                    value
                                 }
+                                is NativeFunkFunction -> {
+                                    computation.call(emptyList())
+                                }
+                                else -> throw FunkException("Unexpected function type: ${computation::class.simpleName}")
                             }
-                        }
-                        else -> {
-                            future.completeExceptionally(
-                                FunkException("Unexpected function type: ${computation::class.simpleName}")
-                            )
+
+                            future.complete(result)
+                        } catch (e: Exception) {
+
+                            e.printStackTrace()
+                            future.completeExceptionally(e)
                         }
                     }
+                        .virtual(true)  // Use Java virtual threads (Project Loom)
+                        .build()
+
+                    // Start the thread
+                    thread.start()
 
                     // Return the Promise wrapping the future
                     FunkPromise(future)
@@ -149,6 +151,92 @@ object LoomImplementations {
                 else -> throw NativeFunctionException(
                     "__native_loom_await",
                     "promise must be a FunkPromise, got: ${promise::class.simpleName}"
+                )
+            }
+        }
+    }
+
+    /**
+     * __native_loom_current_thread - Get a handle to the current thread.
+     *
+     * Takes: {}
+     * Returns: Thread
+     *
+     * Returns an opaque handle to the current Java thread (typically a virtual thread).
+     * This handle can be passed to other threads for coordination via unpark.
+     *
+     * Example usage in Funk:
+     *   let receiver_thread = current_thread {}
+     *   # Pass this handle to other threads for signaling
+     */
+    private fun registerCurrentThread(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_current_thread"] = NativeFunkFunction("__native_loom_current_thread") { args ->
+            // Get current thread and wrap it in FunkThread
+            val currentThread = Thread.currentThread()
+            FunkThread(currentThread)
+        }
+    }
+
+    /**
+     * __native_loom_park - Park (suspend) the current virtual thread.
+     *
+     * Takes: {}
+     * Returns: {}
+     *
+     * Parks (suspends) the current virtual thread until it is unparked by another thread.
+     * While parked, the thread does not consume CPU resources. Uses LockSupport.park()
+     * internally for efficient blocking.
+     *
+     * CRITICAL: This is a low-level synchronization primitive. The thread will remain
+     * parked until another thread calls unpark on this thread's handle.
+     *
+     * Example usage in Funk:
+     *   park {}  # Suspends current thread until unparked
+     */
+    private fun registerPark(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_park"] = NativeFunkFunction("__native_loom_park") { args ->
+
+            // Park the current thread using LockSupport
+            java.util.concurrent.locks.LockSupport.park()
+
+            FunkRecord(emptyMap())  // Return empty record (unit type)
+        }
+    }
+
+    /**
+     * __native_loom_unpark - Unpark (resume) a parked virtual thread.
+     *
+     * Takes: { thread: Thread }
+     * Returns: {}
+     *
+     * Unparks the given thread, allowing it to resume execution if it was parked.
+     * If the thread is not currently parked, the next park() call will return immediately.
+     * Uses LockSupport.unpark() internally.
+     *
+     * CRITICAL: This is a low-level synchronization primitive for custom coordination
+     * patterns between threads.
+     *
+     * Example usage in Funk:
+     *   unpark {thread = receiver_thread}  # Wakes up the parked thread
+     */
+    private fun registerUnpark(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_unpark"] = NativeFunkFunction("__native_loom_unpark") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_unpark", "expects FunkRecord")
+
+            val threadValue = record.fields["thread"]
+                ?: throw NativeFunctionException("__native_loom_unpark", "expects 'thread' field")
+
+            when (threadValue) {
+                is FunkThread -> {
+
+                    // Unpark the thread using LockSupport
+                    java.util.concurrent.locks.LockSupport.unpark(threadValue.thread)
+                    FunkRecord(emptyMap())  // Return empty record (unit type)
+                }
+                else -> throw NativeFunctionException(
+                    "__native_loom_unpark",
+                    "thread must be a FunkThread, got: ${threadValue::class.simpleName}"
                 )
             }
         }

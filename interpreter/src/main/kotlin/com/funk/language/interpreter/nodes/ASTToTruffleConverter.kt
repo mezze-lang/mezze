@@ -543,10 +543,10 @@ class ASTToTruffleConverter(
      * Convert an expression to a Truffle node
      */
     fun convertExpression(expr: Expression): FunkNode {
-        println("DEBUG convertExpression: expr class = ${expr::class.simpleName}")
+
         if (expr is FunctionCall && expr.function is MemberAccess) {
             val ma = expr.function as MemberAccess
-            println("DEBUG FunctionCall with MemberAccess: receiver=${ma.receiver::class.simpleName}, member=${ma.member}")
+
         }
         return when (expr) {
             is IntLiteral -> IntLiteralNode(expr.value)
@@ -756,12 +756,12 @@ class ASTToTruffleConverter(
      */
     private fun convertFunctionCall(funcCall: FunctionCall): FunkNode {
         val functionClass = funcCall.function::class.simpleName
-        println("DEBUG convertFunctionCall: function=${functionClass}, resolvedFunctionName=${funcCall.resolvedFunctionName}, resolvedAbilities=${funcCall.resolvedAbilities.keys}")
+
 
         // PRIORITY 1: Check for monomorphic function call (Rust-style)
         // Monomorphic functions are specialized and should be called directly
         if (funcCall.resolvedFunctionName != null) {
-            println("DEBUG: Taking monomorphic path")
+
             return convertMonomorphicFunctionCall(funcCall)
         }
 
@@ -832,12 +832,12 @@ class ASTToTruffleConverter(
                 // CRITICAL: Check if the receiver is a local variable/parameter
                 // If it's in the frame, it's a regular record field access, not an effect call
                 if (variableSlots.containsKey(receiverName)) {
-                    println("DEBUG: receiverName '$receiverName' is in variableSlots, taking record field access path")
+
                     // This is a regular function call on a record field (e.g., cfg.handler)
                     // Use default dispatch
                     val functionNode = convertExpression(funcCall.function)
                     val argumentsNode = convertExpression(funcCall.arguments)
-                    println("DEBUG: Creating FunctionCallNode for record field access")
+
                     return createFunctionCallNode(functionNode, argumentsNode)
                 }
 
@@ -1149,7 +1149,7 @@ class ASTToTruffleConverter(
                 }
 
                 // DEBUG: Print record fields
-                System.err.println("DEBUG binary op '$operation': record fields = ${argsValue.fields.keys}, values = ${argsValue.fields.values.map { it::class.simpleName }}")
+
 
                 val left = argsValue.fields["l"] ?: throw RuntimeException("Missing 'l' field in binary operation (available fields: ${argsValue.fields.keys})")
                 val right = argsValue.fields["r"] ?: throw RuntimeException("Missing 'r' field in binary operation (available fields: ${argsValue.fields.keys})")
@@ -1399,7 +1399,7 @@ class ASTToTruffleConverter(
 
         // DEBUG: Log free variable collection
         if (freeVariables.isNotEmpty()) {
-            println("DEBUG convertLambdaExpression: paramNames=$paramNames, allVariables=$allVariables, freeVariables=$freeVariables")
+
         }
 
         // Create a new converter for the function body to manage its own frame
@@ -1456,7 +1456,7 @@ class ASTToTruffleConverter(
         }.toMap()
 
         // Pass closure variable names AND their CURRENT frame slots to function definition node
-        println("DEBUG creating FunctionDefinitionNode: paramNames=$paramNames, freeVariables=$freeVariables, closureVariableSlots=$closureVariableSlots")
+
         return FunctionDefinitionNode("lambda", paramNames, bodyNode, functionFrameDescriptor, freeVariables, closureVariableSlots)
     }
 
@@ -1608,8 +1608,8 @@ class ASTToTruffleConverter(
      * Convert a record literal to a record construction node
      */
     private fun convertRecordLiteral(recordLit: RecordLiteral): FunkNode {
-        println("DEBUG convertRecordLiteral: fieldEntries = ${recordLit.getFieldEntries().map { it.name }}")
-        println("DEBUG convertRecordLiteral: spreadEntries = ${recordLit.getSpreadEntries().size}")
+
+
         val fieldNodes = mutableMapOf<String, FunkNode>()
         val spreadNodes = mutableListOf<FunkNode>()
 
@@ -1987,7 +1987,7 @@ class ASTToTruffleConverter(
                     // CRITICAL: Fork exception thrown from within the perform block
                     // This means the continuation was forked with multiple values
                     // Return the collected results as an array (this is the final result of the perform block)
-                    System.err.println("DEBUG: Caught ForkedExecutionException in perform block, returning ${e.values.size} results")
+
                     return com.funk.language.interpreter.FunkArrayList(e.values)
                 } finally {
                     // Always pop handlers, even if exception occurs

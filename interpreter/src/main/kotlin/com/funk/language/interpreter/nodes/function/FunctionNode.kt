@@ -66,11 +66,6 @@ class FunctionDefinitionNode(
             emptyMap()
         }
 
-        println("\nDEBUG FunctionDef.execute: name=$name, closureVariableNames=$closureVariableNames")
-        println("DEBUG: closureVariableSlots = $closureVariableSlots")
-        println("DEBUG: lexicalScopeSlotMap = $lexicalScopeSlotMap")
-        println("DEBUG: Materialized frame = ${materializedFrame != null}")
-
         // Create function with lexical scope (MaterializedFrame) and slot mapping
         return FunkTruffleFunction(
             callTarget,
@@ -142,7 +137,7 @@ class FunkFunctionRootNode(
         // [3] = Map<String, Int> lexical scope slot mapping
         val arguments = frame.getArguments()
 
-        println("DEBUG FunkFunctionRootNode.execute: name=$name, arguments.size=${arguments.size}")
+
 
         // Get context for registering variables
         val context = FunkLanguage.getCurrentContext(this)
@@ -187,9 +182,9 @@ class FunkFunctionRootNode(
         val missingParams = mutableListOf<String>()
 
         // DEBUG: Log parameter checking
-        println("DEBUG FunkFunctionRootNode.execute: name=$name, parameterNames=$parameterNames")
-        println("DEBUG: argsRecord = ${argsRecord?.fields?.keys}")
-        println("DEBUG: argsRecord.fields = ${argsRecord?.fields?.mapValues { it.value::class.simpleName }}")
+
+
+
 
         // Special case: zero-parameter functions should always execute
         if (parameterNames.isEmpty()) {
@@ -198,22 +193,22 @@ class FunkFunctionRootNode(
         } else if (argsRecord != null) {
             for (paramName in parameterNames) {
                 val value = argsRecord.fields[paramName]
-                println("DEBUG: Checking param '$paramName', value = ${value?.let { it::class.simpleName }}")
+
                 if (value != null && value !is FunkNull) {
                     providedParams[paramName] = value
-                    println("DEBUG: param '$paramName' is PROVIDED")
+
                 } else {
                     missingParams.add(paramName)
-                    println("DEBUG: param '$paramName' is MISSING (value is null or FunkNull)")
+
                 }
             }
 
         } else {
             missingParams.addAll(parameterNames)
-            println("DEBUG: argsRecord is null, all params are MISSING")
+
         }
 
-        println("DEBUG: providedParams = ${providedParams.keys}, missingParams = $missingParams")
+
 
         // If not all parameters are provided (and function has > 0 parameters), return a partially applied function
         if (parameterNames.isNotEmpty() && missingParams.isNotEmpty()) {
@@ -243,37 +238,37 @@ class FunkFunctionRootNode(
         // Use the lexicalScopeSlotMap to find the correct slot numbers in the lexical scope frame
         val paramCount = parameterNames.size
         if (lexicalScope != null && lexicalScopeSlotMap.isNotEmpty()) {
-            println("DEBUG: Binding closure variables from lexical scope with slot map")
-            println("DEBUG: lexicalScopeSlotMap = $lexicalScopeSlotMap")
+
+
 
             for ((index, varName) in closureVariableNames.withIndex()) {
                 val slotIndex = paramCount + index
 
                 // Look up the variable in the lexical scope frame using the slot map
                 val lexicalSlot = lexicalScopeSlotMap[varName]
-                println("DEBUG: Looking up closure var '$varName' from lexical scope, slot=$lexicalSlot")
+
 
                 if (lexicalSlot != null && lexicalSlot < lexicalScope.frameDescriptor.numberOfSlots) {
                     try {
                         val value = lexicalScope.getObject(lexicalSlot) as? FunkValue
-                        println("DEBUG: Found value in lexical scope: ${value?.let { it::class.simpleName }}")
+
                         if (value != null && value !is FunkNull) {
                             frame.setObject(slotIndex, value)
                         } else {
                             frame.setObject(slotIndex, FunkNull)
                         }
                     } catch (e: Exception) {
-                        println("DEBUG: Exception reading from lexical scope: ${e.message}")
+
                         frame.setObject(slotIndex, FunkNull)
                     }
                 } else {
                     // No valid slot in lexical scope - will fall back to global lookup
-                    println("DEBUG: No valid slot for '$varName', setting to FunkNull")
+
                     frame.setObject(slotIndex, FunkNull)
                 }
             }
         } else {
-            println("DEBUG: No lexical scope, using legacy closure variables map")
+
             // Fallback to legacy approach for backward compatibility
             for ((index, varName) in closureVariableNames.withIndex()) {
                 val slotIndex = paramCount + index

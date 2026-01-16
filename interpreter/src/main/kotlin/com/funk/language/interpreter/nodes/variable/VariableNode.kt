@@ -77,25 +77,16 @@ class SimpleReadVariableNode(private val slot: Int, private val variableName: St
 
     override fun execute(frame: VirtualFrame): FunkValue {
         // First try reading from frame slot
-        println("DEBUG SimpleReadVariableNode: reading '$variableName' from slot $slot (frame has ${frame.frameDescriptor.numberOfSlots} slots)")
         val value = try {
             frame.getObject(slot)
         } catch (e: ArrayIndexOutOfBoundsException) {
-            println("ERROR SimpleReadVariableNode: Cannot access slot $slot for variable '$variableName'")
-            println("ERROR: Frame descriptor slots: ${frame.frameDescriptor.numberOfSlots}")
-            println("ERROR: Frame descriptor: ${frame.frameDescriptor}")
-            println("ERROR: Stack trace:")
-            e.printStackTrace()
             throw RuntimeException("Cannot access frame slot $slot for variable '$variableName' (frame has ${frame.frameDescriptor.numberOfSlots} slots)", e)
         }
-
-        println("DEBUG SimpleReadVariableNode: slot $slot contains ${value?.let { it::class.simpleName } ?: "null"}")
 
         // Return the value if it's a valid FunkValue (but NOT FunkNull)
         // FunkNull closure variables can occur with recursive functions where the function
         // references itself before it's defined
         if (value is FunkValue && value !is FunkNull) {
-            println("DEBUG SimpleReadVariableNode: returning $variableName = ${value::class.simpleName}")
             return value
         }
 
@@ -148,11 +139,6 @@ class SimpleWriteVariableNode(
         // ALSO write to context.locals so module exports can be extracted
         val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
         context.defineLocal(variableName, value)
-
-        // DEBUG: Log what's being written
-        if (value is FunkTruffleFunction) {
-            println("DEBUG SimpleWriteVariableNode: Writing $variableName = $value to context.locals")
-        }
 
         return value
     }

@@ -28,18 +28,18 @@ class StateMachineNode(
             when (state) {
                 is ComputeState -> {
                     // Convert the computation expression to a Truffle node
-                    println("DEBUG: Converting ComputeState expression: ${state.computation::class.simpleName}")
+
                     val computeNode = try {
                         converter.convertExpression(state.computation)
                     } catch (e: Exception) {
-                        println("DEBUG: Exception during conversion: ${e.message}")
+
                         e.printStackTrace()
                         throw RuntimeException("Failed to convert ComputeState expression: ${state.computation}", e)
                     }
-                    println("DEBUG: computeNode == null? ${computeNode == null}")
-                    println("DEBUG: computeNode class: ${computeNode.javaClass.name}")
-                    println("DEBUG: computeNode simpleName: ${computeNode::class.simpleName}")
-                    println("DEBUG: computeNode qualifiedName: ${computeNode::class.qualifiedName}")
+
+
+
+
                     if (computeNode == null) {
                         throw RuntimeException("FATAL: convertExpression returned null for ${state.computation}. This should be impossible!")
                     }
@@ -50,10 +50,10 @@ class StateMachineNode(
                     convertedStates.add(state to valueNode)
                 }
                 is CompleteState -> {
-                    println("DEBUG: Converting CompleteState expression: ${state.resultExpression::class.simpleName}")
-                    println("DEBUG: CompleteState resultExpression details: $state.resultExpression}")
+
+
                     val resultNode = converter.convertExpression(state.resultExpression)
-                    println("DEBUG: Converted CompleteState node: ${resultNode?.javaClass?.name ?: "NULL"}")
+
                     convertedStates.add(state to resultNode)
                 }
             }
@@ -65,11 +65,11 @@ class StateMachineNode(
         // Build the state machine with the converted nodes
         // CRITICAL: Create FRESH frames for each state execution to support multishot continuations
         for ((state, node) in convertedStates) {
-            println("DEBUG: Processing state ${state::class.simpleName}, node = ${node::class.simpleName}")
+
             when (state) {
                 is ComputeState -> {
                     val computeNode = node
-                    println("DEBUG: ComputeState - computeNode = ${computeNode::class.simpleName}")
+
 
                     builder.addComputeState { machine, input ->
                         // Create a FRESH frame for this execution (critical for multishot)
@@ -93,61 +93,61 @@ class StateMachineNode(
                             val actualInput = if (input is FunkRecord && input.fields.containsKey("value")) {
                                 // Fork passes {value = <actual>}, extract it
                                 val extracted = input.fields["value"]!!
-                                println("DEBUG ComputeState: Extracted input from record: ${(extracted as? FunkInt)?.value ?: extracted::class.simpleName}")
+
                                 extracted
                             } else {
                                 // Direct value (from state-to-state transitions)
-                                println("DEBUG ComputeState: Using direct input: ${(input as? FunkInt)?.value ?: input::class.simpleName}")
+
                                 input
                             }
-                            println("DEBUG ComputeState: Writing to __state_machine_input__ (slot $inputSlot): ${(actualInput as? FunkInt)?.value ?: actualInput::class.simpleName}")
+
                             freshFrame.setObject(inputSlot, actualInput)
                         }
 
                         // Populate frame with captured locals from the machine
                         // CRITICAL: Skip __state_machine_input__ since it comes from the input parameter, not captured locals
-                        println("DEBUG ComputeState: Populating ${machine.capturedLocals.size} captured locals from machine")
+
                         for ((varName, varValue) in machine.capturedLocals) {
                             // CRITICAL: Don't overwrite __state_machine_input__ - it was set from the input parameter above
                             if (varName == "__state_machine_input__") {
-                                println("DEBUG:   Skipping __state_machine_input__ (comes from input parameter)")
+
                                 continue
                             }
 
                             val slot = converter.getVariableSlots()[varName]
                             if (slot != null) {
                                 val valueStr = (varValue as? FunkInt)?.value?.toString() ?: varValue::class.simpleName
-                                println("DEBUG:   Restoring $varName (slot $slot) = $valueStr")
+
                                 freshFrame.setObject(slot, varValue)
                             }
                         }
 
                         // Execute the computation node with the fresh frame
-                        println("DEBUG ComputeState: About to execute ${computeNode::class.simpleName}")
+
                         val result = computeNode.execute(freshFrame)
-                        println("DEBUG ComputeState: Executed, result = ${result::class.simpleName}")
+
 
                         // CRITICAL: Check if result is a suspended continuation (for early return, exception handling)
                         // If suspended, skip variable capture and return immediately
                         // This implements early return semantics for Return effect and exception handling
                         if (result !is com.funk.language.interpreter.FunkContinuationSuspended) {
                             // Only capture variables if we're NOT suspending (normal execution flow)
-                            println("DEBUG ComputeState: Capturing frame variables after execution:")
+
                             val updatedLocals = mutableMapOf<String, FunkValue>()
                             for ((varName, slot) in converter.getVariableSlots()) {
                                 val value = freshFrame.getObject(slot) as? FunkValue
                                 if (value != null && value !is FunkNull) {
                                     val valueStr = (value as? FunkInt)?.value?.toString() ?: value::class.simpleName
-                                    println("DEBUG:   Persisting $varName (slot $slot) = $valueStr")
+
                                     updatedLocals[varName] = value
                                 }
                             }
 
-                            println("DEBUG ComputeState: Total persisted variables: ${updatedLocals.size}, keys: ${updatedLocals.keys}")
+
                             // Pass updated locals to the state machine via ThreadLocal
                             ContinuationStateMachine.setUpdatedLocals(updatedLocals)
                         } else {
-                            println("DEBUG ComputeState: Result is FunkContinuationSuspended, skipping variable capture")
+
                         }
 
                         result
@@ -187,8 +187,8 @@ class StateMachineNode(
                     val resultNode = node
 
                     builder.addCompleteState { machine, input ->
-                        println("DEBUG CompleteState: About to execute ${resultNode::class.simpleName}")
-                        println("DEBUG CompleteState: Captured locals: ${machine.capturedLocals.keys}")
+
+
 
                         // Create a FRESH frame for this execution (critical for multishot)
                         val numSlots = frameDescriptor.numberOfSlots.coerceAtLeast(2)
@@ -204,29 +204,29 @@ class StateMachineNode(
 
                         // Populate frame with captured locals
                         // CRITICAL: Skip __state_machine_input__ since it's a special binding variable
-                        println("DEBUG CompleteState: Populating frame variables:")
-                        println("DEBUG CompleteState: Available slots: ${converter.getVariableSlots().keys}")
+
+
                         for ((varName, varValue) in machine.capturedLocals) {
                             // Skip __state_machine_input__ - it's only used for binding states
                             if (varName == "__state_machine_input__") {
-                                println("DEBUG:   Skipping __state_machine_input__ (binding variable only)")
+
                                 continue
                             }
 
                             val slot = converter.getVariableSlots()[varName]
-                            println("DEBUG:   Looking up $varName: slot = $slot")
+
                             if (slot != null) {
                                 val valueStr = (varValue as? FunkInt)?.value?.toString() ?: varValue::class.simpleName
-                                println("DEBUG:   Setting $varName (slot $slot) = $valueStr")
+
                                 freshFrame.setObject(slot, varValue)
                             } else {
-                                println("DEBUG:   WARNING: No slot found for $varName!")
+
                             }
                         }
 
                         // Evaluate the result expression
                         val result = resultNode.execute(freshFrame)
-                        println("DEBUG CompleteState: Result = ${(result as? FunkInt)?.value ?: result::class.simpleName}")
+
                         result
                     }
                 }
