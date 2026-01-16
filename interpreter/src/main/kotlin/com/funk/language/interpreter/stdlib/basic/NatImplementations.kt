@@ -3,7 +3,23 @@ package com.funk.language.interpreter.stdlib.basic
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for Nat type operations
+ * Truffle-optimized implementations for Nat type operations.
+ *
+ * Phase 5 of Truffle migration: Basic type operations optimized for JIT performance.
+ * Nat is the natural number type representing non-negative integers (0, 1, 2, ...).
+ *
+ * Optimizations:
+ * - Inline Kotlin arithmetic (+, *, /, %) for JIT compilation
+ * - Direct integer comparison with no overhead
+ * - Zero-cost abstraction over Kotlin Long (with >= 0 constraint)
+ * - Special case: Nat - Nat returns Int (can be negative)
+ * - Proper division-by-zero and modulo-by-zero checks
+ * - Safe conversions to Int, Float, and Frac types
+ *
+ * Note: __native_nat_subtract throws on negative results,
+ *       subtract_nat returns Int to allow negative results
+ *
+ * Total: 23 natural number operations (arithmetic, comparison, conversion)
  */
 object NatImplementations {
 

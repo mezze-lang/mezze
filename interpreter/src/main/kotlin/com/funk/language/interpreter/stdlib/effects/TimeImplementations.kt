@@ -6,7 +6,23 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
 /**
- * Truffle runtime implementations for Time effect operations
+ * Truffle-optimized implementations for Time effect operations.
+ *
+ * Phase 6 of Truffle migration: I/O and System operations optimized for JIT performance.
+ * Handles all time-related operations using java.time APIs.
+ *
+ * Optimizations:
+ * - Direct java.time APIs for JIT compilation (Instant, LocalDateTime, ZoneId)
+ * - System.currentTimeMillis() and System.nanoTime() for high-performance timestamps
+ * - TimeUnit.NANOSECONDS.sleep() for nanosecond precision
+ * - DateTimeFormatter for flexible date formatting and parsing
+ * - Proper interrupt handling for sleep operations
+ * - Helper functions for timestamp component extraction (year, month, day, hour, minute, second)
+ *
+ * Operations: now, now_nanos, sleep, sleep_nanos, current_year/month/day/hour/minute/second,
+ *             format, parse, year/month/day/hour/minute/second_from_timestamp
+ *
+ * Total: 18 time functions
  */
 object TimeImplementations {
 

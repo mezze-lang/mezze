@@ -3,7 +3,19 @@ package com.funk.language.interpreter.stdlib.conversion
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for conversion abilities
+ * Truffle-optimized implementations for type conversion operations.
+ *
+ * Phase 5 of Truffle migration: Type conversions and basic types optimized for JIT performance.
+ * Handles conversions between all basic types: Int, Float, Frac, Nat, Bool, String
+ *
+ * Optimizations:
+ * - Inline Kotlin type conversions for JIT compilation
+ * - Option types for fallible conversions (e.g., String to Int)
+ * - Direct Kotlin standard library operations (toString, toLong, toDouble)
+ * - Safe conversions with proper error handling
+ * - Zero-overhead type coercion patterns
+ *
+ * Total: 21 conversion functions
  */
 object TruffleConversionImplementations {
     

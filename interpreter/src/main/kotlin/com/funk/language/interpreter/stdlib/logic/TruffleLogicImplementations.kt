@@ -3,7 +3,22 @@ package com.funk.language.interpreter.stdlib.logic
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for logic abilities
+ * Truffle-optimized implementations for logic and comparison operations.
+ *
+ * Phase 7 of Truffle migration: Logic operations optimized for JIT performance.
+ * Handles boolean logic and extended comparison operations for all types.
+ *
+ * Optimizations:
+ * - Inline boolean operations (&&, ||, !) for JIT compilation
+ * - Direct comparison operations with zero overhead
+ * - Cross-multiplication for fraction comparisons (avoids division)
+ * - Backward compatibility aliases (boolAnd, boolOr, boolNot)
+ * - Extended comparisons: notEqual, lessThanOrEqual, greaterThanOrEqual for Int, Float, Frac, Nat
+ *
+ * Operations: and, or, not, equal_string, notEqual_*, lessThanOrEqual_*, greaterThanOrEqual_*
+ *
+ * Total: 11 logic functions (3 boolean + 2 string comparison + 4 types × 3 operations = 12 numeric)
+ * Note: Actual count is 11 because some operations are generated in loops
  */
 object TruffleLogicImplementations {
     

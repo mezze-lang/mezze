@@ -3,7 +3,25 @@ package com.funk.language.interpreter.stdlib.effects
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for Environment effect operations
+ * Truffle-optimized implementations for Environment effect operations.
+ *
+ * Phase 6 of Truffle migration: I/O and System operations optimized for JIT performance.
+ * Handles environment variables, process information, and system properties.
+ *
+ * Optimizations:
+ * - Direct System.getenv() and System.getProperty() calls for JIT compilation
+ * - Option types for environment variable lookups (Some/None)
+ * - ProcessHandle API for process information
+ * - Inline property access for OS information
+ * - Mock environment helpers for testing
+ *
+ * Operations: env_get, env_set, env_get_all, current_dir, change_dir, os_name, os_version,
+ *             arch, process_id, process_args, exit, mock_env_get
+ *
+ * Note: Java doesn't allow changing working directory or setting env vars at runtime,
+ *       so these use System.setProperty() as a workaround for testing.
+ *
+ * Total: 12 environment functions
  */
 object EnvironmentImplementations {
 

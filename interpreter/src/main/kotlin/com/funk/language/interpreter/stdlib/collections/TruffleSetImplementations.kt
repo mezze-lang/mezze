@@ -3,7 +3,16 @@ package com.funk.language.interpreter.stdlib.collections
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for Set collection operations
+ * Truffle-optimized implementations for Set operations.
+ *
+ * Phase 3 of Truffle migration: Collection operations optimized for JIT performance.
+ * Set is an immutable collection of unique elements backed by Kotlin's Set.
+ *
+ * Optimizations:
+ * - Inline Kotlin set operations (union, intersection, difference)
+ * - Direct element access patterns
+ * - Proper Truffle function calling with all 4 required arguments
+ * - Immutable operations (create new sets instead of mutating)
  */
 object TruffleSetImplementations {
 

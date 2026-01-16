@@ -3,8 +3,19 @@ package com.funk.language.interpreter.stdlib.math
 import com.funk.language.interpreter.*
 
 /**
- * Core math operations implementations
+ * Truffle-optimized implementations for core math operations.
+ *
+ * Phase 4 of Truffle migration: Math operations optimized for JIT performance.
  * Includes: abs, max, min, pow, sqrt, ln, log10, exp, floor, ceil, round, sign, is_nan, is_infinite, is_finite
+ *
+ * Optimizations:
+ * - Direct use of JIT-friendly Kotlin math functions (kotlin.math.*)
+ * - No function callbacks - all pure math operations
+ * - Optimized integer power using exponentiation by squaring algorithm
+ * - Type-specific implementations for Int, Float, Frac, Nat
+ * - Inline operations for maximum performance
+ *
+ * Total: 32 math functions (12 basic + 5 advanced + 15 hidden natives)
  */
 object MathCoreImplementations {
 

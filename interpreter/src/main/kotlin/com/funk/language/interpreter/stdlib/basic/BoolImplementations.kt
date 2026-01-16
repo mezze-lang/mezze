@@ -3,7 +3,18 @@ package com.funk.language.interpreter.stdlib.basic
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for Bool type operations
+ * Truffle-optimized implementations for Bool type operations.
+ *
+ * Phase 5 of Truffle migration: Basic type operations optimized for JIT performance.
+ * Bool is the fundamental boolean type with logical operations.
+ *
+ * Optimizations:
+ * - Inline Kotlin boolean operations (&&, ||, !) for JIT compilation
+ * - Direct boolean comparison with no overhead
+ * - Zero-cost abstraction over Kotlin Boolean
+ * - All operations are pure and side-effect free
+ *
+ * Total: 5 boolean operations (equals, and, or, not, toString)
  */
 object BoolImplementations {
 

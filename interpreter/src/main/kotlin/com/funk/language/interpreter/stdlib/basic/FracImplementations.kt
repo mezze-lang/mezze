@@ -3,7 +3,26 @@ package com.funk.language.interpreter.stdlib.basic
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for Frac type operations
+ * Truffle-optimized implementations for Frac type operations.
+ *
+ * Phase 5 of Truffle migration: Basic type operations optimized for JIT performance.
+ * Frac is the fraction type representing exact rational numbers (numerator/denominator).
+ *
+ * Optimizations:
+ * - Inline fraction arithmetic with automatic reduction to lowest terms
+ * - Cross-multiplication for efficient comparison (avoids division)
+ * - Direct GCD calculation for fraction reduction
+ * - Zero-overhead rational number operations
+ * - Proper handling of negative fractions
+ * - Safe conversions to Int and Float types
+ *
+ * Arithmetic operations:
+ * - a/b + c/d = (a*d + c*b) / (b*d)
+ * - a/b - c/d = (a*d - c*b) / (b*d)
+ * - a/b * c/d = (a*c) / (b*d)
+ * - a/b ÷ c/d = (a*d) / (b*c)
+ *
+ * Total: 26 fraction operations (arithmetic, comparison, conversion, utilities)
  */
 object FracImplementations {
 

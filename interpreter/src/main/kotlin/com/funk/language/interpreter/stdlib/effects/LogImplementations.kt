@@ -3,7 +3,30 @@ package com.funk.language.interpreter.stdlib.effects
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for Log effect operations
+ * Truffle-optimized implementations for Log effect operations.
+ *
+ * Phase 8 of Truffle migration: Effect system optimized for JIT performance.
+ * Handles all logging operations with structured log levels.
+ *
+ * Optimizations:
+ * - Direct println/System.err.println for zero-overhead logging
+ * - Inline string operations for JIT compilation
+ * - Structured log levels (info, warn, error, debug, trace)
+ * - Backward compatibility aliases (print, debug)
+ *
+ * Log Levels:
+ * - console_print: Raw output (no level prefix)
+ * - console_println: Raw output with newline
+ * - log_info: [INFO] prefix
+ * - log_warn: [WARN] prefix
+ * - log_error: [ERROR] prefix to stderr
+ * - log_debug: [DEBUG] prefix
+ * - log_trace: [TRACE] prefix
+ *
+ * Operations: console_print, console_println, log_info, log_warn, log_error, log_debug,
+ *            log_trace, print (legacy), debug (legacy)
+ *
+ * Total: 11 logging functions
  */
 object LogImplementations {
 

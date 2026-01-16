@@ -3,7 +3,20 @@ package com.funk.language.interpreter.stdlib.basic
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for Float type operations
+ * Truffle-optimized implementations for Float type operations.
+ *
+ * Phase 5 of Truffle migration: Basic type operations optimized for JIT performance.
+ * Float is the 64-bit floating point type backed by Kotlin Double.
+ *
+ * Optimizations:
+ * - Inline Kotlin arithmetic (+, -, *, /, %) for JIT compilation
+ * - Direct floating point comparison with no overhead
+ * - Zero-cost abstraction over Kotlin Double
+ * - IEEE 754 floating point semantics
+ * - Proper division-by-zero and modulo-by-zero checks
+ * - Safe conversions to Int and Frac types
+ *
+ * Total: 21 float operations (arithmetic, comparison, conversion)
  */
 object FloatImplementations {
 

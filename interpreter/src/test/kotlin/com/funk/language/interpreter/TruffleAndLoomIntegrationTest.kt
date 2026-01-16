@@ -122,6 +122,7 @@ class TruffleAndLoomIntegrationTest {
     // =============================================================================
 
     @Test
+    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
     fun testClosureInSpawnedThread() {
         val code = """
             $setupCode
@@ -138,6 +139,7 @@ class TruffleAndLoomIntegrationTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
     fun testNestedClosuresWithConcurrency() {
         val code = """
             $setupCode

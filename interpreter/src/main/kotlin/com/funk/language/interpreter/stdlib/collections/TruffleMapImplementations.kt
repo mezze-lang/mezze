@@ -3,7 +3,16 @@ package com.funk.language.interpreter.stdlib.collections
 import com.funk.language.interpreter.*
 
 /**
- * Truffle runtime implementations for Map collection operations
+ * Truffle-optimized implementations for Map operations.
+ *
+ * Phase 3 of Truffle migration: Collection operations optimized for JIT performance.
+ * Map is an immutable key-value collection backed by Kotlin's Map.
+ *
+ * Optimizations:
+ * - Inline Kotlin collection operations for JIT compilation
+ * - Direct map operations (insert, get, remove, merge)
+ * - Proper Truffle function calling with all 4 required arguments
+ * - Immutable operations (create new maps instead of mutating)
  */
 object TruffleMapImplementations {
 

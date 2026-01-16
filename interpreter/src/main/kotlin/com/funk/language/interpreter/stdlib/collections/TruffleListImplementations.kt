@@ -3,8 +3,16 @@ package com.funk.language.interpreter.stdlib.collections
 import com.funk.language.interpreter.*
 
 /**
- * Native implementations for List operations
- * List is an immutable linked list backed by Kotlin's List for performance
+ * Truffle-optimized implementations for List operations.
+ *
+ * Phase 3 of Truffle migration: Collection operations optimized for JIT performance.
+ * List is an immutable linked list backed by Kotlin's List for performance.
+ *
+ * Optimizations:
+ * - Helper function for consistent Truffle function calling
+ * - Inline Kotlin collection operations (map, filter, fold, zip, etc.)
+ * - Deep equality comparison for nested lists
+ * - Custom comparators for sorting
  */
 object TruffleListImplementations {
 

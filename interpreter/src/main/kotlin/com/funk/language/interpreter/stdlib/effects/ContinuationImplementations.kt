@@ -8,21 +8,31 @@ import com.funk.language.interpreter.continuations.ContinuationResumeFn
 import java.util.UUID
 
 /**
- * Native implementations for the Continuation effect using explicit state machines.
+ * Truffle-optimized implementations for the Continuation effect using explicit state machines.
  *
- * This implementation uses explicit state machines (as per docs/implementation/continuation_state_machines.md)
- * instead of closure-based captures, providing:
- * - Better Truffle optimization
- * - Inspectability and debugging
- * - Support for multishot continuations
- * - Serialization (future)
+ * Phase 8 of Truffle migration: Effect system optimized for JIT performance.
+ * This implementation uses explicit state machines instead of closure-based captures.
+ *
+ * Optimizations:
+ * - Explicit state machines for better Truffle optimization (vs closure captures)
+ * - Inspectable and debuggable continuation state
+ * - Support for multishot continuations (fork with multiple values)
+ * - Thread-local delimiter stack for scoped continuations
+ * - Opaque FunkCont handles (cannot be forged by user code)
+ * - Cartesian product flattening for nested choice points
+ * - Proper abort handling with ContinuationAbortedException
  *
  * The continuation effect provides first-class continuations for custom control flow:
- * - Generators (yield/resume)
- * - Nondeterministic choice (backtracking/multishot)
- * - Early Exit/Abort
+ * - Generators (yield/resume via suspend_with/extract_suspended)
+ * - Nondeterministic choice (backtracking/multishot via fork)
+ * - Early Exit/Abort (via abort)
  *
- * Note: Loom is NOT used for continuations - only for async I/O primitives (Phase 4).
+ * Operations: delimit, activate, capture, suspend, suspend_with, resume, fork, abort,
+ *            is_suspended, extract_suspended
+ *
+ * Note: Loom is NOT used for continuations - only for async I/O primitives.
+ *
+ * Total: 10 continuation functions
  */
 object ContinuationImplementations {
 

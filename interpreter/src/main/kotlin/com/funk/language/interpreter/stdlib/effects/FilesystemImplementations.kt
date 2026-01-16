@@ -6,7 +6,22 @@ import java.nio.file.AccessDeniedException
 import java.io.IOException
 
 /**
- * Truffle runtime implementations for Filesystem effect operations
+ * Truffle-optimized implementations for Filesystem effect operations.
+ *
+ * Phase 6 of Truffle migration: I/O and System operations optimized for JIT performance.
+ * Handles file system operations with proper error handling using Result/Option types.
+ *
+ * Optimizations:
+ * - Direct Java File I/O operations for JIT compilation
+ * - Proper error handling with FileSystemError variants (FileNotFound, PermissionDenied, IOError, etc.)
+ * - Result types (Ok/Err) for robust error reporting
+ * - Security exception handling for permission checks
+ * - Optimized directory operations (list, create, delete)
+ * - MemoryFS stubs for future in-memory filesystem implementation
+ *
+ * Operations: read_file, write_file, exists, delete, create_directory, file_size, list_directory
+ *
+ * Total: 18 filesystem functions
  */
 object FilesystemImplementations {
 

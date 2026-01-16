@@ -3,8 +3,18 @@ package com.funk.language.interpreter.stdlib.math
 import com.funk.language.interpreter.*
 
 /**
- * Trigonometric functions implementations
+ * Truffle-optimized implementations for trigonometric operations.
+ *
+ * Phase 4 of Truffle migration: Trigonometric math optimized for JIT performance.
  * Includes: sin, cos, tan, asin, acos, atan, atan2
+ *
+ * Optimizations:
+ * - Direct use of JIT-friendly Kotlin math functions (kotlin.math.*)
+ * - No function callbacks - all pure trigonometric operations
+ * - Inline operations for maximum performance
+ * - Float-only operations (standard for trigonometry)
+ *
+ * Total: 10 trigonometric functions (3 public + 7 hidden natives)
  */
 object MathTrigImplementations {
 

@@ -6,15 +6,30 @@ import java.util.concurrent.CompletableFuture
 import com.oracle.truffle.api.CallTarget
 
 /**
- * Native implementations for Project Loom virtual thread concurrency.
+ * Truffle-optimized implementations for Project Loom virtual thread concurrency.
  *
- * Provides native functions that bridge Funk's Concurrency effect to Kotlin's
- * LoomConcurrencyManager, enabling lightweight concurrency with virtual threads.
+ * Phase 8 of Truffle migration: Effect system optimized for JIT performance.
+ * Provides native functions for lightweight concurrency with virtual threads.
+ *
+ * Optimizations:
+ * - TruffleThreadBuilder for proper Truffle context sharing across threads
+ * - CompletableFuture-based promises for async result handling
+ * - Virtual threads (Project Loom) for efficient concurrency
+ * - LockSupport.park/unpark for low-level thread coordination
+ * - Proper Truffle function calling (4 arguments: args, closure, scope, slot map)
+ * - Thread-local state management via TruffleContextHolder
+ *
+ * CRITICAL: Uses TruffleThreadBuilder to avoid "Multi threaded access not allowed" errors.
+ * Each spawned thread has proper access to the TruffleContext via newTruffleThreadBuilder.
+ *
+ * Operations: spawn, await, current_thread, park, unpark
  *
  * These implementations allow Funk programs to:
- * - Spawn computations on virtual threads (`__native_loom_spawn`)
- * - Wait for concurrent computations to complete (`__native_loom_await`)
- * - Execute multiple operations in parallel with structured concurrency
+ * - Spawn computations on virtual threads (lightweight concurrency)
+ * - Wait for concurrent computations to complete (structured concurrency)
+ * - Coordinate threads with park/unpark primitives
+ *
+ * Total: 5 Loom functions
  */
 object LoomImplementations {
 

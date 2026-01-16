@@ -3,8 +3,16 @@ package com.funk.language.interpreter.stdlib.collections
 import com.funk.language.interpreter.*
 
 /**
- * Native implementations for ArrayList operations
- * ArrayList is a mutable array-based collection backed by Java ArrayList
+ * Truffle-optimized implementations for ArrayList operations.
+ *
+ * Phase 3 of Truffle migration: Collection operations optimized for JIT performance.
+ * ArrayList is a mutable array-based collection backed by Java ArrayList.
+ *
+ * Optimizations:
+ * - Inline Kotlin collection operations for JIT compilation
+ * - Direct element access patterns
+ * - Proper Truffle function calling with all 4 required arguments
+ * - Immutable operations (create new lists instead of mutating)
  */
 object TruffleArrayListImplementations {
 

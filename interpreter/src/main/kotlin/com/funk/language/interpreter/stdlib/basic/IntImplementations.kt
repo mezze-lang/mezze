@@ -136,21 +136,33 @@ object IntImplementations {
             val record = args[0] as FunkRecord
             val left = record.fields["l"] as? FunkInt ?: throw NativeFunctionException("__native_int_add", "expects 'l' as Int")
             val right = record.fields["r"] as? FunkInt ?: throw NativeFunctionException("__native_int_add", "expects 'r' as Int")
-            FunkInt(left.value + right.value)
+            try {
+                FunkInt(Math.addExact(left.value, right.value))
+            } catch (e: ArithmeticException) {
+                throw FunkException("Integer overflow in addition: ${left.value} + ${right.value}")
+            }
         }
 
         context["__native_int_subtract"] = NativeFunkFunction("__native_int_subtract") { args ->
             val record = args[0] as FunkRecord
             val left = record.fields["l"] as? FunkInt ?: throw NativeFunctionException("__native_int_subtract", "expects 'l' as Int")
             val right = record.fields["r"] as? FunkInt ?: throw NativeFunctionException("__native_int_subtract", "expects 'r' as Int")
-            FunkInt(left.value - right.value)
+            try {
+                FunkInt(Math.subtractExact(left.value, right.value))
+            } catch (e: ArithmeticException) {
+                throw FunkException("Integer overflow in subtraction: ${left.value} - ${right.value}")
+            }
         }
 
         context["__native_int_multiply"] = NativeFunkFunction("__native_int_multiply") { args ->
             val record = args[0] as FunkRecord
             val left = record.fields["l"] as? FunkInt ?: throw NativeFunctionException("__native_int_multiply", "expects 'l' as Int")
             val right = record.fields["r"] as? FunkInt ?: throw NativeFunctionException("__native_int_multiply", "expects 'r' as Int")
-            FunkInt(left.value * right.value)
+            try {
+                FunkInt(Math.multiplyExact(left.value, right.value))
+            } catch (e: ArithmeticException) {
+                throw FunkException("Integer overflow in multiplication: ${left.value} * ${right.value}")
+            }
         }
 
         context["__native_int_divide"] = NativeFunkFunction("__native_int_divide") { args ->
@@ -178,7 +190,65 @@ object IntImplementations {
         context["__native_int_neg"] = NativeFunkFunction("__native_int_neg") { args ->
             val record = args[0] as FunkRecord
             val value = record.fields["n"] as? FunkInt ?: throw NativeFunctionException("__native_int_neg", "expects 'n' as Int")
-            FunkInt(-value.value)
+            try {
+                FunkInt(Math.negateExact(value.value))
+            } catch (e: ArithmeticException) {
+                throw FunkException("Integer overflow in negation: ${value.value}")
+            }
+        }
+
+        context["__native_int_pow"] = NativeFunkFunction("__native_int_pow") { args ->
+            val record = args[0] as FunkRecord
+            val base = record.fields["base"] as? FunkInt ?: throw NativeFunctionException("__native_int_pow", "expects 'base' as Int")
+            val exp = record.fields["exp"] as? FunkInt ?: throw NativeFunctionException("__native_int_pow", "expects 'exp' as Int")
+            if (exp.value < 0) throw FunkException("Negative exponent not supported for integer power")
+            // Compute power using repeated multiplication with overflow checking
+            var result = 1L
+            var b = base.value
+            var e = exp.value
+            try {
+                while (e > 0) {
+                    if (e and 1 == 1L) {
+                        result = Math.multiplyExact(result, b)
+                    }
+                    e = e shr 1
+                    if (e > 0) {
+                        b = Math.multiplyExact(b, b)
+                    }
+                }
+                FunkInt(result)
+            } catch (ex: ArithmeticException) {
+                throw FunkException("Integer overflow in power: ${base.value} ^ ${exp.value}")
+            }
+        }
+
+        context["__native_int_sign"] = NativeFunkFunction("__native_int_sign") { args ->
+            val record = args[0] as FunkRecord
+            val value = record.fields["n"] as? FunkInt ?: throw NativeFunctionException("__native_int_sign", "expects 'n' as Int")
+            FunkInt(when {
+                value.value < 0 -> -1L
+                value.value > 0 -> 1L
+                else -> 0L
+            })
+        }
+
+        context["__native_int_from_string"] = NativeFunkFunction("__native_int_from_string") { args ->
+            val record = args[0] as FunkRecord
+            val s = record.fields["s"] as? FunkString ?: throw NativeFunctionException("__native_int_from_string", "expects 's' as String")
+            try {
+                val value = s.value.toLong()
+                // Return Some {val = value}
+                FunkVariant("Some", FunkRecord(mapOf("val" to FunkInt(value))))
+            } catch (e: NumberFormatException) {
+                // Return None
+                FunkVariant("None", null)
+            }
+        }
+
+        context["__native_int_from_nat"] = NativeFunkFunction("__native_int_from_nat") { args ->
+            val record = args[0] as FunkRecord
+            val n = record.fields["n"] as? FunkNat ?: throw NativeFunctionException("__native_int_from_nat", "expects 'n' as Nat")
+            FunkInt(n.value)
         }
     }
 }

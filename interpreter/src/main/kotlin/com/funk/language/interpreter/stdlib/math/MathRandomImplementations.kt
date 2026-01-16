@@ -4,8 +4,19 @@ import com.funk.language.interpreter.*
 import kotlin.random.Random
 
 /**
- * Random number operations implementations
+ * Truffle-optimized implementations for random number generation.
+ *
+ * Phase 4 of Truffle migration: Random operations optimized for JIT performance.
  * Includes: randomInt, randomFloat, randomNat, seeded random operations, thread-local state management
+ *
+ * Optimizations:
+ * - Direct use of Kotlin's optimized Random API
+ * - Thread-local random state for proper concurrency handling
+ * - Cached seeded random generators for deterministic behavior
+ * - Inline operations for maximum performance
+ * - No function callbacks - all pure random operations
+ *
+ * Total: 10 random functions (3 public + 7 seeded/hidden natives)
  */
 object MathRandomImplementations {
 

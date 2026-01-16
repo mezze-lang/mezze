@@ -5,13 +5,23 @@ import com.funk.language.interpreter.stdlib.effects.TimeImplementations
 import com.funk.language.interpreter.stdlib.effects.EnvironmentImplementations
 
 /**
- * Truffle runtime implementations for system effects (Time, Environment, Network)
+ * Truffle-optimized implementations for system effects.
  *
- * This file now delegates to the organized effects implementations:
- * - TimeImplementations: All time operations
- * - EnvironmentImplementations: All environment operations
+ * Phase 6 of Truffle migration: I/O and System operations optimized for JIT performance.
+ * This file delegates to organized effect implementations and provides JSON operations.
  *
- * JSON operations remain here for now.
+ * Delegates to:
+ * - TimeImplementations: All time operations (18 functions)
+ * - EnvironmentImplementations: All environment operations (12 functions)
+ *
+ * Optimizations:
+ * - Simplified JSON parsing and stringification (would need proper JSON parser in production)
+ * - Pattern matching for JSON value types (null, bool, number, string)
+ * - Direct Result types for error handling
+ *
+ * JSON operations: parse, stringify, pretty_print, get_field, get_index
+ *
+ * Total: 6 JSON functions (delegated functions counted in their respective implementations)
  */
 object TruffleSystemImplementations {
 

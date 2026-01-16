@@ -3,8 +3,17 @@ package com.funk.language.interpreter.stdlib.collections
 import com.funk.language.interpreter.*
 
 /**
- * Native implementations for NonEmptyList operations
- * NonEmptyList is guaranteed to have at least one element
+ * Truffle-optimized implementations for NonEmptyList operations.
+ *
+ * Phase 3 of Truffle migration: Collection operations optimized for JIT performance.
+ * NonEmptyList is an immutable linked list guaranteed to have at least one element.
+ *
+ * Optimizations:
+ * - Helper function for consistent Truffle function calling
+ * - Inline Kotlin collection operations (map, fold, reverse, zip, etc.)
+ * - Safe head/tail operations (no empty list checks needed)
+ * - Custom comparators for sorting
+ * - Type-safe reduction without initial value
  */
 object TruffleNonEmptyListImplementations {
 
