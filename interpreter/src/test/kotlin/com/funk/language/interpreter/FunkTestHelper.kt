@@ -18,6 +18,12 @@ object FunkTestHelper {
     private val parser = FunkParser()
     private val typeChecker = TypeChecker()
 
+    // Shared engine for all test executions to avoid sharing layer violations
+    // This engine is reused across all test contexts to ensure CallTargets can be shared
+    private val sharedEngine = org.graalvm.polyglot.Engine.newBuilder()
+        .option("engine.WarnInterpreterOnly", "false")
+        .build()
+
     /**
      * Execute a Funk program from source code
      */
@@ -28,9 +34,13 @@ object FunkTestHelper {
         // Clear module cache to ensure clean state for each test execution
         com.funk.language.typechecker.ModuleResolver.clearCache()
 
-        // Create polyglot context
+        // Create polyglot context with multi-threading enabled for Loom concurrency
+        // Use the shared engine to avoid sharing layer violations
         Context.newBuilder("funk")
+            .engine(sharedEngine)
             .allowAllAccess(true)
+            .allowCreateThread(true)  // Allow spawning threads
+            .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
             .build().use { context ->
                 // Create source and execute via FunkLanguage
                 val source = Source.newBuilder("funk", sourceCode, sourcePath)
@@ -59,16 +69,28 @@ object FunkTestHelper {
         // Clear module cache to ensure clean state for each test execution
         com.funk.language.typechecker.ModuleResolver.clearCache()
 
-        // Create polyglot context
+        // Create polyglot context with multi-threading enabled for Loom concurrency
+        // Use the shared engine to avoid sharing layer violations
         Context.newBuilder("funk")
+            .engine(sharedEngine)
             .allowAllAccess(true)
+            .allowCreateThread(true)  // Allow spawning threads
+            .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
             .build().use { context ->
-                // Execute the program directly by converting typed AST to Truffle nodes
-                // This preserves all type information, monomorphization, etc.
-                executeProgramDirectly(program, monomorphicInstances, context, root)
+                // Set the polyglot context in ThreadLocal for cross-thread Truffle execution
+                TruffleContextHolder.setPolyglotContext(context)
 
-                // Retrieve result from FunkLanguage storage
-                return FunkLanguage.getLastExecutionResult() ?: FunkNull
+                try {
+                    // Execute the program directly by converting typed AST to Truffle nodes
+                    // This preserves all type information, monomorphization, etc.
+                    executeProgramDirectly(program, monomorphicInstances, context, root)
+
+                    // Retrieve result from FunkLanguage storage
+                    return FunkLanguage.getLastExecutionResult() ?: FunkNull
+                } finally {
+                    // Clear the context from ThreadLocal
+                    TruffleContextHolder.clearEnv()
+                }
             }
     }
 

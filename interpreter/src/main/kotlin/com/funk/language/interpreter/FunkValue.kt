@@ -1086,4 +1086,30 @@ class InterpreterReference(val interpreter: FunkInterpreter) : FunkValue() {
     override fun getDisplayString(): String = "<interpreter-reference>"
 }
 
+/**
+ * Thread handle value - represents a handle to a Java thread (particularly virtual threads).
+ *
+ * Used by the Loom effect for low-level thread coordination via park/unpark operations.
+ * This provides explicit control over thread scheduling for custom synchronization patterns.
+ *
+ * CRITICAL: This is an OPAQUE type - users cannot create these directly.
+ * They can only obtain thread handles via __native_loom_current_thread().
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkThread(
+    val thread: Thread,
+    val threadId: String = thread.toString()
+) : FunkValue() {
+    override fun getDisplayString(): String = "<thread:$threadId>"
+
+    @ExportMessage
+    fun isExecutable(): Boolean = false
+
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    fun execute(arguments: Array<Any?>): Any {
+        throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
+    }
+}
+
 

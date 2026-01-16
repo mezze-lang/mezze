@@ -527,6 +527,8 @@ class TruffleAndLoomIntegrationTest {
 
     @Test
     fun testConcurrentStateManipulation() {
+        // Tests park/unpark/current_thread with true multi-threaded execution.
+        // Worker threads unpark the main thread, demonstrating proper thread coordination.
         val code = """
             $setupCode
 
