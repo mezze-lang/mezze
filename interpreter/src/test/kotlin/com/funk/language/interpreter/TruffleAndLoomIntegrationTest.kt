@@ -528,7 +528,8 @@ class TruffleAndLoomIntegrationTest {
     @Test
     fun testConcurrentStateManipulation() {
         // Tests park/unpark/current_thread with true multi-threaded execution.
-        // Worker threads unpark the main thread, demonstrating proper thread coordination.
+        // Worker threads compute their result THEN unpark the main thread.
+        // This ensures proper ordering and avoids race conditions.
         val code = """
             $setupCode
 
@@ -536,8 +537,9 @@ class TruffleAndLoomIntegrationTest {
                 let main_thread = current_thread {}
 
                 let worker = {id} -> do
+                    let result = id * 2
                     unpark {thread = main_thread}
-                    id * 2
+                    result
 
                 let p1 = spawn {computation = {} -> worker {id = 10}}
                 let p2 = spawn {computation = {} -> worker {id = 20}}
