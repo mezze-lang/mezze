@@ -8,7 +8,9 @@ import com.funk.language.interpreter.*
 object TruffleSetImplementations {
 
     fun registerAll(context: MutableMap<String, FunkValue>) {
-        val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
+        // OLD INTERPRETER CODE REMOVED:
+        // val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
+        // No longer needed - functions are called via Truffle, not old interpreter
 
         // Create empty set
         context["__native_set_empty"] = NativeFunkFunction("__native_set_empty") { args ->
@@ -104,19 +106,17 @@ object TruffleSetImplementations {
 
         // Filter
         context["__native_set_filter"] = NativeFunkFunction("__native_set_filter") { args ->
-            if (interpreter == null) {
-                throw NativeFunctionException("__native_set_filter", "interpreter not available")
-            }
-
             val record = args[0] as FunkRecord
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_filter", "expects 's' as Set")
             val p = record.fields["p"] ?: throw NativeFunctionException("__native_set_filter", "expects 'p' predicate")
 
             val filtered = s.elements.filter { element ->
                 val arg = if (element is FunkRecord) element else FunkRecord(mapOf("val" to element))
+                // Call function via Truffle (not old interpreter)
                 val result = when (p) {
                     is NativeFunkFunction -> p.call(listOf(element))
-                    else -> interpreter.callFunctionWithRecord(p, arg, context)
+                    is FunkTruffleFunction -> p.callTarget.call(arg, p.closureVariables, p.lexicalScope, p.lexicalScopeSlotMap) as FunkValue
+                    else -> throw NativeFunctionException("__native_set_filter", "unsupported function type: ${p::class.simpleName}")
                 }
                 (result as FunkBool).value
             }.toSet()
@@ -126,19 +126,17 @@ object TruffleSetImplementations {
 
         // Map
         context["__native_set_map"] = NativeFunkFunction("__native_set_map") { args ->
-            if (interpreter == null) {
-                throw NativeFunctionException("__native_set_map", "interpreter not available")
-            }
-
             val record = args[0] as FunkRecord
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_map", "expects 's' as Set")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_set_map", "expects 'f' function")
 
             val mapped = s.elements.map { element ->
                 val arg = if (element is FunkRecord) element else FunkRecord(mapOf("val" to element))
+                // Call function via Truffle (not old interpreter)
                 when (f) {
                     is NativeFunkFunction -> f.call(listOf(element))
-                    else -> interpreter.callFunctionWithRecord(f, arg, context)
+                    is FunkTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
+                    else -> throw NativeFunctionException("__native_set_map", "unsupported function type: ${f::class.simpleName}")
                 }
             }.toSet()
 
@@ -147,10 +145,6 @@ object TruffleSetImplementations {
 
         // Fold
         context["__native_set_fold"] = NativeFunkFunction("__native_set_fold") { args ->
-            if (interpreter == null) {
-                throw NativeFunctionException("__native_set_fold", "interpreter not available")
-            }
-
             val record = args[0] as FunkRecord
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_fold", "expects 's' as Set")
             val init = record.fields["init"] ?: throw NativeFunctionException("__native_set_fold", "expects 'init' value")
@@ -159,9 +153,11 @@ object TruffleSetImplementations {
             var accumulator = init
             for (element in s.elements) {
                 val callArg = FunkRecord(mapOf("acc" to accumulator, "elem" to element))
+                // Call function via Truffle (not old interpreter)
                 accumulator = when (f) {
                     is NativeFunkFunction -> f.call(listOf(callArg))
-                    else -> interpreter.callFunctionWithRecord(f, callArg, context)
+                    is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
+                    else -> throw NativeFunctionException("__native_set_fold", "unsupported function type: ${f::class.simpleName}")
                 }
             }
 

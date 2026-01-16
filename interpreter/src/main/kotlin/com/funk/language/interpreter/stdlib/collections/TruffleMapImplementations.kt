@@ -8,7 +8,9 @@ import com.funk.language.interpreter.*
 object TruffleMapImplementations {
 
     fun registerAll(context: MutableMap<String, FunkValue>) {
-        val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
+        // OLD INTERPRETER CODE REMOVED:
+        // val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
+        // No longer needed - functions are called via Truffle, not old interpreter
 
         // Create empty map
         context["__native_map_empty"] = NativeFunkFunction("__native_map_empty") { args ->
@@ -97,19 +99,17 @@ object TruffleMapImplementations {
 
         // Map values
         context["__native_map_map_values"] = NativeFunkFunction("__native_map_map_values") { args ->
-            if (interpreter == null) {
-                throw NativeFunctionException("__native_map_map_values", "interpreter not available")
-            }
-
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_map_values", "expects 'm' as Map")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_map_map_values", "expects 'f' function")
 
             val newEntries = m.entries.map { (k, v) ->
                 val arg = if (v is FunkRecord) v else FunkRecord(mapOf("val" to v))
+                // Call function via Truffle (not old interpreter)
                 val result = when (f) {
                     is NativeFunkFunction -> f.call(listOf(v))
-                    else -> interpreter.callFunctionWithRecord(f, arg, context)
+                    is FunkTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
+                    else -> throw NativeFunctionException("__native_map_map_values", "unsupported function type: ${f::class.simpleName}")
                 }
                 k to result
             }.toMap()
@@ -119,19 +119,17 @@ object TruffleMapImplementations {
 
         // Filter
         context["__native_map_filter"] = NativeFunkFunction("__native_map_filter") { args ->
-            if (interpreter == null) {
-                throw NativeFunctionException("__native_map_filter", "interpreter not available")
-            }
-
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_filter", "expects 'm' as Map")
             val p = record.fields["p"] ?: throw NativeFunctionException("__native_map_filter", "expects 'p' predicate")
 
             val filteredEntries = m.entries.filter { (k, v) ->
                 val entry = FunkRecord(mapOf("key" to k, "value" to v))
+                // Call function via Truffle (not old interpreter)
                 val result = when (p) {
                     is NativeFunkFunction -> p.call(listOf(entry))
-                    else -> interpreter.callFunctionWithRecord(p, entry, context)
+                    is FunkTruffleFunction -> p.callTarget.call(entry, p.closureVariables, p.lexicalScope, p.lexicalScopeSlotMap) as FunkValue
+                    else -> throw NativeFunctionException("__native_map_filter", "unsupported function type: ${p::class.simpleName}")
                 }
                 (result as FunkBool).value
             }.toMap()
@@ -141,10 +139,6 @@ object TruffleMapImplementations {
 
         // Fold
         context["__native_map_fold"] = NativeFunkFunction("__native_map_fold") { args ->
-            if (interpreter == null) {
-                throw NativeFunctionException("__native_map_fold", "interpreter not available")
-            }
-
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_fold", "expects 'm' as Map")
             val init = record.fields["init"] ?: throw NativeFunctionException("__native_map_fold", "expects 'init' value")
@@ -154,9 +148,11 @@ object TruffleMapImplementations {
             for ((k, v) in m.entries) {
                 val entry = FunkRecord(mapOf("key" to k, "value" to v))
                 val callArg = FunkRecord(mapOf("acc" to accumulator, "entry" to entry))
+                // Call function via Truffle (not old interpreter)
                 accumulator = when (f) {
                     is NativeFunkFunction -> f.call(listOf(callArg))
-                    else -> interpreter.callFunctionWithRecord(f, callArg, context)
+                    is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
+                    else -> throw NativeFunctionException("__native_map_fold", "unsupported function type: ${f::class.simpleName}")
                 }
             }
 
@@ -165,19 +161,17 @@ object TruffleMapImplementations {
 
         // From keys
         context["__native_map_from_keys"] = NativeFunkFunction("__native_map_from_keys") { args ->
-            if (interpreter == null) {
-                throw NativeFunctionException("__native_map_from_keys", "interpreter not available")
-            }
-
             val record = args[0] as FunkRecord
             val ks = record.fields["ks"] as? FunkList ?: throw NativeFunctionException("__native_map_from_keys", "expects 'ks' as List")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_map_from_keys", "expects 'f' function")
 
             val entries = ks.elements.associateWith { k ->
                 val arg = if (k is FunkRecord) k else FunkRecord(mapOf("val" to k))
+                // Call function via Truffle (not old interpreter)
                 when (f) {
                     is NativeFunkFunction -> f.call(listOf(k))
-                    else -> interpreter.callFunctionWithRecord(f, arg, context)
+                    is FunkTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
+                    else -> throw NativeFunctionException("__native_map_from_keys", "unsupported function type: ${f::class.simpleName}")
                 }
             }
 
@@ -195,10 +189,6 @@ object TruffleMapImplementations {
 
         // Merge with function
         context["__native_map_merge_with"] = NativeFunkFunction("__native_map_merge_with") { args ->
-            if (interpreter == null) {
-                throw NativeFunctionException("__native_map_merge_with", "interpreter not available")
-            }
-
             val record = args[0] as FunkRecord
             val m1 = record.fields["m1"] as? FunkMap ?: throw NativeFunctionException("__native_map_merge_with", "expects 'm1' as Map")
             val m2 = record.fields["m2"] as? FunkMap ?: throw NativeFunctionException("__native_map_merge_with", "expects 'm2' as Map")
@@ -209,9 +199,11 @@ object TruffleMapImplementations {
                 if (k in result) {
                     val v1 = result[k]!!
                     val callArg = FunkRecord(mapOf("v1" to v1, "v2" to v2))
+                    // Call function via Truffle (not old interpreter)
                     result[k] = when (f) {
                         is NativeFunkFunction -> f.call(listOf(callArg))
-                        else -> interpreter.callFunctionWithRecord(f, callArg, context)
+                        is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
+                        else -> throw NativeFunctionException("__native_map_merge_with", "unsupported function type: ${f::class.simpleName}")
                     }
                 } else {
                     result[k] = v2

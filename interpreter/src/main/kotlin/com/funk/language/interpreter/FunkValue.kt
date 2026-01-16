@@ -545,62 +545,14 @@ data class FunkTruffleFunction(
     override fun toString(): String = "FunkTruffleFunction(${name ?: "anonymous"}, ${closureVariables.size} closure vars, lexicalScope=${lexicalScope != null})"
 }
 
-/**
- * Function value for direct interpreter execution
- */
-@ExportLibrary(InteropLibrary::class)
-data class FunkFunction(
-    val parameters: List<String>, // Simplified parameters
-    val body: com.funk.language.ast.Expression,
-    val capturedEnvironment: Map<String, FunkValue>,
-    val name: String? = null
-) : FunkValue() {
-    override fun getDisplayString(): String = name ?: "<function>"
-    
-    /**
-     * Call this function with the given arguments using Truffle execution
-     */
-    fun call(arguments: List<FunkValue>): FunkValue {
-        // Simplified function call - not using Truffle for now
-        return FunkString("function_result")
-    }
-    
-    @ExportMessage
-    fun isExecutable(): Boolean = true
-    
-    @ExportMessage
-    fun execute(arguments: Array<Any?>): Any {
-        // For interop, we'd need to convert arguments and call through interpreter
-        throw FunkException("Direct interop execution not implemented")
-    }
-}
-
-/**
- * Partially applied function value
- */
-@ExportLibrary(InteropLibrary::class)
-data class FunkPartialFunction(
-    val originalFunction: FunkValue,
-    val providedArguments: Map<String, FunkValue>,
-    val remainingParameters: List<String>
-) : FunkValue() {
-    override fun getDisplayString(): String = "<partial function>"
-    
-    @ExportMessage
-    fun isExecutable(): Boolean = true
-    
-    @ExportMessage
-    fun execute(arguments: Array<Any?>): Any {
-        throw FunkException("Partial function execution through interop not implemented")
-    }
-}
-
-/**
- * Placeholder for recursive function references during evaluation
- */
-class RecursiveFunctionPlaceholder(val name: String) : FunkValue() {
-    override fun getDisplayString(): String = "<recursive-placeholder-$name>"
-}
+// OLD INTERPRETER CODE REMOVED:
+// - FunkFunction (old map-based interpreter function)
+// - FunkPartialFunction (old partial application)
+// - RecursiveFunctionPlaceholder (old recursion handling)
+//
+// All functions now use FunkTruffleFunction with Truffle call targets.
+// Partial application is handled by PartiallyAppliedFunction (wraps Truffle closures).
+// Recursion is handled natively by Truffle's lexical scoping.
 
 /**
  * Natural number value (non-negative integers)
@@ -1083,13 +1035,10 @@ data class FunkPromise(
     fun isRejected(): Boolean = future.isCompletedExceptionally
 }
 
-/**
- * Wrapper for FunkInterpreter to store in context
- * This is NOT a FunkValue (intentionally) - it's just stored in the context Map
- */
-class InterpreterReference(val interpreter: FunkInterpreter) : FunkValue() {
-    override fun getDisplayString(): String = "<interpreter-reference>"
-}
+// OLD INTERPRETER CODE REMOVED:
+// - InterpreterReference (legacy wrapper for old interpreter)
+//
+// No longer needed - all execution goes through Truffle, not the old interpreter.
 
 /**
  * Thread handle value - represents a handle to a Java thread (particularly virtual threads).

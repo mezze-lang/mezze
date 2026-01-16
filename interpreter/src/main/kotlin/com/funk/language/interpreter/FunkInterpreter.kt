@@ -338,67 +338,19 @@ class FunkInterpreter {
     }
 
     // ========================================================================
-    // Legacy stub methods for backward compatibility with old stdlib files
-    // These are NOT used in the Truffle execution path but needed for compilation
+    // OLD INTERPRETER CODE REMOVED
     // ========================================================================
-
-    /**
-     * Legacy method - not used in Truffle execution.
-     * Continuations are now handled by Truffle nodes.
-     */
-    fun getCurrentExecutionState(): ExecutionState? {
-        throw UnsupportedOperationException("getCurrentExecutionState not supported in Truffle-only mode. Continuations are handled by Truffle nodes.")
-    }
-
-    /**
-     * Legacy method - not used in Truffle execution.
-     */
-    fun pushExecutionState(state: ExecutionState) {
-        throw UnsupportedOperationException("pushExecutionState not supported in Truffle-only mode.")
-    }
-
-    /**
-     * Legacy method - not used in Truffle execution.
-     */
-    fun popExecutionState() {
-        throw UnsupportedOperationException("popExecutionState not supported in Truffle-only mode.")
-    }
-
-    /**
-     * Legacy method - not used in Truffle execution.
-     */
-    fun callFunctionWithRecord(function: FunkValue, args: FunkRecord, context: MutableMap<String, FunkValue>): FunkValue {
-        throw UnsupportedOperationException("callFunctionWithRecord not supported in Truffle-only mode. Functions are called via Truffle nodes.")
-    }
-
-    /**
-     * Legacy method - not used in Truffle execution.
-     */
-    fun callFunction(function: FunkValue, args: List<FunkValue>, context: MutableMap<String, FunkValue>): FunkValue {
-        throw UnsupportedOperationException("callFunction not supported in Truffle-only mode. Functions are called via Truffle nodes.")
-    }
-
-    /**
-     * Legacy method - not used in Truffle execution.
-     */
-    fun evaluateExpression(expr: Expression, context: MutableMap<String, FunkValue>): FunkValue {
-        throw UnsupportedOperationException("evaluateExpression not supported in Truffle-only mode. Expressions are evaluated via Truffle nodes.")
-    }
-
-    /**
-     * Legacy method - not used in Truffle execution.
-     */
-    fun executeStatement(stmt: Statement, context: MutableMap<String, FunkValue>): FunkValue {
-        throw UnsupportedOperationException("executeStatement not supported in Truffle-only mode. Statements are executed via Truffle nodes.")
-    }
-
-    /**
-     * Legacy execution state data class for compilation compatibility
-     */
-    data class ExecutionState(
-        val remainingStatements: List<Statement>,
-        val resultExpression: Expression,
-        val context: Map<String, FunkValue>,
-        val location: String
-    )
+    // All legacy methods from the old map-based interpreter have been removed:
+    // - evaluateExpression() - old AST walking evaluation
+    // - executeStatement() - old statement execution
+    // - callFunction() - old function calling
+    // - callFunctionWithRecord() - old function calling with record args
+    // - getCurrentExecutionState() - old continuation system
+    // - pushExecutionState() - old continuation system
+    // - popExecutionState() - old continuation system
+    // - ExecutionState data class - old continuation state
+    //
+    // All execution now goes through Truffle nodes via FunkLanguage.
+    // Functions are called via FunkTruffleFunction and Truffle call targets.
+    // Continuations are handled by the effect system and state machines.
 }
