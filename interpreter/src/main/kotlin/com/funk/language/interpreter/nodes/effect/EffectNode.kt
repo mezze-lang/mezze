@@ -45,8 +45,8 @@ class AsyncEffectCallNode(
         val effectHandler = getEffectHandler()
         val context = mutableMapOf<String, FunkValue>()
         getContext().captureEnvironment().forEach { (k, v) -> context[k] = v }
-        
-        return effectHandler.executeEffectCall(effectName, operationName, arguments, context, getInterpreter())
+
+        return effectHandler.executeEffectCall(effectName, operationName, arguments, context)
     }
     
     private fun executeAsync(frame: VirtualFrame, arguments: FunkValue): FunkValue {
@@ -70,8 +70,8 @@ class AsyncEffectCallNode(
         val effectHandler = getEffectHandler()
         val context = mutableMapOf<String, FunkValue>()
         getContext().captureEnvironment().forEach { (k, v) -> context[k] = v }
-        
-        return effectHandler.executeEffectCall(effectName, operationName, arguments, context, getInterpreter())
+
+        return effectHandler.executeEffectCall(effectName, operationName, arguments, context)
     }
     
     private fun isAsyncEffect(effectName: String, operationName: String): Boolean {
@@ -87,13 +87,7 @@ class AsyncEffectCallNode(
     }
     
     private fun getEffectHandler(): EffectHandler {
-        return getContext().let { context ->
-            EffectHandler()
-        }
-    }
-    
-    private fun getInterpreter(): com.funk.language.interpreter.FunkInterpreter {
-        return com.funk.language.interpreter.FunkInterpreter()
+        return getContext().effectHandler
     }
 }
 

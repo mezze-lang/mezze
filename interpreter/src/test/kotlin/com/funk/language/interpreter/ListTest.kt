@@ -18,7 +18,6 @@ class ListTest {
 
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
-    private lateinit var interpreter: FunkInterpreter
 
     @BeforeEach
     fun setup() {
@@ -30,7 +29,6 @@ class ListTest {
 
         parser = FunkParser()
         typeChecker = TypeChecker()
-        interpreter = FunkInterpreter()
     }
 
     // ============================================================================

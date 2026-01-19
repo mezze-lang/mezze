@@ -895,8 +895,7 @@ class ASTToTruffleConverter(
                         effectName = receiverName,
                         operationName = operationName,
                         arguments = arguments,
-                        context = effectContext,
-                        interpreter = com.funk.language.interpreter.FunkInterpreter()
+                        context = effectContext
                     )
                 } else {
 
@@ -1748,12 +1747,13 @@ class ASTToTruffleConverter(
     }
     
     /**
-     * Convert do expression to a parallel-aware node with runtime parallelism detection
+     * Convert do expression to a sequential execution node
      */
     private fun convertDoExpression(doExpr: DoExpression): FunkNode {
-        // Use the factory to create the most appropriate do-expression node
-        return com.funk.language.interpreter.nodes.control.DoExpressionNodeFactory
-            .createDoExpressionNode(doExpr, this)
+        // Convert each statement in the do block to a node
+        val statementNodes = doExpr.statements.map { convertStatement(it) }.toTypedArray()
+        // Return a sequence node that executes all statements in order
+        return SequenceNode(statementNodes)
     }
     
     /**

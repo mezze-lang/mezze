@@ -12,13 +12,11 @@ import kotlin.test.assertNotNull
 class BuiltinEffectsTest {
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
-    private lateinit var interpreter: FunkInterpreter
 
     @BeforeEach
     fun setup() {
         parser = FunkParser()
         typeChecker = TypeChecker()
-        interpreter = FunkInterpreter()
     }
 
     @Test

@@ -914,7 +914,8 @@ data class Program(
 @Serializable
 data class TypeCheckResult(
     val program: Program,  // User's original AST with type information
-    val monomorphicInstances: Map<String, LetBinding> = emptyMap()  // Compiler-generated specialized functions (e.g., "add$Int" -> specialized binding)
+    val monomorphicInstances: Map<String, LetBinding> = emptyMap(),  // Compiler-generated specialized functions (e.g., "add$Int" -> specialized binding)
+    val preResolvedItems: List<ProgramItem> = emptyList()  // Pre-resolved stdlib items (functions, effects, handlers) for standalone compilation
 )
 
 @Serializable

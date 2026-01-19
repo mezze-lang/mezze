@@ -11,13 +11,11 @@ import java.nio.file.Paths
 class DebugHandlersTest {
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
-    private lateinit var interpreter: FunkInterpreter
 
     @BeforeEach
     fun setup() {
         parser = FunkParser()
         typeChecker = TypeChecker()
-        interpreter = FunkInterpreter()
         System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
         // Clear module cache for fresh resolution
         com.funk.language.typechecker.ModuleResolver.clearCache()

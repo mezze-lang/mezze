@@ -72,7 +72,7 @@ object TruffleNativeImplementations {
         FilesystemImplementations.registerAll(context)
         TimeImplementations.registerAll(context)
         EnvironmentImplementations.registerAll(context)
-        ContinuationImplementations.registerAll(context, null)  // interpreter will be set up later
+        ContinuationImplementations.registerAll(context)
         LoomImplementations.registerAll(context)  // Project Loom virtual threads
 
         // Register logic implementations (boolean operations, comparisons)

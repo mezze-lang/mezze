@@ -16,13 +16,11 @@ class EffectAssociatedTypesInterpreterTest {
 
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
-    private lateinit var interpreter: FunkInterpreter
 
     @BeforeEach
     fun setup() {
         parser = FunkParser()
         typeChecker = TypeChecker()
-        interpreter = FunkInterpreter()
         // Set project root for stdlib module resolution
         System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
         // Clear module cache for fresh resolution

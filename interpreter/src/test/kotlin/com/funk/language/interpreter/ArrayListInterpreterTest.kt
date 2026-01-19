@@ -11,11 +11,9 @@ class ArrayListInterpreterTest {
     
     private val parser = FunkParser()
     private val typeChecker = TypeChecker()
-    private lateinit var interpreter: FunkInterpreter
     
     @BeforeEach
     fun setUp() {
-        interpreter = FunkInterpreter()
     }
     
     @Test

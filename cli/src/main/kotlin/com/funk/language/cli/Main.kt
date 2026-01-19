@@ -5,9 +5,10 @@ import com.funk.language.ast.*
 import com.funk.language.ast.prettyPrintType
 import com.funk.language.ast.prettyPrintTypeWithAliases
 import com.funk.language.typechecker.*
-import com.funk.language.interpreter.FunkException
-import com.funk.language.interpreter.FunkLanguage
+import com.funk.language.interpreter.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import org.graalvm.polyglot.Context
 import org.graalvm.polyglot.Engine
 import org.graalvm.polyglot.Source
@@ -152,7 +153,7 @@ private fun showCommandHelp(command: String) {
             println("USAGE: funk exec [file]")
             println()
             println("Execute Funk source code using the Truffle runtime")
-            println("Fast startup, interpreter-only execution in native binary")
+            println("Fast startup, direct execution without compilation")
             println()
             println("OPTIONS:")
             println("  -h, --help         Show this help message")
@@ -165,7 +166,7 @@ private fun showCommandHelp(command: String) {
         "compile" -> {
             println("USAGE: funk compile <file> [output]")
             println()
-            println("Compile Funk source code to a standalone JAR")
+            println("Compile Funk source code to a standalone JAR executable")
             println()
             println("ARGUMENTS:")
             println("  <file>             Input Funk source file")
@@ -179,8 +180,8 @@ private fun showCommandHelp(command: String) {
             println("  funk compile program.funk myapp.jar      # Creates myapp.jar")
             println()
             println("OUTPUT:")
-            println("  Pre-compiled AST + Interpreter + Truffle runtime")
-            println("  Smaller size, faster startup than full JIT builds")
+            println("  Standalone JAR with pre-compiled AST + Truffle runtime")
+            println("  Fast startup (~500ms), full JIT optimization, cross-platform")
             println()
         }
         
@@ -390,11 +391,10 @@ private fun handleExecCommand(args: List<String>) {
     val ast = parser.parse(source, file = fileName)
 
     val typeChecker = TypeChecker()
-    val typeCheckResult = if (filePath != null) {
-        typeChecker.typeCheck(ast, filePath.parent ?: filePath)
-    } else {
-        typeChecker.typeCheck(ast)
-    }
+    // Use funk.project.root for module resolution, not the user's file directory
+    val projectRootForTypeCheck = System.getProperty("funk.project.root")?.let { java.nio.file.Paths.get(it) }
+        ?: java.nio.file.Paths.get(".")
+    val typeCheckResult = typeChecker.typeCheck(ast, projectRootForTypeCheck)
 
     // Get the type of the last expression in the program
     val lastItem = typeCheckResult.program.items.lastOrNull()
@@ -437,10 +437,13 @@ private fun handleExecCommand(args: List<String>) {
     }
 
     try {
-        // Execute using the interpreter directly with the already type-checked AST
+        // Execute using Truffle via polyglot API directly with the already type-checked AST
         // No need to parse/type-check again!
-        val interpreter = com.funk.language.interpreter.FunkInterpreter(skipParserSetup = false)
-        val result = interpreter.execute(typeCheckResult.program)
+        // Use funk.project.root system property, or current working directory
+        // The project root should point to the Funk installation (where stdlib is), not the user's file location
+        val projectRoot = System.getProperty("funk.project.root")?.let { java.nio.file.Paths.get(it) }
+            ?: java.nio.file.Paths.get(".")
+        executeFunkProgram(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         // Program should return {}, so we don't print the result
         println()
@@ -473,8 +476,8 @@ private fun handleCompileCommand(args: List<String>) {
         showCommandHelp("compile")
         return
     }
-    
-    // Parse arguments (simplified - no more -o flag)
+
+    // Parse arguments
     if (args.isEmpty()) {
         println("❌ Error: compile command requires an input file")
         println()
@@ -482,21 +485,20 @@ private fun handleCompileCommand(args: List<String>) {
         println("Use 'funk compile --help' for more information")
         return
     }
-    
+
     val inputFileName = args[0]
     val outputFileName = if (args.size > 1) args[1] else ""
-    
+
     val inputFile = File(inputFileName)
     if (!inputFile.exists()) {
         println("❌ Error: Input file not found at '$inputFileName'")
         return
     }
-    
-    // Determine output file name
+
+    // Determine output file name (always .jar)
     val outputFile = if (outputFileName.isNotEmpty()) {
         File(outputFileName)
     } else {
-        // Default: replace .funk extension with .jar, or add .jar
         val inputName = inputFile.nameWithoutExtension
         File(inputFile.parent ?: ".", "$inputName.jar")
     }
@@ -511,23 +513,26 @@ private fun handleCompileCommand(args: List<String>) {
         // Parse and type check the source
         val parser = FunkParser()
         val ast = parser.parse(source)
-        
+
         val typeChecker = TypeChecker()
-        val typeCheckResult = typeChecker.typeCheck(ast, inputFile.toPath().parent ?: inputFile.toPath())
+        // Use funk.project.root for module resolution, not the user's file directory
+        val projectRootForTypeCheck = System.getProperty("funk.project.root")?.let { java.nio.file.Paths.get(it) }
+            ?: java.nio.file.Paths.get(".")
+        val typeCheckResult = typeChecker.typeCheck(ast, projectRootForTypeCheck)
 
         println("✅ Type checking successful")
 
-        // Always create standalone JAR (AST + Interpreter + Truffle)
-        createStandaloneJar(inputFile, outputFile, source, typeCheckResult.program)
-        
+        // Create standalone JAR (AST + Interpreter + Truffle)
+        createStandaloneJar(inputFile, outputFile, source, typeCheckResult.program, typeCheckResult.monomorphicInstances, typeCheckResult.preResolvedItems)
+
         println("✅ Compilation successful!")
         println()
         println("📦 Created: ${outputFile.absolutePath}")
         println("📏 Size: ${outputFile.length() / 1024}KB")
         println()
         println("🚀 Run: java -jar ${outputFile.name}")
-        println("   (Pre-compiled AST, smaller size, faster startup)")
-        
+        println("   (Standalone JAR with pre-compiled AST and full Truffle JIT)")
+
     } catch (e: TypeCheckError) {
         // Pass source code and file for enhanced error messages with code snippets
         println(ErrorPrettyPrinter.prettyPrint(e, source, inputFile.name))
@@ -539,81 +544,202 @@ private fun handleCompileCommand(args: List<String>) {
     }
 }
 
-private fun createStandaloneJar(inputFile: File, outputFile: File, source: String, typedProgram: Program) {
-        println("🔧 Creating standalone JAR with full Truffle JIT support...")
-    
+private fun createStandaloneJar(
+    inputFile: File,
+    outputFile: File,
+    source: String,
+    typedProgram: Program,
+    monomorphicInstances: Map<String, LetBinding>,
+    preResolvedItems: List<ProgramItem>
+) {
+    println("🔧 Creating standalone JAR with full Truffle JIT support...")
+
     // Create a temporary directory for JAR contents
     val tempDir = kotlin.io.path.createTempDirectory("funk-compile").toFile()
-    
+
     try {
         // 1. Create a Kotlin main class that runs the embedded program
-        createKotlinMainClass(tempDir, inputFile, source)
-        
+        createKotlinMainClass(tempDir, inputFile, source, monomorphicInstances, preResolvedItems)
+
         // 2. Build the JAR using Gradle task (which will compile Kotlin)
         buildJarWithGradle(tempDir, outputFile, inputFile.nameWithoutExtension)
-        
+
     } finally {
         // Clean up temp directory
         tempDir.deleteRecursively()
     }
 }
 
-private fun createKotlinMainClass(tempDir: File, inputFile: File, source: String) {
+private fun createKotlinMainClass(
+    tempDir: File,
+    inputFile: File,
+    source: String,
+    monomorphicInstances: Map<String, LetBinding>,
+    preResolvedItems: List<ProgramItem>
+) {
     // Parse and type-check at compile time to get enhanced AST
     val parser = FunkParser()
     val typeChecker = TypeChecker()
-    
+
     val program = parser.parse(source)
-    val projectRoot = inputFile.toPath().parent ?: inputFile.toPath()
+    // Use funk.project.root for module resolution
+    val projectRoot = System.getProperty("funk.project.root")?.let { java.nio.file.Paths.get(it) }
+        ?: java.nio.file.Paths.get(".")
     val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
 
-    // Serialize the enhanced AST to JSON (clean user AST only, no compiler artifacts)
+    // Use the pre-resolved items from the caller (typeCheckResult) instead of recalculating
+    // This ensures we use the same collection that was already computed
+
+    // Serialize the enhanced AST and monomorphic instances to JSON
     val json = kotlinx.serialization.json.Json {
         prettyPrint = false
         ignoreUnknownKeys = true
     }
     val serializedAST = json.encodeToString(Program.serializer(), typeCheckResult.program)
+
+    // Serialize monomorphic instances (pre-resolved stdlib + user modules)
+    val serializedMonomorphics = json.encodeToString(
+        MapSerializer(String.serializer(), LetBinding.serializer()),
+        typeCheckResult.monomorphicInstances
+    )
+
+    // Serialize pre-resolved items (effect declarations, handlers, etc.)
+    val serializedPreResolved = json.encodeToString(
+        kotlinx.serialization.builtins.ListSerializer(ProgramItem.serializer()),
+        preResolvedItems
+    )
+
     val mainClassDir = File(tempDir, "src/main/kotlin/com/funk/standalone")
     mainClassDir.mkdirs()
-    
-    val mainClassContent = """
-package com.funk.standalone
 
+    val imports = """
 import com.funk.language.ast.Program
-import com.funk.language.interpreter.FunkInterpreter
+import com.funk.language.ast.LetBinding
+import com.funk.language.ast.ProgramItem
+import com.funk.language.interpreter.FunkLanguage
+import com.funk.language.interpreter.TruffleContextHolder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import org.graalvm.polyglot.Context
 import org.graalvm.polyglot.Engine
 import org.graalvm.polyglot.Source
 import java.nio.file.Paths
+    """.trimIndent()
+
+    val runtimeDescription = """
+ * Runtime: JVM with full polyglot support
+ * - Can dynamically embed Python, JavaScript, Ruby, etc.
+ * - Full Truffle JIT optimization for peak performance
+ * - Supports cross-language interop
+ * - Fast startup (~500ms) with pre-compiled AST
+        """.trimIndent()
+
+    val executionFunction = """
+    /**
+     * Execute program using polyglot embedding API (JAR runtime).
+     *
+     * This runtime supports embedding other Truffle languages:
+     * - Python (via GraalPy)
+     * - JavaScript (via GraalJS)
+     * - Ruby (via TruffleRuby)
+     * - etc.
+     *
+     * All stdlib items are pre-resolved at compile time (functions, effects, handlers),
+     * so no module loading or stdlib extraction is needed at runtime.
+     */
+    private fun executeTruffleProgram(
+        program: Program,
+        monomorphicInstances: Map<String, LetBinding>,
+        preResolvedItems: List<ProgramItem>
+    ) {
+        // Clear module cache to ensure clean state
+        com.funk.language.typechecker.ModuleResolver.clearCache()
+
+        // Create shared engine to avoid context sharing violations
+        val sharedEngine = Engine.newBuilder()
+            .option("engine.WarnInterpreterOnly", "false")
+            .build()
+
+        // Create polyglot context
+        Context.newBuilder("funk")
+            .engine(sharedEngine)
+            .allowAllAccess(true)
+            .allowCreateThread(true)
+            .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
+            .build().use { context ->
+                // Set the polyglot context in ThreadLocal for cross-thread Truffle execution
+                TruffleContextHolder.setPolyglotContext(context)
+
+                try {
+                    // Set pre-resolved stdlib items (NO runtime module loading!)
+                    // Use a dummy path since we don't need stdlib files
+                    FunkLanguage.setProgramForDirectExecution(program, Paths.get("."))
+                    FunkLanguage.setMonomorphicInstances(monomorphicInstances)
+                    FunkLanguage.setPreResolvedItems(preResolvedItems)
+
+                    // Trigger execution with a special marker source
+                    val source = Source.newBuilder("funk", "# DIRECT_AST_EXECUTION", "__direct_execution__.funk")
+                        .buildLiteral()
+                    context.eval(source)
+
+                } finally {
+                    // Clear the context from ThreadLocal
+                    TruffleContextHolder.clearEnv()
+                }
+            }
+    }
+        """.trimIndent()
+
+    val mainClassContent = """
+package com.funk.standalone
+
+$imports
 
 /**
  * Standalone executable for ${inputFile.name}
  * Generated by Funk compiler with pre-processed enhanced AST
- * 
- * This JAR contains the pre-parsed and type-checked AST, so no parser is needed at runtime.
- * Uses full Truffle execution with JIT compilation for maximum performance.
+ *
+$runtimeDescription
+ *
+ * This executable contains:
+ * - Pre-parsed and type-checked AST (no parsing needed at runtime)
+ * - Pre-resolved stdlib and module functions (no module loading needed)
+ * - Pre-resolved effect declarations and handlers
+ * - Truffle runtime for execution
+ *
+ * All dependencies are resolved at compile time for fast startup and execution.
  */
 object Main {
     private const val ENHANCED_AST_JSON = ${escapeForKotlin(serializedAST)}
+    private const val MONOMORPHIC_INSTANCES_JSON = ${escapeForKotlin(serializedMonomorphics)}
+    private const val PRE_RESOLVED_ITEMS_JSON = ${escapeForKotlin(serializedPreResolved)}
     private const val PROGRAM_NAME = "${inputFile.name}"
-    private const val PROJECT_ROOT = "${projectRoot.toAbsolutePath()}"
-    
+
     @JvmStatic
     fun main(args: Array<String>) {
         try {
-            // Deserialize the enhanced AST (no parsing needed!)
             val json = Json { ignoreUnknownKeys = true }
+
+            // Deserialize the enhanced AST (no parsing needed!)
             val enhancedProgram = json.decodeFromString<Program>(ENHANCED_AST_JSON)
-            
-            // Execute using full Truffle with JIT optimization
-            val result = executeTruffleProgram(enhancedProgram)
-            
-            // Print result if it's meaningful
-            if (result != null && result.toString() != "null") {
-                println(result)
-            }
-            
+
+            // Deserialize pre-resolved monomorphic instances (stdlib + user modules)
+            val monomorphicInstances = json.decodeFromString(
+                MapSerializer(String.serializer(), LetBinding.serializer()),
+                MONOMORPHIC_INSTANCES_JSON
+            )
+
+            // Deserialize pre-resolved items (effect declarations, handlers)
+            val preResolvedItems = json.decodeFromString(
+                ListSerializer(ProgramItem.serializer()),
+                PRE_RESOLVED_ITEMS_JSON
+            )
+
+            // Execute using Truffle runtime
+            executeTruffleProgram(enhancedProgram, monomorphicInstances, preResolvedItems)
+
         } catch (e: Exception) {
             System.err.println("Error executing ${'$'}PROGRAM_NAME: ${'$'}{e.message}")
             if (args.isNotEmpty() && args[0] == "--debug") {
@@ -622,43 +748,8 @@ object Main {
             kotlin.system.exitProcess(1)
         }
     }
-    
-    /**
-     * Execute program using full Truffle with JIT optimization
-     */
-    private fun executeTruffleProgram(program: Program): Any? {
-        // Create engine with JIT compilation enabled
-        val engine = Engine.newBuilder()
-            .allowExperimentalOptions(true)
-            .build()
-            
-        // Create context for Funk language with JIT optimization
-        val context = Context.newBuilder("funk")
-            .engine(engine)
-            .allowAllAccess(true)
-            .allowExperimentalOptions(true)
-            .build()
-        
-        return try {
-            // Execute the pre-processed AST directly using Funk interpreter
-            // Create interpreter without parser dependencies since modules are resolved at compile time
-            val interpreter = com.funk.language.interpreter.FunkInterpreter(skipParserSetup = true)
-            val result = interpreter.execute(program)
-            
-            // Convert FunkValue to appropriate return type for output
-            when (result) {
-                is com.funk.language.interpreter.FunkInt -> result.value
-                is com.funk.language.interpreter.FunkFloat -> result.value
-                is com.funk.language.interpreter.FunkString -> result.value
-                is com.funk.language.interpreter.FunkBool -> result.value
-                is com.funk.language.interpreter.FunkNull -> null
-                else -> result.getDisplayString()
-            }
-        } finally {
-            context.close()
-            engine.close()
-        }
-    }
+
+$executionFunction
 }
     """.trimIndent()
     
@@ -667,8 +758,8 @@ object Main {
     // Also create a simple build.gradle.kts for this standalone project
     val buildGradleContent = """
 plugins {
-    kotlin("jvm") version "1.9.22"
-    kotlin("plugin.serialization") version "1.9.22"
+    kotlin("jvm") version "2.2.0"
+    kotlin("plugin.serialization") version "2.2.0"
     application
     id("com.github.johnrengelman.shadow") version "8.1.1"
 }
@@ -684,27 +775,26 @@ repositories {
 dependencies {
     // Serialization for AST deserialization
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
-    
-    // Full Truffle dependencies for JIT compilation
+
+    // GraalVM Truffle dependencies for polyglot runtime
     implementation("org.graalvm.polyglot:polyglot:24.2.2")
     implementation("org.graalvm.sdk:graal-sdk:24.2.2")
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
-    
-    // Runtime optimization support (enables JIT compilation!)
-    runtimeOnly("org.graalvm.truffle:truffle-runtime:24.2.2")
-    
+    implementation("org.graalvm.truffle:truffle-runtime:24.2.2")
+
     // Funk language components
     ${generateTruffleEnabledDependencies()}
 }
 
-kotlin {
-    jvmToolchain(21)
+// Match the main project's JVM target (Kotlin 2.2.0 supports JDK 24)
+tasks.withType<JavaCompile> {
+    options.release.set(24)
 }
 
 tasks.shadowJar {
     archiveClassifier.set("")
     mergeServiceFiles()
-    
+
     manifest {
         attributes["Main-Class"] = "com.funk.standalone.Main"
     }
@@ -712,39 +802,45 @@ tasks.shadowJar {
     """.trimIndent()
     
     File(tempDir, "build.gradle.kts").writeText(buildGradleContent)
-    
+
     // Copy our Funk language JARs to the temp directory
     copyFunkLanguageJars(tempDir)
-    
-    println("✅ Created Kotlin main class wrapper")
-}
 
-private fun generateFunkDependencies(): String {
-    return """
-    // ANTLR runtime for parsing
-    implementation("org.antlr:antlr4-runtime:4.13.1")
-    
-    // Local Funk language JARs (copied from parent project)
-    implementation(files("libs/funk-parser.jar"))
-    implementation(files("libs/funk-typechecker.jar")) 
-    implementation(files("libs/funk-interpreter.jar"))
-    """.trimIndent()
+    println("✅ Created Kotlin main class with pre-resolved modules")
 }
 
 private fun generateTruffleEnabledDependencies(): String {
     return """
-    // AST definitions and interpreter with Truffle support (no parser/typechecker needed!)
+    // AST definitions and interpreter with Truffle support
     implementation(files("libs/funk-ast.jar"))
     implementation(files("libs/funk-interpreter.jar"))
+    implementation(files("libs/funk-parser.jar"))
+    implementation(files("libs/funk-typechecker.jar"))
     """.trimIndent()
 }
 
 
+private fun copyStdlibResources(tempDir: File, projectRoot: Path) {
+    // Copy stdlib directory to resources so it's bundled in the JAR
+    val stdlibDir = projectRoot.resolve("stdlib/std").toFile()
+    if (!stdlibDir.exists()) {
+        throw IllegalStateException("Stdlib directory not found at: ${stdlibDir.absolutePath}")
+    }
+
+    val resourcesDir = File(tempDir, "src/main/resources/stdlib/std")
+    resourcesDir.mkdirs()
+
+    stdlibDir.copyRecursively(resourcesDir, overwrite = true)
+    println("📦 Bundled stdlib into JAR resources")
+}
+
 private fun copyFunkLanguageJars(tempDir: File) {
     val libsDir = File(tempDir, "libs")
     libsDir.mkdirs()
-    
-    val projectRoot = File(".")
+
+    // Use funk.project.root system property to find the Funk installation
+    val projectRootPath = System.getProperty("funk.project.root") ?: "."
+    val projectRoot = File(projectRootPath)
     
     // Copy AST JAR (shared AST definitions)
     val astJar = File(projectRoot, "ast/build/libs/ast-1.0.0.jar")
@@ -780,15 +876,6 @@ private fun copyFunkLanguageJars(tempDir: File) {
         println("📦 Copied typechecker JAR")
     } else {
         throw IllegalStateException("Typechecker JAR not found: ${typecheckerJar.absolutePath}. Please run 'gradle build' first.")
-    }
-    
-    // Copy Truffle compiler JAR for JIT optimization
-    val truffleCompilerJar = File(System.getenv("JAVA_HOME"), "lib/truffle/truffle-compiler.jar")
-    if (truffleCompilerJar.exists()) {
-        truffleCompilerJar.copyTo(File(libsDir, "truffle-compiler.jar"), overwrite = true)
-        println("📦 Copied Truffle JIT compiler")
-    } else {
-        println("⚠️  Truffle compiler JAR not found - JAR will run in interpreter mode")
     }
 }
 
@@ -832,6 +919,7 @@ private fun buildJarWithGradle(tempDir: File, outputFile: File, programName: Str
 private fun escapeForKotlin(source: String): String {
     return "\"\"\"" + source.replace("\"\"\"", "\\\"\\\"\\\"") + "\"\"\""
 }
+
 
 /**
  * Enhanced error reporting functions
@@ -1000,19 +1088,101 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
 }
 
 /**
+ * Execute a Funk program using Truffle polyglot API
+ */
+private fun executeFunkProgram(program: Program, monomorphicInstances: Map<String, LetBinding>, projectRoot: Path): FunkValue {
+    // Clear module cache to ensure clean state
+    com.funk.language.typechecker.ModuleResolver.clearCache()
+
+    // Create shared engine to avoid context sharing violations
+    val sharedEngine = Engine.newBuilder()
+        .option("engine.WarnInterpreterOnly", "false")
+        .build()
+
+    // Create polyglot context
+    Context.newBuilder("funk")
+        .engine(sharedEngine)
+        .allowAllAccess(true)
+        .allowCreateThread(true)
+        .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
+        .build().use { context ->
+            // Set the polyglot context in ThreadLocal for cross-thread Truffle execution
+            TruffleContextHolder.setPolyglotContext(context)
+
+            try {
+                // Store the program and monomorphic instances for FunkLanguage to use
+                FunkLanguage.setProgramForDirectExecution(program, projectRoot)
+                FunkLanguage.setMonomorphicInstances(monomorphicInstances)
+
+                // Trigger execution with a special marker source
+                val source = Source.newBuilder("funk", "# DIRECT_AST_EXECUTION", "__direct_execution__.funk")
+                    .buildLiteral()
+                context.eval(source)
+
+                // Retrieve result from FunkLanguage storage
+                return FunkLanguage.getLastExecutionResult() ?: FunkNull
+            } finally {
+                // Clear the context from ThreadLocal
+                TruffleContextHolder.clearEnv()
+            }
+        }
+}
+
+/**
+ * Execute a Funk program for JAR (used in compiled standalone JAR code)
+ */
+private fun executeFunkProgramForJar(program: Program, monomorphicInstances: Map<String, LetBinding>, projectRoot: Path): FunkValue {
+    // Clear module cache to ensure clean state
+    com.funk.language.typechecker.ModuleResolver.clearCache()
+
+    // Create shared engine to avoid context sharing violations
+    val sharedEngine = Engine.newBuilder()
+        .option("engine.WarnInterpreterOnly", "false")
+        .build()
+
+    // Create polyglot context
+    Context.newBuilder("funk")
+        .engine(sharedEngine)
+        .allowAllAccess(true)
+        .allowCreateThread(true)
+        .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
+        .build().use { context ->
+            // Set the polyglot context in ThreadLocal for cross-thread Truffle execution
+            TruffleContextHolder.setPolyglotContext(context)
+
+            try {
+                // Store the program and monomorphic instances for FunkLanguage to use
+                FunkLanguage.setProgramForDirectExecution(program, projectRoot)
+                FunkLanguage.setMonomorphicInstances(monomorphicInstances)
+
+                // Trigger execution with a special marker source
+                val source = Source.newBuilder("funk", "# DIRECT_AST_EXECUTION", "__direct_execution__.funk")
+                    .buildLiteral()
+                context.eval(source)
+
+                // Retrieve result from FunkLanguage storage
+                return FunkLanguage.getLastExecutionResult() ?: FunkNull
+            } finally {
+                // Clear the context from ThreadLocal
+                TruffleContextHolder.clearEnv()
+            }
+        }
+}
+
+/**
  * Pretty print a FunkValue result for user-friendly output
  */
-private fun prettyPrintResult(result: com.funk.language.interpreter.FunkValue): String {
+private fun prettyPrintResult(result: FunkValue): String {
     return when (result) {
-        is com.funk.language.interpreter.FunkInt -> result.value.toString()
-        is com.funk.language.interpreter.FunkFloat -> result.value.toString()
-        is com.funk.language.interpreter.FunkString -> "\"${result.value}\""
-        is com.funk.language.interpreter.FunkBool -> result.value.toString()
-        is com.funk.language.interpreter.FunkNull -> "null"
-        is com.funk.language.interpreter.FunkVariant -> {
+        is FunkInt -> result.value.toString()
+        is FunkFloat -> result.value.toString()
+        is FunkString -> "\"${result.value}\""
+        is FunkBool -> result.value.toString()
+        is FunkNull -> "null"
+        is FunkVariant -> {
             val value = result.value
             if (value != null) {
-                if (value is com.funk.language.interpreter.FunkRecord) {
+                if (value is FunkRecord) {
                     "${result.constructor} ${prettyPrintResult(value)}"
                 } else {
                     "${result.constructor}(${prettyPrintResult(value)})"
@@ -1021,13 +1191,13 @@ private fun prettyPrintResult(result: com.funk.language.interpreter.FunkValue): 
                 result.constructor
             }
         }
-        is com.funk.language.interpreter.FunkRecord -> {
-            val fields = result.fields.map { (key, value) -> 
-                "$key = ${prettyPrintResult(value)}" 
+        is FunkRecord -> {
+            val fields = result.fields.map { (key, value) ->
+                "$key = ${prettyPrintResult(value)}"
             }
             "{ ${fields.joinToString(", ")} }"
         }
-        is com.funk.language.interpreter.NativeFunkFunction -> "<native-function:${result.name}>"
+        is NativeFunkFunction -> "<native-function:${result.name}>"
         else -> {
             // Check if it's FunkTruffleFunction (from either package) using class name
             if (result::class.simpleName == "FunkTruffleFunction") {

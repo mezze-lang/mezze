@@ -11,13 +11,11 @@ import org.junit.jupiter.api.BeforeEach
 class FunkInterpreterComprehensiveTest {
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
-    private lateinit var interpreter: FunkInterpreter
 
     @BeforeEach
     fun setUp() {
         parser = FunkParser()
         typeChecker = TypeChecker()
-        interpreter = FunkInterpreter()
     }
 
     @Test

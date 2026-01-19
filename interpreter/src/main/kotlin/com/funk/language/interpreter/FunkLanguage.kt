@@ -48,6 +48,9 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
         // ThreadLocal storage for monomorphic instances (compiler-generated specializations)
         private val monomorphicInstances = ThreadLocal<Map<String, LetBinding>>()
 
+        // ThreadLocal storage for pre-resolved stdlib items (effects, handlers, etc.)
+        private val preResolvedItems = ThreadLocal<List<ProgramItem>>()
+
         fun getCurrentLanguage(node: Node): FunkLanguage {
             @Suppress("DEPRECATION")
             return getCurrentLanguage(FunkLanguage::class.java)
@@ -97,8 +100,18 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             monomorphicInstances.remove()
             return instances
         }
+
+        fun setPreResolvedItems(items: List<ProgramItem>) {
+            preResolvedItems.set(items)
+        }
+
+        internal fun getAndClearPreResolvedItems(): List<ProgramItem> {
+            val items = preResolvedItems.get() ?: emptyList()
+            preResolvedItems.remove()
+            return items
+        }
     }
-    
+
     override fun createContext(env: Env): FunkContext {
         // Store the Truffle environment in ThreadLocal for cross-thread execution
         TruffleContextHolder.setEnv(env)
@@ -156,12 +169,14 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
             if (directExecution != null) {
                 val (typedProgram, projectRoot) = directExecution
                 val monomorphicInstances = getAndClearMonomorphicInstances()
+                val preResolvedItems = getAndClearPreResolvedItems()
 
                 // CRITICAL FIX: Add monomorphic instances to the program
                 // Monomorphic instances are specialized versions of polymorphic functions
                 // (e.g., displayValue$Int is the Int-specialized version of displayValue)
                 // IMPORTANT: Prepend them BEFORE other items so they're registered before being used
-                val programWithMonomorphicInstances = if (monomorphicInstances.isNotEmpty()) {
+                // NOTE: preResolvedItems (effects, handlers) are NOT added here - they're converted separately below
+                val programWithMonomorphics = if (monomorphicInstances.isNotEmpty()) {
                     // PREPEND monomorphic instances so they're executed BEFORE call sites
                     Program(monomorphicInstances.values.toList() + typedProgram.items)
                 } else {
@@ -169,8 +184,8 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
                 }
 
                 // Extract UseDeclarations from the program to support module loading
-                val useDeclarations: List<UseDeclaration> = programWithMonomorphicInstances.items.filterIsInstance<UseDeclaration>()
-                val pubUseDeclarations: List<PubUseDeclaration> = programWithMonomorphicInstances.items.filterIsInstance<PubUseDeclaration>()
+                val useDeclarations: List<UseDeclaration> = programWithMonomorphics.items.filterIsInstance<UseDeclaration>()
+                val pubUseDeclarations: List<PubUseDeclaration> = programWithMonomorphics.items.filterIsInstance<PubUseDeclaration>()
 
                 // Extract module paths
                 val usePaths = useDeclarations.map { it.path }.map { usePath ->
@@ -191,28 +206,43 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 
                 val allImportedModules = (usePaths + pubUsePaths).distinct()
 
-                // CRITICAL: Process modules BEFORE converting main program to accumulate handler mappings
-                // Load cached typed modules and extract their handler mappings
+                // CRITICAL: If pre-resolved items are provided, extract handler mappings from them
+                // Otherwise, load modules and extract handler mappings
                 val accumulatedHandlerMapping = mutableMapOf<String, Pair<String, String>>()
-                for (modulePath in allImportedModules) {
-                    val typedModule = TypeChecker.getTypedModule(modulePath)
-                    if (typedModule != null) {
-                        // Convert module to extract handler mappings (don't execute yet)
-                        val moduleConverter = ASTToTruffleConverter(projectRoot = projectRoot)
-                        moduleConverter.convertProgram(typedModule)
-                        // Extract handler mappings from the module converter
-                        accumulatedHandlerMapping.putAll(moduleConverter.getHandlerMappings())
+                if (preResolvedItems.isNotEmpty()) {
+                    // Extract handler mappings directly from preResolvedItems
+                    // Create a temporary program with just the preResolvedItems to extract mappings
+                    val preResolvedProgram = Program(preResolvedItems)
+                    val preResolvedConverter = ASTToTruffleConverter(projectRoot = projectRoot)
+                    preResolvedConverter.convertProgram(preResolvedProgram)
+                    accumulatedHandlerMapping.putAll(preResolvedConverter.getHandlerMappings())
+                } else {
+                    // Load cached typed modules and extract their handler mappings
+                    for (modulePath in allImportedModules) {
+                        val typedModule = TypeChecker.getTypedModule(modulePath)
+                        if (typedModule != null) {
+                            // Convert module to extract handler mappings (don't execute yet)
+                            val moduleConverter = ASTToTruffleConverter(projectRoot = projectRoot)
+                            moduleConverter.convertProgram(typedModule)
+                            // Extract handler mappings from the module converter
+                            accumulatedHandlerMapping.putAll(moduleConverter.getHandlerMappings())
+                        }
                     }
                 }
 
-                // Convert main program with accumulated handler mappings from all modules
+                // Convert main program with accumulated handler mappings
+                // NOTE: Don't include preResolvedItems here - they'll be executed separately in FunkTruffleRootNode
                 val converter = ASTToTruffleConverter(parentHandlerMapping = accumulatedHandlerMapping)
-                val truffleNode = converter.convertProgram(programWithMonomorphicInstances)
+                val truffleNode = converter.convertProgram(programWithMonomorphics)
                 val frameDescriptor = converter.getFrameDescriptor()
                 val effectDeclarations = converter.getEffectDeclarations()
 
-                // Create execution root node with module loading support
-                val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode, allImportedModules, projectRoot, effectDeclarations)
+                // CRITICAL FIX: If pre-resolved items are provided, skip module loading at runtime
+                // All stdlib functions, effects, and handlers are already resolved and included
+                val modulesToLoad = if (monomorphicInstances.isNotEmpty() || preResolvedItems.isNotEmpty()) emptyList() else allImportedModules
+
+                // Create execution root node with module loading support and preResolvedItems
+                val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode, modulesToLoad, projectRoot, effectDeclarations, preResolvedItems)
                 return rootNode.callTarget
             }
 
@@ -297,36 +327,6 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 }
 
 /**
- * Root node that uses FunkInterpreter for module-based programs
- */
-class FunkInterpreterRootNode(
-    language: FunkLanguage,
-    private val program: Program,
-    private val projectRoot: java.nio.file.Path,
-    sourceCode: String
-) : RootNode(language, FrameDescriptor.newBuilder().build()) {
-    
-    override fun execute(frame: VirtualFrame): Any {
-        return try {
-            val interpreter = FunkInterpreter(skipParserSetup = true)
-            val result = interpreter.execute(program, projectRoot)
-            
-            // Convert FunkValue to Truffle-compatible value
-            when (result) {
-                is com.funk.language.interpreter.FunkInt -> result.value as Any
-                is com.funk.language.interpreter.FunkFloat -> result.value as Any
-                is com.funk.language.interpreter.FunkString -> result.value as Any
-                is com.funk.language.interpreter.FunkBool -> result.value as Any
-                is com.funk.language.interpreter.FunkNull -> null as Any?
-                else -> result.toString() as Any
-            } ?: "null"
-        } catch (e: Exception) {
-            throw FunkException("Execution error: ${e.message}", e)
-        }
-    }
-}
-
-/**
  * Optimized Truffle root node for program execution using specialized nodes
  * Handles module loading and execution before running the main program
  */
@@ -337,7 +337,8 @@ class FunkTruffleRootNode(
     private val sourceCode: String,
     private val importedModules: List<String>,
     private val projectRoot: java.nio.file.Path,
-    private val effectDeclarations: List<EffectDeclaration>
+    private val effectDeclarations: List<EffectDeclaration>,
+    private val preResolvedItems: List<ProgramItem> = emptyList()
 ) : RootNode(language, frameDescriptor) {
 
     // Lazy-initialized module cache to avoid reloading modules on every execution
@@ -364,6 +365,22 @@ class FunkTruffleRootNode(
                     effectHandler.registerEffect(effectDecl.name, effectRecord)
                 }
                 effectsRegistered = true
+            }
+
+            // CRITICAL: If preResolvedItems are provided, execute them first to register handler implementations
+            // These are effect declarations and handlers from stdlib that were collected at compile time
+            if (preResolvedItems.isNotEmpty()) {
+                val preResolvedProgram = Program(preResolvedItems)
+                val preResolvedConverter = ASTToTruffleConverter(context, projectRoot)
+                val preResolvedNode = preResolvedConverter.convertProgram(preResolvedProgram)
+                val preResolvedDescriptor = preResolvedConverter.getFrameDescriptor()
+
+                // Create a frame and execute preResolvedItems to register handlers
+                val args = arrayOf<Any?>(FunkRecord(emptyMap()), emptyMap<String, FunkValue>())
+                val preResolvedFrame: VirtualFrame = com.oracle.truffle.api.Truffle.getRuntime()
+                    .createMaterializedFrame(args, preResolvedDescriptor)
+
+                preResolvedNode.execute(preResolvedFrame)
             }
 
             // Load and execute all imported modules before running the main program
@@ -534,32 +551,4 @@ class FunkTruffleRootNode(
     override fun getName(): String = "funk-program"
 
     override fun toString(): String = "FunkTruffleRootNode"
-}
-
-/**
- * Legacy root node for backward compatibility with existing interpreter
- */
-class FunkProgramRootNode(
-    language: FunkLanguage,
-    private val program: Program,
-    private val interpreter: FunkInterpreter
-) : RootNode(language) {
-    
-    override fun execute(frame: VirtualFrame): Any {
-        // Execute the program using the Funk interpreter with shared AST
-        return try {
-            val result = interpreter.execute(program)
-            // Convert FunkValue to appropriate return type for Truffle
-            when (result) {
-                is FunkInt -> result.value
-                is FunkFloat -> result.value
-                is FunkString -> result.value
-                is FunkBool -> result.value
-                is FunkNull -> "null" // Return string "null" instead of actual null
-                else -> result.getDisplayString()
-            }
-        } catch (e: Exception) {
-            throw FunkException("Execution error: ${e.message}", e)
-        }
-    }
 }
