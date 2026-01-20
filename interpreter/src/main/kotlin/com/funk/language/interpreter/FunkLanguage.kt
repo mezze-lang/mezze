@@ -239,7 +239,8 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 
                 // CRITICAL FIX: If pre-resolved items are provided, skip module loading at runtime
                 // All stdlib functions, effects, and handlers are already resolved and included
-                val modulesToLoad = if (monomorphicInstances.isNotEmpty() || preResolvedItems.isNotEmpty()) emptyList() else allImportedModules
+                // NOTE: Monomorphic instances are just specialized functions - we still need modules for effects/handlers!
+                val modulesToLoad = if (preResolvedItems.isNotEmpty()) emptyList() else allImportedModules
 
                 // Create execution root node with module loading support and preResolvedItems
                 val rootNode = FunkTruffleRootNode(this, truffleNode, frameDescriptor, sourceCode, modulesToLoad, projectRoot, effectDeclarations, preResolvedItems)

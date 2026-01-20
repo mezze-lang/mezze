@@ -30,13 +30,11 @@ class ComprehensiveConcurrencyValidationTest {
     
     private lateinit var concurrencyManager: LoomConcurrencyManager
     private lateinit var scheduler: SmartEffectScheduler
-    private lateinit var parallelismDetector: RuntimeParallelismDetector
-    
+
     @BeforeEach
     fun setUp() {
         concurrencyManager = LoomConcurrencyManager()
         scheduler = SmartEffectScheduler(concurrencyManager)
-        parallelismDetector = RuntimeParallelismDetector(concurrencyManager)
     }
     
     @AfterEach
