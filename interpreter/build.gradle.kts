@@ -49,6 +49,10 @@ tasks.test {
     // Production JARs have full Truffle JIT compilation via HotSpotTruffleRuntime
     systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
 
+    // Enable native access for Java 24 (Truffle and Gradle use System::load for native libraries)
+    // Suppresses warnings about restricted method access
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+
     // Increase heap size for Truffle
     maxHeapSize = "2g"
 }
