@@ -183,6 +183,35 @@ object Parsers {
         }
     }
 
+    // Separated by with optional trailing separator: parse items separated by a separator, allowing trailing separator
+    fun <T, S> sepEndBy(parser: Parser<T>, separator: Parser<S>): Parser<List<T>> = { stream ->
+        when (val first = parser(stream)) {
+            is ParseResult.Success -> {
+                val rest = many(seq(separator, parser))(first.remaining)
+                when (rest) {
+                    is ParseResult.Success -> {
+                        val items = listOf(first.value) + rest.value.map { it.second }
+                        // Allow optional trailing separator
+                        val afterTrailing = optional(separator)(rest.remaining)
+                        when (afterTrailing) {
+                            is ParseResult.Success -> ParseResult.Success(items, afterTrailing.remaining)
+                            is ParseResult.Failure -> ParseResult.Success(items, rest.remaining)
+                        }
+                    }
+                    is ParseResult.Failure -> {
+                        // Allow optional trailing separator after first item
+                        val afterTrailing = optional(separator)(first.remaining)
+                        when (afterTrailing) {
+                            is ParseResult.Success -> ParseResult.Success(listOf(first.value), afterTrailing.remaining)
+                            is ParseResult.Failure -> ParseResult.Success(listOf(first.value), first.remaining)
+                        }
+                    }
+                }
+            }
+            is ParseResult.Failure -> ParseResult.Success(emptyList(), stream)
+        }
+    }
+
     // Lookahead: check if parser would succeed without consuming input
     fun <T> lookahead(parser: Parser<T>): Parser<Boolean> = { stream ->
         when (parser(stream)) {

@@ -874,8 +874,8 @@ class FunkParser {
                         pipe2Check.remaining
                     )
                 } else {
-                    // Non-empty variant: parse constructors
-                    val constructors = sepByWithNewlines(
+                    // Non-empty variant: parse constructors (with optional trailing comma)
+                    val constructors = sepEndByWithNewlines(
                         variantConstructorParser,
                         tok(TokenType.COMMA)
                     )(stream1)
@@ -884,18 +884,15 @@ class FunkParser {
                         is ParseResult.Success -> {
                             val stream2 = skipNewlines(constructors.remaining)
 
-                            // Check for open variant syntax: , ...
+                            // Check for open variant syntax: ...
+                            // Note: sepEndByWithNewlines already consumed the comma before ..., so we check for ... directly
                             var isOpen = false
                             var streamAfterEllipsis = stream2
 
-                            val commaCheck = tok(TokenType.COMMA)(stream2)
-                            if (commaCheck is ParseResult.Success) {
-                                val streamAfterComma = skipNewlines(commaCheck.remaining)
-                                val ellipsisCheck = tok(TokenType.ELLIPSIS)(streamAfterComma)
-                                if (ellipsisCheck is ParseResult.Success) {
-                                    isOpen = true
-                                    streamAfterEllipsis = skipNewlines(ellipsisCheck.remaining)
-                                }
+                            val ellipsisCheck = tok(TokenType.ELLIPSIS)(stream2)
+                            if (ellipsisCheck is ParseResult.Success) {
+                                isOpen = true
+                                streamAfterEllipsis = skipNewlines(ellipsisCheck.remaining)
                             }
 
                             val pipe2 = tok(TokenType.PIPE)(streamAfterEllipsis)
@@ -2277,9 +2274,9 @@ class FunkParser {
     }
 
     private val typedLambdaParams: Parser<LambdaParameters> = { stream ->
-        // {x: Int, y, z: String} - allows mixed typed/untyped parameters
+        // {x: Int, y, z: String,} - allows mixed typed/untyped parameters with optional trailing comma
         // At least one parameter must have a type annotation for this to be considered typed
-        val entries = Parsers.sepBy(lambdaParameterEntry, tok(TokenType.COMMA))(stream)
+        val entries = Parsers.sepEndBy(lambdaParameterEntry, tok(TokenType.COMMA))(stream)
         when (entries) {
             is ParseResult.Success -> {
                 val entryList = (entries as ParseResult.Success).value
@@ -2308,8 +2305,8 @@ class FunkParser {
     }
 
     private val untypedLambdaParams: Parser<LambdaParameters> = { stream ->
-        // {x, y} or {x, y, ...} or {}
-        val params = Parsers.sepBy(identifierParser, tok(TokenType.COMMA))(stream)
+        // {x, y,} or {x, y, ...,} or {} - allows optional trailing comma
+        val params = Parsers.sepEndBy(identifierParser, tok(TokenType.COMMA))(stream)
         when (params) {
             is ParseResult.Success -> {
                 val names = (params as ParseResult.Success).value.map { it.text }
@@ -2348,8 +2345,8 @@ class FunkParser {
                 val recordLocation = tokenLocation(lbrace.value)
                 val stream1 = skipNewlines((lbrace as ParseResult.Success).remaining)
 
-                // Use custom sepBy that skips newlines after commas
-                val entries = sepByWithNewlines(
+                // Use custom sepEndBy that skips newlines after commas and allows trailing commas
+                val entries = sepEndByWithNewlines(
                     recordLiteralEntryParser,
                     tok(TokenType.COMMA)
                 )(stream1)
@@ -2359,17 +2356,14 @@ class FunkParser {
                         val stream2 = skipNewlines((entries as ParseResult.Success).remaining)
 
                         // Check for trailing ellipsis to mark as open record: {x = 1, ...}
+                        // Note: sepEndBy already consumed any trailing comma
                         var isOpen = false
                         var streamAfterEllipsis = stream2
 
-                        val commaCheck = tok(TokenType.COMMA)(stream2)
-                        if (commaCheck is ParseResult.Success) {
-                            val streamAfterComma = skipNewlines(commaCheck.remaining)
-                            val ellipsisCheck = tok(TokenType.ELLIPSIS)(streamAfterComma)
-                            if (ellipsisCheck is ParseResult.Success) {
-                                isOpen = true
-                                streamAfterEllipsis = skipNewlines(ellipsisCheck.remaining)
-                            }
+                        val ellipsisCheck = tok(TokenType.ELLIPSIS)(stream2)
+                        if (ellipsisCheck is ParseResult.Success) {
+                            isOpen = true
+                            streamAfterEllipsis = skipNewlines(ellipsisCheck.remaining)
                         }
 
                         val rbrace = tok(TokenType.RBRACE)(streamAfterEllipsis)
@@ -2409,6 +2403,42 @@ class FunkParser {
                                     currentStream = next.remaining
                                 }
                                 is ParseResult.Failure -> break // No more items
+                            }
+                        }
+                        is ParseResult.Failure -> break // No separator, done
+                    }
+                }
+
+                ParseResult.Success(results, currentStream)
+            }
+            is ParseResult.Failure -> ParseResult.Success(emptyList(), stream)
+        }
+    }
+
+    // Custom sepEndBy that skips newlines after separators and allows trailing separator
+    private fun <T, S> sepEndByWithNewlines(parser: Parser<T>, separator: Parser<S>): Parser<List<T>> = { stream ->
+        when (val first = parser(stream)) {
+            is ParseResult.Success -> {
+                val results = mutableListOf(first.value)
+                var currentStream = first.remaining
+
+                while (true) {
+                    // Try to match separator
+                    when (val sep = separator(currentStream)) {
+                        is ParseResult.Success -> {
+                            // Skip newlines after separator
+                            val afterSep = skipNewlines(sep.remaining)
+                            // Try to match next item
+                            when (val next = parser(afterSep)) {
+                                is ParseResult.Success -> {
+                                    results.add(next.value)
+                                    currentStream = next.remaining
+                                }
+                                is ParseResult.Failure -> {
+                                    // Trailing separator is allowed - update position past separator
+                                    currentStream = afterSep
+                                    break
+                                }
                             }
                         }
                         is ParseResult.Failure -> break // No separator, done
@@ -2523,8 +2553,8 @@ class FunkParser {
                         rbracket.remaining
                     )
                 } else {
-                    // Parse elements separated by commas
-                    val elements = sepByWithNewlines(
+                    // Parse elements separated by commas (with optional trailing comma)
+                    val elements = sepEndByWithNewlines(
                         arrayElementParser,
                         tok(TokenType.COMMA)
                     )(stream1)
@@ -3084,18 +3114,29 @@ class FunkParser {
                             val restName = identifierParser(ellipsisStream)
                             when (restName) {
                                 is ParseResult.Success -> {
-                                    // Named rest pattern: [x, ...tail]
+                                    // Named rest pattern: [x, ...tail] or [x, ...tail,]
                                     val name = restName.value.text
                                     val remaining = skipNewlines(restName.remaining)
-                                    ParseResult.Success(Pair(accum, Pair(name, remaining)), remaining)
+                                    // Allow optional trailing comma after rest pattern
+                                    val afterRest = if (remaining.current()?.type == TokenType.COMMA) {
+                                        skipNewlines(remaining.advance())
+                                    } else {
+                                        remaining
+                                    }
+                                    ParseResult.Success(Pair(accum, Pair(name, afterRest)), afterRest)
                                 }
                                 is ParseResult.Failure -> {
-                                    // No identifier after ... - this is an anonymous rest pattern: [x, ...]
+                                    // No identifier after ... - this is an anonymous rest pattern: [x, ...] or [x, ...,]
                                     // Check if we're at ] or , which indicates end of pattern
                                     when (afterEllipsis.current()?.type) {
-                                        TokenType.RBRACKET, TokenType.COMMA -> {
+                                        TokenType.RBRACKET -> {
                                             // Anonymous rest pattern is valid
                                             ParseResult.Success(Pair(accum, Pair(null, afterEllipsis)), afterEllipsis)
+                                        }
+                                        TokenType.COMMA -> {
+                                            // Anonymous rest pattern with trailing comma: [x, ...,]
+                                            val afterComma = skipNewlines(afterEllipsis.advance())
+                                            ParseResult.Success(Pair(accum, Pair(null, afterComma)), afterComma)
                                         }
                                         else -> {
                                             // Expected identifier or end of pattern
@@ -3186,7 +3227,7 @@ class FunkParser {
         when (lbrace) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbrace.remaining)
-                val entries = sepByWithNewlines(
+                val entries = sepEndByWithNewlines(
                     recordPatternEntryParser,
                     tok(TokenType.COMMA)
                 )(stream1)
@@ -3376,7 +3417,7 @@ class FunkParser {
         when (lbrace) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbrace.remaining)
-                val entries = sepByWithNewlines(
+                val entries = sepEndByWithNewlines(
                     recordPatternEntryParser,
                     tok(TokenType.COMMA)
                 )(stream1)
@@ -4441,7 +4482,7 @@ class FunkParser {
         when (lbrace) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbrace.remaining)
-                val entries = sepByWithNewlines(
+                val entries = sepEndByWithNewlines(
                     recordTypeEntryParser,
                     tok(TokenType.COMMA)
                 )(stream1)
