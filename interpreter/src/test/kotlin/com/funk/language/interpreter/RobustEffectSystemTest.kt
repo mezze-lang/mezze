@@ -24,8 +24,6 @@ class RobustEffectSystemTest {
     fun setup() {
         parser = FunkParser()
         typeChecker = TypeChecker()
-        // Clear native global store for clean state (like Truffle does)
-        NativeGlobalStore.clear()
         interpreter = FunkInterpreter()
     }
 

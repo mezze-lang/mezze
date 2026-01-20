@@ -153,8 +153,8 @@ private fun showCommandHelp(command: String) {
         "exec" -> {
             println("USAGE: funk exec [file]")
             println()
-            println("Execute Funk source code using the Truffle runtime")
-            println("Fast startup, interpreter-only execution in native binary")
+            println("Execute Funk source code directly without compilation")
+            println("Fast startup, direct execution with full Truffle JIT optimization")
             println()
             println("OPTIONS:")
             println("  -h, --help         Show this help message")

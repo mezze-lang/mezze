@@ -146,10 +146,6 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
         val source = request.source
         val sourceCode = source.characters.toString()
 
-        // Clear native global store for new program execution
-        // This ensures clean state for each program run
-        NativeGlobalStore.clear()
-
         try {
             // Check if this is a direct AST execution (from tests)
             val directExecution = getAndClearDirectExecutionProgram()
