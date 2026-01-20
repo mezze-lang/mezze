@@ -18,19 +18,19 @@ subprojects {
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "java") // required for java { toolchain { ... } }
 
-    // Kotlin toolchain (use 24 which is available, Kotlin will fallback to JVM 22 target automatically)
+    // Kotlin toolchain (Kotlin 2.2.0 fully supports JDK 24 - verified bytecode major version 68)
     configure<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension> {
         jvmToolchain(24)
     }
 
-    // Java toolchain (use GraalVM 24, Kotlin 2.2.0 now supports JDK 24!)
+    // Java toolchain (GraalVM JDK 24 with Truffle JIT compiler)
     java {
         toolchain {
             languageVersion.set(JavaLanguageVersion.of(24))
         }
     }
 
-    // Ensure Java bytecode targets JVM 24 (Kotlin 2.2.0 supports JDK 24)
+    // Ensure Java bytecode targets JVM 24 (verified: compiles to major version 68)
     tasks.withType<JavaCompile> {
         options.release.set(24)
     }
