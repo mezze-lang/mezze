@@ -53,6 +53,11 @@ tasks.test {
     // Suppresses warnings about restricted method access
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 
+    // Note: Truffle 24.2.2 uses sun.misc.Unsafe::objectFieldOffset (terminally deprecated in Java 24)
+    // This warning comes from com.oracle.truffle.api.nodes.NodeClassImpl$NodeFieldData
+    // Cannot be suppressed - will be fixed when Truffle updates to newer reflection APIs
+    // WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+
     // Increase heap size for Truffle
     maxHeapSize = "2g"
 }
