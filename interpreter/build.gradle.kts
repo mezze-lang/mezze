@@ -45,6 +45,10 @@ tasks.test {
     systemProperty("junit.jupiter.execution.timeout.default", "120s")
     systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
 
+    // Suppress WarnInterpreterOnly in tests (expected - tests run without JIT compiler)
+    // Production JARs have full Truffle JIT compilation via HotSpotTruffleRuntime
+    systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
+
     // Increase heap size for Truffle
     maxHeapSize = "2g"
 }
