@@ -1,9 +1,11 @@
 plugins {
     kotlin("jvm")
-    kotlin("kapt")
+    kotlin("kapt") // Required for Truffle DSL annotation processing (@ExportLibrary, @ExportMessage)
 }
 
-// Enable annotation processing
+// Kapt is essential for Truffle interop - processes @ExportLibrary/@ExportMessage annotations
+// to generate InteropLibrary exports for FunkValue types (28 generated Java files)
+// Note: Kapt is deprecated in favor of KSP, but Truffle DSL doesn't support KSP yet
 kotlin {
     jvmToolchain(24)
 }
