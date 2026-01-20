@@ -18,6 +18,7 @@ class RobustEffectSystemTest {
 
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
+    private lateinit var interpreter: FunkInterpreter
 
     @BeforeEach
     fun setup() {
@@ -25,6 +26,7 @@ class RobustEffectSystemTest {
         typeChecker = TypeChecker()
         // Clear native global store for clean state (like Truffle does)
         NativeGlobalStore.clear()
+        interpreter = FunkInterpreter()
     }
 
     // ============================================================================

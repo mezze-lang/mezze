@@ -103,7 +103,8 @@ class EffectHandler {
         effectName: String,
         operationName: String,
         arguments: FunkValue,
-        context: MutableMap<String, FunkValue>
+        context: MutableMap<String, FunkValue>,
+        interpreter: FunkInterpreter  // Kept for backward compatibility, but not used
     ): FunkValue {
         // COMPREHENSIVE HANDLER RESOLUTION
         // CRITICAL FIX: Prioritize handler stack over context

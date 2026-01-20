@@ -1,6 +1,0 @@
-use std::effects::log::{println, Log, Console}
-
-perform Console in do
-    println {msg = "Hello from Funk!"}
-    println {msg = "CLI execution successful!"}
-    {}

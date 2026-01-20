@@ -45,9 +45,11 @@ object ContinuationImplementations {
 
     /**
      * Register all continuation effect native functions.
+     * Note: interpreter parameter is no longer used - we use state machines instead.
      */
     fun registerAll(
-        context: MutableMap<String, FunkValue>
+        context: MutableMap<String, FunkValue>,
+        interpreter: FunkInterpreter?
     ) {
         registerDelimit(context)
         registerActivate(context)

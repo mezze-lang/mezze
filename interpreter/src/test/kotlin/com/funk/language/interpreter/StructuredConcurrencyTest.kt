@@ -357,7 +357,6 @@ class StructuredConcurrencyTest {
     // =============================================================================
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread cleanup issue")
     fun testBatchProcessing() {
         val code = """
             $setupCode

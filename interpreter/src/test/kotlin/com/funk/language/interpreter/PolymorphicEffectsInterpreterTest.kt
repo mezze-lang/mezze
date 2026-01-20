@@ -13,12 +13,14 @@ class PolymorphicEffectsInterpreterTest {
 
     private lateinit var parser: FunkParser
     private lateinit var typeChecker: TypeChecker
+    private lateinit var interpreter: FunkInterpreter
 
     @BeforeEach
     fun setup() {
         com.funk.language.typechecker.ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
         parser = FunkParser()
         typeChecker = TypeChecker()
+        interpreter = FunkInterpreter()
     }
 
     private fun execute(code: String): FunkValue? {
