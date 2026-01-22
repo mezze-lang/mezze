@@ -398,51 +398,81 @@ private fun handleExecCommand(args: List<String>) {
         typeChecker.typeCheck(ast)
     }
 
-    // Get the type of the last expression in the program
-    val lastItem = typeCheckResult.program.items.lastOrNull()
-    val programType = when (lastItem) {
-        is LetBinding -> lastItem.inferredType
-        is TopLevelExpression -> lastItem.expression.inferredType
-        else -> null
-    }
+    // Check if program has a 'main' function and auto-call it
+    val mainBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()
+        .find { it.variableName == "main" }
 
-    // Check that program returns {} with NO effects
-    // - Must be RecordType (not SuspendedType which would have unhandled effects)
-    // - Must be empty record
-    // - Must be closed (not open)
-    val isValidMainType = programType is FunkType.RecordType &&
+    val programToExecute = if (mainBinding != null) {
+        // Validate that main has type {} -> {}
+        val mainType = mainBinding.inferredType
+        val isValidMainType = mainType is FunkType.FunctionType &&
+                              mainType.paramType is FunkType.RecordType &&
+                              (mainType.paramType as FunkType.RecordType).fields.isEmpty() &&
+                              !(mainType.paramType as FunkType.RecordType).isOpen &&
+                              mainType.returnType is FunkType.RecordType &&
+                              (mainType.returnType as FunkType.RecordType).fields.isEmpty() &&
+                              !(mainType.returnType as FunkType.RecordType).isOpen
+
+        if (!isValidMainType) {
+            println("❌ Type Error: 'main' must have type {} -> {}")
+            println("━".repeat(50))
+            println("Expected: {} -> {}")
+            println("Actual:   ${prettyPrintType(mainType!!)}")
+            println()
+            println("💡 The main function must:")
+            println("   - Take no arguments: {}")
+            println("   - Return nothing: {}")
+            println("   - Perform side effects (like printing) instead of returning values")
+            kotlin.system.exitProcess(1)
+        }
+
+        // Add a call to main() at the end of the program
+        val mainCall = com.funk.language.ast.FunctionCall(
+            function = com.funk.language.ast.Identifier("main", null, null),
+            arguments = com.funk.language.ast.RecordLiteral(emptyList(), null, null),
+            inferredType = null,
+            sourceLocation = null
+        )
+        typeCheckResult.program.copy(
+            items = typeCheckResult.program.items + listOf(com.funk.language.ast.TopLevelExpression(mainCall))
+        )
+    } else {
+        // No main function - check that the last expression returns {}
+        val lastItem = typeCheckResult.program.items.lastOrNull()
+        val programType = when (lastItem) {
+            is LetBinding -> lastItem.inferredType
+            is TopLevelExpression -> lastItem.expression.inferredType
+            else -> null
+        }
+
+        val isValidType = programType is FunkType.RecordType &&
                           programType.fields.isEmpty() &&
                           !programType.isOpen
 
-    if (!isValidMainType && programType != null) {
-        println("❌ Type Error: Main must return {} with no unhandled effects")
-        println("━".repeat(50))
-        println("Expected: {}")
-        println("Actual:   ${prettyPrintType(programType)}")
-        println()
+        if (!isValidType && programType != null) {
+            println("❌ Type Error: Program must return {} with no unhandled effects")
+            println("━".repeat(50))
+            println("Expected: {}")
+            println("Actual:   ${prettyPrintType(programType)}")
+            println()
 
-        if (programType is FunkType.SuspendedType) {
-            println("💡 You have unhandled effects: <${programType.effects.effects.joinToString(", ")}>")
-            println("   Use 'perform <Handler> in' to handle all effects before the program ends")
-        } else {
-            println("💡 Tip: Programs executed with 'funk exec' must return {}")
-            println("   End your program with {} or use an effect that returns {}")
+            if (programType is FunkType.SuspendedType) {
+                println("💡 You have unhandled effects: <${programType.effects.effects.joinToString(", ")}>")
+                println("   Use 'perform <Handler> in' to handle all effects before the program ends")
+            } else {
+                println("💡 Tip: Programs executed with 'funk exec' must return {}")
+                println("   Define a 'main' function or end your program with {}")
+            }
+            kotlin.system.exitProcess(1)
         }
 
-        println()
-        println("Example:")
-        println("  use std::effects::log::{println, Log, Console}")
-        println()
-        println("  perform Console in do")
-        println("    println { msg = \"Hello!\" }")
-        kotlin.system.exitProcess(1)
+        typeCheckResult.program
     }
 
     try {
         // Execute using the interpreter directly with the already type-checked AST
-        // No need to parse/type-check again!
         val interpreter = com.funk.language.interpreter.FunkInterpreter(skipParserSetup = false)
-        val result = interpreter.execute(typeCheckResult.program)
+        val result = interpreter.execute(programToExecute)
 
         // Program should return {}, so we don't print the result
         println()
@@ -591,20 +621,24 @@ private fun handleCompileCommand(args: List<String>) {
 
 private fun createStandaloneJar(inputFile: File, outputFile: File, source: String, typedProgram: Program) {
         println("🔧 Creating standalone JAR with full Truffle JIT support...")
-    
+
     // Create a temporary directory for JAR contents
     val tempDir = kotlin.io.path.createTempDirectory("funk-compile").toFile()
+    println("🔍 Build directory: ${tempDir.absolutePath}")
     
     try {
         // 1. Create a Kotlin main class that runs the embedded program
         createKotlinMainClass(tempDir, inputFile, source)
-        
+
         // 2. Build the JAR using Gradle task (which will compile Kotlin)
         buildJarWithGradle(tempDir, outputFile, inputFile.nameWithoutExtension)
-        
-    } finally {
-        // Clean up temp directory
+
+        // Clean up temp directory on success
         tempDir.deleteRecursively()
+    } catch (e: Exception) {
+        // Keep temp directory on failure for debugging
+        println("⚠️  Temp directory preserved for debugging: ${tempDir.absolutePath}")
+        throw e
     }
 }
 
@@ -658,8 +692,8 @@ import java.nio.file.Paths
  * Uses full Truffle execution with JIT compilation for maximum performance.
  */
 object Main {
-    private const val ENHANCED_AST_JSON = ${escapeForKotlin(serializedAST)}
-    private const val CACHED_MODULES_JSON = ${escapeForKotlin(serializedModules)}
+    private val ENHANCED_AST_JSON = ${escapeForKotlin(serializedAST)}
+    private val CACHED_MODULES_JSON = ${escapeForKotlin(serializedModules)}
     private const val PROGRAM_NAME = "${inputFile.name}"
     private const val PROJECT_ROOT = "${projectRoot.toAbsolutePath()}"
 
@@ -914,7 +948,12 @@ private fun buildJarWithGradle(tempDir: File, outputFile: File, programName: Str
 }
 
 private fun escapeForKotlin(source: String): String {
-    return "\"\"\"" + source.replace("\"\"\"", "\\\"\\\"\\\"") + "\"\"\""
+    // Escape $ signs to prevent Kotlin string interpolation
+    // Escape """ to prevent premature string termination
+    val escaped = source
+        .replace("$", "\${'$'}")  // $var becomes ${'$'}var (no interpolation)
+        .replace("\"\"\"", "\\\"\\\"\\\"")  // """ becomes \"\"\" (escaped)
+    return "\"\"\"" + escaped + "\"\"\""
 }
 
 /**
