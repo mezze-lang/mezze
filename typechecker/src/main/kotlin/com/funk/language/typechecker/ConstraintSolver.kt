@@ -997,17 +997,56 @@ class ConstraintSolver(
                 val effectsUnifier = unifyEffectRows(type1.effects, type2.effects)
                 paramUnifier.compose(returnUnifier).compose(effectsUnifier)
             }
-            
+
             // Record types
             type1 is FunkType.RecordType && type2 is FunkType.RecordType -> {
                 unifyRecords(type1, type2)
             }
-            
+
             // Variant types
             type1 is FunkType.VariantType && type2 is FunkType.VariantType -> {
                 unifyVariants(type1, type2)
             }
-            
+
+            // Array types - only unify with other Arrays
+            type1 is FunkType.ArrayType && type2 is FunkType.ArrayType -> {
+                unify(type1.elementType, type2.elementType)
+            }
+
+            // List types - only unify with other Lists
+            type1 is FunkType.ListType && type2 is FunkType.ListType -> {
+                unify(type1.elementType, type2.elementType)
+            }
+
+            // Map types
+            type1 is FunkType.MapType && type2 is FunkType.MapType -> {
+                val keyUnifier = unify(type1.keyType, type2.keyType)
+                val valueUnifier = unify(
+                    keyUnifier.apply(type1.valueType),
+                    keyUnifier.apply(type2.valueType)
+                )
+                keyUnifier.compose(valueUnifier)
+            }
+
+            // Set types
+            type1 is FunkType.SetType && type2 is FunkType.SetType -> {
+                unify(type1.elementType, type2.elementType)
+            }
+
+            // BLOCK: Array vs non-Array types (except type variables)
+            type1 is FunkType.ArrayType -> {
+                throw ConstraintConflictError(
+                    "Type conflict: Array cannot unify with ${prettyPrintType(type2)}. Arrays and Lists are distinct types.",
+                    listOf(type1, type2)
+                )
+            }
+            type2 is FunkType.ArrayType -> {
+                throw ConstraintConflictError(
+                    "Type conflict: ${prettyPrintType(type1)} cannot unify with Array. Arrays and Lists are distinct types.",
+                    listOf(type1, type2)
+                )
+            }
+
             // Base types must be identical - strict type checking
             else -> {
                 // Check for common type conflicts and provide helpful error messages

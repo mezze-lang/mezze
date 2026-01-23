@@ -103,7 +103,7 @@ class NewtypeTypeCheckerTest {
     @Test
     fun `test newtype with array type typechecks`() {
         val source = """
-            newtype Names = Names [String]
+            newtype Names = Names { list: [String] }
 
             let mkNames = {ns} -> Names {list = ns}
         """.trimIndent()

@@ -109,7 +109,7 @@ object EnvironmentTypes {
     private fun registerMockEnvironmentOperations(context: MutableMap<String, FunkType>) {
         context["__native_mock_env_get"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "env_vars" to FunkType.MapType(FunkType.StringType, FunkType.StringType),
+                "env_vars" to FunkType.ArrayType(FunkType.RecordType(mapOf("key" to FunkType.StringType, "value" to FunkType.StringType))),
                 "name" to FunkType.StringType
             )),
             optionType(FunkType.StringType)
