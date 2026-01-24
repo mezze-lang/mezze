@@ -915,20 +915,28 @@ class ASTToTruffleConverter(
                     val operation = receiver.fields[operationName]
                         ?: throw RuntimeException("Field '$operationName' not found in record")
 
-                    if (operation !is com.funk.language.interpreter.FunkTruffleFunction) {
-                        throw RuntimeException("Field '$operationName' is not a function")
-                    }
-
+                    // Handle both Truffle functions and native functions
                     val arguments = argsChild.execute(frame)
-                    // CRITICAL: FunkFunctionRootNode expects 4 arguments:
-                    // [0] = args record, [1] = closure variables map (legacy),
-                    // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
-                    return operation.callTarget.call(
-                        arguments,
-                        operation.closureVariables,
-                        operation.lexicalScope,
-                        operation.lexicalScopeSlotMap
-                    ) as FunkValue
+                    return when (operation) {
+                        is com.funk.language.interpreter.FunkTruffleFunction -> {
+                            // CRITICAL: FunkFunctionRootNode expects 4 arguments:
+                            // [0] = args record, [1] = closure variables map (legacy),
+                            // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
+                            operation.callTarget.call(
+                                arguments,
+                                operation.closureVariables,
+                                operation.lexicalScope,
+                                operation.lexicalScopeSlotMap
+                            ) as FunkValue
+                        }
+                        is com.funk.language.interpreter.NativeFunkFunction -> {
+                            // Native functions expect the record as the first element in a list
+                            operation.call(listOf(arguments))
+                        }
+                        else -> {
+                            throw RuntimeException("Field '$operationName' is not a function, got: ${operation::class.simpleName}")
+                        }
+                    }
                 }
             }
         }

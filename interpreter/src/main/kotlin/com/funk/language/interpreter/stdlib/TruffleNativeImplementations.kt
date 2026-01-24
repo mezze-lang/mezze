@@ -16,6 +16,7 @@ import com.funk.language.interpreter.stdlib.collections.TruffleArrayListImplemen
 import com.funk.language.interpreter.stdlib.collections.TruffleMapImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleSetImplementations
 import com.funk.language.interpreter.stdlib.effects.LogImplementations
+import com.funk.language.interpreter.stdlib.effects.InspectImplementations
 import com.funk.language.interpreter.stdlib.effects.FilesystemImplementations
 import com.funk.language.interpreter.stdlib.effects.TimeImplementations
 import com.funk.language.interpreter.stdlib.effects.EnvironmentImplementations
@@ -67,8 +68,9 @@ object TruffleNativeImplementations {
         TruffleMapImplementations.registerAll(context)
         TruffleSetImplementations.registerAll(context)
 
-        // Register effects implementations (log, filesystem, time, environment, continuation, loom)
+        // Register effects implementations (log, inspect, filesystem, time, environment, continuation, loom)
         LogImplementations.registerAll(context)
+        InspectImplementations.registerAll(context)
         FilesystemImplementations.registerAll(context)
         TimeImplementations.registerAll(context)
         EnvironmentImplementations.registerAll(context)

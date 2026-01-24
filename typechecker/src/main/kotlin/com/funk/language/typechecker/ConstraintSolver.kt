@@ -358,7 +358,8 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
  * Enhanced constraint-based type inference solver with ability support and memoization
  */
 class ConstraintSolver(
-    private val abilityRegistry: AbilityRegistry = AbilityRegistry()
+    private val abilityRegistry: AbilityRegistry = AbilityRegistry(),
+    private val typeAliases: Map<String, com.funk.language.ast.TypeAliasInfo> = emptyMap()
 ) {
     // Memoization cache for unification results
     // Key: Pair of types (canonicalized), Value: Result substitution
@@ -978,72 +979,108 @@ class ConstraintSolver(
      * Unify two types without caching (actual implementation)
      */
     private fun unifyUncached(type1: FunkType, type2: FunkType): Substitution {
+        // CRITICAL FIX: Expand TypeApplication before unification
+        // This ensures that TypeApplication (like Tree Int) is properly expanded to its
+        // underlying VariantType before attempting unification
+        var expandedType1 = type1
+        var expandedType2 = type2
+
+        // Expand type1 if it's a TypeApplication
+        if (type1 is FunkType.TypeApplication) {
+            val expanded = expandTypeApplication(type1)
+            if (expanded != null) {
+                expandedType1 = expanded
+                if (System.getProperty("funk.typecheck.debug") == "true") {
+                    println("DEBUG: Expanded type1 from ${prettyPrintType(type1)} to ${prettyPrintType(expandedType1)}")
+                }
+            } else {
+                if (System.getProperty("funk.typecheck.debug") == "true") {
+                    println("DEBUG: Could not expand TypeApplication: ${type1.constructor}")
+                }
+            }
+        }
+
+        // Expand type2 if it's a TypeApplication
+        if (type2 is FunkType.TypeApplication) {
+            val expanded = expandTypeApplication(type2)
+            if (expanded != null) {
+                expandedType2 = expanded
+                if (System.getProperty("funk.typecheck.debug") == "true") {
+                    println("DEBUG: Expanded type2 from ${prettyPrintType(type2)} to ${prettyPrintType(expandedType2)}")
+                }
+            } else {
+                if (System.getProperty("funk.typecheck.debug") == "true") {
+                    println("DEBUG: Could not expand TypeApplication: ${type2.constructor}")
+                }
+            }
+        }
+
         return when {
             // Same type
-            type1 == type2 -> Substitution.empty()
+            expandedType1 == expandedType2 -> Substitution.empty()
 
             // Type variable cases
-            type1 is FunkType.VarType -> unifyVariable(type1.variable, type2)
-            type2 is FunkType.VarType -> unifyVariable(type2.variable, type1)
-            
+            expandedType1 is FunkType.VarType -> unifyVariable(expandedType1.variable, expandedType2)
+            expandedType2 is FunkType.VarType -> unifyVariable(expandedType2.variable, expandedType1)
+
             // Function types
-            type1 is FunkType.FunctionType && type2 is FunkType.FunctionType -> {
-                val paramUnifier = unify(type1.paramType, type2.paramType)
+            expandedType1 is FunkType.FunctionType && expandedType2 is FunkType.FunctionType -> {
+                val paramUnifier = unify(expandedType1.paramType, expandedType2.paramType)
                 val returnUnifier = unify(
-                    paramUnifier.apply(type1.returnType),
-                    paramUnifier.apply(type2.returnType)
+                    paramUnifier.apply(expandedType1.returnType),
+                    paramUnifier.apply(expandedType2.returnType)
                 )
                 // Unify effect rows (no substitution needed as effects don't contain type variables)
-                val effectsUnifier = unifyEffectRows(type1.effects, type2.effects)
+                val effectsUnifier = unifyEffectRows(expandedType1.effects, expandedType2.effects)
                 paramUnifier.compose(returnUnifier).compose(effectsUnifier)
             }
 
             // Record types
-            type1 is FunkType.RecordType && type2 is FunkType.RecordType -> {
-                unifyRecords(type1, type2)
+            expandedType1 is FunkType.RecordType && expandedType2 is FunkType.RecordType -> {
+                unifyRecords(expandedType1, expandedType2)
             }
 
             // Variant types
-            type1 is FunkType.VariantType && type2 is FunkType.VariantType -> {
-                unifyVariants(type1, type2)
+            expandedType1 is FunkType.VariantType && expandedType2 is FunkType.VariantType -> {
+                unifyVariants(expandedType1, expandedType2)
             }
 
             // Array types - only unify with other Arrays
-            type1 is FunkType.ArrayType && type2 is FunkType.ArrayType -> {
-                unify(type1.elementType, type2.elementType)
+            expandedType1 is FunkType.ArrayType && expandedType2 is FunkType.ArrayType -> {
+                unify(expandedType1.elementType, expandedType2.elementType)
             }
 
             // List types - only unify with other Lists
-            type1 is FunkType.ListType && type2 is FunkType.ListType -> {
-                unify(type1.elementType, type2.elementType)
+            expandedType1 is FunkType.ListType && expandedType2 is FunkType.ListType -> {
+                unify(expandedType1.elementType, expandedType2.elementType)
             }
 
             // Map types
-            type1 is FunkType.MapType && type2 is FunkType.MapType -> {
-                val keyUnifier = unify(type1.keyType, type2.keyType)
+            expandedType1 is FunkType.MapType && expandedType2 is FunkType.MapType -> {
+                val keyUnifier = unify(expandedType1.keyType, expandedType2.keyType)
                 val valueUnifier = unify(
-                    keyUnifier.apply(type1.valueType),
-                    keyUnifier.apply(type2.valueType)
+                    keyUnifier.apply(expandedType1.valueType),
+                    keyUnifier.apply(expandedType2.valueType)
                 )
                 keyUnifier.compose(valueUnifier)
             }
 
             // Set types
-            type1 is FunkType.SetType && type2 is FunkType.SetType -> {
-                unify(type1.elementType, type2.elementType)
+            expandedType1 is FunkType.SetType && expandedType2 is FunkType.SetType -> {
+                unify(expandedType1.elementType, expandedType2.elementType)
             }
 
             // BLOCK: Array vs non-Array types (except type variables)
-            type1 is FunkType.ArrayType -> {
+            expandedType1 is FunkType.ArrayType -> {
                 throw ConstraintConflictError(
-                    "Type conflict: Array cannot unify with ${prettyPrintType(type2)}. Arrays and Lists are distinct types.",
-                    listOf(type1, type2)
+                    "Type conflict: Array cannot unify with ${prettyPrintType(expandedType2)}. Arrays and Lists are distinct types.",
+                    listOf(expandedType1, expandedType2)
                 )
             }
-            type2 is FunkType.ArrayType -> {
+            expandedType2 is FunkType.ArrayType -> {
                 throw ConstraintConflictError(
-                    "Type conflict: ${prettyPrintType(type1)} cannot unify with Array. Arrays and Lists are distinct types.",
-                    listOf(type1, type2)
+                    "Type conflict: ${prettyPrintType(expandedType1)} cannot unify with Array. Arrays and Lists are distinct types.",
+                    listOf(expandedType1, expandedType2)
                 )
             }
 
@@ -1051,47 +1088,47 @@ class ConstraintSolver(
             else -> {
                 // Check for common type conflicts and provide helpful error messages
                 when {
-                    type1 is FunkType.IntType && type2 is FunkType.FloatType -> {
+                    expandedType1 is FunkType.IntType && expandedType2 is FunkType.FloatType -> {
                         throw ConstraintConflictError(
                             "Type conflict: Cannot unify Int and Float. Consider using explicit type conversion.",
-                            listOf(type1, type2)
+                            listOf(expandedType1, expandedType2)
                         )
                     }
-                    type1 is FunkType.FloatType && type2 is FunkType.IntType -> {
+                    expandedType1 is FunkType.FloatType && expandedType2 is FunkType.IntType -> {
                         throw ConstraintConflictError(
                             "Type conflict: Cannot unify Float and Int. Consider using explicit type conversion.",
-                            listOf(type1, type2)
+                            listOf(expandedType1, expandedType2)
                         )
                     }
-                    type1 is FunkType.IntType && type2 is FunkType.NatType -> {
+                    expandedType1 is FunkType.IntType && expandedType2 is FunkType.NatType -> {
                         throw ConstraintConflictError(
                             "Type conflict: Cannot unify Int and Nat. Use 'n' suffix for Nat literals (e.g., 5n).",
-                            listOf(type1, type2)
+                            listOf(expandedType1, expandedType2)
                         )
                     }
-                    type1 is FunkType.NatType && type2 is FunkType.IntType -> {
+                    expandedType1 is FunkType.NatType && expandedType2 is FunkType.IntType -> {
                         throw ConstraintConflictError(
                             "Type conflict: Cannot unify Nat and Int. Use 'n' suffix for Nat literals (e.g., 5n).",
-                            listOf(type1, type2)
+                            listOf(expandedType1, expandedType2)
                         )
                     }
-                    type1 is FunkType.StringType && (type2 is FunkType.IntType || type2 is FunkType.FloatType || type2 is FunkType.BooleanType) -> {
+                    expandedType1 is FunkType.StringType && (expandedType2 is FunkType.IntType || expandedType2 is FunkType.FloatType || expandedType2 is FunkType.BooleanType) -> {
                         throw ConstraintConflictError(
-                            "Type conflict: Cannot unify String with ${prettyPrintType(type2)}. Consider using string conversion functions.",
-                            listOf(type1, type2)
+                            "Type conflict: Cannot unify String with ${prettyPrintType(expandedType2)}. Consider using string conversion functions.",
+                            listOf(expandedType1, expandedType2)
                         )
                     }
-                    (type1 is FunkType.IntType || type1 is FunkType.FloatType || type1 is FunkType.BooleanType) && type2 is FunkType.StringType -> {
+                    (expandedType1 is FunkType.IntType || expandedType1 is FunkType.FloatType || expandedType1 is FunkType.BooleanType) && expandedType2 is FunkType.StringType -> {
                         throw ConstraintConflictError(
-                            "Type conflict: Cannot unify ${prettyPrintType(type1)} with String. Consider using string conversion functions.",
-                            listOf(type1, type2)
+                            "Type conflict: Cannot unify ${prettyPrintType(expandedType1)} with String. Consider using string conversion functions.",
+                            listOf(expandedType1, expandedType2)
                         )
                     }
                     else -> {
                         // For other cases (like different variant/record types), just return empty substitution
                         // This allows structural subtyping to work
                         if (System.getProperty("funk.typecheck.debug") == "true") {
-                            println("Warning: Cannot unify ${prettyPrintType(type1)} with ${prettyPrintType(type2)} - ignoring constraint")
+                            println("Warning: Cannot unify ${prettyPrintType(expandedType1)} with ${prettyPrintType(expandedType2)} - ignoring constraint")
                         }
                         Substitution.empty()
                     }
@@ -1327,6 +1364,66 @@ class ConstraintSolver(
         }
         
         return substitution
+    }
+
+    /**
+     * Expand a TypeApplication to its underlying type definition by substituting type parameters.
+     *
+     * For example, given:
+     *   type Tree 'a = | Leaf, Node { val: 'a, left: Tree 'a, right: Tree 'a } |
+     *
+     * expandTypeApplication(Tree Int) returns:
+     *   | Leaf, Node { val: Int, left: Tree Int, right: Tree Int } |
+     *
+     * @param typeApp The TypeApplication to expand (e.g., Tree Int)
+     * @return The expanded type with type parameters substituted, or null if the type alias is not found
+     */
+    private fun expandTypeApplication(typeApp: FunkType.TypeApplication): FunkType? {
+        // Look up the type alias definition
+        val aliasInfo = typeAliases[typeApp.constructor]
+
+        if (aliasInfo == null) {
+            if (System.getProperty("funk.typecheck.debug") == "true") {
+                println("DEBUG: Type alias '${typeApp.constructor}' not found in typeAliases")
+            }
+            return null
+        }
+
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("DEBUG: Expanding TypeApplication ${typeApp.constructor} with args: ${typeApp.args.map { prettyPrintType(it) }}")
+            println("DEBUG: Type alias has ${aliasInfo.typeParams.size} parameters: ${aliasInfo.typeParams}")
+        }
+
+        // Check that the number of type arguments matches the number of type parameters
+        if (typeApp.args.size != aliasInfo.typeParams.size) {
+            if (System.getProperty("funk.typecheck.debug") == "true") {
+                println("DEBUG: Type argument count mismatch: expected ${aliasInfo.typeParams.size}, got ${typeApp.args.size}")
+            }
+            return null
+        }
+
+        // Build a substitution map from type parameter names to the provided type arguments
+        // Type parameters are strings like "'a", "'b", etc.
+        val substitutionMap = mutableMapOf<TypeVar, FunkType>()
+        for ((param, arg) in aliasInfo.typeParams.zip(typeApp.args)) {
+            // Create a TypeVar from the parameter name (remove leading quote if present)
+            val paramName = if (param.startsWith("'")) param else "'$param"
+            substitutionMap[TypeVar(paramName)] = arg
+        }
+
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("DEBUG: Built substitution map: ${substitutionMap.map { (k, v) -> "${k.name} -> ${prettyPrintType(v)}" }}")
+        }
+
+        // Apply the substitution to the alias definition
+        val substitution = Substitution(substitutionMap)
+        val expandedType = substitution.apply(aliasInfo.definition)
+
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("DEBUG: Expanded ${typeApp.constructor} to: ${prettyPrintType(expandedType)}")
+        }
+
+        return expandedType
     }
 
     /**
