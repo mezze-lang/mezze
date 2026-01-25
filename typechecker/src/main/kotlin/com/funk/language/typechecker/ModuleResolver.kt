@@ -297,6 +297,7 @@ class ModuleResolver(
             }
 
             // Fall back to filesystem (for development)
+            // Note: relativeFilePath already contains "stdlib/std/..." prefix
             val possibleRoots = listOf(
                 projectRoot,
                 Paths.get("."),
@@ -305,7 +306,7 @@ class ModuleResolver(
             )
 
             for (root in possibleRoots) {
-                val stdlibPath = root.resolve("stdlib").resolve(relativeFilePath)
+                val stdlibPath = root.resolve(relativeFilePath)
                 if (Files.exists(stdlibPath) && Files.isRegularFile(stdlibPath)) {
                     return stdlibPath
                 }
@@ -327,7 +328,8 @@ class ModuleResolver(
             }
 
             // Fall back to filesystem for development
-            val flatStdlibPath = projectRoot.resolve("stdlib").resolve("${segments[0]}.funk")
+            // Note: relativeFilePath already contains "stdlib/std/..." prefix
+            val flatStdlibPath = projectRoot.resolve(relativeFilePath)
             if (System.getProperty("funk.typecheck.debug") == "true") {
                 println("DEBUG: Checking flat stdlib path: $flatStdlibPath (exists: ${Files.exists(flatStdlibPath)})")
             }
