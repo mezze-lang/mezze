@@ -63,7 +63,7 @@ let mathAndCompare = {mode, x, y} -> match mode is
 # Wildcard with operations
 let withWildcard = {opt, x, y} -> match opt is
   Some -> x + y
-  _ -> x - y                                                    # expected: withWildcard : { opt: | Some, ... |, x: 'a, y: 'a } with NumAdd 'a, NumSub 'a -> 'a
+  _ -> x - y                                                    # expected: withWildcard : { opt: | Some { val: 'a }, ... |, x: 'b, y: 'b } with NumAdd 'b, NumSub 'b -> 'b
 
 # Guard with operations
 let guardedOp = {val, x, y} -> match val is

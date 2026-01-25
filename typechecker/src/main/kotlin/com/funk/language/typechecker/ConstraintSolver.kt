@@ -1378,7 +1378,7 @@ class ConstraintSolver(
      * @param typeApp The TypeApplication to expand (e.g., Tree Int)
      * @return The expanded type with type parameters substituted, or null if the type alias is not found
      */
-    private fun expandTypeApplication(typeApp: FunkType.TypeApplication): FunkType? {
+    internal fun expandTypeApplication(typeApp: FunkType.TypeApplication): FunkType? {
         // Look up the type alias definition
         val aliasInfo = typeAliases[typeApp.constructor]
 
