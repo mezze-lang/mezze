@@ -37,7 +37,16 @@ dependencies {
 tasks.named<ProcessResources>("processResources") {
     from(project.rootDir.resolve("stdlib")) {
         include("**/*.funk")
-        into(".")
+        into("stdlib")
+    }
+
+    // Create a marker file with the project root path for auto-detection
+    doLast {
+        val resourcesDir = sourceSets.main.get().output.resourcesDir
+        if (resourcesDir != null) {
+            val markerFile = File(resourcesDir, "funk-project-root.txt")
+            markerFile.writeText(project.rootDir.absolutePath)
+        }
     }
 }
 
@@ -131,8 +140,8 @@ graalvmNative {
                 "-H:IncludeResources=META-INF/truffle-languages/.*",
                 "-H:IncludeResources=META-INF/services/.*",
 
-                // Include stdlib as resources
-                "-H:IncludeResources=std/.*\\.funk",
+                // Include stdlib as resources (embedded in native binary)
+                "-H:IncludeResources=stdlib/.*\\.funk",
 
                 // Include all charsets for language support
                 "-H:+AddAllCharsets",

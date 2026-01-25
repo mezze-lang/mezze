@@ -283,9 +283,9 @@ class ModuleResolver(
         // Special handling for std:: modules - always look in stdlib directory
         if (segments.isNotEmpty() && segments[0] == "std") {
             val stdSegments = segments.drop(1) // Remove "std" prefix
-            val relativeFilePath = "std/" + stdSegments.joinToString("/") + ".funk"
+            val relativeFilePath = "stdlib/std/" + stdSegments.joinToString("/") + ".funk"
 
-            // First, try to load from JAR resources (for packaged stdlib)
+            // First, try to load from embedded resources (works in JAR and native binary)
             val resourceContent = loadStdlibFromResource(relativeFilePath)
             if (resourceContent != null) {
                 // Write to temp file and return path
@@ -316,8 +316,8 @@ class ModuleResolver(
         
         // For flat stdlib modules (int, string, float, etc.), check resources first, then filesystem
         if (segments.size == 1) {
-            // Try to load from resources first (for stdlib modules in JAR/native binary)
-            val relativeFilePath = "std/${segments[0]}.funk"
+            // Try to load from embedded resources first (works in JAR and native binary)
+            val relativeFilePath = "stdlib/std/${segments[0]}.funk"
             val resourceContent = loadStdlibFromResource(relativeFilePath)
             if (resourceContent != null) {
                 val tempFile = Files.createTempFile("funk-stdlib-", ".funk")

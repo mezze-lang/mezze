@@ -17,18 +17,96 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 
+/**
+ * Detect the project root by finding the directory containing the stdlib folder.
+ * This allows the funk CLI to find stdlib modules regardless of where it's run from.
+ */
+private fun detectProjectRoot(): File? {
+    // Strategy 0: Read embedded project root from JAR resource (works when binary is relocated)
+    try {
+        val resourceStream = object {}.javaClass.classLoader.getResourceAsStream("funk-project-root.txt")
+        if (resourceStream != null) {
+            val projectRootPath = resourceStream.bufferedReader().use { it.readText().trim() }
+            val projectRoot = File(projectRootPath)
+
+            // Verify the path still exists and has stdlib
+            val stdlibDir = File(projectRoot, "stdlib")
+            if (stdlibDir.exists() && stdlibDir.isDirectory) {
+                return projectRoot
+            }
+        }
+    } catch (e: Exception) {
+        // If resource reading fails, try other strategies
+    }
+
+    // Strategy 1: Find the location of this class file (Main.class)
+    // For installed funk CLI, this will be in cli/build/install/funk/lib/...
+    // For development, this will be in cli/build/classes/kotlin/main/...
+    try {
+        // Get the location of the JAR or class files containing this function
+        val classLocation = object {}.javaClass.protectionDomain.codeSource.location
+        val classFile = File(classLocation.toURI())
+
+        // Navigate upward to find the project root (directory containing stdlib/)
+        var current: File? = classFile.parentFile
+        while (current != null) {
+            val stdlibDir = File(current, "stdlib")
+            val isSymlink = Files.isSymbolicLink(stdlibDir.toPath())
+
+            // Only accept non-symlink stdlib directories (skip cli/stdlib -> ../stdlib)
+            if (stdlibDir.exists() && stdlibDir.isDirectory && !isSymlink) {
+                // Found it! This is the project root
+                return current
+            }
+            current = current.parentFile
+        }
+    } catch (e: Exception) {
+        // If class location detection fails, try other strategies
+    }
+
+    // Strategy 2: Check if stdlib exists in current working directory
+    val currentDir = File(System.getProperty("user.dir"))
+    val stdlibInCurrentDir = File(currentDir, "stdlib")
+    if (stdlibInCurrentDir.exists() && stdlibInCurrentDir.isDirectory) {
+        return currentDir
+    }
+
+    // Strategy 3: Check parent directories of current working directory
+    var current: File? = currentDir.parentFile
+    while (current != null) {
+        val stdlibDir = File(current, "stdlib")
+        if (stdlibDir.exists() && stdlibDir.isDirectory) {
+            return current
+        }
+        current = current.parentFile
+    }
+
+    // Could not detect project root - return null
+    // The user will need to set funk.project.root manually via JAVA_OPTS
+    return null
+}
+
 fun main(args: Array<String>) {
+    // Auto-detect and set funk.project.root if not already set
+    // This is mainly for development mode - stdlib is embedded in production native binary
+    if (System.getProperty("funk.project.root") == null) {
+        val projectRoot = detectProjectRoot()
+        if (projectRoot != null) {
+            System.setProperty("funk.project.root", projectRoot.absolutePath)
+        }
+    }
+
     // Handle global flags first
     if (args.contains("--help") || args.contains("-h")) {
         showHelp()
         return
     }
-    
+
     if (args.contains("--version") || args.contains("-v")) {
         showVersion()
         return
     }
-    
+
     if (args.isEmpty()) {
         showUsage()
         kotlin.system.exitProcess(1)
@@ -36,13 +114,13 @@ fun main(args: Array<String>) {
 
     val command = args[0]
     val remainingArgs = args.drop(1)
-    
+
     // Handle command-specific help
     if (remainingArgs.contains("--help") || remainingArgs.contains("-h")) {
         showCommandHelp(command)
         return
     }
-    
+
     try {
         when (command) {
             "parse" -> handleParseCommand(remainingArgs)
@@ -263,13 +341,18 @@ private fun handleCheckCommand(args: List<String>) {
         val fileName = filePath?.fileName?.toString()
         val ast = parser.parse(source, file = fileName)
 
+        // Get the project root for type checking (prioritize auto-detected)
+        val typeCheckProjectRoot = System.getProperty("funk.project.root")?.let {
+            java.nio.file.Paths.get(it)
+        } ?: if (filePath != null) {
+            filePath.parent ?: filePath
+        } else {
+            java.nio.file.Paths.get(".")
+        }
+
         // Use improved type checker (92% test success rate)
         val typeChecker = TypeChecker()
-        val result = if (filePath != null) {
-            typeChecker.typeCheck(ast, filePath.parent ?: filePath)
-        } else {
-            typeChecker.typeCheck(ast)
-        }
+        val result = typeChecker.typeCheck(ast, typeCheckProjectRoot)
         val typeAliases = typeChecker.getTypeAliases()
 
         printTypeCheckSuccess(result, typeAliases)
@@ -391,12 +474,17 @@ private fun handleExecCommand(args: List<String>) {
     val fileName = filePath?.fileName?.toString()
     val ast = parser.parse(source, file = fileName)
 
-    val typeChecker = TypeChecker()
-    val typeCheckResult = if (filePath != null) {
-        typeChecker.typeCheck(ast, filePath.parent ?: filePath)
+    // Get the project root for type checking (prioritize auto-detected)
+    val typeCheckProjectRoot = System.getProperty("funk.project.root")?.let {
+        java.nio.file.Paths.get(it)
+    } ?: if (filePath != null) {
+        filePath.parent ?: filePath
     } else {
-        typeChecker.typeCheck(ast)
+        java.nio.file.Paths.get(".")
     }
+
+    val typeChecker = TypeChecker()
+    val typeCheckResult = typeChecker.typeCheck(ast, typeCheckProjectRoot)
 
     // Check if program has a 'main' function and auto-call it
     val mainBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()
@@ -470,9 +558,23 @@ private fun handleExecCommand(args: List<String>) {
     }
 
     try {
+        // Suppress Truffle warnings for native binary (interpreter-only mode is expected)
+        System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
+        System.setProperty("polyglot.log.level", "OFF")
+
         // Execute using the interpreter directly with the already type-checked AST
         val interpreter = com.funk.language.interpreter.FunkInterpreter(skipParserSetup = false)
-        val result = interpreter.execute(programToExecute)
+
+        // Get the project root (prioritize auto-detected, then file path, then current dir)
+        val projectRootPath = System.getProperty("funk.project.root")?.let {
+            java.nio.file.Paths.get(it)
+        } ?: if (filePath != null) {
+            filePath.parent ?: filePath
+        } else {
+            java.nio.file.Paths.get(".")
+        }
+
+        val result = interpreter.execute(programToExecute, projectRootPath, typeCheckResult.monomorphicInstances)
 
         // Program should return {}, so we don't print the result
         println()

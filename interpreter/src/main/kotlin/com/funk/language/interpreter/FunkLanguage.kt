@@ -223,7 +223,9 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 
             // Determine project root for type-checking and module loading
             // Priority: 1) System property 2) Source file parent 3) Current directory
-            val projectRoot = System.getProperty("funk.project.root")?.let {
+            val funkProjectRootProp = System.getProperty("funk.project.root")
+
+            val projectRoot = funkProjectRootProp?.let {
                 java.nio.file.Paths.get(it)
             } ?: if (source.path != null) {
                 val sourcePath = java.nio.file.Paths.get(source.path)
@@ -517,8 +519,18 @@ class FunkTruffleRootNode(
 
         // Check if it's a stdlib module (starts with "std")
         if (parts.firstOrNull() == "std") {
-            // stdlib modules are in stdlib/std/...
+            // Try to load from embedded resources first (for native binary / JAR)
             val relativePath = "stdlib/${parts.joinToString("/")}.funk"
+            val resourceStream = javaClass.classLoader.getResourceAsStream(relativePath)
+            if (resourceStream != null) {
+                // Write to temp file
+                val tempFile = java.nio.file.Files.createTempFile("funk-stdlib-", ".funk")
+                java.nio.file.Files.writeString(tempFile, resourceStream.bufferedReader().use { it.readText() })
+                tempFile.toFile().deleteOnExit()
+                return tempFile.toFile()
+            }
+
+            // Fall back to filesystem (for development)
             return projectRoot.resolve(relativePath).toFile()
         } else {
             // User modules are relative to project root
