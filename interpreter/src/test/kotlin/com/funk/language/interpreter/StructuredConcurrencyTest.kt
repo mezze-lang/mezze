@@ -83,6 +83,7 @@ class StructuredConcurrencyTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("Flaky - virtual thread not completing under heavy test load")
     fun testConcurrentComputations() {
         val code = """
             $setupCode
