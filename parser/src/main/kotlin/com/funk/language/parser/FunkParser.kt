@@ -1,6 +1,7 @@
 package com.funk.language.parser
 
 import com.funk.language.ast.*
+import com.funk.language.parser.internal.*
 
 /**
  * Funk language parser using parser combinators.
