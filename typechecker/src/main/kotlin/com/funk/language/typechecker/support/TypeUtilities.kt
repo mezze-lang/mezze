@@ -247,6 +247,119 @@ fun mergeEffectsInTypes(
     }
 }
 
+/**
+ * Recursively checks if a type contains type variables.
+ *
+ * This searches through the type structure to determine if any type variables (VarType) are present.
+ * Used to distinguish polymorphic types from concrete types.
+ *
+ * @param type The type to check
+ * @return true if the type contains any type variables
+ */
+fun isTypeVariable(type: FunkType): Boolean {
+    return when (type) {
+        is FunkType.VarType -> true
+        is FunkType.FunctionType ->
+            isTypeVariable(type.paramType) || isTypeVariable(type.returnType)
+        is FunkType.RecordType ->
+            type.fields.values.any { isTypeVariable(it) }
+        is FunkType.TypeApplication ->
+            type.args.any { isTypeVariable(it) }
+        is FunkType.ArrayType ->
+            isTypeVariable(type.elementType)
+        is FunkType.MapType ->
+            isTypeVariable(type.keyType) || isTypeVariable(type.valueType)
+        is FunkType.SetType ->
+            isTypeVariable(type.elementType)
+        is FunkType.ListType ->
+            isTypeVariable(type.elementType)
+        is FunkType.VariantType ->
+            type.constructors.values.any { it != null && isTypeVariable(it) }
+        is FunkType.SuspendedType ->
+            isTypeVariable(type.valueType)
+        else -> false
+    }
+}
+
+// ============================================================================
+// String Utilities for Error Reporting
+// ============================================================================
+
+/**
+ * Calculate the Levenshtein (edit) distance between two strings.
+ *
+ * The Levenshtein distance is the minimum number of single-character edits
+ * (insertions, deletions, or substitutions) needed to change one string into another.
+ *
+ * Used for generating "did you mean?" suggestions in error messages.
+ *
+ * @param s1 First string
+ * @param s2 Second string
+ * @return The edit distance between s1 and s2
+ */
+fun levenshteinDistance(s1: String, s2: String): Int {
+    val dp = Array(s1.length + 1) { IntArray(s2.length + 1) }
+
+    for (i in 0..s1.length) dp[i][0] = i
+    for (j in 0..s2.length) dp[0][j] = j
+
+    for (i in 1..s1.length) {
+        for (j in 1..s2.length) {
+            dp[i][j] = if (s1[i - 1] == s2[j - 1]) {
+                dp[i - 1][j - 1]
+            } else {
+                1 + minOf(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+            }
+        }
+    }
+
+    return dp[s1.length][s2.length]
+}
+
+/**
+ * Find the closest matching name from a collection of candidates.
+ *
+ * Uses Levenshtein distance to find the candidate that is most similar
+ * to the input string. Case-insensitive comparison.
+ *
+ * Used for generating helpful "did you mean X?" error messages.
+ *
+ * @param input The input string to match
+ * @param candidates Collection of candidate strings
+ * @return The closest matching candidate, or null if candidates is empty
+ */
+fun findClosestName(input: String, candidates: Collection<String>): String? {
+    if (candidates.isEmpty()) return null
+    return candidates
+        .map { it to levenshteinDistance(input.lowercase(), it.lowercase()) }
+        .minByOrNull { it.second }
+        ?.first
+}
+
+/**
+ * Format a suggestion message for error reporting.
+ *
+ * Creates a helpful error message fragment that includes:
+ * - A "did you mean X?" suggestion if a close match exists
+ * - A list of all available options
+ *
+ * @param input The incorrect input that triggered the error
+ * @param availableNames Collection of valid names
+ * @param itemType The type of item (e.g., "variable", "function", "type")
+ * @return A formatted suggestion string
+ */
+fun formatSuggestionMessage(input: String, availableNames: Collection<String>, itemType: String): String {
+    val closest = findClosestName(input, availableNames)
+    val availableList = availableNames.sorted().joinToString(", ")
+
+    return buildString {
+        if (closest != null) {
+            append("\n\nDid you mean '$closest'?")
+        }
+        append("\n\nAvailable ${itemType}s: $availableList")
+    }
+}
+
 // Note: Additional expression analysis utilities (containsRecursiveReference, containsArithmeticOperations, etc.)
 // are kept in TypeChecker.kt for now to avoid complex expression traversal code duplication.
 // These can be extracted in a future iteration once the main engine extraction is complete.
