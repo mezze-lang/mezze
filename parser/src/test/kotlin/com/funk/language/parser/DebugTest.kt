@@ -1,5 +1,6 @@
 package com.funk.language.parser
 
+import com.funk.language.parser.internal.Lexer
 import org.junit.jupiter.api.Test
 
 class DebugTest {

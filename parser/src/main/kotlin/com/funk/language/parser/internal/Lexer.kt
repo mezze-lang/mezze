@@ -1,4 +1,6 @@
-package com.funk.language.parser
+package com.funk.language.parser.internal
+
+import com.funk.language.parser.*
 
 /**
  * Lexer for Funk language.
