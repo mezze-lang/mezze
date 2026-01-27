@@ -3,44 +3,7 @@ package com.funk.language.typechecker
 import com.funk.language.ast.FunkType
 import com.funk.language.ast.TypeVar
 import com.funk.language.ast.SourceLocation
-
-/**
- * Represents a type constraint in the constraint-based type inference system
- */
-sealed class Constraint {
-    /**
-     * Equality constraint: T1 = T2
-     */
-    data class Equality(val left: FunkType, val right: FunkType) : Constraint()
-    
-    /**
-     * Instance constraint: T1 is an instance of T2 (for polymorphism)
-     */
-    data class Instance(val type: FunkType, val scheme: FunkType) : Constraint()
-    
-    /**
-     * Ability constraint: type variable must implement an ability
-     */
-    data class AbilityConstraint(
-        val typeVar: TypeVar,
-        val ability: String,
-        val sourceLocation: SourceLocation? = null
-    ) : Constraint() {
-        override fun toString(): String = "${typeVar.name} : $ability"
-    }
-
-    /**
-     * Annotation constraint: inferred type must match declared type annotation
-     */
-    data class AnnotationConstraint(
-        val inferredType: FunkType,
-        val declaredType: FunkType,
-        val expression: com.funk.language.ast.Expression,
-        val sourceLocation: SourceLocation? = null
-    ) : Constraint() {
-        override fun toString(): String = "Annotation: ${expression::class.simpleName} must have type $declaredType"
-    }
-}
+import com.funk.language.typechecker.support.Constraint
 
 /**
  * Represents an ability definition with operations and super-abilities

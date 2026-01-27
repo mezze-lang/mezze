@@ -2,6 +2,7 @@ package com.funk.language.typechecker
 
 import com.funk.language.ast.FunkType
 import com.funk.language.ast.TypeVar
+import com.funk.language.typechecker.support.Constraint
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals

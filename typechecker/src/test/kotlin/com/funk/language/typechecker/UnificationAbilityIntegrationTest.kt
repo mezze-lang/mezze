@@ -1,6 +1,7 @@
 package com.funk.language.typechecker
 
 import com.funk.language.ast.*
+import com.funk.language.typechecker.support.Constraint
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
