@@ -283,4 +283,14 @@ interface IResolutionEngine {
      * @return Common supertype if one exists, null otherwise
      */
     fun findCommonSupertype(type1: FunkType, type2: FunkType): FunkType?
+
+    /**
+     * Get the underlying variant type from a type that might be a TypeApplication or SuspendedType.
+     *
+     * For example: Option Int -> VariantType with constructors {Some, None}
+     *
+     * @param type The type to expand
+     * @return The underlying VariantType, or null if not a variant
+     */
+    fun getUnderlyingVariantType(type: FunkType): FunkType.VariantType?
 }
