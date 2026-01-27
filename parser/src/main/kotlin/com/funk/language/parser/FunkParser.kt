@@ -16,175 +16,6 @@ class FunkParser {
     private var currentSource: String? = null
     private var currentFile: String? = null
 
-    /**
-     * Create a SourceLocation from a token
-     */
-    private fun tokenLocation(token: Token): SourceLocation {
-        return SourceLocation(token.line, token.column, currentFile)
-    }
-
-    /**
-     * Create a SourceLocation from a token stream's current position
-     */
-    private fun streamLocation(stream: TokenStream): SourceLocation {
-        return SourceLocation(stream.getSourceLine(), stream.getSourceColumn(), currentFile)
-    }
-
-    /**
-     * Desugar a binary operator into an ability method call.
-     * For example: x + y becomes NumAdd.add {l = x, r = y}
-     */
-    private fun desugarBinaryOperator(
-        operator: String,
-        left: Expression,
-        right: Expression,
-        location: SourceLocation?
-    ): Expression {
-        val (abilityName, operationName) = when (operator) {
-            "+" -> "NumAdd" to "add"
-            "-" -> "NumSub" to "sub"
-            "*" -> "NumMul" to "mul"
-            "/" -> "NumDiv" to "div"
-            "%" -> "NumMod" to "mod"
-            "==" -> "Eq" to "eq"
-            "!=" -> "Eq" to "neq"
-            "<" -> "Ord" to "lt"
-            ">" -> "Ord" to "gt"
-            "<=" -> "Ord" to "le"
-            ">=" -> "Ord" to "ge"
-            "&&" -> "LogicalAnd" to "and"
-            "||" -> "LogicalOr" to "or"
-            else -> throw IllegalArgumentException("Unknown binary operator: $operator")
-        }
-
-        val desugared = FunctionCall(
-            function = MemberAccess(
-                receiver = Identifier(abilityName, sourceLocation = location),
-                member = operationName,
-                sourceLocation = location
-            ),
-            arguments = RecordLiteral(
-                entries = listOf(
-                    RecordFieldEntry("l", left),
-                    RecordFieldEntry("r", right)
-                ),
-                sourceLocation = location
-            ),
-            sourceLocation = location
-        )
-
-        // Mark this expression as coming from operator syntax for better error messages
-        if (location != null) {
-            SyntaxMetadata.markAsOperator(location, operator)
-        }
-
-        return desugared
-    }
-
-    /**
-     * Desugar a unary operator into an ability method call.
-     * For example: -x becomes NumSub.neg {n = x}, !x becomes LogicalNot.not {val = x}
-     */
-    private fun desugarUnaryOperator(
-        operator: String,
-        operand: Expression,
-        location: SourceLocation?
-    ): Expression {
-        val (abilityName, operationName, fieldName) = when (operator) {
-            "-" -> Triple("NumSub", "neg", "n")
-            "!" -> Triple("LogicalNot", "not", "val")
-            else -> throw IllegalArgumentException("Unknown unary operator: $operator")
-        }
-
-        val desugared = FunctionCall(
-            function = MemberAccess(
-                receiver = Identifier(abilityName, sourceLocation = location),
-                member = operationName,
-                sourceLocation = location
-            ),
-            arguments = RecordLiteral(
-                entries = listOf(
-                    RecordFieldEntry(fieldName, operand)
-                ),
-                sourceLocation = location
-            ),
-            sourceLocation = location
-        )
-
-        // Mark this expression as coming from operator syntax for better error messages
-        if (location != null) {
-            SyntaxMetadata.markAsOperator(location, operator)
-        }
-
-        return desugared
-    }
-
-    /**
-     * Fix source locations for expressions parsed from string interpolations.
-     * This recursively updates sourceLocation fields to reflect the actual position in the original file.
-     */
-    private fun fixInterpolationSourceLocation(expr: Expression, lineOffset: Int, columnOffset: Int, file: String?): Expression {
-        return when (expr) {
-            is Identifier -> {
-                val newLoc = expr.sourceLocation?.let { loc ->
-                    if (loc.line == 1) {
-                        SourceLocation(lineOffset, columnOffset + loc.column - 1, file)
-                    } else {
-                        SourceLocation(lineOffset + loc.line - 1, loc.column, file)
-                    }
-                }
-                expr.copy(sourceLocation = newLoc)
-            }
-            is FunctionCall -> {
-                val newFunc = fixInterpolationSourceLocation(expr.function, lineOffset, columnOffset, file)
-                val newArgs = fixInterpolationSourceLocation(expr.arguments, lineOffset, columnOffset, file)
-                val newLoc = expr.sourceLocation?.let { loc ->
-                    if (loc.line == 1) {
-                        SourceLocation(lineOffset, columnOffset + loc.column - 1, file)
-                    } else {
-                        SourceLocation(lineOffset + loc.line - 1, loc.column, file)
-                    }
-                }
-                expr.copy(function = newFunc, arguments = newArgs, sourceLocation = newLoc)
-            }
-            is RecordLiteral -> {
-                val newEntries = expr.entries.map { entry ->
-                    when (entry) {
-                        is RecordFieldEntry -> {
-                            entry.value?.let { v ->
-                                RecordFieldEntry(entry.name, fixInterpolationSourceLocation(v, lineOffset, columnOffset, file))
-                            } ?: entry
-                        }
-                        is RecordSpreadEntry -> {
-                            RecordSpreadEntry(fixInterpolationSourceLocation(entry.expression, lineOffset, columnOffset, file))
-                        }
-                    }
-                }
-                val newLoc = expr.sourceLocation?.let { loc ->
-                    if (loc.line == 1) {
-                        SourceLocation(lineOffset, columnOffset + loc.column - 1, file)
-                    } else {
-                        SourceLocation(lineOffset + loc.line - 1, loc.column, file)
-                    }
-                }
-                expr.copy(entries = newEntries, sourceLocation = newLoc)
-            }
-            is MemberAccess -> {
-                val newReceiver = fixInterpolationSourceLocation(expr.receiver, lineOffset, columnOffset, file)
-                val newLoc = expr.sourceLocation?.let { loc ->
-                    if (loc.line == 1) {
-                        SourceLocation(lineOffset, columnOffset + loc.column - 1, file)
-                    } else {
-                        SourceLocation(lineOffset + loc.line - 1, loc.column, file)
-                    }
-                }
-                expr.copy(receiver = newReceiver, sourceLocation = newLoc)
-            }
-            // For other expression types, just update the top-level location
-            else -> expr
-        }
-    }
-
     fun parse(source: String, desugar: Boolean = true, file: String? = null): Program {
         // Store for error reporting in nested parser methods
         currentSource = source
@@ -212,156 +43,6 @@ class FunkParser {
         } finally {
             currentSource = null
             currentFile = null
-        }
-    }
-
-    /**
-     * Create a ParseException with full context
-     */
-    private fun createParseException(message: String, stream: TokenStream): ParseException {
-        return ParseException(
-            message,
-            stream.getSourcePosition(),
-            stream.getSourceLine(),
-            stream.getSourceColumn(),
-            currentSource,
-            currentFile
-        )
-    }
-
-    // Desugar pipe operators in the entire program
-    private fun desugarProgram(program: Program): Program {
-        return Program(program.items.map { desugarProgramItem(it) })
-    }
-
-    private fun desugarProgramItem(item: ProgramItem): ProgramItem {
-        return when (item) {
-            is LetBinding -> item.copy(expression = desugarExpression(item.expression))
-            is TopLevelExpression -> item.copy(expression = desugarExpression(item.expression))
-            is ImplDeclaration -> item.copy(operations = item.operations.map { op ->
-                op.copy(implementation = desugarExpression(op.implementation))
-            })
-            // No desugaring needed for these declaration types
-            is TypeDeclaration -> item
-            is EffectDeclaration -> item
-            is AbilityDeclaration -> item
-            is ImplAbilityDeclaration -> item
-            is UseDeclaration -> item
-            is PubUseDeclaration -> item
-        }
-    }
-
-    private fun desugarExpression(expr: Expression): Expression {
-        return when (expr) {
-            // Expressions that need recursive desugaring
-            is FunctionCall -> expr.copy(
-                function = desugarExpression(expr.function),
-                arguments = desugarExpression(expr.arguments)
-            )
-            is RecordLiteral -> expr.copy(
-                entries = expr.entries.map { entry ->
-                    when (entry) {
-                        is RecordFieldEntry -> entry.copy(
-                            value = entry.value?.let { desugarExpression(it) }
-                        )
-                        is RecordSpreadEntry -> entry.copy(
-                            expression = desugarExpression(entry.expression)
-                        )
-                    }
-                }
-            )
-            is IfExpression -> expr.copy(
-                condition = desugarExpression(expr.condition),
-                thenBranch = desugarExpression(expr.thenBranch),
-                elseBranch = desugarExpression(expr.elseBranch)
-            )
-            is LambdaExpression -> expr.copy(body = desugarExpression(expr.body))
-            is MatchExpression -> expr.copy(
-                expression = desugarExpression(expr.expression),
-                cases = expr.cases.map { case ->
-                    case.copy(expression = desugarExpression(case.expression))
-                }
-            )
-            is DoExpression -> expr.copy(
-                statements = expr.statements.map { desugarStatement(it) },
-                result = desugarExpression(expr.result)
-            )
-            is ArrayLiteral -> expr.copy(
-                elements = expr.elements.map { desugarExpression(it) }
-            )
-            is PerformExpression -> expr.copy(
-                expression = desugarExpression(expr.expression)
-            )
-            is RecordUpdateExpression -> expr.copy(
-                baseRecord = desugarExpression(expr.baseRecord),
-                updates = expr.updates.map { update ->
-                    update.copy(value = desugarExpression(update.value))
-                }
-            )
-            is ArrayAccess -> expr.copy(
-                array = desugarExpression(expr.array),
-                index = desugarExpression(expr.index)
-            )
-            is MemberAccess -> expr.copy(
-                receiver = desugarExpression(expr.receiver)
-            )
-            is RecordUpdate -> expr.copy(
-                record = desugarExpression(expr.record),
-                updates = expr.updates.map { update ->
-                    update.copy(value = update.value?.let { desugarExpression(it) })
-                }
-            )
-            is VariantConstruction -> expr.copy(
-                value = expr.value?.let { desugarExpression(it) }
-            )
-            is EffectCallExpression -> expr.copy(
-                arguments = desugarExpression(expr.arguments)
-            )
-            is StateMachineExpression -> expr.copy(
-                states = expr.states.map { state ->
-                    when (state) {
-                        is ComputeState -> state.copy(
-                            computation = desugarExpression(state.computation)
-                        )
-                        is YieldState -> state.copy(
-                            valueExpression = desugarExpression(state.valueExpression)
-                        )
-                        is CompleteState -> state.copy(
-                            resultExpression = desugarExpression(state.resultExpression)
-                        )
-                    }
-                }
-            )
-            is StringLiteral -> {
-                val parts = expr.parts
-                if (expr.isInterpolated && parts != null) {
-                    expr.copy(
-                        parts = parts.map { part ->
-                            when (part) {
-                                is StringPart -> part
-                                is ExpressionPart -> ExpressionPart(desugarExpression(part.expression))
-                            }
-                        }
-                    )
-                } else {
-                    expr
-                }
-            }
-            // Literals and simple expressions (no desugaring needed)
-            is IntLiteral -> expr
-            is NatLiteral -> expr
-            is FloatLiteral -> expr
-            is BooleanLiteral -> expr
-            is FractionLiteral -> expr
-            is Identifier -> expr
-            is PlaceholderExpression -> expr
-        }
-    }
-
-    private fun desugarStatement(stmt: Statement): Statement {
-        return when (stmt) {
-            is ExpressionStatement -> ExpressionStatement(desugarExpression(stmt.expression))
-            is LetStatement -> LetStatement(stmt.pattern, stmt.typeAnnotation, desugarExpression(stmt.expression))
         }
     }
 
@@ -2250,7 +1931,7 @@ class FunkParser {
             lbrace
         } else {
             val lbraceSuccess = lbrace as ParseResult.Success
-            val lambdaLocation = tokenLocation(lbraceSuccess.value)
+            val lambdaLocation = tokenLocation(lbraceSuccess.value, currentFile)
             val stream1 = skipNewlines(lbraceSuccess.remaining)
 
             // Parse parameters - could be typed or untyped
@@ -2405,7 +2086,7 @@ class FunkParser {
         val lbrace = tok(TokenType.LBRACE)(stream)
         when (lbrace) {
             is ParseResult.Success -> {
-                val recordLocation = tokenLocation(lbrace.value)
+                val recordLocation = tokenLocation(lbrace.value, currentFile)
                 val stream1 = skipNewlines((lbrace as ParseResult.Success).remaining)
 
                 // Use custom sepEndBy that skips newlines after commas and allows trailing commas
@@ -2602,7 +2283,7 @@ class FunkParser {
     private val arrayLiteral: Parser<Expression> = { stream ->
         // Parse: [element1, element2, ...]
         // Also supports spread: [1, ...rest, 3]
-        val arrayLocation = stream.current()?.let { tokenLocation(it) }  // Capture [ token location
+        val arrayLocation = stream.current()?.let { tokenLocation(it, currentFile) }  // Capture [ token location
         val lbracket = tok(TokenType.LBRACKET)(stream)
         when (lbracket) {
             is ParseResult.Success -> {
@@ -2670,7 +2351,7 @@ class FunkParser {
 
     private val ifExpression: Parser<Expression> = { stream ->
         // Parse: if <condition> then <thenBranch> else <elseBranch>
-        val ifLocation = stream.current()?.let { tokenLocation(it) }  // Capture 'if' location
+        val ifLocation = stream.current()?.let { tokenLocation(it, currentFile) }  // Capture 'if' location
         val ifToken = tok(TokenType.IF)(stream)
         when (ifToken) {
             is ParseResult.Success -> {
@@ -2732,7 +2413,7 @@ class FunkParser {
         // Parse two forms:
         // 1. perform operation {args} - simple effect call
         // 2. perform Handler1, Handler2 in expression - perform with handlers
-        val performLocation = stream.current()?.let { tokenLocation(it) }  // Capture perform keyword location
+        val performLocation = stream.current()?.let { tokenLocation(it, currentFile) }  // Capture perform keyword location
         val performToken = tok(TokenType.PERFORM)(stream)
         when (performToken) {
             is ParseResult.Success -> {
@@ -2832,7 +2513,7 @@ class FunkParser {
 
     private val doExpression: Parser<Expression> = { stream ->
         // Parse: do <statement>* <result-expression>
-        val doLocation = stream.current()?.let { tokenLocation(it) }  // Capture do keyword location
+        val doLocation = stream.current()?.let { tokenLocation(it, currentFile) }  // Capture do keyword location
         val doToken = tok(TokenType.DO)(stream)
         when (doToken) {
             is ParseResult.Success -> {
@@ -2971,7 +2652,7 @@ class FunkParser {
 
     private val matchExpression: Parser<Expression> = { stream ->
         // Parse: match <expr> is <case1> <case2> ...
-        val matchLocation = stream.current()?.let { tokenLocation(it) }  // Capture match keyword location
+        val matchLocation = stream.current()?.let { tokenLocation(it, currentFile) }  // Capture match keyword location
         val matchToken = tok(TokenType.MATCH)(stream)
         when (matchToken) {
             is ParseResult.Success -> {
@@ -3828,7 +3509,7 @@ class FunkParser {
 
         if (token?.type == TokenType.MINUS) {
             // Check if this is a negative literal (skip newlines first)
-            val opLocation = tokenLocation(token)
+            val opLocation = tokenLocation(token, currentFile)
             val streamAfterMinus = skipNewlines(stream.advance())
             val literalToken = streamAfterMinus.current()
 
@@ -3883,7 +3564,7 @@ class FunkParser {
             }
         } else if (token?.type == TokenType.NOT) {
             // Desugar to ability method call
-            val opLocation = tokenLocation(token)  // Capture operator location
+            val opLocation = tokenLocation(token, currentFile)  // Capture operator location
             val opStream = stream.advance()
             val operand = unaryExpression(opStream) // Right-associative: !(!x) is valid
             when (operand) {
@@ -3991,7 +3672,9 @@ class FunkParser {
                     throw createParseException(
                         "Function calls must use {} syntax, not (). " +
                         "Instead of '$funcName(...)', use '$funcName { <field> = <value> }' with named arguments.",
-                        currentStream
+                        currentStream,
+                        currentSource,
+                        currentFile
                     )
                 }
                 TokenType.NEWLINE -> {
@@ -4027,7 +3710,9 @@ class FunkParser {
                                 throw createParseException(
                                     "Newline not allowed before '{' in function call. Function calls require '{' on the same line. " +
                                     "Instead of:\n  $funcName\n  { ... }\nUse:\n  $funcName { ... }",
-                                    currentStream
+                                    currentStream,
+                                    currentSource,
+                                    currentFile
                                 )
                             }
                         }
@@ -4048,7 +3733,9 @@ class FunkParser {
                         throw createParseException(
                             "Function calls must use {} syntax. Instead of '$funcName $argName', " +
                             "use '$funcName { ... }' with named arguments.",
-                            currentStream
+                            currentStream,
+                            currentSource,
+                            currentFile
                         )
                     }
                     // For non-identifier expressions, treat following identifier as separate statement
@@ -4082,7 +3769,9 @@ class FunkParser {
                         throw createParseException(
                             "Function calls must use {} syntax. Instead of '$funcName $literalType', " +
                             "use '$funcName { <field> = $literalType }' with named arguments.",
-                            currentStream
+                            currentStream,
+                            currentSource,
+                            currentFile
                         )
                     }
                     break
@@ -4101,7 +3790,7 @@ class FunkParser {
     // @ placeholder for pipe operator
     private val atPlaceholderExpression: Parser<Expression> = { stream ->
         val atToken = stream.current()
-        val location = atToken?.let { tokenLocation(it) }
+        val location = atToken?.let { tokenLocation(it, currentFile) }
         val token = tok(TokenType.AT)(stream)
         when (token) {
             is ParseResult.Success -> ParseResult.Success(
@@ -4117,7 +3806,7 @@ class FunkParser {
         val first = identifierParser(stream)
         when (first) {
             is ParseResult.Success -> {
-                val startLocation = tokenLocation(first.value)  // Capture location of first token
+                val startLocation = tokenLocation(first.value, currentFile)  // Capture location of first token
                 var name = first.value.text
                 var currentStream = first.remaining
                 var failed: ParseResult.Failure? = null
@@ -4162,7 +3851,7 @@ class FunkParser {
 
     private val literalExpression: Parser<Expression> = { stream ->
         val token = stream.current()
-        val location = token?.let { tokenLocation(it) }
+        val location = token?.let { tokenLocation(it, currentFile) }
         when (token?.type) {
             TokenType.INTEGER -> ParseResult.Success(
                 IntLiteral(token.text.toLong(), sourceLocation = location),
