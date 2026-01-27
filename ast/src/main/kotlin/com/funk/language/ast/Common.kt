@@ -154,9 +154,17 @@ data class SourceLocation(
  * - Parser desugars to: `NumSub.neg {n = x}`
  * - Metadata records: "This came from operator `-`"
  * - Error messages can say: "Type error in operator `-`" instead of "Type error in call to NumSub.neg"
+ *
+ * ## Thread Safety
+ *
+ * **THREAD-SAFE**: Uses ThreadLocal storage so each thread has its own metadata map.
+ * This allows parallel parsing of multiple files without race conditions.
  */
 object SyntaxMetadata {
-    private val operatorMetadata = mutableMapOf<SourceLocation, String>()
+    // Each thread gets its own metadata map - prevents race conditions
+    private val operatorMetadata = ThreadLocal.withInitial<MutableMap<SourceLocation, String>> {
+        mutableMapOf()
+    }
 
     /**
      * Mark an expression as coming from operator syntax.
@@ -164,7 +172,7 @@ object SyntaxMetadata {
      * @param operatorSyntax The operator that was desugared (e.g., "-", "+", "!")
      */
     fun markAsOperator(location: SourceLocation, operatorSyntax: String) {
-        operatorMetadata[location] = operatorSyntax
+        operatorMetadata.get()[location] = operatorSyntax
     }
 
     /**
@@ -173,20 +181,28 @@ object SyntaxMetadata {
      * @return The operator syntax, or null if not from an operator
      */
     fun getOperatorSyntax(location: SourceLocation): String? {
-        return operatorMetadata[location]
+        return operatorMetadata.get()[location]
     }
 
     /**
-     * Clear all metadata. Typically called when starting a new parse.
+     * Clear all metadata for the current thread. Typically called when starting a new parse.
      */
     fun clear() {
-        operatorMetadata.clear()
+        operatorMetadata.get().clear()
     }
 
     /**
-     * Get the number of tracked metadata entries (for debugging/testing)
+     * Get the number of tracked metadata entries for the current thread (for debugging/testing)
      */
-    fun size(): Int = operatorMetadata.size
+    fun size(): Int = operatorMetadata.get().size
+
+    /**
+     * Remove the ThreadLocal for the current thread to prevent memory leaks.
+     * Call this in long-running servers after parse operations are complete.
+     */
+    fun cleanup() {
+        operatorMetadata.remove()
+    }
 }
 
 // ============================================================================

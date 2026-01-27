@@ -99,9 +99,8 @@ internal val FunkParser.arrayPattern: Parser<Pattern>
                                         }
                                         else -> {
                                             // Expected identifier or end of pattern
-                                            ParseResult.Failure(
-                                                "Expected identifier or ']' after ... in array pattern",
-                                                ellipsisStream.getSourcePosition()
+                                            ellipsisStream.failure(
+                                                "Expected identifier or ']' after ... in array pattern"
                                             )
                                         }
                                     }
@@ -132,9 +131,8 @@ internal val FunkParser.arrayPattern: Parser<Pattern>
                                         TokenType.RBRACKET -> {
                                             ParseResult.Success(Pair(newAccum, Pair(null, afterPattern)), afterPattern)
                                         }
-                                        else -> ParseResult.Failure(
-                                            "Expected ',' or ']' in array pattern",
-                                            afterPattern.getSourcePosition()
+                                        else -> afterPattern.failure(
+                                            "Expected ',' or ']' in array pattern"
                                         )
                                     }
                                 }
@@ -254,7 +252,7 @@ internal val FunkParser.literalPattern: Parser<Pattern>
                         stream.advance()
                     )
                 } else {
-                    ParseResult.Failure("Invalid integer literal: ${token.text}", stream.getSourcePosition())
+                    stream.failure("Invalid integer literal: ${token.text}")
                 }
             }
             TokenType.NAT -> {
@@ -265,7 +263,7 @@ internal val FunkParser.literalPattern: Parser<Pattern>
                         stream.advance()
                     )
                 } else {
-                    ParseResult.Failure("Invalid nat literal: ${token.text}", stream.getSourcePosition())
+                    stream.failure("Invalid nat literal: ${token.text}")
                 }
             }
             TokenType.STRING -> {
@@ -296,10 +294,10 @@ internal val FunkParser.literalPattern: Parser<Pattern>
                         stream.advance()
                     )
                 } else {
-                    ParseResult.Failure("Invalid float literal: ${token.text}", stream.getSourcePosition())
+                    stream.failure("Invalid float literal: ${token.text}")
                 }
             }
-            else -> ParseResult.Failure("Expected literal (integer, nat, string, boolean, or float)", stream.getSourcePosition())
+            else -> stream.failure("Expected literal (integer, nat, string, boolean, or float)")
         }
     }
 
@@ -312,7 +310,7 @@ internal val FunkParser.variablePattern: Parser<Pattern>
                 // Check if next token is LBRACE - if so, it's a constructor pattern
                 val next = ident.remaining.current()
                 if (next?.type == TokenType.LBRACE) {
-                    ParseResult.Failure("Constructor pattern, not variable", stream.getSourcePosition())
+                    stream.failure("Constructor pattern, not variable")
                 } else {
                     ParseResult.Success(VariablePattern(ident.value.text), ident.remaining)
                 }
@@ -334,7 +332,7 @@ internal val FunkParser.constructorPattern: Parser<Pattern>
                 val isConstructor = ident.value.text.firstOrNull()?.isUpperCase() == true
 
                 if (!isConstructor) {
-                    ParseResult.Failure("Expected constructor (uppercase)", stream.getSourcePosition())
+                    stream.failure("Expected constructor (uppercase)")
                 } else {
                     val stream1 = ident.remaining
                     val next = stream1.current()

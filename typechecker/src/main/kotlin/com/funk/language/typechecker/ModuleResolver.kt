@@ -109,26 +109,59 @@ private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
 }
 
 /**
- *
-Module resolution system for Funk
+ * Module resolution system for Funk
  * Handles loading, parsing, and caching of modules
+ *
+ * ## Thread Safety
+ *
+ * **THREAD-SAFE FOR PARALLEL MODULE LOADING**: Each module parse creates a fresh parser instance.
+ * The module cache uses synchronized access for thread-safe concurrent module resolution.
+ *
+ * Safe parallel usage:
+ * ```kotlin
+ * val resolver = ModuleResolver()
+ * val modules = modulePaths.parallelStream().map { path ->
+ *     resolver.resolveModule(path)  // Safe - thread-safe cache + fresh parsers
+ * }.toList()
+ * ```
  */
 class ModuleResolver(
-    currentPath: Path = Paths.get("."),
-    private val parser: FunkParser = FunkParser()
+    currentPath: Path = Paths.get(".")
 ) {
     private val projectRoot: Path = findProjectRoot(currentPath)
 
     companion object {
         // Cache for parsed modules to avoid reprocessing (shared across all instances)
+        // Access is synchronized for thread safety
         private val moduleCache = mutableMapOf<String, Module>()
+        private val cacheLock = Any()
 
         /**
          * Clear the module cache. This is useful for tests to ensure clean state between runs.
          */
         @JvmStatic
         fun clearCache() {
-            moduleCache.clear()
+            synchronized(cacheLock) {
+                moduleCache.clear()
+            }
+        }
+
+        /**
+         * Get a module from the cache (thread-safe).
+         */
+        internal fun getFromCache(modulePath: String): Module? {
+            synchronized(cacheLock) {
+                return moduleCache[modulePath]
+            }
+        }
+
+        /**
+         * Put a module in the cache (thread-safe).
+         */
+        internal fun putInCache(modulePath: String, module: Module) {
+            synchronized(cacheLock) {
+                moduleCache[modulePath] = module
+            }
         }
     }
 
@@ -192,12 +225,12 @@ class ModuleResolver(
             return createEmptyModule(modulePath, "Core module skipped - types are now built-in")
         }
         
-        // Check cache first
-        moduleCache[modulePath]?.let { 
+        // Check cache first (thread-safe)
+        getFromCache(modulePath)?.let {
             if (System.getProperty("funk.typecheck.debug") == "true") {
                 println("DEBUG: Found cached module: $modulePath")
             }
-            return it 
+            return it
         }
         
         // Check for deprecated core modules and provide migration warnings
@@ -216,9 +249,10 @@ class ModuleResolver(
         loadingStack.add(modulePath)
         
         try {
-            // Parse the module
+            // Parse the module with file name for better error messages
+            // Create fresh parser for thread safety
             val source = Files.readString(filePath)
-            val program = parser.parse(source)
+            val program = FunkParser().parse(source, file = filePath.toString())
 
             // Don't type-check during module resolution to avoid circular dependencies
             // The module will be type-checked when it's actually used
@@ -236,13 +270,17 @@ class ModuleResolver(
                 dependencies = dependencies
             )
 
-            // Cache the module immediately so updateModuleExports can find and update it
+            // Cache the module immediately so updateModuleExports can find and update it (thread-safe)
             // The exports may be incomplete (based on annotations only), but will be updated later
-            moduleCache[modulePath] = module
+            putInCache(modulePath, module)
             return module
             
-        } catch (e: Exception) {
+        } catch (e: com.funk.language.parser.ParseException) {
+            // Preserve the formatted error message with code snippets
             throw ModuleError.ParseError(modulePath, e.message ?: "Unknown parse error")
+        } catch (e: Exception) {
+            // Catch other unexpected errors
+            throw ModuleError.ParseError(modulePath, "Unexpected error: ${e.message}")
         } finally {
             loadingStack.remove(modulePath)
         }
@@ -612,7 +650,7 @@ class ModuleResolver(
             }
         }
 
-        val module = moduleCache[modulePath]
+        val module = getFromCache(modulePath)
         val updatedModule = if (module != null) {
             module.copy(
                 program = typedProgram,
@@ -628,7 +666,7 @@ class ModuleResolver(
                 dependencies = emptyList()
             )
         }
-        moduleCache[modulePath] = updatedModule
+        putInCache(modulePath, updatedModule)
 
         if (System.getProperty("funk.typecheck.debug") == "true") {
             println("DEBUG updateModuleExports: Cached module with ${updatedModule.exports.size} exports")

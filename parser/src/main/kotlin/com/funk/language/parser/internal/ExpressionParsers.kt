@@ -74,7 +74,7 @@ internal fun FunkParser.lookAheadForArrowAfterBrace(stream: TokenStream): Boolea
 internal val FunkParser.lambdaOrRecordExpression: Parser<Expression>
     get() = { stream ->
         if (stream.current()?.type != TokenType.LBRACE) {
-            ParseResult.Failure("Expected LBRACE", stream.getSourcePosition())
+            stream.failure("Expected LBRACE")
         } else {
             // Look ahead to find the matching RBRACE and check if there's an ARROW after it
             val hasArrowAfterBrace = lookAheadForArrowAfterBrace(stream)
@@ -92,49 +92,45 @@ internal val FunkParser.lambdaOrRecordExpression: Parser<Expression>
 // ===== LAMBDA EXPRESSION =====
 
 internal val FunkParser.lambdaExpression: Parser<Expression>
-    get() = { stream ->
+    get() = parser@{ stream ->
         // Parse {params} -> body
-        val lbrace = tok(TokenType.LBRACE)(stream)
-        if (lbrace is ParseResult.Failure) {
-            lbrace
-        } else {
-            val lbraceSuccess = lbrace as ParseResult.Success
-            val lambdaLocation = tokenLocation(lbraceSuccess.value, currentFile)
-            val stream1 = skipNewlines(lbraceSuccess.remaining)
 
-            // Parse parameters - could be typed or untyped
-            val paramsResult = lambdaParameters(stream1)
+        // Parse opening brace
+        when (val lbrace = tok(TokenType.LBRACE)(stream)) {
+            is ParseResult.Failure -> return@parser lbrace
+            is ParseResult.Success -> {
+                val lambdaLocation = tokenLocation(lbrace.value, currentFile)
+                val stream1 = skipNewlines(lbrace.remaining)
 
-            when (paramsResult) {
-                is ParseResult.Success -> {
-                    val stream2 = skipNewlines(paramsResult.remaining)
-                    val rbrace = tok(TokenType.RBRACE)(stream2)
-
-                    when (rbrace) {
-                        is ParseResult.Success -> {
-                            val stream3 = skipNewlines((rbrace as ParseResult.Success).remaining)
-                            val arrow = tok(TokenType.ARROW)(stream3)
-
-                            when (arrow) {
-                                is ParseResult.Success -> {
-                                    val stream4 = skipNewlines((arrow as ParseResult.Success).remaining)
-                                    val body = expression(stream4)
-
-                                    when (body) {
-                                        is ParseResult.Success -> ParseResult.Success(
-                                            LambdaExpression(paramsResult.value, (body as ParseResult.Success).value, sourceLocation = lambdaLocation),
-                                            body.remaining
-                                        )
-                                        is ParseResult.Failure -> body
+                // Parse parameters - could be typed or untyped
+                when (val paramsResult = lambdaParameters(stream1)) {
+                    is ParseResult.Failure -> return@parser paramsResult
+                    is ParseResult.Success -> {
+                        // Parse closing brace
+                        val stream2 = skipNewlines(paramsResult.remaining)
+                        when (val rbrace = tok(TokenType.RBRACE)(stream2)) {
+                            is ParseResult.Failure -> return@parser rbrace
+                            is ParseResult.Success -> {
+                                // Parse arrow
+                                val stream3 = skipNewlines(rbrace.remaining)
+                                when (val arrow = tok(TokenType.ARROW)(stream3)) {
+                                    is ParseResult.Failure -> return@parser arrow
+                                    is ParseResult.Success -> {
+                                        // Parse body
+                                        val stream4 = skipNewlines(arrow.remaining)
+                                        when (val body = expression(stream4)) {
+                                            is ParseResult.Failure -> return@parser body
+                                            is ParseResult.Success -> ParseResult.Success(
+                                                LambdaExpression(paramsResult.value, body.value, sourceLocation = lambdaLocation),
+                                                body.remaining
+                                            )
+                                        }
                                     }
                                 }
-                                is ParseResult.Failure -> arrow
                             }
                         }
-                        is ParseResult.Failure -> rbrace
                     }
                 }
-                is ParseResult.Failure -> paramsResult
             }
         }
     }
@@ -197,7 +193,7 @@ internal val FunkParser.typedLambdaParams: Parser<LambdaParameters>
                 val entryList = (entries as ParseResult.Success).value
                 if (entryList.isEmpty()) {
                     // No parameters found
-                    ParseResult.Failure("Expected typed parameters", stream.getSourcePosition())
+                    stream.failure("Expected typed parameters")
                 } else {
                     // Check if at least one parameter has a type annotation
                     val hasTypedParam = entryList.any { it.second != null }
@@ -211,7 +207,7 @@ internal val FunkParser.typedLambdaParams: Parser<LambdaParameters>
                         ParseResult.Success(TypedParameters(recordType), entries.remaining)
                     } else {
                         // All parameters are untyped, fail so we can try untyped parser
-                        ParseResult.Failure("Expected at least one typed parameter", stream.getSourcePosition())
+                        stream.failure("Expected at least one typed parameter")
                     }
                 }
             }
@@ -431,36 +427,38 @@ internal val FunkParser.primaryExpression: Parser<Expression>
 // ===== IF EXPRESSION =====
 
 internal val FunkParser.ifExpression: Parser<Expression>
-    get() = { stream ->
+    get() = parser@{ stream ->
         // Parse: if <condition> then <thenBranch> else <elseBranch>
-        val ifLocation = stream.current()?.let { tokenLocation(it, currentFile) }  // Capture 'if' location
-        val ifToken = tok(TokenType.IF)(stream)
-        when (ifToken) {
+        val ifLocation = stream.current()?.let { tokenLocation(it, currentFile) }
+
+        // Parse 'if' keyword
+        when (val ifToken = tok(TokenType.IF)(stream)) {
+            is ParseResult.Failure -> return@parser ifToken
             is ParseResult.Success -> {
+                // Parse condition
                 val stream1 = skipNewlines(ifToken.remaining)
-                val condition = expression(stream1)
-
-                when (condition) {
+                when (val condition = expression(stream1)) {
+                    is ParseResult.Failure -> return@parser condition
                     is ParseResult.Success -> {
+                        // Parse 'then' keyword
                         val stream2 = skipNewlines(condition.remaining)
-                        val thenToken = tok(TokenType.THEN)(stream2)
-
-                        when (thenToken) {
+                        when (val thenToken = tok(TokenType.THEN)(stream2)) {
+                            is ParseResult.Failure -> return@parser thenToken
                             is ParseResult.Success -> {
+                                // Parse then branch
                                 val stream3 = skipNewlines(thenToken.remaining)
-                                val thenBranch = expression(stream3)
-
-                                when (thenBranch) {
+                                when (val thenBranch = expression(stream3)) {
+                                    is ParseResult.Failure -> return@parser thenBranch
                                     is ParseResult.Success -> {
+                                        // Parse 'else' keyword
                                         val stream4 = skipNewlines(thenBranch.remaining)
-                                        val elseToken = tok(TokenType.ELSE)(stream4)
-
-                                        when (elseToken) {
+                                        when (val elseToken = tok(TokenType.ELSE)(stream4)) {
+                                            is ParseResult.Failure -> return@parser elseToken
                                             is ParseResult.Success -> {
+                                                // Parse else branch
                                                 val stream5 = skipNewlines(elseToken.remaining)
-                                                val elseBranch = expression(stream5)
-
-                                                when (elseBranch) {
+                                                when (val elseBranch = expression(stream5)) {
+                                                    is ParseResult.Failure -> return@parser elseBranch
                                                     is ParseResult.Success -> ParseResult.Success(
                                                         IfExpression(
                                                             condition.value,
@@ -470,22 +468,16 @@ internal val FunkParser.ifExpression: Parser<Expression>
                                                         ),
                                                         elseBranch.remaining
                                                     )
-                                                    is ParseResult.Failure -> elseBranch
                                                 }
                                             }
-                                            is ParseResult.Failure -> elseToken
                                         }
                                     }
-                                    is ParseResult.Failure -> thenBranch
                                 }
                             }
-                            is ParseResult.Failure -> thenToken
                         }
                     }
-                    is ParseResult.Failure -> condition
                 }
             }
-            is ParseResult.Failure -> ifToken
         }
     }
 
@@ -725,7 +717,7 @@ internal val FunkParser.doExpression: Parser<Expression>
                         finalResult.second
                     )
                 } else {
-                    ParseResult.Failure("Expected result expression in do block", currentStream.getSourcePosition())
+                    currentStream.failure("Expected result expression in do block")
                 }
             }
             is ParseResult.Failure -> {
@@ -1222,7 +1214,7 @@ internal val FunkParser.unaryExpression: Parser<Expression>
                                 streamAfterMinus.advance()
                             )
                         } else {
-                            ParseResult.Failure("Invalid fraction literal: ${literalToken.text}", streamAfterMinus.getSourcePosition())
+                            streamAfterMinus.failure("Invalid fraction literal: ${literalToken.text}")
                         }
                     }
                     else -> {
@@ -1565,7 +1557,7 @@ internal val FunkParser.literalExpression: Parser<Expression>
                         stream.advance()
                     )
                 } else {
-                    ParseResult.Failure("Invalid fraction literal: ${token.text}", stream.getSourcePosition())
+                    stream.failure("Invalid fraction literal: ${token.text}")
                 }
             }
             TokenType.STRING -> {
@@ -1588,7 +1580,7 @@ internal val FunkParser.literalExpression: Parser<Expression>
                 BooleanLiteral(token.text == "true", sourceLocation = location),
                 stream.advance()
             )
-            else -> ParseResult.Failure("Expected literal", stream.getSourcePosition())
+            else -> stream.failure("Expected literal")
         }
     }
 

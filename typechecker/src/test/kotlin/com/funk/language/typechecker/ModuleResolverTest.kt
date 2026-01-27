@@ -8,7 +8,7 @@ import java.nio.file.Paths
 class ModuleResolverTest {
     
     private val parser = FunkParser()
-    private val moduleResolver = ModuleResolver(Paths.get("."), parser)
+    private val moduleResolver = ModuleResolver(Paths.get("."))
     
     @Test
     fun testCoreModulesAreSkipped() {
