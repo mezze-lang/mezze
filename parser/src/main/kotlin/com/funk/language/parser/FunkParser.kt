@@ -241,12 +241,19 @@ class FunkParser {
             is ImplDeclaration -> item.copy(operations = item.operations.map { op ->
                 op.copy(implementation = desugarExpression(op.implementation))
             })
-            else -> item // TypeDeclaration, EffectDeclaration, AbilityDeclaration, UseDeclaration, etc.
+            // No desugaring needed for these declaration types
+            is TypeDeclaration -> item
+            is EffectDeclaration -> item
+            is AbilityDeclaration -> item
+            is ImplAbilityDeclaration -> item
+            is UseDeclaration -> item
+            is PubUseDeclaration -> item
         }
     }
 
     private fun desugarExpression(expr: Expression): Expression {
         return when (expr) {
+            // Expressions that need recursive desugaring
             is FunctionCall -> expr.copy(
                 function = desugarExpression(expr.function),
                 arguments = desugarExpression(expr.arguments)
@@ -291,7 +298,63 @@ class FunkParser {
                     update.copy(value = desugarExpression(update.value))
                 }
             )
-            else -> expr // Literals, identifiers, etc.
+            is ArrayAccess -> expr.copy(
+                array = desugarExpression(expr.array),
+                index = desugarExpression(expr.index)
+            )
+            is MemberAccess -> expr.copy(
+                receiver = desugarExpression(expr.receiver)
+            )
+            is RecordUpdate -> expr.copy(
+                record = desugarExpression(expr.record),
+                updates = expr.updates.map { update ->
+                    update.copy(value = update.value?.let { desugarExpression(it) })
+                }
+            )
+            is VariantConstruction -> expr.copy(
+                value = expr.value?.let { desugarExpression(it) }
+            )
+            is EffectCallExpression -> expr.copy(
+                arguments = desugarExpression(expr.arguments)
+            )
+            is StateMachineExpression -> expr.copy(
+                states = expr.states.map { state ->
+                    when (state) {
+                        is ComputeState -> state.copy(
+                            computation = desugarExpression(state.computation)
+                        )
+                        is YieldState -> state.copy(
+                            valueExpression = desugarExpression(state.valueExpression)
+                        )
+                        is CompleteState -> state.copy(
+                            resultExpression = desugarExpression(state.resultExpression)
+                        )
+                    }
+                }
+            )
+            is StringLiteral -> {
+                val parts = expr.parts
+                if (expr.isInterpolated && parts != null) {
+                    expr.copy(
+                        parts = parts.map { part ->
+                            when (part) {
+                                is StringPart -> part
+                                is ExpressionPart -> ExpressionPart(desugarExpression(part.expression))
+                            }
+                        }
+                    )
+                } else {
+                    expr
+                }
+            }
+            // Literals and simple expressions (no desugaring needed)
+            is IntLiteral -> expr
+            is NatLiteral -> expr
+            is FloatLiteral -> expr
+            is BooleanLiteral -> expr
+            is FractionLiteral -> expr
+            is Identifier -> expr
+            is PlaceholderExpression -> expr
         }
     }
 
