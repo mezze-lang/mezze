@@ -3,6 +3,7 @@ package com.funk.language.parser.internal
 import com.funk.language.parser.*
 
 /**
+import com.funk.language.parser.internal.lib.*
  * Lexer for Funk language.
  * Converts source code into a stream of tokens.
  */

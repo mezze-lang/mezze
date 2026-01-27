@@ -3,6 +3,7 @@ package com.funk.language.parser.internal
 import com.funk.language.ast.*
 import com.funk.language.parser.*
 
+import com.funk.language.parser.internal.lib.*
 /**
  * Parser helper functions and utilities.
  *

@@ -1,6 +1,8 @@
-package com.funk.language.parser.internal
+package com.funk.language.parser.internal.lib
 
 import com.funk.language.parser.*
+import com.funk.language.parser.internal.Token
+import com.funk.language.parser.internal.TokenType
 
 /**
  * Parser combinator framework for Funk language.
