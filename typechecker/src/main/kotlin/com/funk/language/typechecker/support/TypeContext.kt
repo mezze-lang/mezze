@@ -1,8 +1,7 @@
 package com.funk.language.typechecker.support
 
 import com.funk.language.ast.*
-import com.funk.language.typechecker.ModuleResolver
-import com.funk.language.typechecker.NewtypeInfo
+import com.funk.language.typechecker.*
 
 /**
  * Centralized state container for type checking operations.
@@ -19,11 +18,22 @@ import com.funk.language.typechecker.NewtypeInfo
  * The TypeContext is passed to all engine functions (InferenceEngine, ValidationEngine, etc.)
  * and provides centralized access to:
  * - Type environment (variable bindings)
+ * - Type, ability, and effect declarations
  * - Type aliases and newtypes
  * - Ability implementations
+ * - Effect performer mappings
  * - Constraint tracking
  * - Module resolution
  * - Type variable generation
+ *
+ * # Phase 4 Enhancement
+ *
+ * This version of TypeContext has been enhanced in Phase 4 to consolidate additional
+ * state fields from TypeChecker, including:
+ * - Type/ability/effect declaration maps
+ * - Performer-to-effect mappings
+ * - Module binding tracking
+ * - Imported values
  *
  * # Thread Safety
  *
@@ -34,16 +44,27 @@ import com.funk.language.typechecker.NewtypeInfo
  * @property moduleResolver The module resolver for handling imports and dependencies
  */
 data class TypeContext(
-    // Module information
+    // ========== Module Information ==========
     var currentModule: String = "main",
     var currentFilePath: String? = null,
     var moduleResolver: ModuleResolver? = null,
 
-    // Type environment - maps variable names to their types
+    // ========== Type Environment ==========
+    // Maps variable names to their types (monomorphic bindings)
     val context: MutableMap<String, FunkType> = mutableMapOf(),
 
     // Type schemes for polymorphic bindings (let-polymorphism)
     val typeSchemes: MutableMap<String, TypeScheme> = mutableMapOf(),
+
+    // Imported values from other modules
+    val importedValues: MutableMap<String, FunkType> = mutableMapOf(),
+
+    // Maps binding names to their source module (null = current module)
+    val bindingSourceModule: MutableMap<String, String?> = mutableMapOf(),
+
+    // ========== Type Definitions ==========
+    // Type declarations (records, variants, etc.)
+    val typeDeclarationMap: MutableMap<String, TypeDeclaration> = mutableMapOf(),
 
     // Type aliases defined in the program
     val typeAliases: MutableMap<String, TypeAliasInfo> = mutableMapOf(),
@@ -51,13 +72,34 @@ data class TypeContext(
     // Newtype definitions
     val newtypes: MutableMap<String, NewtypeInfo> = mutableMapOf(),
 
+    // ========== Ability System ==========
+    // Ability declarations
+    val abilityDeclarationMap: MutableMap<String, AbilityDeclaration> = mutableMapOf(),
+
+    // Ability dependencies (for ability requires clauses)
+    val abilityDependencies: MutableMap<String, List<AbilityDependency>> = mutableMapOf(),
+
     // Ability (type class) implementations
     val implAbilities: MutableMap<String, List<ImplAbilityDeclaration>> = mutableMapOf(),
 
-    // Constraint tracking for type inference
+    // ========== Effect System ==========
+    // Effect declarations
+    val effectDeclarationMap: MutableMap<String, EffectDeclaration> = mutableMapOf(),
+
+    // Maps performer names to their effect names
+    val performerToEffectMap: MutableMap<String, String> = mutableMapOf(),
+
+    // Maps performer names to their implementation declarations
+    val performerImplMap: MutableMap<String, ImplDeclaration> = mutableMapOf(),
+
+    // ========== Constraint Tracking ==========
+    // Type equality constraints for unification
     val constraints: MutableList<Pair<FunkType, FunkType>> = mutableListOf(),
+
+    // Ability constraints for type variables
     val abilityConstraints: MutableList<Triple<TypeVar, String, SourceLocation?>> = mutableListOf(),
 
+    // ========== Type Variable Generation ==========
     // Type variable counter for generating fresh type variables
     private var typeVarCounter: Int = 0
 ) {
@@ -210,8 +252,8 @@ data class TypeContext(
     /**
      * Create a child context with a new scope.
      *
-     * The child context shares type aliases, newtypes, and ability implementations
-     * with the parent, but has its own variable bindings and constraints.
+     * The child context shares type/ability/effect declarations with the parent,
+     * but has its own variable bindings and constraints.
      *
      * This is useful for checking function bodies where local bindings shouldn't
      * leak to the outer scope.
@@ -220,17 +262,38 @@ data class TypeContext(
      */
     fun createChildContext(): TypeContext {
         return TypeContext(
+            // Module info
             currentModule = currentModule,
             currentFilePath = currentFilePath,
             moduleResolver = moduleResolver,
-            context = context.toMutableMap(), // Copy bindings
-            typeSchemes = typeSchemes.toMutableMap(), // Copy schemes
-            typeAliases = typeAliases, // Share type aliases
-            newtypes = newtypes, // Share newtypes
-            implAbilities = implAbilities, // Share ability impls
-            constraints = mutableListOf(), // Fresh constraint list
-            abilityConstraints = mutableListOf(), // Fresh ability constraints
-            typeVarCounter = typeVarCounter // Continue type var numbering
+
+            // Type environment (copied)
+            context = context.toMutableMap(),
+            typeSchemes = typeSchemes.toMutableMap(),
+            importedValues = importedValues.toMutableMap(),
+            bindingSourceModule = bindingSourceModule.toMutableMap(),
+
+            // Type definitions (shared)
+            typeDeclarationMap = typeDeclarationMap,
+            typeAliases = typeAliases,
+            newtypes = newtypes,
+
+            // Ability system (shared)
+            abilityDeclarationMap = abilityDeclarationMap,
+            abilityDependencies = abilityDependencies,
+            implAbilities = implAbilities,
+
+            // Effect system (shared)
+            effectDeclarationMap = effectDeclarationMap,
+            performerToEffectMap = performerToEffectMap,
+            performerImplMap = performerImplMap,
+
+            // Constraints (fresh)
+            constraints = mutableListOf(),
+            abilityConstraints = mutableListOf(),
+
+            // Type variable counter (continued)
+            typeVarCounter = typeVarCounter
         )
     }
 
@@ -238,13 +301,20 @@ data class TypeContext(
      * Reset the context for a new type checking session.
      *
      * Clears all bindings, constraints, and resets the type variable counter.
-     * Keeps type aliases, newtypes, and ability implementations.
+     * Keeps type/ability/effect declarations.
      */
     fun reset() {
+        // Clear type environment
         context.clear()
         typeSchemes.clear()
+        importedValues.clear()
+        bindingSourceModule.clear()
+
+        // Clear constraints
         constraints.clear()
         abilityConstraints.clear()
+
+        // Reset counter
         typeVarCounter = 0
     }
 
@@ -258,14 +328,33 @@ data class TypeContext(
             TypeContext Summary:
               Module: $currentModule
               File: $currentFilePath
-              Bindings: ${context.size}
-              Type Schemes: ${typeSchemes.size}
-              Type Aliases: ${typeAliases.size}
-              Newtypes: ${newtypes.size}
-              Ability Impls: ${implAbilities.size}
-              Constraints: ${constraints.size}
-              Ability Constraints: ${abilityConstraints.size}
-              Next Type Var: ${typeVarCounter}
+
+              Type Environment:
+                Bindings: ${context.size}
+                Type Schemes: ${typeSchemes.size}
+                Imported Values: ${importedValues.size}
+                Binding Sources: ${bindingSourceModule.size}
+
+              Type Definitions:
+                Type Declarations: ${typeDeclarationMap.size}
+                Type Aliases: ${typeAliases.size}
+                Newtypes: ${newtypes.size}
+
+              Ability System:
+                Ability Declarations: ${abilityDeclarationMap.size}
+                Ability Dependencies: ${abilityDependencies.size}
+                Ability Implementations: ${implAbilities.size}
+
+              Effect System:
+                Effect Declarations: ${effectDeclarationMap.size}
+                Performers: ${performerToEffectMap.size}
+                Performer Impls: ${performerImplMap.size}
+
+              Constraints:
+                Type Constraints: ${constraints.size}
+                Ability Constraints: ${abilityConstraints.size}
+
+              Next Type Var: $typeVarCounter
         """.trimIndent()
     }
 }
