@@ -5,10 +5,8 @@ import kotlinx.serialization.Serializable
 /**
  * Built-in ability system for the Funk language.
  *
- * This file contains all built-in abilities, operators, and type utilities:
+ * This file contains all built-in abilities and type utilities:
  * - BuiltinAbilities: All built-in abilities (Eq, Ord, NumAdd, etc.)
- * - BuiltinOperators: Operator to ability mappings
- * - BuiltinAbilityDefinitions: Ability interface definitions
  * - BuiltinTypes: Built-in type constructor utilities
  *
  * Part of the refactored AST module.
@@ -143,131 +141,6 @@ object BuiltinAbilities {
 
             else -> false
         }
-    }
-}
-
-/**
- * Built-in ability interface definitions
- * These define the structure and operations for each built-in ability
- */
-object BuiltinAbilityDefinitions {
-
-    /**
-     * Equality ability - provides equals operation
-     */
-    data class EqAbility(
-        val equals: String = "equals" // { l: 'a, r: 'a } -> Boolean
-    )
-
-    /**
-     * Ordering ability - provides comparison operations
-     */
-    data class OrdAbility(
-        val compare: String = "compare",        // { l: 'a, r: 'a } -> Ordering
-        val lessThan: String = "less_than",     // { l: 'a, r: 'a } -> Boolean
-        val greaterThan: String = "greater_than" // { l: 'a, r: 'a } -> Boolean
-    )
-
-    /**
-     * Numeric addition ability
-     */
-    data class NumAddAbility(
-        val add: String = "add" // { l: 'a, r: 'a } -> 'a
-    )
-
-    /**
-     * Numeric subtraction ability
-     */
-    data class NumSubAbility(
-        val subtract: String = "subtract" // { l: 'a, r: 'a } -> 'a
-    )
-
-    /**
-     * Numeric multiplication ability
-     */
-    data class NumMulAbility(
-        val multiply: String = "multiply" // { l: 'a, r: 'a } -> 'a
-    )
-
-    /**
-     * Numeric division ability
-     */
-    data class NumDivAbility(
-        val divide: String = "divide" // { l: 'a, r: 'a } -> 'a
-    )
-
-    /**
-     * Numeric modulo ability
-     */
-    data class NumModAbility(
-        val modulo: String = "modulo" // { l: 'a, r: 'a } -> 'a
-    )
-
-    /**
-     * Numeric negation ability
-     */
-    data class NumNegAbility(
-        val neg: String = "neg" // { val: 'a } -> 'a
-    )
-
-    /**
-     * Logical AND ability
-     */
-    data class LogicalAndAbility(
-        val and: String = "and" // { l: Bool, r: Bool } -> Bool
-    )
-
-    /**
-     * Logical OR ability
-     */
-    data class LogicalOrAbility(
-        val or: String = "or" // { l: Bool, r: Bool } -> Bool
-    )
-
-    /**
-     * Logical NOT ability
-     */
-    data class LogicalNotAbility(
-        val not: String = "not" // { val: Bool } -> Bool
-    )
-
-    /**
-     * Inspect ability - provides string representation
-     */
-    data class InspectAbility(
-        val to_str: String = "to_str" // { val: 'a } -> String
-    )
-
-    /**
-     * Get the operation names for a built-in ability
-     */
-    fun getAbilityOperations(abilityName: String): List<String> {
-        return when (abilityName) {
-            BuiltinAbilities.EQ -> listOf(EqAbility().equals)
-            BuiltinAbilities.ORD -> listOf(
-                OrdAbility().compare,
-                OrdAbility().lessThan,
-                OrdAbility().greaterThan
-            )
-            BuiltinAbilities.NUM_ADD -> listOf(NumAddAbility().add)
-            BuiltinAbilities.NUM_SUB -> listOf(NumSubAbility().subtract)
-            BuiltinAbilities.NUM_MUL -> listOf(NumMulAbility().multiply)
-            BuiltinAbilities.NUM_DIV -> listOf(NumDivAbility().divide)
-            BuiltinAbilities.NUM_MOD -> listOf(NumModAbility().modulo)
-            BuiltinAbilities.NUM_NEG -> listOf(NumNegAbility().neg)
-            BuiltinAbilities.LOGICAL_AND -> listOf(LogicalAndAbility().and)
-            BuiltinAbilities.LOGICAL_OR -> listOf(LogicalOrAbility().or)
-            BuiltinAbilities.LOGICAL_NOT -> listOf(LogicalNotAbility().not)
-            BuiltinAbilities.INSPECT -> listOf(InspectAbility().to_str)
-            else -> emptyList()
-        }
-    }
-
-    /**
-     * Check if an operation belongs to a built-in ability
-     */
-    fun isBuiltinAbilityOperation(abilityName: String, operationName: String): Boolean {
-        return getAbilityOperations(abilityName).contains(operationName)
     }
 }
 

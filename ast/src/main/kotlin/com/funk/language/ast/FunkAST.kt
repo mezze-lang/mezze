@@ -30,9 +30,11 @@ import kotlinx.serialization.ExperimentalSerializationApi
  * - `SourceLocation` - Source code location tracking
  * - `Visibility` - Public/Private visibility
  * - `UsePath` - Module import paths
- * - `BuiltinAbilities` - Built-in ability system (Eq, Ord, NumAdd, etc.)
- * - `BuiltinOperators` - Operator to ability mappings
- * - `BuiltinAbilityDefinitions` - Built-in ability structures
+ *
+ * ### BuiltinAbilities.kt
+ * Built-in ability system:
+ * - `BuiltinAbilities` - Built-in abilities (Eq, Ord, NumAdd, etc.)
+ * - `BuiltinTypes` - Built-in type constructors and utilities
  *
  * ### Type.kt
  * Type system representations:
