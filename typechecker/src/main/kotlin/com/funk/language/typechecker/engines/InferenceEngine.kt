@@ -55,8 +55,20 @@ import com.funk.language.typechecker.support.TypeContext
  */
 class InferenceEngine(
     private val typeContext: TypeContext,
-    private val unificationEngine: UnificationEngine
-) {
+    private val unificationEngine: IUnificationEngine
+) : IInferenceEngine {
+    /**
+     * Infer the type of an expression (placeholder).
+     *
+     * @param expr The expression to infer
+     * @param expectedType Optional expected type for bidirectional inference
+     * @return The inferred type
+     */
+    override fun inferType(expr: Expression, expectedType: FunkType?): FunkType {
+        // TODO: Implementation deferred to Phase 4 Step 6
+        return FunkType.VarType(typeContext.freshTypeVar())
+    }
+
     /**
      * Infer the type of a field from its name.
      *
@@ -66,7 +78,7 @@ class InferenceEngine(
      * @param fieldName The name of the field
      * @return A fresh type variable for the field
      */
-    fun inferFieldTypeFromName(fieldName: String): FunkType {
+    override fun inferFieldTypeFromName(fieldName: String): FunkType {
         val typeVar = typeContext.freshTypeVar()
         return FunkType.VarType(typeVar)
     }

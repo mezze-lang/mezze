@@ -62,9 +62,39 @@ import com.funk.language.typechecker.support.TypeContext
  */
 class ValidationEngine(
     private val typeContext: TypeContext,
-    private val unificationEngine: UnificationEngine,
-    private val inferenceEngine: InferenceEngine
-) {
+    private val unificationEngine: IUnificationEngine,
+    private val inferenceEngine: IInferenceEngine
+) : IValidationEngine {
+    /**
+     * Validate match exhaustiveness (placeholder).
+     */
+    override fun validateMatchExhaustiveness(matchedType: FunkType, cases: List<MatchCase>) {
+        // TODO: Implementation deferred to Phase 4 Step 5
+    }
+
+    /**
+     * Validate ability constraints (placeholder).
+     */
+    override fun validateAbilityConstraints(
+        type: FunkType,
+        constraints: Set<String>,
+        typeVar: TypeVar,
+        location: SourceLocation?
+    ) {
+        // TODO: Implementation deferred to Phase 4 Step 5
+    }
+
+    /**
+     * Validate type against annotation (placeholder).
+     */
+    override fun validateTypeAgainstAnnotation(
+        inferredType: FunkType,
+        annotatedType: FunkType,
+        expr: Expression
+    ) {
+        // TODO: Implementation deferred to Phase 4 Step 5
+    }
+
     // ============================================================================
     // TODO: Full Validation Engine Extraction (Phase 4)
     // ============================================================================

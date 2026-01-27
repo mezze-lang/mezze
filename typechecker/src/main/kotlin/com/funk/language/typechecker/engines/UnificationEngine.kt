@@ -39,7 +39,7 @@ import com.funk.language.typechecker.support.TypeContext
 class UnificationEngine(
     private val typeContext: TypeContext,
     private val constraintSolver: ConstraintSolver
-) {
+) : IUnificationEngine {
     // Additional state not yet in TypeContext
     // TODO: Move these to TypeContext in future iteration
     private val typeVarAbilityConstraints = mutableMapOf<TypeVar, MutableSet<String>>()
@@ -223,7 +223,7 @@ class UnificationEngine(
      * @param expectedType The expected type (from annotation or context)
      * @return true if unification succeeded, false otherwise
      */
-    fun unifyTypes(actualType: FunkType, expectedType: FunkType): Boolean {
+    override fun unifyTypes(actualType: FunkType, expectedType: FunkType): Boolean {
         val substitutions = mutableMapOf<TypeVar, FunkType>()
         return try {
             unifyTypesWithSubstitution(actualType, expectedType, substitutions)
@@ -283,7 +283,7 @@ class UnificationEngine(
      * @param type2 The second type to unify
      * @param substitutions Mutable map to accumulate substitutions
      */
-    fun unifyTypesWithSubstitution(
+    override fun unifyTypesWithSubstitution(
         type1: FunkType,
         type2: FunkType,
         substitutions: MutableMap<TypeVar, FunkType>
@@ -435,7 +435,7 @@ class UnificationEngine(
      * @param substitutions The map of substitutions to apply
      * @return The type with substitutions applied
      */
-    fun applySubstitution(
+    override fun applySubstitution(
         type: FunkType,
         substitutions: Map<TypeVar, FunkType>
     ): FunkType {
@@ -586,7 +586,7 @@ class UnificationEngine(
      * @param type The type to generalize
      * @return A type scheme with quantified type variables
      */
-    fun generalize(type: FunkType): TypeScheme {
+    override fun generalize(type: FunkType): TypeScheme {
         val freeVars = getFreeTypeVariables(type)
 
         // Extract ability constraints from FunctionType if present
@@ -629,7 +629,7 @@ class UnificationEngine(
      * @param scheme The type scheme to instantiate
      * @return The instantiated type with fresh type variables
      */
-    fun instantiateScheme(scheme: TypeScheme): FunkType {
+    override fun instantiateScheme(scheme: TypeScheme): FunkType {
         if (scheme.isMonomorphic) return scheme.type
 
         // Create substitution with fresh type variables
@@ -696,7 +696,7 @@ class UnificationEngine(
      * @param type2 The second type
      * @return true if types are structurally equal
      */
-    fun areTypesStructurallyEqual(type1: FunkType, type2: FunkType): Boolean {
+    override fun areTypesStructurallyEqual(type1: FunkType, type2: FunkType): Boolean {
         return when {
             // Concrete types must match exactly
             type1 is FunkType.IntType && type2 is FunkType.IntType -> true

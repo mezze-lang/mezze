@@ -58,8 +58,48 @@ import com.funk.language.typechecker.support.TypeContext
  */
 class ResolutionEngine(
     private val typeContext: TypeContext,
-    private val unificationEngine: UnificationEngine
-) {
+    private val unificationEngine: IUnificationEngine
+) : IResolutionEngine {
+    /**
+     * Resolve type alias (placeholder).
+     */
+    override fun resolveTypeAlias(type: FunkType): FunkType {
+        // TODO: Implementation deferred to Phase 4 Step 4
+        return type
+    }
+
+    /**
+     * Look up variable (placeholder).
+     */
+    override fun lookupVariable(name: String): FunkType? {
+        // TODO: Implementation deferred to Phase 4 Step 4
+        return typeContext.lookupType(name)
+    }
+
+    /**
+     * Find variant constructor type (placeholder).
+     */
+    override fun findVariantConstructorType(constructorName: String): FunkType? {
+        // TODO: Implementation deferred to Phase 4 Step 4
+        return null
+    }
+
+    /**
+     * Find closest name (placeholder).
+     */
+    override fun findClosestName(input: String, candidates: Collection<String>): String? {
+        // TODO: Implementation deferred to Phase 4 Step 4
+        return com.funk.language.typechecker.support.findClosestName(input, candidates)
+    }
+
+    /**
+     * Find common supertype (placeholder).
+     */
+    override fun findCommonSupertype(type1: FunkType, type2: FunkType): FunkType? {
+        // TODO: Implementation deferred to Phase 4 Step 4
+        return null
+    }
+
     // ============================================================================
     // TODO: Full Resolution Engine Extraction (Phase 4)
     // ============================================================================
