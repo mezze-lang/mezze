@@ -45,10 +45,14 @@ class AbilityConstraintTest {
         assertTrue(abilityRegistry.hasAbility(FunkType.FracType, "NumAdd"))
         assertTrue(abilityRegistry.hasAbility(FunkType.FracType, "Eq"))
         
-        // Test Bool type abilities
-        assertTrue(abilityRegistry.hasAbility(FunkType.BooleanType, "Eq"))
-        assertTrue(abilityRegistry.hasAbility(FunkType.BooleanType, "LogicalAnd"))
-        assertFalse(abilityRegistry.hasAbility(FunkType.BooleanType, "NumAdd"))
+        // Test Bool type abilities (variant type)
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertTrue(abilityRegistry.hasAbility(boolVariant, "Eq"))
+        assertTrue(abilityRegistry.hasAbility(boolVariant, "LogicalAnd"))
+        assertFalse(abilityRegistry.hasAbility(boolVariant, "NumAdd"))
         
         // Test String type abilities
         assertTrue(abilityRegistry.hasAbility(FunkType.StringType, "Eq"))
@@ -110,8 +114,12 @@ class AbilityConstraintTest {
     fun `test ability constraint validation with invalid type`() {
         val typeVar = TypeVar("'a")
         val constraint = Constraint.AbilityConstraint(typeVar, "NumAdd")
-        val equalityConstraint = Constraint.Equality(FunkType.VarType(typeVar), FunkType.BooleanType)
-        
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        val equalityConstraint = Constraint.Equality(FunkType.VarType(typeVar), boolVariant)
+
         // Should throw - Bool does not have NumAdd ability
         assertThrows(AbilityConstraintError::class.java) {
             constraintSolver.solveWithAbilities(setOf(constraint, equalityConstraint))

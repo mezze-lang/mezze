@@ -33,6 +33,20 @@ class AbilityRegistry {
     }
     
     /**
+     * Check if a type is the Bool variant type (| True, False |)
+     */
+    private fun isBoolVariant(type: FunkType): Boolean {
+        if (type !is FunkType.VariantType) return false
+        if (type.rowVar != null) return false // Must be closed
+        if (type.constructors.size != 2) return false
+        if (!type.constructors.containsKey("True")) return false
+        if (!type.constructors.containsKey("False")) return false
+        if (type.constructors["True"] != null) return false  // True should have no payload
+        if (type.constructors["False"] != null) return false // False should have no payload
+        return true
+    }
+
+    /**
      * Check if a type has a specific ability
      */
     fun hasAbility(type: FunkType, abilityName: String): Boolean {
@@ -40,6 +54,11 @@ class AbilityRegistry {
         // This prevents exponential blowup in constraint solving for Inspect.to_str calls
         if (abilityName == "Inspect") {
             return true
+        }
+
+        // Check for Bool variant type (| True, False |)
+        if (isBoolVariant(type)) {
+            return abilityName in setOf("Eq", "LogicalAnd", "LogicalOr", "LogicalNot")
         }
 
         return when (type) {

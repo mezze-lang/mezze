@@ -2,13 +2,13 @@
 # Note: Result type (Ok/Err) is built-in to the language
 
 # Map a function over the success value
-pub let map: { result: (Result 'a 'e), f: 'a -> 'b } -> (Result 'b 'e) = { result, f } ->
+pub let map: { result: (Result 'a 'e), f: {val: 'a} -> 'b } -> (Result 'b 'e) = { result, f } ->
     match result is
         Ok { val } -> Ok { val = f { val } }
         Err { error } -> Err { error = error }
 
 # Map a function over the error value
-pub let map_err: { result: (Result 'a 'e), f: 'e -> 'f } -> (Result 'a 'f) = { result, f } ->
+pub let map_err: { result: (Result 'a 'e), f: {error: 'e} -> 'f } -> (Result 'a 'f) = { result, f } ->
     match result is
         Ok { val } -> Ok { val = val }
         Err { error } -> Err { error = f { error } }
@@ -32,13 +32,13 @@ pub let is_err: { result: (Result 'a 'e) } -> Bool = { result } ->
         Err { error } -> true
 
 # Chain operations that return Results
-pub let flat_map: { result: (Result 'a 'e), f: 'a -> (Result 'b 'e) } -> (Result 'b 'e) = { result, f } ->
+pub let flat_map: { result: (Result 'a 'e), f: {val: 'a} -> (Result 'b 'e) } -> (Result 'b 'e) = { result, f } ->
     match result is
         Ok { val } -> f { val }
         Err { error } -> Err { error = error }
 
 # Chain operations on the error value
-pub let or_else: { result: (Result 'a 'e), f: 'e -> (Result 'a 'f) } -> (Result 'a 'f) = { result, f } ->
+pub let or_else: { result: (Result 'a 'e), f: {error: 'e} -> (Result 'a 'f) } -> (Result 'a 'f) = { result, f } ->
     match result is
         Ok { val } -> Ok { val = val }
         Err { error } -> f { error }
@@ -64,19 +64,19 @@ pub let map2: { result_a: (Result 'a 'e), result_b: (Result 'b 'e), f: { a: 'a, 
         Err { error } -> Err { error = error }
 
 # Execute an action if Result is Ok
-pub let if_ok: { result: (Result 'a 'e), action: 'a -> Unit } -> Unit = { result, action } ->
+pub let if_ok: { result: (Result 'a 'e), action: {val: 'a} -> {} } -> {} = { result, action } ->
     match result is
         Ok { val } -> action { val }
         Err { error } -> {}
 
 # Execute an action if Result is Err
-pub let if_err: { result: (Result 'a 'e), action: 'e -> Unit } -> Unit = { result, action } ->
+pub let if_err: { result: (Result 'a 'e), action: {error: 'e} -> {} } -> {} = { result, action } ->
     match result is
         Ok { val } -> {}
         Err { error } -> action { error }
 
 # Execute different actions based on Result state
-pub let fold: { result: (Result 'a 'e), on_err: 'e -> 'b, on_ok: 'a -> 'b } -> 'b = { result, on_err, on_ok } ->
+pub let fold: { result: (Result 'a 'e), on_err: {error: 'e} -> 'b, on_ok: {val: 'a} -> 'b } -> 'b = { result, on_err, on_ok } ->
     match result is
         Ok { val } -> on_ok { val }
         Err { error } -> on_err { error }

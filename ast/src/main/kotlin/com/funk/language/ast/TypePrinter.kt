@@ -102,24 +102,36 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
         }
     }
     is FunkType.VariantType -> {
-        // Print as regular variant type (inline variant syntax)
-        val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
-            when (dataType) {
-                null -> name
-                is FunkType.RecordType -> "$name ${prettyPrintTypeWithMapping(dataType, typeVarMapping)}"
-                else -> "$name(${prettyPrintTypeWithMapping(dataType, typeVarMapping)})"
-            }
-        }
-        if (type.isOpen) {
-            "| $constructors, ... |"
+        // Special case: Bool variant prints as "Bool" instead of "| True, False |"
+        val isBoolVariant = type.constructors.size == 2 &&
+                type.constructors.containsKey("True") &&
+                type.constructors.containsKey("False") &&
+                type.constructors["True"] == null &&
+                type.constructors["False"] == null &&
+                !type.isOpen
+
+        if (isBoolVariant) {
+            "Bool"
         } else {
-            "| $constructors |"
+            // Print as regular variant type (inline variant syntax)
+            val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
+                when (dataType) {
+                    null -> name
+                    is FunkType.RecordType -> "$name ${prettyPrintTypeWithMapping(dataType, typeVarMapping)}"
+                    else -> "$name(${prettyPrintTypeWithMapping(dataType, typeVarMapping)})"
+                }
+            }
+            if (type.isOpen) {
+                "| $constructors, ... |"
+            } else {
+                "| $constructors |"
+            }
         }
     }
     is FunkType.ArrayType -> "[${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}]"
     is FunkType.TypeApplication -> {
         val argsStr = type.args.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
-        "${type.constructor} $argsStr"
+        if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
     }
     is FunkType.ListType -> "List ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is FunkType.MapType -> "Map ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
@@ -371,22 +383,33 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
     }
     is FunkType.VariantType -> {
-        // First, check if this variant matches a known type declaration
-        val declMatch = findTypeDeclarationForVariant(type, typeDeclarations, typeVarMapping)
-        if (declMatch != null) {
-            // Print as named type (e.g., "Tree 'a" instead of expanded variant)
-            val typeArgsStr = if (declMatch.typeArgs.isEmpty()) {
-                ""
-            } else {
-                " " + declMatch.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
-            }
-            declMatch.declName + typeArgsStr
-        } else {
-        // Check if this is a Result type (has Ok and Err constructors)
-        val hasOk = type.constructors.containsKey("Ok")
-        val hasErr = type.constructors.containsKey("Err")
+        // Special case: Bool variant prints as "Bool" instead of "| True, False |"
+        val isBoolVariant = type.constructors.size == 2 &&
+                type.constructors.containsKey("True") &&
+                type.constructors.containsKey("False") &&
+                type.constructors["True"] == null &&
+                type.constructors["False"] == null &&
+                !type.isOpen
 
-        if (hasOk && hasErr && type.constructors.size == 2) {
+        if (isBoolVariant) {
+            "Bool"
+        } else {
+            // First, check if this variant matches a known type declaration
+            val declMatch = findTypeDeclarationForVariant(type, typeDeclarations, typeVarMapping)
+            if (declMatch != null) {
+                // Print as named type (e.g., "Tree 'a" instead of expanded variant)
+                val typeArgsStr = if (declMatch.typeArgs.isEmpty()) {
+                    ""
+                } else {
+                    " " + declMatch.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
+                }
+                declMatch.declName + typeArgsStr
+            } else {
+            // Check if this is a Result type (has Ok and Err constructors)
+            val hasOk = type.constructors.containsKey("Ok")
+            val hasErr = type.constructors.containsKey("Err")
+
+            if (hasOk && hasErr && type.constructors.size == 2) {
             // This is a Result type - print as: Result valueType | errors |
             val okType = type.constructors["Ok"]
             val errType = type.constructors["Err"]
@@ -439,12 +462,13 @@ private fun prettyPrintTypeWithAliasesRecursive(
                 "| $constructors |"
             }
         }
+            }
         }
     }
     is FunkType.ArrayType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}]"
     is FunkType.TypeApplication -> {
         val argsStr = type.args.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
-        "${type.constructor} $argsStr"
+        if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
     }
     is FunkType.ListType -> "List ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
     is FunkType.MapType -> "Map ${prettyPrintWithAliasCheck(type.keyType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"

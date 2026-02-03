@@ -245,7 +245,11 @@ class CompleteTypeInferenceTest {
         assertTrue(isValidType is FunkType.FunctionType)
         
         val resultType = getVariableType(program, "result")
-        assertEquals(FunkType.BooleanType, resultType)
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertEquals(boolVariant, resultType)
     }
 
     @Test

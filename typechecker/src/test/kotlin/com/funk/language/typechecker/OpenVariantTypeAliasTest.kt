@@ -146,7 +146,7 @@ class OpenVariantTypeAliasTest {
             y
             """.trimIndent(),
             "y",
-            "| Red, Blue, Green |"
+            "Color"
         )
     }
 
@@ -159,7 +159,7 @@ class OpenVariantTypeAliasTest {
             y
             """.trimIndent(),
             "y",
-            "| Red, Blue, Green, ... |"
+            "Color"
         )
     }
 
@@ -173,7 +173,7 @@ class OpenVariantTypeAliasTest {
             y
             """.trimIndent(),
             "y",
-            "| Red, Blue, Green, ... |"
+            "Color"
         )
     }
 
@@ -198,7 +198,7 @@ class OpenVariantTypeAliasTest {
             s
             """.trimIndent(),
             "s",
-            "| Circle { radius: Int }, Square { side: Int }, ... |"
+            "Shape"
         )
     }
 
@@ -213,7 +213,7 @@ class OpenVariantTypeAliasTest {
             z
             """.trimIndent(),
             "z",
-            "| Red, Blue, Green |"
+            "Color"
         )
     }
 

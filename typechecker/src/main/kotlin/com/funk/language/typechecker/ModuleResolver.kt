@@ -567,7 +567,14 @@ class ModuleResolver(
                     "Int" -> FunkType.IntType
                     "Float" -> FunkType.FloatType
                     "String" -> FunkType.StringType
-                    "Boolean" -> FunkType.BooleanType
+                    "Boolean" -> FunkType.VariantType(
+                        constructors = mapOf("True" to null, "False" to null),
+                        rowVar = null
+                    )
+                    "Bool" -> FunkType.VariantType(
+                        constructors = mapOf("True" to null, "False" to null),
+                        rowVar = null
+                    )
                     "Nat" -> FunkType.NatType
                     "Frac" -> FunkType.FracType
                     else -> FunkType.VarType(TypeVar.fresh())

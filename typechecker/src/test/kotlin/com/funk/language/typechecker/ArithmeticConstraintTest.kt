@@ -78,7 +78,11 @@ class ArithmeticConstraintTest {
             val functionType = compareBinding.inferredType as FunkType.FunctionType
             
             // Return type should be Boolean for comparison
-            assertEquals(FunkType.BooleanType, functionType.returnType)
+            val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertEquals(boolVariant, functionType.returnType)
             
         } catch (e: Exception) {
             fail("Type checking should succeed for valid comparison function: ${e.message}")

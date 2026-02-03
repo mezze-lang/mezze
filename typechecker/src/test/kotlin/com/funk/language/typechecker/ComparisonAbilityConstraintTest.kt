@@ -29,7 +29,11 @@ class ComparisonAbilityConstraintTest {
         val eqBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "eq" }
         assertTrue(eqBinding.inferredType is FunkType.FunctionType)
         val functionType = eqBinding.inferredType as FunkType.FunctionType
-        assertEquals(FunkType.BooleanType, functionType.returnType)
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertEquals(boolVariant, functionType.returnType)
     }
     
     @Test
@@ -44,7 +48,11 @@ class ComparisonAbilityConstraintTest {
         val neqBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "neq" }
         assertTrue(neqBinding.inferredType is FunkType.FunctionType)
         val functionType = neqBinding.inferredType as FunkType.FunctionType
-        assertEquals(FunkType.BooleanType, functionType.returnType)
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertEquals(boolVariant, functionType.returnType)
     }
     
     @Test
@@ -59,7 +67,11 @@ class ComparisonAbilityConstraintTest {
         val ltBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "lt" }
         assertTrue(ltBinding.inferredType is FunkType.FunctionType)
         val functionType = ltBinding.inferredType as FunkType.FunctionType
-        assertEquals(FunkType.BooleanType, functionType.returnType)
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertEquals(boolVariant, functionType.returnType)
     }
     
     @Test

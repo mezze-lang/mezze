@@ -254,7 +254,12 @@ class ConstraintSolverTest {
     fun `test nested record unification`() {
         val innerVar = TypeVar.fresh()
         val outerVar = TypeVar.fresh()
-        
+
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+
         val nestedType1 = FunkType.RecordType(
             fields = mapOf(
                 "outer" to FunkType.RecordType(
@@ -263,11 +268,11 @@ class ConstraintSolverTest {
                 "simple" to FunkType.VarType(outerVar)
             )
         )
-        
+
         val nestedType2 = FunkType.RecordType(
             fields = mapOf(
                 "outer" to FunkType.RecordType(
-                    fields = mapOf("inner" to FunkType.BooleanType)
+                    fields = mapOf("inner" to boolVariant)
                 ),
                 "simple" to FunkType.FloatType
             )
@@ -275,8 +280,8 @@ class ConstraintSolverTest {
         
         val constraint = Constraint.Equality(nestedType1, nestedType2)
         val result = solver.solve(listOf(constraint))
-        
-        assertEquals(FunkType.BooleanType, result.mapping[innerVar])
+
+        assertEquals(boolVariant, result.mapping[innerVar])
         assertEquals(FunkType.FloatType, result.mapping[outerVar])
     }
     

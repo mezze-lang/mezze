@@ -610,6 +610,16 @@ object BasicTypes {
             FunkType.RecordType(mapOf("s" to FunkType.StringType, "n" to FunkType.IntType)),
             FunkType.StringType
         )
+
+        context["string::split"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("s" to FunkType.StringType, "delimiter" to FunkType.StringType)),
+            FunkType.ArrayType(FunkType.StringType)
+        )
+
+        context["string::join"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("strings" to FunkType.ArrayType(FunkType.StringType), "separator" to FunkType.StringType)),
+            FunkType.StringType
+        )
     }
 
     private fun registerFracTypes(context: MutableMap<String, FunkType>) {

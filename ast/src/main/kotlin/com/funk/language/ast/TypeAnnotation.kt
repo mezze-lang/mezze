@@ -138,7 +138,13 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
             val fieldTypes = annotation.entries.associate { entry ->
                 entry.name to convertTypeAnnotation(entry.type)
             }
-            FunkType.RecordType(fieldTypes)
+            // If restField is present (e.g., {x: Int, ...}), create open record with row variable
+            val rowVar = if (annotation.restField != null) {
+                RowVar(annotation.restField)
+            } else {
+                null
+            }
+            FunkType.RecordType(fieldTypes, rowVar)
         }
         is VariantTypeAnnotation -> {
             val constructorTypes = annotation.constructors.associate { constructor ->
@@ -147,52 +153,28 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
             FunkType.VariantType(constructorTypes)
         }
         is TypeApplicationAnnotation -> {
-            when (annotation.constructor) {
-                // Note: Option and Result are now regular variant types, not special built-in types
-                // They will be handled by the variant type system
-                "List" -> {
-                    if (annotation.args.size == 1) {
-                        FunkType.ListType(convertTypeAnnotation(annotation.args[0]))
-                    } else {
-                        throw RuntimeException("List type requires exactly 1 type argument")
-                    }
-                }
-                "Map" -> {
-                    if (annotation.args.size == 2) {
-                        FunkType.MapType(
-                            convertTypeAnnotation(annotation.args[0]),
-                            convertTypeAnnotation(annotation.args[1])
-                        )
-                    } else {
-                        throw RuntimeException("Map type requires exactly 2 type arguments")
-                    }
-                }
-                "Set" -> {
-                    if (annotation.args.size == 1) {
-                        FunkType.SetType(convertTypeAnnotation(annotation.args[0]))
-                    } else {
-                        throw RuntimeException("Set type requires exactly 1 type argument")
-                    }
-                }
-                else -> {
-                    // For parameterized types like Option, Result, and user-defined generic types
-                    // We need to look up the type definition and apply the type arguments
-                    // For now, we'll create a TypeApplication that represents the applied type
-                    // This will be resolved later during type checking
-                    if (annotation.args.isNotEmpty()) {
-                        // This is a parameterized type application (e.g., Option Int, Result String Error)
-                        // We'll represent it as a type application for now
-                        // The type checker will resolve this to the actual variant type
-                        FunkType.TypeApplication(
-                            annotation.constructor,
-                            annotation.args.map { convertTypeAnnotation(it) }
-                        )
-                    } else {
-                        // Simple type constructor without arguments (will be resolved as type variable)
-                        FunkType.VarType(TypeVar(annotation.constructor))
-                    }
-                }
+            // For parameterized types like Option, Result, List, and user-defined generic types
+            // We create a TypeApplication that represents the applied type
+            // This will be resolved later during type checking
+            //
+            // Note: List, Map, Set are NOT built-in types in Funk - they are user-defined
+            // variant types from the standard library. We treat them like any other
+            // user-defined type.
+            if (annotation.args.isNotEmpty()) {
+                // This is a parameterized type application (e.g., List Int, Option String, Result Int Error)
+                // We'll represent it as a type application for now
+                // The type checker will resolve this to the actual variant type
+                FunkType.TypeApplication(
+                    annotation.constructor,
+                    annotation.args.map { convertTypeAnnotation(it) }
+                )
+            } else {
+                // Simple type constructor without arguments (will be resolved as type variable)
+                FunkType.VarType(TypeVar(annotation.constructor))
             }
+        }
+        is ArrayTypeAnnotation -> {
+            FunkType.ArrayType(convertTypeAnnotation(annotation.elementType))
         }
         else -> {
             throw RuntimeException("Unsupported type annotation: ${annotation::class.simpleName}")

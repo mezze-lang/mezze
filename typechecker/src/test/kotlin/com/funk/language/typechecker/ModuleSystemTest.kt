@@ -2,6 +2,7 @@ package com.funk.language.typechecker
 
 import com.funk.language.ast.*
 import com.funk.language.parser.FunkParser
+import com.funk.language.typechecker.module.ModuleError
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach

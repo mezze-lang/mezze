@@ -439,9 +439,9 @@ class EffectAssociatedTypesTest {
     @Test
     fun `test effect with two associated types type checks`() {
         val code = """
-            effect Result having 'ok, 'err where {
-                succeed: {value: 'ok} -> {} <Result>
-                fail: {error: 'err} -> {} <Result>
+            effect Operation having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Operation>
+                fail: {error: 'err} -> {} <Operation>
             }
         """.trimIndent()
 
@@ -466,12 +466,12 @@ class EffectAssociatedTypesTest {
     @Test
     fun `test implementation with two associated type bindings type checks`() {
         val code = """
-            effect Result having 'ok, 'err where {
-                succeed: {value: 'ok} -> {} <Result>
-                fail: {error: 'err} -> {} <Result>
+            effect Operation having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Operation>
+                fail: {error: 'err} -> {} <Operation>
             }
 
-            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+            impl Operation for IntStringOperation having 'ok = Int, 'err = String where {
                 succeed = {value} -> {}
                 fail = {error} -> {}
             }
@@ -504,19 +504,19 @@ class EffectAssociatedTypesTest {
     @Test
     fun `test multiple associated types used in perform block`() {
         val code = """
-            effect Result having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
-                fail: {error: 'err} -> 'err <Result>
+            effect Operation having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Operation>
+                fail: {error: 'err} -> 'err <Operation>
             }
 
-            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+            impl Operation for IntStringOperation having 'ok = Int, 'err = String where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
 
-            let useResult = perform IntStringResult in do
-                let x = Result.succeed { value = 42 }
-                let y = Result.fail { error = "oops" }
+            let useResult = perform IntStringOperation in do
+                let x = Operation.succeed { value = 42 }
+                let y = Operation.fail { error = "oops" }
                 x
         """.trimIndent()
 
@@ -530,25 +530,25 @@ class EffectAssociatedTypesTest {
     @Test
     fun `test type substitution works correctly for each associated type`() {
         val code = """
-            effect Result having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
-                fail: {error: 'err} -> 'err <Result>
+            effect Operation having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Operation>
+                fail: {error: 'err} -> 'err <Operation>
             }
 
-            impl Result for BoolFloatResult having 'ok = Bool, 'err = Float where {
+            impl Operation for BoolFloatOperation having 'ok = Bool, 'err = Float where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
 
-            let successResult = perform BoolFloatResult in Result.succeed { value = true }
-            let failResult = perform BoolFloatResult in Result.fail { error = 3.14 }
+            let successResult = perform BoolFloatOperation in Operation.succeed { value = true }
+            let failResult = perform BoolFloatOperation in Operation.fail { error = 3.14 }
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
         val successBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "successResult" }
-        assertTrue(successBinding.inferredType is FunkType.BooleanType)
+        assertTrue(successBinding.inferredType is FunkType.VariantType)
 
         val failBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "failResult" }
         assertTrue(failBinding.inferredType is FunkType.FloatType)
@@ -557,12 +557,12 @@ class EffectAssociatedTypesTest {
     @Test
     fun `test error when missing one of multiple associated type bindings`() {
         val code = """
-            effect Result having 'ok, 'err where {
-                succeed: {value: 'ok} -> {} <Result>
-                fail: {error: 'err} -> {} <Result>
+            effect Operation having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Operation>
+                fail: {error: 'err} -> {} <Operation>
             }
 
-            impl Result for PartialResult having 'ok = Int where {
+            impl Operation for PartialOperation having 'ok = Int where {
                 succeed = {value} -> {}
                 fail = {error} -> {}
             }
@@ -605,11 +605,11 @@ class EffectAssociatedTypesTest {
     @Test
     fun `test error when providing wrong binding name with multiple types`() {
         val code = """
-            effect Result having 'ok, 'err where {
-                succeed: {value: 'ok} -> {} <Result>
+            effect Operation having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Operation>
             }
 
-            impl Result for BadResult having 'ok = Int, 'wrong = String where {
+            impl Operation for BadOperation having 'ok = Int, 'wrong = String where {
                 succeed = {value} -> {}
             }
         """.trimIndent()
@@ -625,12 +625,12 @@ class EffectAssociatedTypesTest {
     @Test
     fun `test complex types as multiple associated type bindings`() {
         val code = """
-            effect Result having 'ok, 'err where {
-                succeed: {value: 'ok} -> {} <Result>
-                fail: {error: 'err} -> {} <Result>
+            effect Operation having 'ok, 'err where {
+                succeed: {value: 'ok} -> {} <Operation>
+                fail: {error: 'err} -> {} <Operation>
             }
 
-            impl Result for ComplexResult having 'ok = [Int], 'err = {code: Int, message: String} where {
+            impl Operation for ComplexOperation having 'ok = [Int], 'err = {code: Int, message: String} where {
                 succeed = {value} -> {}
                 fail = {error} -> {}
             }
@@ -643,17 +643,17 @@ class EffectAssociatedTypesTest {
     @Test
     fun `test multiple associated types with performer parameters`() {
         val code = """
-            effect Result having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
-                fail: {error: 'err} -> 'err <Result>
+            effect Operation having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Operation>
+                fail: {error: 'err} -> 'err <Operation>
             }
 
-            impl Result for ConfigurableResult {defaultOk: Int, defaultErr: String} having 'ok = Int, 'err = String where {
+            impl Operation for ConfigurableOperation {defaultOk: Int, defaultErr: String} having 'ok = Int, 'err = String where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
 
-            let result = perform ConfigurableResult {defaultOk = 0, defaultErr = "error"} in Result.succeed { value = 100 }
+            let result = perform ConfigurableOperation {defaultOk = 0, defaultErr = "error"} in Operation.succeed { value = 100 }
         """.trimIndent()
 
         val program = typeCheck(code)
@@ -666,9 +666,9 @@ class EffectAssociatedTypesTest {
     @Test
     fun `test multiple effects each with multiple associated types`() {
         val code = """
-            effect Result having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
-                fail: {error: 'err} -> 'err <Result>
+            effect Operation having 'ok, 'err where {
+                succeed: {value: 'ok} -> 'ok <Operation>
+                fail: {error: 'err} -> 'err <Operation>
             }
 
             effect State having 'state, 'change where {
@@ -676,7 +676,7 @@ class EffectAssociatedTypesTest {
                 update: {delta: 'change} -> {} <State>
             }
 
-            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+            impl Operation for IntStringOperation having 'ok = Int, 'err = String where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
@@ -686,8 +686,8 @@ class EffectAssociatedTypesTest {
                 update = {delta} -> {}
             }
 
-            let combined = perform IntStringResult, IntFloatState in do
-                let r = Result.succeed { value = 42 }
+            let combined = perform IntStringOperation, IntFloatState in do
+                let r = Operation.succeed { value = 42 }
                 let s = State.get {}
                 r
         """.trimIndent()

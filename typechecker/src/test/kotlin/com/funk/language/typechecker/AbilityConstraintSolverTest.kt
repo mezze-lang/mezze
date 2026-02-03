@@ -130,17 +130,21 @@ class AbilityConstraintSolverTest {
     fun `test ability constraint error contains source location`() {
         val typeVar = TypeVar("'a")
         val location = SourceLocation(5, 10, "test.funk")
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
         val constraints = setOf(
-            Constraint.Equality(FunkType.VarType(typeVar), FunkType.BooleanType),
+            Constraint.Equality(FunkType.VarType(typeVar), boolVariant),
             Constraint.AbilityConstraint(typeVar, "NumAdd", location)
         )
-        
+
         val exception = assertThrows(AbilityConstraintError::class.java) {
             constraintSolver.solveWithAbilities(constraints)
         }
-        
+
         assertEquals(location, exception.sourceLocation)
-        assertEquals(FunkType.BooleanType, exception.type)
+        assertEquals(boolVariant, exception.type)
         assertEquals("NumAdd", exception.ability)
     }
     

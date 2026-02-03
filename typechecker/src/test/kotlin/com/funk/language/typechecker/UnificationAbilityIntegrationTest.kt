@@ -166,7 +166,11 @@ class UnificationAbilityIntegrationTest {
         
         assertTrue(exception.message!!.contains("Bool"))
         assertTrue(exception.message!!.contains("NumAdd"))
-        assertEquals(FunkType.BooleanType, exception.type)
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertEquals(boolVariant, exception.type)
         assertEquals("NumAdd", exception.ability)
     }
 }

@@ -65,8 +65,8 @@ class ArrayListTypeCheckerTest {
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as FunkType.ArrayType
         
-        // Should infer [Boolean]
-        assertTrue(inferredType.elementType is FunkType.BooleanType)
+        // Should infer [Bool] (variant type)
+        assertTrue(inferredType.elementType is FunkType.VariantType)
     }
     
     @Test

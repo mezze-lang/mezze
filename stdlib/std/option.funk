@@ -2,7 +2,7 @@
 # Note: Option type is now built-in to the language
 
 # Map a function over the Option value
-pub let map: { opt: (Option 'a), f: 'a -> 'b } -> (Option 'b) = { opt, f } ->
+pub let map: { opt: (Option 'a), f: {val: 'a} -> 'b } -> (Option 'b) = { opt, f } ->
     match opt is
         Some { val } -> Some { val = f { val } }
         None -> None
@@ -26,13 +26,13 @@ pub let is_none: { opt: (Option 'a) } -> Bool = { opt } ->
         None -> true
 
 # Filter Option based on predicate
-pub let filter: { opt: (Option 'a), p: 'a -> Bool } -> (Option 'a) = { opt, p } ->
+pub let filter: { opt: (Option 'a), p: {val: 'a} -> Bool } -> (Option 'a) = { opt, p } ->
     match opt is
         Some { val } -> if p { val } then Some { val = val } else None
         None -> None
 
 # Chain operations that return Options
-pub let flat_map: { opt: (Option 'a), f: 'a -> (Option 'b) } -> (Option 'b) = { opt, f } ->
+pub let flat_map: { opt: (Option 'a), f: {val: 'a} -> (Option 'b) } -> (Option 'b) = { opt, f } ->
     match opt is
         Some { val } -> f { val }
         None -> None
@@ -52,19 +52,19 @@ pub let map2: { opt_a: (Option 'a), opt_b: (Option 'b), f: { a: 'a, b: 'b } -> '
         None -> None
 
 # Execute an action if Option contains a value
-pub let if_some: { opt: (Option 'a), action: 'a -> Unit } -> Unit = { opt, action } ->
+pub let if_some: { opt: (Option 'a), action: {val: 'a} -> {} } -> {} = { opt, action } ->
     match opt is
         Some { val } -> action { val }
         None -> {}
 
 # Execute an action if Option is None
-pub let if_none: { opt: (Option 'a), action: Unit -> Unit } -> Unit = { opt, action } ->
+pub let if_none: { opt: (Option 'a), action: {} -> {} } -> {} = { opt, action } ->
     match opt is
         Some { val } -> {}
         None -> action {}
 
 # Execute different actions based on Option state
-pub let fold: { opt: (Option 'a), on_none: {} -> 'b, on_some: 'a -> 'b } -> 'b = { opt, on_none, on_some } ->
+pub let fold: { opt: (Option 'a), on_none: {} -> 'b, on_some: {val: 'a} -> 'b } -> 'b = { opt, on_none, on_some } ->
     match opt is
         Some { val } -> on_some { val }
         None -> on_none {}

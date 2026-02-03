@@ -49,7 +49,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test List constructors have List type`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let lst = Cons { head = 1, tail = Nil }
         """.trimIndent()
@@ -73,7 +73,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test Array and List are distinct types`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let arr = [1, 2, 3]
             let lst = Cons { head = 1, tail = Nil }
@@ -93,7 +93,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test List cannot be assigned to Array`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let lst = Cons { head = 1, tail = Nil }
 
@@ -116,7 +116,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test function expecting Array rejects List`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let take_array : { arr: [Int] } -> Int = { arr } ->
                 match arr is
@@ -140,7 +140,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test function expecting List rejects Array`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let take_list : { lst: (List Int) } -> Int = { lst } ->
                 match lst is
@@ -188,7 +188,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test function accepting List works with List`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let get_head : { lst: (List Int) } -> Int = { lst } ->
                 match lst is
@@ -218,7 +218,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test array pattern only matches arrays`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let process : { val: [Int] } -> String = { val } ->
                 match val is
@@ -242,7 +242,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test list pattern only matches lists`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let process : { val: (List Int) } -> String = { val } ->
                 match val is
@@ -295,7 +295,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test polymorphic function with List parameter`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let map_list : { lst: (List 'a), f: 'a -> 'b } -> (List 'b) = { lst, f } ->
                 match lst is
@@ -324,7 +324,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test passing Array to List function fails`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let map_list : { lst: (List 'a), f: 'a -> 'b } -> (List 'b) = { lst, f } ->
                 match lst is
@@ -348,7 +348,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test passing List to Array function fails`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let get_element : { arr: ['a] } -> 'a = { arr } ->
                 match arr is
@@ -375,7 +375,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test nested Array and List are distinct`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             # Array of Arrays
             let arr_of_arrs = [[1, 2], [3, 4]]
@@ -398,7 +398,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test Array of Lists is valid`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let list1 = Cons { head = 1, tail = Nil }
             let list2 = Cons { head = 2, tail = Nil }
@@ -430,7 +430,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test List of Arrays is valid`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let arr1 = [1, 2]
             let arr2 = [3, 4]
@@ -464,7 +464,7 @@ class ArrayVsListTypeDistinctionTest {
         val source = """
             use std::list::{concat}
 
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let list1 = Cons { head = 1, tail = Nil }
             let list2 = Cons { head = 2, tail = Nil }
@@ -534,7 +534,7 @@ class ArrayVsListTypeDistinctionTest {
     @Test
     fun `test clear error message when Array and List mismatch`() {
         val source = """
-            type List 'a = | Cons { head: 'a, tail: (List 'a) } | Nil
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             let arr = [1, 2, 3]
             let lst = Cons { head = 1, tail = Nil }

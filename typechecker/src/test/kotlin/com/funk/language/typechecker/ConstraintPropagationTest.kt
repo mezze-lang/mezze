@@ -61,8 +61,12 @@ class ConstraintPropagationTest {
         // Both results should be Boolean
         val result1Binding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "result1" }
         val result2Binding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "result2" }
-        assertEquals(FunkType.BooleanType, result1Binding.inferredType)
-        assertEquals(FunkType.BooleanType, result2Binding.inferredType)
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertEquals(boolVariant, result1Binding.inferredType)
+        assertEquals(boolVariant, result2Binding.inferredType)
     }
     
     @Test
@@ -101,7 +105,11 @@ class ConstraintPropagationTest {
         
         // Result should be Boolean
         val resultBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        assertEquals(FunkType.BooleanType, resultBinding.inferredType)
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertEquals(boolVariant, resultBinding.inferredType)
     }
     
     @Test
@@ -122,7 +130,11 @@ class ConstraintPropagationTest {
         val addAndCheckBinding = typedProgram.items.filterIsInstance<LetBinding>().first { it.variableName == "addAndCheck" }
         assertTrue(addAndCheckBinding.inferredType is FunkType.FunctionType)
         val functionType = addAndCheckBinding.inferredType as FunkType.FunctionType
-        assertEquals(FunkType.BooleanType, functionType.returnType)
+        val boolVariant = FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        )
+        assertEquals(boolVariant, functionType.returnType)
     }
     
     @Test
