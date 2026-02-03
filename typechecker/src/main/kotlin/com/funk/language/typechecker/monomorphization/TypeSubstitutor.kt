@@ -332,7 +332,10 @@ class TypeSubstitutor(
                 "Int" -> FunkType.IntType
                 "Float" -> FunkType.FloatType
                 "String" -> FunkType.StringType
-                "Bool", "Boolean" -> FunkType.BooleanType
+                "Bool" -> FunkType.VariantType(
+                    constructors = mapOf("True" to null, "False" to null),
+                    rowVar = null
+                )
                 "Nat" -> FunkType.NatType
                 "Frac" -> FunkType.FracType
                 "Ordering" -> FunkType.OrderingType
@@ -373,7 +376,7 @@ class TypeSubstitutor(
             is FunkType.IntType -> IdentifierTypeAnnotation("Int")
             is FunkType.FloatType -> IdentifierTypeAnnotation("Float")
             is FunkType.StringType -> IdentifierTypeAnnotation("String")
-            is FunkType.BooleanType -> IdentifierTypeAnnotation("Boolean")
+            is FunkType.BooleanType -> IdentifierTypeAnnotation("Bool")
             is FunkType.NatType -> IdentifierTypeAnnotation("Nat")
             is FunkType.FracType -> IdentifierTypeAnnotation("Frac")
             is FunkType.OrderingType -> IdentifierTypeAnnotation("Ordering")

@@ -245,7 +245,7 @@ object ErrorPrettyPrinter {
         return when (moduleName) {
             "abilities", "operators", "primitives" -> true
             "option", "result" -> true
-            "int", "float", "string", "boolean", "nat" -> true
+            "int", "float", "string", "bool", "nat" -> true
             else -> false
         }
     }
@@ -257,7 +257,7 @@ object ErrorPrettyPrinter {
             "int" -> listOf("Int")
             "float" -> listOf("Float")
             "string" -> listOf("String")
-            "boolean" -> listOf("Boolean")
+            "bool" -> listOf("Bool")
             "nat" -> listOf("Nat")
             "abilities" -> BuiltinAbilities.ALL.toList()
             "operators" -> listOf("+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=")
