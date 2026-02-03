@@ -212,7 +212,9 @@ class ConstraintGenerator(
                                 val freeVars = com.funk.language.typechecker.context.collectFreeTypeVars(solvedType)
 
                                 // Get free type variables from current context
-                                val contextVars = getContextFreeVars(currentContext)
+                                // CRITICAL: Exclude the binding being generalized from context vars calculation
+                                // This prevents the placeholder's type vars from blocking generalization
+                                val contextVars = getContextFreeVars(currentContext, excludeBindings = setOf(name))
 
                                 // Quantify variables that don't appear in context
                                 val quantifiableVars = freeVars - contextVars
@@ -443,10 +445,17 @@ class ConstraintGenerator(
     /**
      * Helper: Get all free type variables from context bindings.
      * Used for let-polymorphism to determine which variables to quantify.
+     *
+     * @param excludeBindings Names of bindings to exclude (e.g., the binding being generalized)
+     *                        This is CRITICAL for recursive functions - when generalizing `singleton`,
+     *                        we should NOT include `singleton`'s placeholder type in the context vars.
      */
-    private fun getContextFreeVars(context: TypingContext): Set<TypeVar> {
+    private fun getContextFreeVars(context: TypingContext, excludeBindings: Set<String> = emptySet()): Set<TypeVar> {
         val freeVars = mutableSetOf<TypeVar>()
-        for ((_, binding) in context.getAllBindings()) {
+        for ((name, binding) in context.getAllBindings()) {
+            // Skip bindings that should be excluded (like the binding being generalized)
+            if (name in excludeBindings) continue
+
             when (binding) {
                 is TypingContext.Binding.Monomorphic -> {
                     freeVars.addAll(com.funk.language.typechecker.context.collectFreeTypeVars(binding.type))
