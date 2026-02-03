@@ -968,12 +968,13 @@ class AnnotationTypeCheckingTest {
     }
 
     @Test
-    fun `test function missing required ability fails`() {
-        // Annotation says it requires NumAdd but implementation doesn't use it
-        assertTypeCheckFails(
+    fun `test function with extra ability constraint in annotation is allowed`() {
+        // Annotation says it requires NumAdd but implementation doesn't use it - this is fine
+        // Extra constraints in annotation are allowed (restricts usage, doesn't break anything)
+        assertTypeChecks(
             """
-            let wrong: { x: 'a } with NumAdd 'a -> 'a = {x} -> x
-            wrong {x = 42}
+            let id: { x: 'a } with NumAdd 'a -> 'a = {x} -> x
+            id {x = 42}
             """.trimIndent()
         )
     }
@@ -1015,9 +1016,10 @@ class AnnotationTypeCheckingTest {
     }
 
     @Test
-    fun `test polymorphic function with extra ability in annotation fails`() {
-        // Annotation declares NumAdd 'a but it's not needed
-        assertTypeCheckFails(
+    fun `test polymorphic function with extra ability in annotation is allowed`() {
+        // Annotation declares NumAdd 'a but it's not needed - this is fine
+        // Extra constraints in annotation are allowed (restricts usage, doesn't break anything)
+        assertTypeChecks(
             """
             let id: { x: 'a } with NumAdd 'a -> 'a = {x} -> x
             id {x = 42}

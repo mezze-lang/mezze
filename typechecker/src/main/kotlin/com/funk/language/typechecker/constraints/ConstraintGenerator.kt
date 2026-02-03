@@ -202,61 +202,50 @@ class ConstraintGenerator(
                                     substitution
                                 )
 
-                                // 1. POLYMORPHISM VALIDATION - DISABLED
-                                // This validation was causing too many false positives.
-                                // The test "test type variable mismatch in polymorphic annotation fails"
-                                // expects this to catch cases like: let bad: { x: 'a, y: 'a } -> 'a = {x, y} -> if true then x else 0
-                                // But this should already fail during constraint solving because the expression
-                                // `if true then x else 0` forces x to unify with Int, which then can't match 'a.
-                                // TODO: Investigate why constraint solving doesn't catch this case.
-                                // if (annotation is FunctionTypeAnnotation &&
-                                //     !containsConcreteTypes(preConvertedAnnotationType) &&
-                                //     !containsFunctionCalls(item.expression)) {
-                                //     validatePolymorphismPreserved(
-                                //         preConvertedAnnotationType,
-                                //         inferredTypeWithAbilities,
-                                //         varName,
-                                //         item.expression
-                                //     )
-                                // }
+                                // 1. POLYMORPHISM VALIDATION
+                                // Check that type variables in annotation are not forced to FULLY concrete types.
+                                // Only flag when substitution maps type var to something with NO type variables.
+                                if (annotation is FunctionTypeAnnotation) {
+                                    validatePolymorphismPreserved(
+                                        preConvertedAnnotationType,
+                                        substitution,
+                                        varName
+                                    )
+                                }
 
-                                // 2. EFFECTS VALIDATION - DISABLED
-                                // The effects validation is causing extra test failures in tests that use
-                                // effects legitimately (RandomEffectModuleTest, StringInterpolationTypeCheckerTest, etc.)
-                                // TODO: Investigate why these tests fail with effects validation
-                                // if (annotation is FunctionTypeAnnotation && annotation.effects != null) {
-                                //     validateEffectsMatch(
-                                //         preConvertedAnnotationType,
-                                //         inferredTypeWithAbilities,
-                                //         varName,
-                                //         item.expression
-                                //     )
-                                // }
+                                // 2. EFFECTS VALIDATION
+                                // Check that annotation doesn't overpromise effects.
+                                // ONLY validate when there are NO function calls - because effects propagate
+                                // through function calls and we can't easily track that here.
+                                if (annotation is FunctionTypeAnnotation &&
+                                    annotation.effects != null &&
+                                    !containsFunctionCalls(item.expression)) {
+                                    validateEffectsNotOverpromised(
+                                        preConvertedAnnotationType,
+                                        inferredTypeWithAbilities,
+                                        varName
+                                    )
+                                }
 
-                                // 3. ABILITY VALIDATION - DISABLED
-                                // The ability validation is causing extra test failures because:
-                                // 1. Type variable names don't match after substitution (e.g., 'a becomes 'b)
-                                // 2. The "unused abilities" check triggers false positives
-                                // TODO: Fix type variable comparison to use unification instead of name equality
-                                // if (annotation is FunctionTypeAnnotation && annotation.abilityConstraints.isNotEmpty()) {
-                                //     // Apply substitution to ability constraints to map fresh type vars back to annotation type vars
-                                //     val resolvedAbilityConstraints = result.abilityConstraints.map { constraint ->
-                                //         val resolvedTypeVar = substitution.apply(FunkType.VarType(constraint.typeVar))
-                                //         if (resolvedTypeVar is FunkType.VarType) {
-                                //             constraint.copy(typeVar = resolvedTypeVar.variable)
-                                //         } else {
-                                //             // Type var was resolved to concrete type - keep original
-                                //             constraint
-                                //         }
-                                //     }
-                                //     validateAbilitiesMatch(
-                                //         preConvertedAnnotationType,
-                                //         inferredTypeWithAbilities,
-                                //         resolvedAbilityConstraints,
-                                //         varName,
-                                //         item.expression
-                                //     )
-                                // }
+                                // 3. ABILITY VALIDATION
+                                // Check that abilities are applied to correct type variables (by ID, not name).
+                                // This catches cases like: annotation declares NumAdd 'b but impl uses NumAdd 'a
+                                if (annotation is FunctionTypeAnnotation && annotation.abilityConstraints.isNotEmpty()) {
+                                    // Apply substitution to ability constraints to map fresh type vars back
+                                    val resolvedAbilityConstraints = result.abilityConstraints.map { constraint ->
+                                        val resolvedTypeVar = substitution.apply(FunkType.VarType(constraint.typeVar))
+                                        if (resolvedTypeVar is FunkType.VarType) {
+                                            constraint.copy(typeVar = resolvedTypeVar.variable)
+                                        } else {
+                                            constraint
+                                        }
+                                    }
+                                    validateAbilityOnCorrectTypeVar(
+                                        preConvertedAnnotationType,
+                                        resolvedAbilityConstraints,
+                                        varName
+                                    )
+                                }
                             }
 
                             // Apply substitution to get final solved types for pattern bindings
@@ -1062,31 +1051,88 @@ class ConstraintGenerator(
     }
 
     /**
-     * Validate that if annotation is polymorphic, the inferred type is also polymorphic.
+     * Validate that type variables in annotation are not forced to FULLY concrete types.
      *
      * This catches cases like:
      *   let bad: { x: 'a, y: 'a } -> 'a = {x, y} -> if true then x else 0
      *
      * Where the annotation says 'a is polymorphic, but the implementation forces it to be Int.
      *
+     * IMPORTANT: Only flags when the substituted type has NO type variables at all.
+     * If the substituted type still contains type variables (even nested), that's OK.
+     *
      * @param annotationType The original annotation type (before substitution)
-     * @param inferredType The inferred type after constraint solving
+     * @param substitution The substitution from constraint solving
      * @param varName The variable name (for error messages)
-     * @param expression The expression being type-checked
      */
     private fun validatePolymorphismPreserved(
         annotationType: FunkType,
-        inferredType: FunkType,
-        varName: String,
-        expression: Expression
+        substitution: com.funk.language.typechecker.solving.Substitution,
+        varName: String
     ) {
-        // If annotation is polymorphic but inferred is concrete, that's an error
-        if (!containsConcreteTypes(annotationType) && containsConcreteTypes(inferredType)) {
-            throw com.funk.language.typechecker.TypeCheckError(
-                "Type annotation mismatch for '$varName': Annotation declares a polymorphic type, " +
-                "but implementation is only monomorphic. " +
-                "The implementation must work for all types, not just specific ones."
-            )
+        // Collect all type variables from the annotation
+        val annotationTypeVars = collectTypeVars(annotationType)
+
+        // Check each type variable - if substitution maps it to a FULLY CONCRETE type, that's an error
+        for (typeVar in annotationTypeVars) {
+            val substituted = substitution.apply(FunkType.VarType(typeVar))
+            if (substituted !is FunkType.VarType) {
+                // Check if the substituted type is FULLY concrete (no type variables)
+                val substitutedTypeVars = collectTypeVars(substituted)
+                if (substitutedTypeVars.isEmpty()) {
+                    throw com.funk.language.typechecker.TypeCheckError(
+                        "Type annotation mismatch for '$varName': Annotation declares type variable '${typeVar.name}' " +
+                        "but implementation forces it to concrete type '${com.funk.language.ast.prettyPrintType(substituted)}'. " +
+                        "The implementation must work for all types, not just specific ones."
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Collect all type variables from a type.
+     */
+    private fun collectTypeVars(type: FunkType): Set<TypeVar> {
+        val result = mutableSetOf<TypeVar>()
+        collectTypeVarsRecursive(type, result)
+        return result
+    }
+
+    private fun collectTypeVarsRecursive(type: FunkType, result: MutableSet<TypeVar>) {
+        when (type) {
+            is FunkType.VarType -> result.add(type.variable)
+            is FunkType.FunctionType -> {
+                collectTypeVarsRecursive(type.paramType, result)
+                collectTypeVarsRecursive(type.returnType, result)
+            }
+            is FunkType.RecordType -> {
+                type.fields.values.forEach { collectTypeVarsRecursive(it, result) }
+            }
+            is FunkType.VariantType -> {
+                type.constructors.values.filterNotNull().forEach { collectTypeVarsRecursive(it, result) }
+            }
+            is FunkType.TypeApplication -> {
+                type.args.forEach { collectTypeVarsRecursive(it, result) }
+            }
+            is FunkType.ArrayType -> collectTypeVarsRecursive(type.elementType, result)
+            is FunkType.ListType -> collectTypeVarsRecursive(type.elementType, result)
+            is FunkType.SetType -> collectTypeVarsRecursive(type.elementType, result)
+            is FunkType.MapType -> {
+                collectTypeVarsRecursive(type.keyType, result)
+                collectTypeVarsRecursive(type.valueType, result)
+            }
+            // Concrete types have no type variables
+            is FunkType.IntType,
+            is FunkType.FloatType,
+            is FunkType.StringType,
+            is FunkType.BooleanType,
+            is FunkType.NatType,
+            is FunkType.FracType,
+            is FunkType.OrderingType -> { /* No type variables */ }
+            // Effect and suspended types - check inner types
+            is FunkType.EffectRow -> { /* Effect names, no type variables to collect */ }
+            is FunkType.SuspendedType -> collectTypeVarsRecursive(type.valueType, result)
         }
     }
 
@@ -1165,6 +1211,91 @@ class ConstraintGenerator(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${missingEffects.joinToString(", ")} " +
                     "which are not used in the implementation."
                 )
+            }
+        }
+    }
+
+    /**
+     * Validate that annotation doesn't overpromise effects.
+     *
+     * Rules:
+     * - If annotation declares effects that implementation doesn't use, that's an error
+     * - If implementation uses effects not in annotation, that's allowed (more restrictive API)
+     *
+     * NOTE: This should ONLY be called when there are NO function calls in the implementation,
+     * because effects propagate through function calls and we can't track that here.
+     */
+    private fun validateEffectsNotOverpromised(
+        annotationType: FunkType,
+        inferredType: FunkType,
+        varName: String
+    ) {
+        if (annotationType is FunkType.FunctionType && inferredType is FunkType.FunctionType) {
+            val annotatedEffects = annotationType.effects?.effects ?: emptySet()
+            val inferredEffects = inferredType.effects?.effects ?: emptySet()
+
+            // Check if annotation declares effects not used in implementation (overpromising)
+            val overpromisedEffects = annotatedEffects - inferredEffects
+            if (overpromisedEffects.isNotEmpty()) {
+                throw com.funk.language.typechecker.TypeCheckError(
+                    "Type annotation mismatch for '$varName': Annotation declares effects ${overpromisedEffects.joinToString(", ")} " +
+                    "which are not used in the implementation."
+                )
+            }
+        }
+    }
+
+    /**
+     * Validate that abilities are applied to the correct type variables.
+     *
+     * This catches cases like:
+     * - Annotation declares `NumAdd 'b` but implementation uses `NumAdd 'a`
+     *
+     * IMPORTANT: Compares type variables by ID, not by name, because fresh type vars
+     * may have different IDs even if they end up with the same name after substitution.
+     */
+    private fun validateAbilityOnCorrectTypeVar(
+        annotationType: FunkType,
+        inferredAbilityConstraints: List<Constraint.AbilityRequired>,
+        varName: String
+    ) {
+        if (annotationType !is FunkType.FunctionType) return
+
+        val annotatedAbilities = annotationType.abilityConstraints
+        val annotationTypeVars = collectTypeVars(annotationType)
+        val annotationTypeVarIds = annotationTypeVars.map { it.id }.toSet()
+
+        // Filter out constraints from annotation itself
+        val actualUsageConstraints = inferredAbilityConstraints.filter { constraint ->
+            constraint.context == null || !constraint.context.startsWith("Type annotation on")
+        }
+
+        for (usage in actualUsageConstraints) {
+            if (usage.abilityName == "Inspect") continue  // Skip implicit Inspect
+
+            val matchingAnnotated = annotatedAbilities.find { it.abilityName == usage.abilityName }
+
+            if (matchingAnnotated != null) {
+                // Check type variables match by ID
+                for (annotatedTypeArg in matchingAnnotated.typeArgs) {
+                    if (annotatedTypeArg is FunkType.VarType) {
+                        if (usage.typeVar.id != annotatedTypeArg.variable.id) {
+                            throw com.funk.language.typechecker.TypeCheckError(
+                                "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
+                                "Annotation declares constraint on '${annotatedTypeArg.variable.name}' but implementation uses it on a different type variable."
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Implementation uses ability not in annotation - error if on annotation's type var
+                val isOnAnnotationTypeVar = annotationTypeVarIds.contains(usage.typeVar.id)
+                if (isOnAnnotationTypeVar) {
+                    throw com.funk.language.typechecker.TypeCheckError(
+                        "Type annotation mismatch for '$varName': Implementation requires '${usage.abilityName}' on type variable '${usage.typeVar.name}', " +
+                        "but the annotation does not declare this constraint."
+                    )
+                }
             }
         }
     }
@@ -1267,10 +1398,15 @@ class ConstraintGenerator(
                 when (entry) {
                     is RecordFieldEntry -> entry.value?.let { containsFunctionCalls(it) } ?: false
                     is RecordSpreadEntry -> containsFunctionCalls(entry.expression)
-                    else -> false
                 }
             }
             is MemberAccess -> containsFunctionCalls(expr.receiver)
+            // String interpolation can contain function calls in its parts
+            is StringLiteral -> {
+                expr.parts?.any { part ->
+                    part is ExpressionPart && containsFunctionCalls(part.expression)
+                } ?: false
+            }
             // For DoExpression and other complex expressions, assume they may contain function calls
             is DoExpression -> true
             else -> false
