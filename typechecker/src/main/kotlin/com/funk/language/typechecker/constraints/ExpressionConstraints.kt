@@ -1295,6 +1295,44 @@ class ExpressionConstraintGenerator {
         // 2. Partial application: subset of parameters provided (currying)
         // 3. Effectful functions: wrap result in SuspendedType
 
+        // VALIDATION: Reject spread-only records in function calls (Bug #10 Extension)
+        // Valid: func { x = 1, y = 2 } - explicit fields
+        // Valid: func { ...k, x = 1 } - spread with explicit fields
+        // Invalid: func { ...k } - spread-only
+        if (expr.arguments is RecordLiteral) {
+            val recordLiteral = expr.arguments as RecordLiteral
+            val hasExplicitFields = recordLiteral.entries.any { it is RecordFieldEntry }
+            val hasSpreadEntries = recordLiteral.entries.any { it is RecordSpreadEntry }
+
+            // Reject if ONLY spread entries (no explicit fields)
+            if (hasSpreadEntries && !hasExplicitFields) {
+                // Get the function name for error message
+                val functionName = when (expr.function) {
+                    is Identifier -> (expr.function as Identifier).name
+                    else -> "function"
+                }
+
+                // Get the spread variable name for error message
+                val spreadEntry = recordLiteral.entries.filterIsInstance<RecordSpreadEntry>().first()
+                val spreadVarName = when (spreadEntry.expression) {
+                    is Identifier -> (spreadEntry.expression as Identifier).name
+                    else -> "record"
+                }
+
+                throw TypeCheckError(
+                    message = "cannot use spread-only records in function call to '$functionName'. " +
+                            "Spread variable: '$spreadVarName'. " +
+                            "Use explicit named arguments instead, e.g., { x = $spreadVarName.x, y = $spreadVarName.y }",
+                    expression = expr,
+                    errorType = ErrorType.TYPE_MISMATCH,
+                    context = mapOf(
+                        "functionName" to functionName,
+                        "spreadVariable" to spreadVarName
+                    )
+                )
+            }
+        }
+
         val functionResult = generate(expr.function, context)
         val argumentResult = generate(expr.arguments, context)
 
