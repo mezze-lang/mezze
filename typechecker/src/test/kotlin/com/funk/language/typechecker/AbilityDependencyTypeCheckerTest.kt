@@ -29,7 +29,7 @@ class AbilityDependencyTypeCheckerTest {
     fun testSimpleAbilityDependency() {
         val source = """
             ability Eq 'a where {
-                equals : {left: 'a, right: 'a} -> Boolean
+                equals : {left: 'a, right: 'a} -> Bool
             }
             
             ability Ord 'a with Eq 'a where {
@@ -61,7 +61,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Eq 'a where {
-                equals : {left: 'a, right: 'a} -> Boolean
+                equals : {left: 'a, right: 'a} -> Bool
             }
             
             ability Serializable 'a with Show 'a, Eq 'a where {
@@ -88,7 +88,7 @@ class AbilityDependencyTypeCheckerTest {
     fun testTransitiveDependencies() {
         val source = """
             ability Eq 'a where {
-                equals : {left: 'a, right: 'a} -> Boolean
+                equals : {left: 'a, right: 'a} -> Bool
             }
             
             ability Ord 'a with Eq 'a where {
@@ -198,7 +198,7 @@ class AbilityDependencyTypeCheckerTest {
     fun testAbilityImplementationWithDependencies() {
         val source = """
             ability Eq 'a where {
-                equals : {left: 'a, right: 'a} -> Boolean
+                equals : {left: 'a, right: 'a} -> Bool
             }
             
             ability Ord 'a with Eq 'a where {
@@ -206,7 +206,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             impl Eq Int where {
-                equals : {left: Int, right: Int} -> Boolean = {left, right} -> true
+                equals : {left: Int, right: Int} -> Bool = {left, right} -> true
             }
             
             impl Ord Int where {
@@ -233,7 +233,7 @@ class AbilityDependencyTypeCheckerTest {
     fun testComplexDependencyChain() {
         val source = """
             ability Eq 'a where {
-                equals : {left: 'a, right: 'a} -> Boolean
+                equals : {left: 'a, right: 'a} -> Bool
             }
             
             ability Show 'a where {
