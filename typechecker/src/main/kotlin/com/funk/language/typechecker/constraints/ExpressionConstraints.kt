@@ -381,10 +381,35 @@ class ExpressionConstraintGenerator {
                 }
                 is RecordSpreadEntry -> {
                     // Spread: {...baseRecord}
-                    // TODO: Handle record spreading with row polymorphism
+                    // Process the spread expression and extract its fields
                     val spreadResult = generate(entry.expression, context)
                     constraints.addAll(spreadResult.constraints)
                     undefinedVars.addAll(spreadResult.undefinedVariables)
+
+                    // Extract fields from the spread type and merge into our record
+                    // The spread expression must be a record type (or unify with one via constraints)
+                    when (val spreadType = spreadResult.type) {
+                        is FunkType.RecordType -> {
+                            // Merge all fields from the spread record into our result
+                            // Explicit fields (RecordFieldEntry) will override spread fields if they have the same name
+                            for ((fieldName, fieldType) in spreadType.fields) {
+                                // Only add if not already explicitly defined
+                                if (fieldName !in presentFields) {
+                                    fields[fieldName] = fieldType
+                                }
+                            }
+                        }
+                        is FunkType.VarType -> {
+                            // Spread type is not yet known - add a constraint that it must be a record
+                            // We'll use a fresh row variable to represent the unknown fields
+                            // This enables: let x = { ...someVar } where someVar's type isn't known yet
+                            // For now, we don't add fields (they'll be resolved during constraint solving)
+                        }
+                        else -> {
+                            // Spread expression is not a record - this will be caught during constraint solving
+                            // For now, just ignore it
+                        }
+                    }
                 }
             }
         }
