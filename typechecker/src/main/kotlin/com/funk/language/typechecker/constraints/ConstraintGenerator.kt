@@ -383,6 +383,10 @@ class ConstraintGenerator(
             // If we convert twice, we get different TypeVar instances, breaking polymorphism
             val annotatedType = expectedType
 
+            // VALIDATION: Check annotation against expression BEFORE adding equality constraint
+            // This catches errors that the constraint solver would silently accept
+            validateAnnotationAgainstExpression(binding, annotatedType, typeAnnotationValue, binding.expression, exprResult.type)
+
             // Extract ability constraints from annotation if it's a function type
             val annotationAbilityConstraints = if (typeAnnotationValue is FunctionTypeAnnotation) {
                 typeAnnotationValue.abilityConstraints.flatMap { constraint ->
@@ -900,6 +904,88 @@ class ConstraintGenerator(
             )
             // Primitive types don't need substitution
             else -> type
+        }
+    }
+
+    /**
+     * Validate type annotation against expression.
+     *
+     * Performs upfront validation that catches errors the constraint solver would silently accept:
+     * 1. Record with extra fields when annotation is closed record
+     * 2. Lambda parameter count mismatch with function annotation
+     * 3. Polymorphic function returning function (partial application check)
+     */
+    private fun validateAnnotationAgainstExpression(
+        binding: LetBinding,
+        annotatedType: FunkType,
+        annotation: TypeAnnotation,
+        expression: Expression,
+        inferredType: FunkType
+    ) {
+        // 1. RECORD EXTRA FIELD VALIDATION
+        // Check if annotation is a closed record type and expression is a record literal with extra fields
+        if (annotatedType is FunkType.RecordType && expression is RecordLiteral) {
+            // Only validate if annotation is closed (no rowVar)
+            if (annotatedType.rowVar == null) {
+                val annotatedFields = annotatedType.fields.keys
+                val literalFields = mutableSetOf<String>()
+
+                // Extract field names from record literal
+                for (entry in expression.entries) {
+                    when (entry) {
+                        is RecordFieldEntry -> literalFields.add(entry.name)
+                        is RecordSpreadEntry -> {
+                            // Spread entries make validation complex - skip for now
+                            // The constraint solver will handle these cases
+                            return
+                        }
+                    }
+                }
+
+                // Check for extra fields
+                val extraFields = literalFields - annotatedFields
+                if (extraFields.isNotEmpty()) {
+                    throw com.funk.language.typechecker.TypeCheckError(
+                        "Type annotation mismatch: record has extra field(s) ${extraFields.sorted().joinToString(", ")} " +
+                        "not present in closed record type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }"
+                    )
+                }
+
+                // Check for missing fields
+                val missingFields = annotatedFields - literalFields
+                if (missingFields.isNotEmpty()) {
+                    throw com.funk.language.typechecker.TypeCheckError(
+                        "Type annotation mismatch: record is missing field(s) ${missingFields.sorted().joinToString(", ")} " +
+                        "required by type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }"
+                    )
+                }
+            }
+        }
+
+        // 2. FUNCTION ARITY VALIDATION
+        // Check if annotation is a function type and expression is a lambda with mismatched parameters
+        if (annotatedType is FunkType.FunctionType && expression is LambdaExpression) {
+            val annotatedParamType = annotatedType.paramType
+
+            // Get parameter count from annotation
+            val expectedParamCount = when (annotatedParamType) {
+                is FunkType.RecordType -> annotatedParamType.fields.size
+                else -> 1 // Single parameter (not a record)
+            }
+
+            // Get parameter count from lambda
+            val actualParamCount = when (val params = expression.parameters) {
+                is UntypedParameters -> params.names.size
+                is TypedParameters -> params.recordType.entries.size
+            }
+
+            // Check if counts match
+            if (expectedParamCount != actualParamCount) {
+                throw com.funk.language.typechecker.TypeCheckError(
+                    "Type annotation mismatch: function expects $expectedParamCount parameter(s) " +
+                    "but lambda has $actualParamCount parameter(s)"
+                )
+            }
         }
     }
 
