@@ -58,7 +58,7 @@ class OpenRecordTypeAliasTest {
             x
             """.trimIndent(),
             "x",
-            "{ name: String, age: Int, ... }"
+            "Person"  // Type alias name is preserved
         )
     }
 
@@ -72,7 +72,7 @@ class OpenRecordTypeAliasTest {
             x
             """.trimIndent(),
             "x",
-            "{ name: String, age: Int, ... }"
+            "Person"  // Type alias name is preserved
         )
     }
 
@@ -86,7 +86,7 @@ class OpenRecordTypeAliasTest {
             x
             """.trimIndent(),
             "x",
-            "{ name: String, age: Int, ... }"
+            "Person"  // Type alias name is preserved
         )
     }
 
@@ -120,7 +120,7 @@ class OpenRecordTypeAliasTest {
             result
             """.trimIndent(),
             "result",
-            "{ name: String, age: Int, ... }"
+            "Person"  // Type alias name is preserved from function return type
         )
     }
 
@@ -148,7 +148,7 @@ class OpenRecordTypeAliasTest {
             x
             """.trimIndent(),
             "x",
-            "{ name: String, age: Int }"
+            "ClosedPerson"  // Type alias name is preserved
         )
     }
 
@@ -179,7 +179,7 @@ class OpenRecordTypeAliasTest {
             open
             """.trimIndent(),
             "open",
-            "{ name: String, ... }"
+            "OpenPerson"  // Type alias name is preserved
         )
     }
 
@@ -198,7 +198,7 @@ class OpenRecordTypeAliasTest {
             x
             """.trimIndent(),
             "x",
-            "{ name: String, address: { city: String, ... }, ... }"
+            "Person"  // Type alias name is preserved (nested Address is also an alias)
         )
     }
 
@@ -224,7 +224,7 @@ class OpenRecordTypeAliasTest {
             x
             """.trimIndent(),
             "x",
-            "{ value: Int, ... }"
+            "Container Int"  // Polymorphic type alias name is preserved with type arguments
         )
     }
 

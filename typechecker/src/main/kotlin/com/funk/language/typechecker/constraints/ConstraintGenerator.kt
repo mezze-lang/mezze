@@ -110,7 +110,7 @@ class ConstraintGenerator(
                     // Extend context with pattern bindings for subsequent items
                     // For simple variable bindings: extends with one binding
                     // For destructuring patterns: extends with multiple bindings
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
                     val patternResult = patternGenerator.generate(
                         item.pattern,
                         result.type,
@@ -158,8 +158,31 @@ class ConstraintGenerator(
                             // (with substitution applied) as the authoritative type.
                             // This ensures closed variant/record types from annotations override open inferred types.
                             // For POLYMORPHIC annotations (with type variables), use the inferred type instead.
+                            // IMPORTANT: Preserve TypeApplication from annotations (don't expand user-defined type aliases)
                             val authoritativeType = if (item.pattern is VariablePattern && preConvertedAnnotationType != null) {
-                                val annotatedType = substitution.apply(preConvertedAnnotationType)
+                                // CRITICAL: If annotation was a TypeApplication (type alias), check if it's user-defined
+                                // Only preserve USER-DEFINED type aliases, not built-in types like Array, List, etc.
+                                // This ensures "let x: Person = ..." has type "Person", not "{ name: String, ... }"
+                                val annotatedType = if (preConvertedAnnotationType is FunkType.TypeApplication) {
+                                    // Check if this is a user-defined type alias (exists in typeDeclarations)
+                                    val isUserDefinedAlias = typeDeclarations.containsKey(preConvertedAnnotationType.constructor)
+
+                                    if (isUserDefinedAlias) {
+                                        // User-defined type alias - preserve it, apply substitution to type arguments only
+                                        FunkType.TypeApplication(
+                                            constructor = preConvertedAnnotationType.constructor,
+                                            args = preConvertedAnnotationType.args.map { substitution.apply(it) }
+                                        )
+                                    } else {
+                                        // Built-in type (Array, List, etc.) - apply substitution normally
+                                        // This allows Array Int to be treated as ArrayType(IntType)
+                                        substitution.apply(preConvertedAnnotationType)
+                                    }
+                                } else {
+                                    // For other types, apply substitution normally
+                                    substitution.apply(preConvertedAnnotationType)
+                                }
+
                                 // Check if annotation contains type variables (polymorphic)
                                 val hasFreeVars = com.funk.language.typechecker.context.collectFreeTypeVars(annotatedType).isNotEmpty()
                                 if (!hasFreeVars) {
@@ -280,7 +303,7 @@ class ConstraintGenerator(
                 }
                 is TopLevelExpression -> {
                     // Top-level expressions (for REPL)
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
                     results["_toplevel"] = expressionGenerator.generate(
                         item.expression,
                         constraintContext
@@ -332,7 +355,8 @@ class ConstraintGenerator(
             abilityNames = abilityNames,
             effectNames = effectNames,
             abilityDeclarations = abilityDeclarations,
-            recordLiteralBindings = recordLiteralBindings
+            recordLiteralBindings = recordLiteralBindings,
+            typeDeclarations = typeDeclarations
         )
 
         // Generate constraints for the expression with expected type
@@ -752,7 +776,8 @@ class ConstraintGenerator(
                     performerToEffect = performerToEffect,
                     abilityNames = abilityNames,
                     effectNames = effectNames,
-                    abilityDeclarations = abilityDeclarations
+                    abilityDeclarations = abilityDeclarations,
+                    typeDeclarations = typeDeclarations
                 )
 
                 // Generate constraints for lambda body

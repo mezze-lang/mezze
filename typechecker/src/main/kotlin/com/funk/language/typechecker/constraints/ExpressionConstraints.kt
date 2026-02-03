@@ -366,6 +366,9 @@ class ExpressionConstraintGenerator {
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
 
+        // Collect all present field names for validation
+        val presentFields = expr.entries.filterIsInstance<RecordFieldEntry>().map { it.name }.toSet()
+
         for (entry in expr.entries) {
             when (entry) {
                 is RecordFieldEntry -> {
@@ -383,6 +386,62 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(spreadResult.constraints)
                     undefinedVars.addAll(spreadResult.undefinedVariables)
                 }
+            }
+        }
+
+        // VALIDATION: If expected type is present AND is a type alias, validate closed record constraints
+        // This handles type annotations like: let x: ClosedPerson = { ... }
+        // where ClosedPerson is a type alias for a closed record
+        // IMPORTANT: Only validate TypeApplications (user-defined type aliases), NOT plain RecordTypes
+        // (plain RecordTypes come from nested records and should be validated by constraint solving instead)
+        val expectedType = context.expectedType
+        if (expectedType != null && expectedType is FunkType.TypeApplication) {
+            // Look up type declaration and resolve to RecordType
+            val typeDecl = context.typeDeclarations[expectedType.constructor]
+            if (typeDecl != null && typeDecl.definition is RecordDefinition) {
+                val recordDef = typeDecl.definition as RecordDefinition
+                // Convert RecordDefinition to RecordType (for validation purposes only)
+                val fields = recordDef.fields.associate { field ->
+                    field.name to convertFieldType(field.type)
+                }
+                val resolvedType = FunkType.RecordType(
+                    fields = fields,
+                    rowVar = if (recordDef.isOpen) RowVar("rest") else null
+                )
+
+                // If resolved type is a closed record, validate fields
+                if (resolvedType.rowVar == null) {
+                // Expected type is a closed record - validate fields match exactly
+                val missingFields = resolvedType.fields.keys - presentFields
+                if (missingFields.isNotEmpty()) {
+                    throw TypeCheckError(
+                        message = "Record literal missing required fields from type annotation: ${missingFields.joinToString(", ")}. " +
+                                "Expected: ${prettyPrintType(expectedType)}, " +
+                                "Got fields: ${presentFields.joinToString(", ")}",
+                        expression = expr,
+                        errorType = ErrorType.MISSING_FIELD,
+                        context = mapOf(
+                            "missingFields" to missingFields.toList(),
+                            "presentFields" to presentFields.toList()
+                        )
+                    )
+                }
+
+                val extraFields = presentFields - resolvedType.fields.keys
+                if (extraFields.isNotEmpty()) {
+                    throw TypeCheckError(
+                        message = "Record literal has extra fields not in type annotation: ${extraFields.joinToString(", ")}. " +
+                                "Expected: ${prettyPrintType(expectedType)}, " +
+                                "Got extra fields: ${extraFields.joinToString(", ")}",
+                        expression = expr,
+                        errorType = ErrorType.TYPE_MISMATCH,
+                        context = mapOf(
+                            "extraFields" to extraFields.toList(),
+                            "expectedFields" to resolvedType.fields.keys.toList()
+                        )
+                    )
+                }
+            }
             }
         }
 
@@ -1739,5 +1798,76 @@ class ExpressionConstraintGenerator {
         // TODO: Implement state machine constraint generation
 
         return ConstraintResult.simple(FunkType.VarType(TypeVar.fresh()))
+    }
+
+    // ========================================================================
+    // HELPER FUNCTIONS
+    // ========================================================================
+
+    /**
+     * Convert TypeAnnotation to FunkType for validation purposes only.
+     * This is a simple conversion used for type alias field validation.
+     */
+    private fun convertFieldType(annotation: TypeAnnotation): FunkType {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                when (annotation.name) {
+                    "Int" -> FunkType.IntType
+                    "Float" -> FunkType.FloatType
+                    "String" -> FunkType.StringType
+                    "Bool" -> FunkType.VariantType(
+                        constructors = mapOf("True" to null, "False" to null),
+                        rowVar = null
+                    )
+                    "Nat" -> FunkType.NatType
+                    "Frac" -> FunkType.FracType
+                    "Ordering" -> FunkType.OrderingType
+                    else -> {
+                        // Type variable or type constructor
+                        if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                            FunkType.VarType(TypeVar(annotation.name))
+                        } else {
+                            FunkType.TypeApplication(annotation.name, emptyList())
+                        }
+                    }
+                }
+            }
+            is RecordTypeAnnotation -> {
+                FunkType.RecordType(
+                    fields = annotation.entries.associate { entry ->
+                        entry.name to convertFieldType(entry.type)
+                    },
+                    rowVar = annotation.restField?.let { RowVar(it) }
+                )
+            }
+            is FunctionTypeAnnotation -> {
+                FunkType.FunctionType(
+                    paramType = convertFieldType(annotation.paramType),
+                    returnType = convertFieldType(annotation.returnType),
+                    effects = annotation.effects?.let { FunkType.EffectRow(it.effects.toSet()) }
+                )
+            }
+            is TypeApplicationAnnotation -> {
+                FunkType.TypeApplication(
+                    constructor = annotation.constructor,
+                    args = annotation.args.map { convertFieldType(it) }
+                )
+            }
+            is VariantTypeAnnotation -> {
+                FunkType.VariantType(
+                    constructors = annotation.constructors.associate { ctor ->
+                        ctor.name to ctor.dataType?.let { convertFieldType(it) }
+                    }
+                )
+            }
+            is ArrayTypeAnnotation -> {
+                FunkType.ArrayType(
+                    elementType = convertFieldType(annotation.elementType)
+                )
+            }
+            is EffectRowAnnotation -> {
+                FunkType.EffectRow(annotation.effects.toSet())
+            }
+        }
     }
 }

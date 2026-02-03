@@ -208,7 +208,8 @@ data class ConstraintContext(
     val effectNames: Set<String> = emptySet(),  // Set of all effect names (e.g., Log, FileSystem)
     val performContext: PerformExpression? = null,  // Current perform context for effect associated type substitution
     val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),  // All ability declarations for method type lookup
-    val recordLiteralBindings: Set<String> = emptySet()  // Variables bound to explicit record literals (for field access validation)
+    val recordLiteralBindings: Set<String> = emptySet(),  // Variables bound to explicit record literals (for field access validation)
+    val typeDeclarations: Map<String, TypeDeclaration> = emptyMap()  // Type declarations for validation only (NOT for general type resolution)
 ) {
     /**
      * Extend context with new variable binding
