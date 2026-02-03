@@ -154,16 +154,17 @@ class ConstraintGenerator(
                         is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
                             val substitution = solveResult.substitution
 
-                            // CRITICAL: If there's a NON-POLYMORPHIC type annotation, use the ANNOTATED type
-                            // (with substitution applied) as the authoritative type.
-                            // This ensures closed variant/record types from annotations override open inferred types.
-                            // For POLYMORPHIC annotations (with type variables), use the inferred type instead.
+                            // CRITICAL: If there's a type annotation, use the ANNOTATED type (with substitution applied)
+                            // as the authoritative type. This ensures closed variant/record types from annotations
+                            // override open inferred types.
+                            // IMPORTANT: Use annotation even if it has type variables (polymorphic) - generalization
+                            // happens AFTER solving constraints. This matches OldTypeChecker.kt lines 1226-1411.
                             // IMPORTANT: Preserve TypeApplication from annotations (don't expand user-defined type aliases)
                             val authoritativeType = if (item.pattern is VariablePattern && preConvertedAnnotationType != null) {
                                 // CRITICAL: If annotation was a TypeApplication (type alias), check if it's user-defined
                                 // Only preserve USER-DEFINED type aliases, not built-in types like Array, List, etc.
                                 // This ensures "let x: Person = ..." has type "Person", not "{ name: String, ... }"
-                                val annotatedType = if (preConvertedAnnotationType is FunkType.TypeApplication) {
+                                if (preConvertedAnnotationType is FunkType.TypeApplication) {
                                     // Check if this is a user-defined type alias (exists in typeDeclarations)
                                     val isUserDefinedAlias = typeDeclarations.containsKey(preConvertedAnnotationType.constructor)
 
@@ -182,16 +183,6 @@ class ConstraintGenerator(
                                     // For other types, apply substitution normally
                                     substitution.apply(preConvertedAnnotationType)
                                 }
-
-                                // Check if annotation contains type variables (polymorphic)
-                                val hasFreeVars = com.funk.language.typechecker.context.collectFreeTypeVars(annotatedType).isNotEmpty()
-                                if (!hasFreeVars) {
-                                    // Monomorphic annotation - use it as authoritative
-                                    annotatedType
-                                } else {
-                                    // Polymorphic annotation - use inferred type
-                                    substitution.apply(result.type)
-                                }
                             } else {
                                 substitution.apply(result.type)
                             }
@@ -199,10 +190,10 @@ class ConstraintGenerator(
                             // Apply substitution to get final solved types for pattern bindings
                             val solvedBindings = if (item.pattern is VariablePattern && authoritativeType != substitution.apply(result.type)) {
                                 // For simple variable bindings where annotation differs from inferred type (e.g., closed vs open variants),
-                                // use the authoritative type (the annotation wins)
+                                // use the authoritative type (the annotation wins, whether monomorphic or polymorphic)
                                 mapOf(item.variableName to authoritativeType)
                             } else {
-                                // For complex patterns, polymorphic annotations, or when types match, apply substitution to pattern bindings
+                                // For complex patterns or when types match, apply substitution to pattern bindings
                                 patternResult.bindings.mapValues { (_, type) ->
                                     substitution.apply(type)
                                 }
