@@ -701,12 +701,12 @@ class AnnotationTypeCheckingTest {
     fun `test variant constructor in annotation guides inference`() {
         assertTypeChecks(
             """
-            let makeResult: { n: Int } -> | Ok { val: Int }, Err { msg: String } | =
-              {n} -> if n > 0 then Ok {val = n} else Err {msg = "negative"}
+            let makeResult: { n: Int } -> | Good { val: Int }, Bad { msg: String } | =
+              {n} -> if n > 0 then Good {val = n} else Bad {msg = "negative"}
             makeResult {n = 5}
             """.trimIndent(),
             "makeResult",
-            "{ n: Int } -> | Ok { val: Int }, Err { msg: String } |"
+            "{ n: Int } -> | Good { val: Int }, Bad { msg: String } |"
         )
     }
 
@@ -842,12 +842,12 @@ class AnnotationTypeCheckingTest {
     fun `test variant with multiple payloads annotation`() {
         assertTypeChecks(
             """
-            let result: | Ok { val: Int }, Err { msg: String, code: Int } | =
-              Err { msg = "error", code = 404 }
+            let result: | Left { val: Int }, Right { msg: String, code: Int } | =
+              Right { msg = "error", code = 404 }
             result
             """.trimIndent(),
             "result",
-            "| Ok { val: Int }, Err { msg: String, code: Int } |"
+            "| Left { val: Int }, Right { msg: String, code: Int } |"
         )
     }
 
@@ -855,7 +855,7 @@ class AnnotationTypeCheckingTest {
     fun `test variant annotation missing constructor fails`() {
         assertTypeCheckFails(
             """
-            let result: | Ok { val: Int } | = Err { msg = "error" }
+            let result: | Success { val: Int } | = Failure { msg: "error" }
             result
             """.trimIndent()
         )
