@@ -187,6 +187,37 @@ class ConstraintGenerator(
                                 substitution.apply(result.type)
                             }
 
+                            // VALIDATION: Check annotation matches inferred type
+                            // This validates polymorphism preservation, effects, and abilities
+                            if (item.pattern is VariablePattern && preConvertedAnnotationType != null) {
+                                val inferredType = substitution.apply(result.type)
+
+                                // Check that polymorphic annotations remain polymorphic after inference
+                                validatePolymorphismPreserved(
+                                    preConvertedAnnotationType,
+                                    inferredType,
+                                    item.variableName,
+                                    item.expression
+                                )
+
+                                // Check that effects match between annotation and implementation
+                                validateEffectsMatch(
+                                    preConvertedAnnotationType,
+                                    inferredType,
+                                    item.variableName,
+                                    item.expression
+                                )
+
+                                // Check that abilities match between annotation and implementation
+                                validateAbilitiesMatch(
+                                    preConvertedAnnotationType,
+                                    inferredType,
+                                    result.abilityConstraints,
+                                    item.variableName,
+                                    item.expression
+                                )
+                            }
+
                             // Apply substitution to get final solved types for pattern bindings
                             val solvedBindings = if (item.pattern is VariablePattern && authoritativeType != substitution.apply(result.type)) {
                                 // For simple variable bindings where annotation differs from inferred type (e.g., closed vs open variants),
@@ -986,6 +1017,220 @@ class ConstraintGenerator(
                     "but lambda has $actualParamCount parameter(s)"
                 )
             }
+        }
+    }
+
+    /**
+     * Validate that if annotation is polymorphic, the inferred type is also polymorphic.
+     *
+     * This catches cases like:
+     *   let bad: { x: 'a, y: 'a } -> 'a = {x, y} -> if true then x else 0
+     *
+     * Where the annotation says 'a is polymorphic, but the implementation forces it to be Int.
+     *
+     * @param annotationType The original annotation type (before substitution)
+     * @param inferredType The inferred type after constraint solving
+     * @param varName The variable name (for error messages)
+     * @param expression The expression being type-checked
+     */
+    private fun validatePolymorphismPreserved(
+        annotationType: FunkType,
+        inferredType: FunkType,
+        varName: String,
+        expression: Expression
+    ) {
+        // If annotation is polymorphic but inferred is concrete, that's an error
+        if (!containsConcreteTypes(annotationType) && containsConcreteTypes(inferredType)) {
+            throw com.funk.language.typechecker.TypeCheckError(
+                "Type annotation mismatch for '$varName': Annotation declares a polymorphic type, " +
+                "but implementation is only monomorphic. " +
+                "The implementation must work for all types, not just specific ones."
+            )
+        }
+    }
+
+    /**
+     * Check if a type contains any concrete (non-polymorphic) types.
+     *
+     * Concrete types include: Int, String, Bool, Float, Unit, etc.
+     * Polymorphic types are type variables like 'a, 'b.
+     *
+     * A type like { x: 'a } -> 'a is NOT concrete (all type variables).
+     * A type like { x: Int } -> Int IS concrete.
+     * A type like { x: 'a } -> Int IS concrete (contains Int).
+     */
+    private fun containsConcreteTypes(type: FunkType): Boolean {
+        return when (type) {
+            is FunkType.VarType -> false
+            is FunkType.FunctionType ->
+                containsConcreteTypes(type.paramType) || containsConcreteTypes(type.returnType)
+            is FunkType.RecordType ->
+                type.fields.values.any { containsConcreteTypes(it) }
+            is FunkType.VariantType -> {
+                // A variant type IS concrete even if constructors have no payloads
+                // For example, |Red, Blue, Green| is a concrete type (not polymorphic)
+                type.constructors.isNotEmpty() || type.constructors.values.any { it != null && containsConcreteTypes(it) }
+            }
+            is FunkType.TypeApplication ->
+                type.args.any { containsConcreteTypes(it) }
+            is FunkType.ArrayType ->
+                containsConcreteTypes(type.elementType)
+            is FunkType.ListType ->
+                containsConcreteTypes(type.elementType)
+            is FunkType.SetType ->
+                containsConcreteTypes(type.elementType)
+            is FunkType.MapType ->
+                containsConcreteTypes(type.keyType) || containsConcreteTypes(type.valueType)
+            // Concrete types: IntType, StringType, BoolType, FloatType, UnitType
+            is FunkType.IntType,
+            is FunkType.StringType,
+            is FunkType.BooleanType,
+            is FunkType.FloatType -> true
+            // Other types are considered concrete by default
+            else -> true
+        }
+    }
+
+    /**
+     * Validate effects match between annotation and inferred type.
+     *
+     * Rules:
+     * - If annotation declares effects, implementation must use exactly those effects
+     * - If annotation declares no effects (pure), implementation must be pure
+     */
+    private fun validateEffectsMatch(
+        annotationType: FunkType,
+        inferredType: FunkType,
+        varName: String,
+        expression: Expression
+    ) {
+        if (annotationType is FunkType.FunctionType && inferredType is FunkType.FunctionType) {
+            val annotatedEffects = annotationType.effects?.effects ?: emptySet()
+            val inferredEffects = inferredType.effects?.effects ?: emptySet()
+
+            // Check if implementation uses effects not declared in annotation
+            val extraEffects = inferredEffects - annotatedEffects
+            if (extraEffects.isNotEmpty()) {
+                throw com.funk.language.typechecker.TypeCheckError(
+                    "Type annotation mismatch for '$varName': Implementation uses effects ${extraEffects.joinToString(", ")} " +
+                    "which are not declared in the annotation."
+                )
+            }
+
+            // Check if annotation declares effects not used in implementation
+            val missingEffects = annotatedEffects - inferredEffects
+            if (missingEffects.isNotEmpty()) {
+                throw com.funk.language.typechecker.TypeCheckError(
+                    "Type annotation mismatch for '$varName': Annotation declares effects ${missingEffects.joinToString(", ")} " +
+                    "which are not used in the implementation."
+                )
+            }
+        }
+    }
+
+    /**
+     * Validate ability constraints match between annotation and inferred type.
+     *
+     * Rules:
+     * - If annotation declares abilities (on type variables), implementation should use them
+     * - We only check for simple functions without function calls to avoid false positives
+     *
+     * Note: We don't check if implementation uses abilities not in annotation, because
+     * concrete abilities (like `Ord Int`) are always available and don't need to be declared.
+     */
+    private fun validateAbilitiesMatch(
+        annotationType: FunkType,
+        inferredType: FunkType,
+        inferredAbilityConstraints: List<Constraint.AbilityRequired>,
+        varName: String,
+        expression: Expression
+    ) {
+        if (annotationType is FunkType.FunctionType && inferredType is FunkType.FunctionType) {
+            val annotatedAbilities = annotationType.abilityConstraints
+
+            // Filter out constraints that come from the annotation itself
+            // These have context like "Type annotation on varName"
+            val actualUsageConstraints = inferredAbilityConstraints.filter { constraint ->
+                constraint.context == null || !constraint.context.startsWith("Type annotation on")
+            }
+
+            // Check if implementation uses abilities on DIFFERENT type variables than annotation declares
+            // Example: annotation declares NumAdd 'b but implementation uses NumAdd 'a
+            for (usage in actualUsageConstraints) {
+                // Skip Inspect - it's implicit
+                if (usage.abilityName == "Inspect") continue
+
+                // Find matching annotation constraint by ability name
+                val matchingAnnotated = annotatedAbilities.find { it.abilityName == usage.abilityName }
+                if (matchingAnnotated != null) {
+                    // Check that the type variables match
+                    // The annotation's type arg should reference the same type variable as the usage
+                    for ((i, annotatedTypeArg) in matchingAnnotated.typeArgs.withIndex()) {
+                        if (annotatedTypeArg is FunkType.VarType) {
+                            // The usage's typeVar should match the annotation's type variable
+                            if (usage.typeVar.name != annotatedTypeArg.variable.name) {
+                                throw com.funk.language.typechecker.TypeCheckError(
+                                    "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
+                                    "Annotation declares '${annotatedTypeArg.variable.name}' but implementation uses '${usage.typeVar.name}'."
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check if annotation declares abilities not used in implementation
+            // Only check for simple functions without function calls
+            if (!containsFunctionCalls(expression)) {
+                for (annotated in annotatedAbilities) {
+                    // Skip Inspect - it's implicit
+                    if (annotated.abilityName == "Inspect") continue
+
+                    // Skip abilities on concrete types - they don't need to be used
+                    val hasConcreteTypes = annotated.typeArgs.any { it !is FunkType.VarType }
+                    if (hasConcreteTypes) continue
+
+                    val matchingInferred = actualUsageConstraints.find { it.abilityName == annotated.abilityName }
+                    if (matchingInferred == null) {
+                        throw com.funk.language.typechecker.TypeCheckError(
+                            "Type annotation mismatch for '$varName': Annotation declares ability '${annotated.abilityName}' " +
+                            "which is not used in the implementation."
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if expression contains function calls.
+     * Used to determine if we should validate unused abilities.
+     */
+    private fun containsFunctionCalls(expr: Expression): Boolean {
+        return when (expr) {
+            is FunctionCall -> true
+            is LambdaExpression -> containsFunctionCalls(expr.body)
+            is IfExpression -> {
+                containsFunctionCalls(expr.condition) ||
+                containsFunctionCalls(expr.thenBranch) ||
+                containsFunctionCalls(expr.elseBranch)
+            }
+            is MatchExpression -> {
+                containsFunctionCalls(expr.expression) ||
+                expr.cases.any { containsFunctionCalls(it.expression) }
+            }
+            is ArrayLiteral -> expr.elements.any { containsFunctionCalls(it) }
+            is RecordLiteral -> expr.entries.any { entry ->
+                when (entry) {
+                    is RecordFieldEntry -> entry.value?.let { containsFunctionCalls(it) } ?: false
+                    is RecordSpreadEntry -> containsFunctionCalls(entry.expression)
+                    else -> false
+                }
+            }
+            is MemberAccess -> containsFunctionCalls(expr.receiver)
+            // For DoExpression and other complex expressions, assume they may contain function calls
+            is DoExpression -> true
+            else -> false
         }
     }
 
