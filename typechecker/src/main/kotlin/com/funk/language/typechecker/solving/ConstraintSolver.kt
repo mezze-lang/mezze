@@ -437,17 +437,7 @@ class ConstraintSolver(
                     }
 
                     // Check if all types are now concrete
-                    val allConcrete = concreteTypeArgs.all { arg ->
-                        when (arg) {
-                            is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
-                            is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-                            is FunkType.OrderingType -> true
-                            is FunkType.TypeApplication -> {
-                                arg.args.all { it !is FunkType.VarType }
-                            }
-                            else -> false
-                        }
-                    }
+                    val allConcrete = concreteTypeArgs.all { isConcrete(it) }
 
                     if (allConcrete) {
                         // Check if implementation exists
@@ -486,37 +476,30 @@ class ConstraintSolver(
         // When we see AbilityRequired('a, Parse, [...]), we store this constraint
         // so that later when 'a = Int is unified, we can validate Int has Parse implementation.
         //
-        // For each type argument that is a type variable, track the constraint
+        // Track constraint on the primary typeVar (always)
+        val trackingArgs = if (typeArgs.isNotEmpty()) typeArgs else listOf(FunkType.VarType(constraint.typeVar))
+        typeVarAbilityConstraints.getOrPut(constraint.typeVar) { mutableListOf() }
+            .add(abilityName to trackingArgs)
+
+        // Also track for any type variables in typeArgs
         for (typeArg in typeArgs) {
-            if (typeArg is FunkType.VarType) {
-                val typeVar = typeArg.variable
-                val constraints = typeVarAbilityConstraints.getOrPut(typeVar) { mutableListOf() }
+            if (typeArg is FunkType.VarType && typeArg.variable != constraint.typeVar) {
+                val constraints = typeVarAbilityConstraints.getOrPut(typeArg.variable) { mutableListOf() }
                 constraints.add(abilityName to typeArgs)
             }
         }
 
         // Apply substitution to type arguments to get concrete types if available
         // If all type args are concrete (not type variables), we can check the implementation now
-        val allConcrete = typeArgs.all { arg ->
-            when (arg) {
-                is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
-                is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-                is FunkType.OrderingType -> true
-                is FunkType.TypeApplication -> {
-                    // For type applications like "List Int", check if args are concrete
-                    arg.args.all { it !is FunkType.VarType }
-                }
-                else -> false
-            }
-        }
+        val allConcrete = trackingArgs.all { isConcrete(it) }
 
         if (allConcrete) {
             // All types are concrete - check if implementation exists
-            val hasImpl = checkAbilityImplementation(abilityName, typeArgs)
+            val hasImpl = checkAbilityImplementation(abilityName, trackingArgs)
 
             if (!hasImpl) {
                 // No implementation found - this is a type error
-                val typeNames = typeArgs.map { formatType(it) }.joinToString(", ")
+                val typeNames = trackingArgs.map { formatType(it) }.joinToString(", ")
                 return ConstraintResult.Failure(
                     "No implementation of $abilityName for types: $typeNames"
                 )
@@ -528,7 +511,7 @@ class ConstraintSolver(
         } else {
             // Some types are still type variables - try bidirectional inference!
             // Example: NumAdd 'b Int => if only NumAdd Int Int exists, infer 'b = Int
-            val inferredSubstitution = tryBidirectionalInference(abilityName, typeArgs)
+            val inferredSubstitution = tryBidirectionalInference(abilityName, trackingArgs)
 
             if (inferredSubstitution != null) {
                 // Successfully inferred type variable from ability constraint
@@ -564,6 +547,23 @@ class ConstraintSolver(
         }
 
         return hasImpl
+    }
+
+    /**
+     * Check if a type is concrete (not a type variable).
+     */
+    private fun isConcrete(type: FunkType): Boolean {
+        return when (type) {
+            is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
+            is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
+            is FunkType.OrderingType -> true
+            is FunkType.VariantType -> true
+            is FunkType.RecordType -> type.rowVar == null && type.fields.values.all { isConcrete(it) }
+            is FunkType.FunctionType -> true
+            is FunkType.TypeApplication -> type.args.all { it !is FunkType.VarType }
+            is FunkType.VarType -> false
+            else -> false
+        }
     }
 
     /**
