@@ -294,7 +294,11 @@ class NewTypeChecker(
                 }
 
                 // PHASE 4: Apply Substitution (moved before validation so expressions have types)
-                val applier = SubstitutionApplier(substitution, globallyResolvedConstraintResults)
+                val applier = SubstitutionApplier(
+                    substitution,
+                    globallyResolvedConstraintResults,
+                    buildResult.performerToEffect
+                )
                 val typedProgram = applier.applyToProgram(program)
 
                 // PHASE 5: Validate Types (moved after substitution so we can check inferred types)

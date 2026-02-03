@@ -25,21 +25,22 @@ class ComprehensiveEffectRowTest {
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             let program = Log.info {msg = "Hello"}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
+
         val programBinding = typedProgram.items[1] as com.funk.language.ast.LetBinding
         val inferredType = programBinding.inferredType
-        
+
         assertNotNull(inferredType)
-        assertTrue(inferredType is FunkType.FunctionType)
-        assertNotNull(inferredType.effects)
-        assertEquals(setOf("Log"), inferredType.effects!!.effects)
-        assertEquals(FunkType.RecordType(emptyMap()), inferredType.returnType) // {} return type
+        // Effect calls return SuspendedType (value with unhandled effects), not FunctionType
+        assertTrue(inferredType is FunkType.SuspendedType)
+        val suspendedType = inferredType as FunkType.SuspendedType
+        assertEquals(setOf("Log"), suspendedType.effects.effects)
+        assertEquals(FunkType.RecordType(emptyMap()), suspendedType.valueType) // {} return type
     }
 
     @Test
@@ -48,7 +49,7 @@ class ComprehensiveEffectRowTest {
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             let program = do
               Log.info {msg = "Hello"}
               42
@@ -56,15 +57,16 @@ class ComprehensiveEffectRowTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
+
         val programBinding = typedProgram.items[1] as com.funk.language.ast.LetBinding
         val inferredType = programBinding.inferredType
-        
+
         assertNotNull(inferredType)
-        assertTrue(inferredType is FunkType.FunctionType)
-        assertNotNull(inferredType.effects)
-        assertEquals(setOf("Log"), inferredType.effects!!.effects)
-        assertEquals(FunkType.IntType, inferredType.returnType) // Int return type from 42
+        // Do blocks with effects return SuspendedType (value with unhandled effects)
+        assertTrue(inferredType is FunkType.SuspendedType)
+        val suspendedType = inferredType as FunkType.SuspendedType
+        assertEquals(setOf("Log"), suspendedType.effects.effects)
+        assertEquals(FunkType.IntType, suspendedType.valueType) // Int return type from 42
     }
 
     @Test
@@ -73,11 +75,11 @@ class ComprehensiveEffectRowTest {
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             effect Console where {
               print : {msg: String} -> {} <Console>
             }
-            
+
             let program = do
               Log.info {msg = "Starting"}
               Console.print {msg = "Processing"}
@@ -87,15 +89,16 @@ class ComprehensiveEffectRowTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
+
         val programBinding = typedProgram.items[2] as com.funk.language.ast.LetBinding
         val inferredType = programBinding.inferredType
-        
+
         assertNotNull(inferredType)
-        assertTrue(inferredType is FunkType.FunctionType)
-        assertNotNull(inferredType.effects)
-        assertEquals(setOf("Log", "Console"), inferredType.effects!!.effects)
-        assertEquals(FunkType.StringType, inferredType.returnType) // String return type from "completed"
+        // Do blocks with effects return SuspendedType
+        assertTrue(inferredType is FunkType.SuspendedType)
+        val suspendedType = inferredType as FunkType.SuspendedType
+        assertEquals(setOf("Log", "Console"), suspendedType.effects.effects)
+        assertEquals(FunkType.StringType, suspendedType.valueType) // String return type from "completed"
     }
 
     @Test
@@ -104,11 +107,11 @@ class ComprehensiveEffectRowTest {
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             effect Error where {
               throw : {msg: String} -> 'a <Error>
             }
-            
+
             let nestedProgram = do
               let innerResult = do
                 Log.info {msg = "Inner"}
@@ -119,22 +122,16 @@ class ComprehensiveEffectRowTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
-        // Check that the program was parsed correctly
-        println("DEBUG: typedProgram.items.size = ${typedProgram.items.size}")
-        for (i in typedProgram.items.indices) {
-            println("DEBUG: item[$i] = ${typedProgram.items[i]::class.simpleName}")
-        }
-        
+
         // Check nested program - should accumulate both Log and Error effects
         val nestedBinding = typedProgram.items[2] as com.funk.language.ast.LetBinding
         val nestedType = nestedBinding.inferredType
-        println("DEBUG: nestedType = $nestedType")
         assertNotNull(nestedType)
-        assertTrue(nestedType is FunkType.FunctionType)
-        assertNotNull(nestedType.effects)
+        // Do blocks with effects return SuspendedType
+        assertTrue(nestedType is FunkType.SuspendedType)
+        val suspendedType = nestedType as FunkType.SuspendedType
         // The outer do block should accumulate effects from both the inner do block (Log) and its own effect call (Error)
-        assertEquals(setOf("Log", "Error"), nestedType.effects!!.effects)
+        assertEquals(setOf("Log", "Error"), suspendedType.effects.effects)
     }
 
     @Test
@@ -143,37 +140,33 @@ class ComprehensiveEffectRowTest {
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for Logger where {
               info : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             let program = do
               Log.info {msg = "Hello"}
               42
-              
+
             let result = perform Logger in program
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
-        // Check program has effectful type
+
+        // Check program has effectful type (SuspendedType)
         val programBinding = typedProgram.items[2] as com.funk.language.ast.LetBinding
         val programType = programBinding.inferredType
-        assertTrue(programType is FunkType.FunctionType)
-        assertEquals(setOf("Log"), programType.effects!!.effects)
-        
-        // Check result has thunk without effects (perform Logger in program should preserve thunk but remove handled effects)
+        assertTrue(programType is FunkType.SuspendedType)
+        val programSuspended = programType as FunkType.SuspendedType
+        assertEquals(setOf("Log"), programSuspended.effects.effects)
+
+        // Check result - after perform, all effects are handled so it's just Int
         val resultBinding = typedProgram.items[3] as com.funk.language.ast.LetBinding
         val resultType = resultBinding.inferredType
-        assertTrue(resultType is FunkType.FunctionType)
-        val functionType = resultType as FunkType.FunctionType
-        assertTrue(functionType.paramType is FunkType.RecordType)
-        assertTrue((functionType.paramType as FunkType.RecordType).fields.isEmpty())
-        assertEquals(FunkType.IntType, functionType.returnType)
-        // Proper effect handling: perform Logger in program should remove all effects since Logger handles Log
-        assertNull(functionType.effects) // All effects handled, none remain
+        // After all effects are handled, result should be the plain value type
+        assertEquals(FunkType.IntType, resultType)
     }
 
     @Test
@@ -182,40 +175,41 @@ class ComprehensiveEffectRowTest {
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             effect Console where {
               print : {msg: String} -> {} <Console>
             }
-            
+
             impl Log for Logger where {
               info : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             let program = do
               Log.info {msg = "Hello"}
               Console.print {msg = "World"}
               42
-              
+
             let partialResult = perform Logger in program
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
-        // Check program has both effects
+
+        // Check program has both effects (SuspendedType)
         val programBinding = typedProgram.items[3] as com.funk.language.ast.LetBinding
         val programType = programBinding.inferredType
-        assertTrue(programType is FunkType.FunctionType)
-        assertEquals(setOf("Log", "Console"), programType.effects!!.effects)
-        
-        // Check partial result - current implementation doesn't remove effects yet
+        assertTrue(programType is FunkType.SuspendedType)
+        val programSuspended = programType as FunkType.SuspendedType
+        assertEquals(setOf("Log", "Console"), programSuspended.effects.effects)
+
+        // Check partial result - Logger handles Log, Console remains
         val partialBinding = typedProgram.items[4] as com.funk.language.ast.LetBinding
         val partialType = partialBinding.inferredType
-        assertTrue(partialType is FunkType.FunctionType)
-        // TODO: Implement proper effect removal in perform expressions
-        // assertEquals(setOf("Console"), partialType.effects!!.effects)
-        assertNotNull(partialType.effects) // Effects are still present in current implementation
-        assertEquals(FunkType.IntType, partialType.returnType)
+        // After partial handling, still SuspendedType with remaining effects
+        assertTrue(partialType is FunkType.SuspendedType)
+        val partialSuspended = partialType as FunkType.SuspendedType
+        assertEquals(setOf("Console"), partialSuspended.effects.effects)
+        assertEquals(FunkType.IntType, partialSuspended.valueType)
     }
 
     @Test
@@ -224,54 +218,50 @@ class ComprehensiveEffectRowTest {
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             effect Console where {
               print : {msg: String} -> {} <Console>
             }
-            
+
             impl Log for Logger where {
               info : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             let program = do
               Log.info {msg = "Hello"}
               Console.print {msg = "World"}
               42
-              
+
             let step1 = perform Logger in program
             let step2 = perform Terminal in step1
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
-        // Check program has both effects
+
+        // Check program has both effects (SuspendedType)
         val programBinding = typedProgram.items[4] as com.funk.language.ast.LetBinding
         val programType = programBinding.inferredType
-        assertTrue(programType is FunkType.FunctionType)
-        assertEquals(setOf("Log", "Console"), programType.effects!!.effects)
-        
-        // Check step1 - Logger handles Log, Console remains
+        assertTrue(programType is FunkType.SuspendedType)
+        val programSuspended = programType as FunkType.SuspendedType
+        assertEquals(setOf("Log", "Console"), programSuspended.effects.effects)
+
+        // Check step1 - Logger handles Log, Console remains (still SuspendedType)
         val step1Binding = typedProgram.items[5] as com.funk.language.ast.LetBinding
         val step1Type = step1Binding.inferredType
-        assertTrue(step1Type is FunkType.FunctionType)
-        // Proper effect removal: Logger handles Log, Console remains
-        assertEquals(setOf("Console"), step1Type.effects!!.effects)
+        assertTrue(step1Type is FunkType.SuspendedType)
+        val step1Suspended = step1Type as FunkType.SuspendedType
+        assertEquals(setOf("Console"), step1Suspended.effects.effects)
 
-        // Check step2 - Terminal handles Console, all effects handled
+        // Check step2 - Terminal handles Console, all effects handled -> plain Int
         val step2Binding = typedProgram.items[6] as com.funk.language.ast.LetBinding
         val step2Type = step2Binding.inferredType
-        assertTrue(step2Type is FunkType.FunctionType)
-        val step2FunctionType = step2Type as FunkType.FunctionType
-        assertTrue(step2FunctionType.paramType is FunkType.RecordType)
-        assertTrue((step2FunctionType.paramType as FunkType.RecordType).fields.isEmpty())
-        assertEquals(FunkType.IntType, step2FunctionType.returnType)
-        // Proper effect removal: All effects handled
-        assertNull(step2FunctionType.effects) // All effects handled
+        // All effects handled, result is the plain value type
+        assertEquals(FunkType.IntType, step2Type)
     }
 
     @Test
@@ -280,51 +270,40 @@ class ComprehensiveEffectRowTest {
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for BasicLogger where {
               info : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             impl Log for FileLogger where {
               info : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             let program = Log.info {msg = "Hello"}
-            
+
             let result1 = perform BasicLogger in program
             let result2 = perform FileLogger in program
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
-        // Check program has Log effect
+
+        // Check program has Log effect (SuspendedType)
         val programBinding = typedProgram.items[3] as com.funk.language.ast.LetBinding
         val programType = programBinding.inferredType
-        assertTrue(programType is FunkType.FunctionType)
-        assertEquals(setOf("Log"), programType.effects!!.effects)
-        
-        // Both results should be thunks with all effects handled
+        assertTrue(programType is FunkType.SuspendedType)
+        val programSuspended = programType as FunkType.SuspendedType
+        assertEquals(setOf("Log"), programSuspended.effects.effects)
+
+        // Both results should be plain {} (empty record) after effects handled
         val result1Binding = typedProgram.items[4] as com.funk.language.ast.LetBinding
         val result2Binding = typedProgram.items[5] as com.funk.language.ast.LetBinding
 
-        // result1 should be {} -> {} (thunk) with no effects
-        assertTrue(result1Binding.inferredType is FunkType.FunctionType)
-        val result1FunctionType = result1Binding.inferredType as FunkType.FunctionType
-        assertTrue(result1FunctionType.paramType is FunkType.RecordType)
-        assertTrue((result1FunctionType.paramType as FunkType.RecordType).fields.isEmpty())
-        assertEquals(FunkType.RecordType(emptyMap()), result1FunctionType.returnType)
-        // Proper effect removal: BasicLogger handles Log
-        assertNull(result1FunctionType.effects)
+        // result1 should be {} (all effects handled)
+        assertEquals(FunkType.RecordType(emptyMap()), result1Binding.inferredType)
 
-        // result2 should be {} -> {} (thunk) with no effects
-        assertTrue(result2Binding.inferredType is FunkType.FunctionType)
-        val result2FunctionType = result2Binding.inferredType as FunkType.FunctionType
-        assertTrue(result2FunctionType.paramType is FunkType.RecordType)
-        assertTrue((result2FunctionType.paramType as FunkType.RecordType).fields.isEmpty())
-        assertEquals(FunkType.RecordType(emptyMap()), result2FunctionType.returnType)
-        // Proper effect removal: FileLogger handles Log
-        assertNull(result2FunctionType.effects)
+        // result2 should be {} (all effects handled)
+        assertEquals(FunkType.RecordType(emptyMap()), result2Binding.inferredType)
     }
 
     @Test
@@ -412,7 +391,7 @@ class ComprehensiveEffectRowTest {
             effect Log where {
               info : {msg: String} -> {} <Log>
             }
-            
+
             let mixedProgram = do
               let x = 5
               Log.info {msg = "x is 5"}
@@ -422,12 +401,14 @@ class ComprehensiveEffectRowTest {
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
+
         val binding = typedProgram.items[1] as com.funk.language.ast.LetBinding
         val inferredType = binding.inferredType
-        
-        assertTrue(inferredType is FunkType.FunctionType)
-        assertEquals(setOf("Log"), inferredType.effects!!.effects)
-        assertEquals(FunkType.IntType, inferredType.returnType)
+
+        // Do blocks with effects return SuspendedType
+        assertTrue(inferredType is FunkType.SuspendedType)
+        val suspendedType = inferredType as FunkType.SuspendedType
+        assertEquals(setOf("Log"), suspendedType.effects.effects)
+        assertEquals(FunkType.IntType, suspendedType.valueType)
     }
 }

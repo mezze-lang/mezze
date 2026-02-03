@@ -208,7 +208,17 @@ class ExpressionConstraintGenerator {
                 when (val binding = result.binding) {
                     is TypingContext.Binding.Monomorphic -> {
                         // Monomorphic variable - use type directly
-                        ConstraintResult.simple(binding.type)
+                        // CRITICAL: If the type is SuspendedType, extract its effects
+                        // This allows perform expressions to know what effects need handling
+                        val type = binding.type
+                        when (type) {
+                            is FunkType.SuspendedType -> ConstraintResult(
+                                type = type,
+                                constraints = emptyList(),
+                                effects = type.effects.effects  // Propagate effects from SuspendedType
+                            )
+                            else -> ConstraintResult.simple(type)
+                        }
                     }
                     is TypingContext.Binding.Polymorphic -> {
                         // Polymorphic variable - instantiate with fresh type variables
@@ -224,9 +234,17 @@ class ExpressionConstraintGenerator {
                             )
                         }
 
+                        // CRITICAL: If the type is SuspendedType, extract its effects
+                        val type = instantiation.type
+                        val effects = when (type) {
+                            is FunkType.SuspendedType -> type.effects.effects
+                            else -> emptySet()
+                        }
+
                         ConstraintResult(
-                            type = instantiation.type,
+                            type = type,
                             constraints = emptyList(),
+                            effects = effects,
                             abilityConstraints = abilityConstraints
                         )
                     }
@@ -1789,7 +1807,7 @@ class ExpressionConstraintGenerator {
 
     private fun generatePerform(expr: PerformExpression, context: ConstraintContext): ConstraintResult {
         // perform Handler in expr
-        // The handler handles a specific effect, removing it from the expression's type
+        // The handler handles a specific effect, removing it from the expression's effects
 
         // CRITICAL: Pass the perform context to child expressions
         // This allows effect operations to substitute associated types from the performer
@@ -1809,19 +1827,26 @@ class ExpressionConstraintGenerator {
             println("  performerToEffect map: ${context.performerToEffect}")
             println("  handledEffects: $handledEffects")
             println("  exprResult.type: ${exprResult.type}")
+            println("  exprResult.effects: ${exprResult.effects}")
         }
 
-        // Remove handled effects from the expression's type
+        // Remove handled effects from the expression's type (for types that already have effects embedded)
         val resultType = removeEffectsFromType(exprResult.type, handledEffects)
+
+        // CRITICAL: Also remove handled effects from ConstraintResult.effects
+        // This is where effects are tracked during constraint generation
+        val remainingEffects = exprResult.effects - handledEffects
 
         // DEBUG
         if (System.getProperty("funk.debug.effects") == "true") {
             println("  resultType after removal: $resultType")
+            println("  remainingEffects: $remainingEffects")
         }
 
         return ConstraintResult(
             type = resultType,
             constraints = exprResult.constraints,
+            effects = remainingEffects,  // Return remaining unhandled effects
             undefinedVariables = exprResult.undefinedVariables
         )
     }

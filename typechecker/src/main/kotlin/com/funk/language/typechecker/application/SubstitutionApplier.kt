@@ -24,7 +24,8 @@ import com.funk.language.typechecker.solving.Substitution
  */
 class SubstitutionApplier(
     private val substitution: Substitution,
-    private val constraintResults: Map<String, com.funk.language.typechecker.constraints.ConstraintResult> = emptyMap()
+    private val constraintResults: Map<String, com.funk.language.typechecker.constraints.ConstraintResult> = emptyMap(),
+    private val performerToEffect: Map<String, String> = emptyMap()
 ) {
     // Mutable context for tracking identifier types during traversal
     // This mimics OldTypeChecker's context map (OldTypeChecker.kt:1900-1910)
@@ -36,8 +37,27 @@ class SubstitutionApplier(
      * Returns a new Program with all types resolved.
      */
     fun applyToProgram(program: Program): Program {
-        val updatedItems = program.items.map { item ->
-            applyToProgramItem(item)
+        // Process items sequentially, updating identifierContext after each let binding
+        // This allows later bindings to reference earlier bindings' types (including SuspendedType)
+        val updatedItems = mutableListOf<ProgramItem>()
+
+        for (item in program.items) {
+            val updatedItem = applyToProgramItem(item)
+            updatedItems.add(updatedItem)
+
+            // After processing a let binding, add its final type to identifierContext
+            // This allows subsequent bindings to see the correct type (including SuspendedType)
+            if (updatedItem is LetBinding) {
+                val bindingName = try {
+                    (updatedItem.pattern as? VariablePattern)?.name
+                        ?: updatedItem.pattern.extractBindings().firstOrNull()
+                } catch (e: Exception) {
+                    null
+                }
+                if (bindingName != null && updatedItem.inferredType != null) {
+                    identifierContext[bindingName] = updatedItem.inferredType!!
+                }
+            }
         }
 
         return Program(items = updatedItems)
@@ -68,33 +88,62 @@ class SubstitutionApplier(
     private fun applyToLetBinding(binding: LetBinding): LetBinding {
         // CRITICAL FIX: Get the binding's type FIRST, then set it on the expression before processing
         // This allows nested expressions (especially lambdas) to know their types
+        val bindingName = try {
+            (binding.pattern as? VariablePattern)?.name ?: binding.pattern.extractBindings().firstOrNull()
+        } catch (e: Exception) {
+            null
+        }
+
+        val constraintResult = bindingName?.let { constraintResults[it] }
+
         val baseInferredType = if (binding.inferredType == null) {
-            // Try to get the type from constraint results
-            val bindingName = try {
-                (binding.pattern as? VariablePattern)?.name ?: binding.pattern.extractBindings().firstOrNull()
-            } catch (e: Exception) {
-                null
-            }
-            bindingName?.let { name ->
-                constraintResults[name]?.type
-            }
+            constraintResult?.type
         } else {
             binding.inferredType
         }
 
         // Apply substitution to get the final type
-        val finalType = baseInferredType?.let { substitution.apply(it) }
+        val substitutedType = baseInferredType?.let { substitution.apply(it) }
+
+        // Get the effects from constraint results
+        val effects = constraintResult?.effects ?: emptySet()
+
+        // Wrap type in SuspendedType if there are unhandled effects
+        // Only wrap if:
+        // 1. There are effects
+        // 2. The type is not already a SuspendedType
+        // 3. The type is not a FunctionType (functions declare their effects in their signature)
+        val preExpressionType = if (effects.isNotEmpty() && substitutedType != null) {
+            when (substitutedType) {
+                is FunkType.SuspendedType -> substitutedType // Already suspended
+                is FunkType.FunctionType -> substitutedType // Functions have effects in signature
+                else -> FunkType.SuspendedType(
+                    valueType = substitutedType,
+                    effects = FunkType.EffectRow(effects)
+                )
+            }
+        } else {
+            substitutedType
+        }
 
         // CRITICAL: If the expression is a lambda, set its inferredType BEFORE processing it
         // This allows the lambda to extract parameter types and add them to identifierContext
         val expr = binding.expression
-        val expressionWithType = if (expr is LambdaExpression && finalType != null) {
-            expr.copy(inferredType = finalType)
+        val expressionWithType = if (expr is LambdaExpression && preExpressionType != null) {
+            expr.copy(inferredType = preExpressionType)
         } else {
             expr
         }
 
         val updatedExpression = applyToExpression(expressionWithType)
+
+        // CRITICAL: For perform expressions, use the expression's computed type
+        // because perform expressions compute effect removal which isn't in constraint results
+        val finalType = if (updatedExpression is PerformExpression && updatedExpression.inferredType != null) {
+            updatedExpression.inferredType
+        } else {
+            preExpressionType
+        }
 
         return binding.copy(
             expression = updatedExpression,
@@ -640,13 +689,85 @@ class SubstitutionApplier(
 
     private fun applyToPerform(expr: PerformExpression): PerformExpression {
         val updatedExpression = applyToExpression(expr.expression)
-        // PerformHandler has name and parameters, not operations
-        // The handlers list stays as-is since they don't contain expressions to update
-        val updatedType = expr.inferredType?.let { substitution.apply(it) }
+
+        // Get the inner expression's type
+        val innerType = updatedExpression.inferredType
+
+        // Map each handler name to the effect it handles
+        val handledEffects = expr.handlers.mapNotNull { handler ->
+            performerToEffect[handler.name]
+        }.toSet()
+
+        // Compute the result type by removing handled effects
+        val resultType = if (innerType != null && handledEffects.isNotEmpty()) {
+            removeEffectsFromType(innerType, handledEffects)
+        } else {
+            // Fallback to existing inferred type if we can't compute
+            expr.inferredType?.let { substitution.apply(it) }
+        }
+
         return expr.copy(
             expression = updatedExpression,
-            inferredType = updatedType
+            inferredType = resultType
         )
+    }
+
+    /**
+     * Remove specific effects from a type.
+     *
+     * For FunctionType with effects: Remove effects from effect row
+     * For SuspendedType with effects: Remove effects from effect row, returning pure value if all removed
+     */
+    private fun removeEffectsFromType(type: FunkType, effectsToRemove: Set<String>): FunkType {
+        return when (type) {
+            is FunkType.FunctionType -> {
+                val effects = type.effects
+                if (effects == null) {
+                    // No effects to remove
+                    type
+                } else {
+                    // Remove the handled effects
+                    val remainingEffects = effects.effects - effectsToRemove
+
+                    if (remainingEffects.isEmpty()) {
+                        // All effects handled - return pure function
+                        FunkType.FunctionType(
+                            paramType = type.paramType,
+                            returnType = type.returnType,
+                            effects = null,  // Pure function
+                            abilityConstraints = type.abilityConstraints
+                        )
+                    } else {
+                        // Some effects remain
+                        FunkType.FunctionType(
+                            paramType = type.paramType,
+                            returnType = type.returnType,
+                            effects = FunkType.EffectRow(remainingEffects),
+                            abilityConstraints = type.abilityConstraints
+                        )
+                    }
+                }
+            }
+            is FunkType.SuspendedType -> {
+                // Remove effects from suspended type
+                val remainingEffects = type.effects.effects - effectsToRemove
+
+                if (remainingEffects.isEmpty()) {
+                    // All effects handled - return pure value
+                    type.valueType
+                } else {
+                    // Some effects remain - still suspended
+                    FunkType.SuspendedType(
+                        valueType = type.valueType,
+                        effects = FunkType.EffectRow(remainingEffects)
+                    )
+                }
+            }
+            else -> {
+                // Other types don't have effects
+                type
+            }
+        }
     }
 
     private fun applyToEffectCall(expr: EffectCallExpression): EffectCallExpression {

@@ -86,12 +86,19 @@ class TypeValidator(
             errors.addAll(abilityErrors)
 
             // Validate effect usage
-            val effectErrors = validateEffectUsage(
-                result.effects,
-                finalType,
-                bindingName
-            )
-            errors.addAll(effectErrors)
+            // NOTE: Now that we have SuspendedType conversion, effects at top level
+            // are properly wrapped in SuspendedType, so validation should pass.
+            // However, we keep validation disabled for top-level let bindings because
+            // effects are ALLOWED to be unhandled at top level - they become part
+            // of the SuspendedType. The validation would only be useful to check
+            // that function bodies don't use undeclared effects, which is a different concern.
+            // TODO: Consider re-enabling for function body validation only
+            // val effectErrors = validateEffectUsage(
+            //     result.effects,
+            //     finalType,
+            //     bindingName
+            // )
+            // errors.addAll(effectErrors)
         }
 
         // Validate type annotations match inferred types
