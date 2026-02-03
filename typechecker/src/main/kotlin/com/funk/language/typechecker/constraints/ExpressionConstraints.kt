@@ -1303,7 +1303,7 @@ class ExpressionConstraintGenerator {
         when (val params = expr.parameters) {
             is UntypedParameters -> {
                 paramNames = params.names
-                isOpenPattern = false  // UntypedParameters don't support ... syntax
+                isOpenPattern = params.isOpen  // Check if ... was used in parameter list
 
                 // If we have an expected parameter type, use it directly
                 // This ensures we use the SAME TypeVar instances from the annotation
@@ -1437,6 +1437,22 @@ class ExpressionConstraintGenerator {
                 val expectedFields = funcParamType.fields.keys
                 val providedFields = argumentType.fields.keys
                 val missingFields = expectedFields - providedFields
+                val extraFields = providedFields - expectedFields
+
+                // VALIDATION: Reject extra fields in closed records
+                if (extraFields.isNotEmpty() && funcParamType.rowVar == null) {
+                    // Get function name for error message
+                    val functionName = when (expr.function) {
+                        is Identifier -> (expr.function as Identifier).name
+                        else -> "function"
+                    }
+                    throw TypeCheckError(
+                        message = "Extra field(s) '${extraFields.joinToString(", ")}' in call to '$functionName'. " +
+                                "Function expects fields: ${expectedFields.sorted().joinToString(", ")}",
+                        expression = expr,
+                        errorType = ErrorType.TYPE_MISMATCH
+                    )
+                }
 
                 // Check for partial application (some fields missing)
                 if (missingFields.isNotEmpty()) {
