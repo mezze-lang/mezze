@@ -1198,6 +1198,52 @@ class ExpressionConstraintGenerator {
             // With payload
             val payloadResult = generate(valueExpr, context)
 
+            // VALIDATION: Check variant constructor payload fields against type declaration
+            // This validates: Red { x = 5, y = 10 } against type Color = | Red { x: Int } |
+            if (valueExpr is RecordLiteral && context.typeDeclarations.isNotEmpty()) {
+                // Find type declarations that have this constructor
+                for ((typeName, typeDecl) in context.typeDeclarations) {
+                    if (typeDecl.definition is VariantDefinition) {
+                        val variantDef = typeDecl.definition as VariantDefinition
+                        val constructor = variantDef.constructors.find { it.name == expr.constructor }
+
+                        if (constructor != null && constructor.dataType is RecordTypeAnnotation) {
+                            val expectedRecordType = constructor.dataType as RecordTypeAnnotation
+                            val isOpen = expectedRecordType.restField != null
+
+                            // Get fields from literal
+                            val literalFields = valueExpr.entries.filterIsInstance<RecordFieldEntry>().map { it.name }.toSet()
+                            val expectedFields = expectedRecordType.entries.map { it.name }.toSet()
+
+                            // Check for closed record (no ...)
+                            if (!isOpen) {
+                                // Check for extra fields
+                                val extraFields = literalFields - expectedFields
+                                if (extraFields.isNotEmpty()) {
+                                    throw TypeCheckError(
+                                        message = "Variant constructor ${expr.constructor} expects exact fields ${expectedFields.sorted().joinToString(", ")} " +
+                                                "but got extra field(s): ${extraFields.sorted().joinToString(", ")}",
+                                        expression = expr,
+                                        errorType = ErrorType.TYPE_MISMATCH
+                                    )
+                                }
+
+                                // Check for missing fields
+                                val missingFields = expectedFields - literalFields
+                                if (missingFields.isNotEmpty()) {
+                                    throw TypeCheckError(
+                                        message = "Variant constructor ${expr.constructor} expects fields ${expectedFields.sorted().joinToString(", ")} " +
+                                                "but missing field(s): ${missingFields.sorted().joinToString(", ")}",
+                                        expression = expr,
+                                        errorType = ErrorType.MISSING_FIELD
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             val constraints = mutableListOf<Constraint>()
             constraints.addAll(payloadResult.constraints)
             constraints.add(
