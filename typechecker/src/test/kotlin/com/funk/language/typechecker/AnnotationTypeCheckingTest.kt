@@ -855,7 +855,7 @@ class AnnotationTypeCheckingTest {
     fun `test variant annotation missing constructor fails`() {
         assertTypeCheckFails(
             """
-            let result: | Success { val: Int } | = Failure { msg: "error" }
+            let result: | Success { val: Int } | = Failure { msg = "error" }
             result
             """.trimIndent()
         )
