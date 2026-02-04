@@ -1371,14 +1371,16 @@ class ConstraintSolver(
             is Constraint.Equality -> Constraint.Equality(
                 left = substitution.apply(constraint.left),
                 right = substitution.apply(constraint.right),
-                context = constraint.context
+                context = constraint.context,
+                sourceLocation = constraint.sourceLocation
             )
 
             is Constraint.AbilityRequired -> Constraint.AbilityRequired(
                 typeVar = constraint.typeVar, // Type vars don't change
                 abilityName = constraint.abilityName,
                 typeArgs = constraint.typeArgs.map { substitution.apply(it) },
-                context = constraint.context
+                context = constraint.context,
+                sourceLocation = constraint.sourceLocation
             )
 
             is Constraint.EffectUsed -> constraint // No types to substitute
@@ -1386,21 +1388,24 @@ class ConstraintSolver(
             is Constraint.Subsumes -> Constraint.Subsumes(
                 general = substitution.apply(constraint.general),
                 specific = substitution.apply(constraint.specific),
-                context = constraint.context
+                context = constraint.context,
+                sourceLocation = constraint.sourceLocation
             )
 
             is Constraint.HasField -> Constraint.HasField(
                 recordType = substitution.apply(constraint.recordType),
                 fieldName = constraint.fieldName,
                 fieldType = substitution.apply(constraint.fieldType),
-                context = constraint.context
+                context = constraint.context,
+                sourceLocation = constraint.sourceLocation
             )
 
             is Constraint.HasConstructor -> Constraint.HasConstructor(
                 variantType = substitution.apply(constraint.variantType),
                 constructorName = constraint.constructorName,
                 payloadType = constraint.payloadType?.let { substitution.apply(it) },
-                context = constraint.context
+                context = constraint.context,
+                sourceLocation = constraint.sourceLocation
             )
 
             is Constraint.MustBeOpen -> Constraint.MustBeOpen(

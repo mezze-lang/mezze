@@ -173,9 +173,24 @@ class SubstitutionApplier(
         // Pass the binding name so we can check if this binding should have open variants
         val closedType = finalType?.let { closeGeneratedRowVars(it, bindingName) }
 
+        // Create TypeScheme for polymorphic bindings (those with type variables)
+        // This is needed for pretty printing and monomorphization
+        val typeScheme = closedType?.let { type ->
+            // Extract ability constraints from constraint result
+            val abilityConstraints = constraintResult?.abilityConstraints?.map { constraint ->
+                AbilityConstraint(
+                    abilityName = constraint.abilityName,
+                    typeParam = constraint.typeVar.name
+                )
+            } ?: emptyList()
+
+            TypeScheme.generalize(type, abilityConstraints)
+        }
+
         return binding.copy(
             expression = updatedExpression,
-            inferredType = closedType
+            inferredType = closedType,
+            typeScheme = typeScheme
         )
     }
 
