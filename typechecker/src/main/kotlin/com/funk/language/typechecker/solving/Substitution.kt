@@ -130,6 +130,10 @@ data class Substitution(
      *   s1 = {α -> Int}
      *   s2 = {β -> α}
      *   s1.compose(s2) = {α -> Int, β -> Int}
+     *
+     * IMPORTANT: s1's mappings take precedence for duplicate keys.
+     * This allows updating a type variable's mapping when we learn more about it
+     * (e.g., adding fields to a record type).
      */
     fun compose(other: Substitution): Substitution {
         // Apply s1 to all mappings in s2
@@ -137,8 +141,9 @@ data class Substitution(
             apply(type)
         }
 
-        // Combine with s1's mappings (s1 takes precedence)
-        return Substitution(mappings + composedMappings)
+        // Combine: composedMappings first, then s1's mappings override
+        // s1 takes precedence for duplicate keys
+        return Substitution(composedMappings + mappings)
     }
 
     /**

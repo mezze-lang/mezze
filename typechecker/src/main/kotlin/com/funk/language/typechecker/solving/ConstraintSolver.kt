@@ -415,7 +415,7 @@ class ConstraintSolver(
             is Constraint.AbilityRequired -> solveAbilityRequired(constraint)
             is Constraint.EffectUsed -> solveEffectUsed(constraint)
             is Constraint.Subsumes -> solveSubsumes(constraint)
-            is Constraint.HasField -> solveHasField(constraint)
+            is Constraint.HasField -> solveHasField(constraint, currentSubst)
             is Constraint.HasConstructor -> solveHasConstructor(constraint)
         }
     }
@@ -893,10 +893,11 @@ class ConstraintSolver(
      *
      * Ensures the record type has the specified field.
      */
-    private fun solveHasField(constraint: Constraint.HasField): ConstraintResult {
+    private fun solveHasField(constraint: Constraint.HasField, currentSubst: Substitution = Substitution.empty): ConstraintResult {
         val recordType = constraint.recordType
         val fieldName = constraint.fieldName
         val expectedFieldType = constraint.fieldType
+
 
         // If record type is a TypeApplication (e.g., Person), expand it to RecordType first
         if (recordType is FunkType.TypeApplication) {
@@ -905,7 +906,8 @@ class ConstraintSolver(
             if (expanded != null) {
                 // Recursively solve with the expanded record type
                 return solveHasField(
-                    constraint.copy(recordType = expanded)
+                    constraint.copy(recordType = expanded),
+                    currentSubst
                 )
             } else {
                 return ConstraintResult.Failure(
@@ -942,9 +944,19 @@ class ConstraintSolver(
                         fields = extendedFields,
                         rowVar = recordType.rowVar  // Keep the same row variable
                     )
-                    // The extended record should unify with the original
-                    // But since we're building up constraints, we just return success
-                    // The row variable will absorb the difference
+
+                    // CRITICAL FIX: Find the type variable that maps to this record and update it
+                    // This ensures multiple field accesses accumulate fields properly
+                    for ((typeVar, mappedType) in currentSubst.mappings) {
+                        val resolvedMappedType = currentSubst.apply(mappedType)
+                        if (resolvedMappedType == recordType) {
+                            // Found the type variable - update its mapping to the extended record
+                            return ConstraintResult.Success(Substitution.single(typeVar, extendedRecord))
+                        }
+                    }
+
+                    // If we can't find the original type variable, still succeed
+                    // This happens when the record came from an annotation, not inference
                     return ConstraintResult.Success(Substitution.empty)
                 } else {
                     // Record is closed - field must exist

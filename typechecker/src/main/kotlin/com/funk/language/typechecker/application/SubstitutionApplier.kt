@@ -145,9 +145,13 @@ class SubstitutionApplier(
             preExpressionType
         }
 
+        // Close generated row variables in the final type
+        // This matches old TypeChecker behavior where records inferred from field access are closed by default
+        val closedType = finalType?.let { closeGeneratedRowVars(it) }
+
         return binding.copy(
             expression = updatedExpression,
-            inferredType = finalType
+            inferredType = closedType
         )
     }
 
@@ -921,6 +925,86 @@ class SubstitutionApplier(
             is EffectRowAnnotation -> {
                 FunkType.VarType(TypeVar.fresh())
             }
+        }
+    }
+
+    // ========================================================================
+    // ROW VARIABLE CLOSING
+    // ========================================================================
+
+    /**
+     * Close generated row variables in a type.
+     *
+     * Row variables created by the constraint solver (named "row0", "row1", etc.)
+     * should be closed by default. Only row variables from user annotations
+     * (named "rest" or other user-specified names) should remain open.
+     *
+     * This matches the old TypeChecker behavior where records inferred from
+     * field access are closed by default.
+     */
+    private fun closeGeneratedRowVars(type: FunkType): FunkType {
+        return when (type) {
+            is FunkType.RecordType -> {
+                // Close the row variable if it's a generated one (starts with "row")
+                val existingRowVar = type.rowVar
+                val closedRowVar = if (existingRowVar != null && existingRowVar.name.startsWith("row")) {
+                    null  // Close it
+                } else {
+                    existingRowVar  // Keep it (user annotation)
+                }
+                FunkType.RecordType(
+                    fields = type.fields.mapValues { (_, fieldType) -> closeGeneratedRowVars(fieldType) },
+                    rowVar = closedRowVar
+                )
+            }
+            is FunkType.VariantType -> {
+                // Close the row variable if it's a generated one (starts with "row")
+                val existingRowVar = type.rowVar
+                val closedRowVar = if (existingRowVar != null && existingRowVar.name.startsWith("row")) {
+                    null  // Close it
+                } else {
+                    existingRowVar  // Keep it (user annotation)
+                }
+                FunkType.VariantType(
+                    constructors = type.constructors.mapValues { (_, payloadType) ->
+                        payloadType?.let { closeGeneratedRowVars(it) }
+                    },
+                    rowVar = closedRowVar
+                )
+            }
+            is FunkType.FunctionType -> {
+                FunkType.FunctionType(
+                    paramType = closeGeneratedRowVars(type.paramType),
+                    returnType = closeGeneratedRowVars(type.returnType),
+                    effects = type.effects,
+                    abilityConstraints = type.abilityConstraints
+                )
+            }
+            is FunkType.ArrayType -> FunkType.ArrayType(closeGeneratedRowVars(type.elementType))
+            is FunkType.ListType -> FunkType.ListType(closeGeneratedRowVars(type.elementType))
+            is FunkType.SetType -> FunkType.SetType(closeGeneratedRowVars(type.elementType))
+            is FunkType.MapType -> FunkType.MapType(
+                keyType = closeGeneratedRowVars(type.keyType),
+                valueType = closeGeneratedRowVars(type.valueType)
+            )
+            is FunkType.TypeApplication -> FunkType.TypeApplication(
+                constructor = type.constructor,
+                args = type.args.map { closeGeneratedRowVars(it) }
+            )
+            is FunkType.SuspendedType -> FunkType.SuspendedType(
+                valueType = closeGeneratedRowVars(type.valueType),
+                effects = type.effects
+            )
+            // Types without row variables
+            is FunkType.VarType,
+            is FunkType.IntType,
+            is FunkType.FloatType,
+            is FunkType.StringType,
+            is FunkType.BooleanType,
+            is FunkType.NatType,
+            is FunkType.FracType,
+            is FunkType.OrderingType,
+            is FunkType.EffectRow -> type
         }
     }
 }
