@@ -260,11 +260,12 @@ class NewTypeChecker(
         when (solveResult) {
             is ConstraintSolver.SolveResult.Failure -> {
                 // Convert solver errors to type check errors
+                // CRITICAL: Extract sourceLocation from the constraint that failed
                 val errors = solveResult.errors.map { error ->
                     TypeCheckError(
                         phase = "Constraint Solving",
                         message = error.message,
-                        sourceLocation = null
+                        sourceLocation = error.constraint.sourceLocation
                     )
                 }
                 return TypeCheckResult.Failure(errors)

@@ -23,8 +23,16 @@ import com.funk.language.typechecker.context.TypingContext
  *
  * Sealed interface ensures exhaustive pattern matching.
  * No catch-all else clauses!
+ *
+ * All constraints have a sourceLocation for error reporting.
  */
 sealed interface Constraint {
+    /**
+     * The source location where this constraint was generated (if available).
+     * Used for error reporting to show the user where a type error occurred.
+     */
+    val sourceLocation: SourceLocation?
+
     /**
      * Equality constraint: t1 must equal t2
      *
@@ -37,7 +45,8 @@ sealed interface Constraint {
     data class Equality(
         val left: FunkType,
         val right: FunkType,
-        val context: String? = null  // For error messages
+        val context: String? = null,  // For error messages
+        override val sourceLocation: SourceLocation? = null
     ) : Constraint
 
     /**
@@ -52,7 +61,8 @@ sealed interface Constraint {
         val typeVar: TypeVar,
         val abilityName: String,
         val typeArgs: List<FunkType> = emptyList(),
-        val context: String? = null  // For error messages
+        val context: String? = null,  // For error messages
+        override val sourceLocation: SourceLocation? = null
     ) : Constraint
 
     /**
@@ -66,7 +76,8 @@ sealed interface Constraint {
     data class EffectUsed(
         val effect: String,
         val expression: Expression? = null,  // For error messages
-        val context: String? = null
+        val context: String? = null,
+        override val sourceLocation: SourceLocation? = null
     ) : Constraint
 
     /**
@@ -79,7 +90,8 @@ sealed interface Constraint {
     data class Subsumes(
         val general: FunkType,
         val specific: FunkType,
-        val context: String? = null
+        val context: String? = null,
+        override val sourceLocation: SourceLocation? = null
     ) : Constraint
 
     /**
@@ -94,14 +106,16 @@ sealed interface Constraint {
         val recordType: FunkType,
         val fieldName: String,
         val fieldType: FunkType,
-        val context: String? = null
+        val context: String? = null,
+        override val sourceLocation: SourceLocation? = null
     ) : Constraint
 
     data class HasConstructor(
         val variantType: FunkType,
         val constructorName: String,
         val payloadType: FunkType?,
-        val context: String? = null
+        val context: String? = null,
+        override val sourceLocation: SourceLocation? = null
     ) : Constraint
 }
 
