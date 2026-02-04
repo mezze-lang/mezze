@@ -270,6 +270,10 @@ class TypeValidator(
                 is Constraint.Subsumes -> {
                     // These were handled during solving
                 }
+
+                is Constraint.MustBeOpen -> {
+                    // This was handled during solving and substitution application
+                }
             }
         }
 

@@ -22,7 +22,7 @@ let handleColor3 = {c} -> match c is
 let handleShape = {s} -> match s is
   Circle {radius} -> radius
   Square {side} -> side
-  _ -> 0                                                        # expected: handleShape : { s: | Circle { radius: Int }, Square { side: Int }, ... | } -> 'a
+  _ -> 0                                                        # expected: handleShape : { s: | Circle { radius: Int }, Square { side: Int }, ... | } -> Int
 
 # Multiple open variants in same function
 let compareColors = {c1, c2} -> match c1 is
@@ -34,14 +34,14 @@ let compareColors = {c1, c2} -> match c1 is
 # Open variant with polymorphic field
 let getField = {v} -> match v is
   Some {val} -> val
-  _ -> 0                                                        # expected: getField : { v: | Some { val: Int }, ... | } -> Int
+  _ -> 0                                                        # expected: getField : { v: Option Int } -> Int
 
 # Nested open variants
 let processNested = {outer} -> match outer is
   Wrapper {inner} -> match inner is
     Value {x} -> x
     _ -> 0
-  _ -> 0                                                        # expected: processNested : { outer: | Wrapper { inner: 'a }, ... | } -> 'b
+  _ -> 0                                                        # expected: processNested : { outer: | Wrapper { inner: | Value { x: Int }, ... | }, ... | } -> Int
 
 # Open variant with multiple fields
 let handlePair = {p} -> match p is

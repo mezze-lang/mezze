@@ -20,6 +20,16 @@ import com.funk.language.typechecker.context.TypeScheme
  * - Returns ConstraintResult with type + constraints
  * - Solving happens separately (not here!)
  */
+/**
+ * Result of generating constraints for a program.
+ * Contains both the per-binding results and additional metadata from per-binding solving.
+ */
+data class ProgramConstraintResult(
+    val constraintResults: Map<String, ConstraintResult>,
+    val perBindingMustBeOpenRowVars: Set<RowVar>,  // Row variables that must stay open from per-binding solving
+    val perBindingSolveErrors: List<com.funk.language.typechecker.solving.ConstraintSolver.ConstraintError> = emptyList()  // Errors from per-binding solving
+)
+
 class ConstraintGenerator(
     private val expressionGenerator: ExpressionConstraintGenerator,
     private val patternGenerator: PatternConstraintGenerator,
@@ -55,7 +65,7 @@ class ConstraintGenerator(
     fun generateProgram(
         program: Program,
         context: TypingContext
-    ): Map<String, ConstraintResult> {
+    ): ProgramConstraintResult {
         // DEBUG: Print ability and effect names
         if (System.getProperty("funk.debug.abilities") == "true") {
             println("[DEBUG ConstraintGenerator] abilityNames = $abilityNames")
@@ -68,6 +78,9 @@ class ConstraintGenerator(
         // CRITICAL: Track record literal bindings for field access validation
         // Matches OldTypeChecker.kt:1428-1429
         val recordLiteralBindings = mutableSetOf<String>()
+
+        // Track errors from per-binding solving
+        val perBindingSolveErrors = mutableListOf<com.funk.language.typechecker.solving.ConstraintSolver.ConstraintError>()
 
         // Import constraint solver for incremental solving
         val solver = com.funk.language.typechecker.solving.ConstraintSolver(context, typeDeclarations, abilityDeclarations)
@@ -133,13 +146,18 @@ class ConstraintGenerator(
                     val resultWithDuplicates = result.copy(
                         duplicateBindings = duplicateBindings
                     )
+
+
                     results[getBindingName(item)] = resultWithDuplicates
 
                     // ALGORITHM W: Solve constraints for THIS binding immediately
                     val solveResult = solver.solve(result.constraints)
                     when (solveResult) {
                         is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
-                            // Solving failed - but STILL add binding to context with its unsolved type
+                            // Solving failed - collect the errors for propagation
+                            perBindingSolveErrors.addAll(solveResult.errors)
+
+                            // STILL add binding to context with its unsolved type
                             // so subsequent bindings can reference it (even if the type is wrong)
                             // This prevents cascading "undefined variable" errors
                             results[getBindingName(item)] = resultWithDuplicates
@@ -406,7 +424,12 @@ class ConstraintGenerator(
             }
         }
 
-        return results
+        // Return results with accumulated mustBeOpenRowVars and errors from per-binding solving
+        return ProgramConstraintResult(
+            constraintResults = results,
+            perBindingMustBeOpenRowVars = solver.getMustBeOpenRowVars(),
+            perBindingSolveErrors = perBindingSolveErrors
+        )
     }
 
     /**
@@ -446,7 +469,8 @@ class ConstraintGenerator(
             effectNames = effectNames,
             abilityDeclarations = abilityDeclarations,
             recordLiteralBindings = recordLiteralBindings,
-            typeDeclarations = typeDeclarations
+            typeDeclarations = typeDeclarations,
+            currentBindingName = getBindingName(binding)
         )
 
         // Generate constraints for the expression with expected type
@@ -582,7 +606,7 @@ class ConstraintGenerator(
      *
      * CRITICAL: Apply substitution to ability constraints so they refer to the SOLVED type variables
      */
-    private fun addAbilityConstraintsToFunctionType(
+    internal fun addAbilityConstraintsToFunctionType(
         type: FunkType,
         abilityConstraints: List<Constraint.AbilityRequired>,
         substitution: com.funk.language.typechecker.solving.Substitution
@@ -1491,6 +1515,18 @@ class ConstraintGenerator(
                 effectNames,
                 abilityDeclarations
             )
+        }
+    }
+
+    private fun debugTypeCG(type: FunkType?, depth: Int = 0): String {
+        if (type == null) return "null"
+        if (depth > 3) return "..."
+        return when (type) {
+            is FunkType.FunctionType -> "FunctionType(param=${debugTypeCG(type.paramType, depth + 1)}, return=${debugTypeCG(type.returnType, depth + 1)})"
+            is FunkType.RecordType -> "RecordType(fields={${type.fields.map { (k, v) -> "$k: ${debugTypeCG(v, depth + 1)}" }.joinToString(", ")}}, rowVar=${type.rowVar})"
+            is FunkType.VariantType -> "VariantType(constructors=${type.constructors.keys}, rowVar=${type.rowVar})"
+            is FunkType.VarType -> "VarType(${type.variable})"
+            else -> type::class.simpleName ?: type.toString()
         }
     }
 }

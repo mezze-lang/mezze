@@ -455,51 +455,51 @@ internal fun unifyVariants(var1: FunkType.VariantType, var2: FunkType.VariantTyp
         return UnificationResult.Success(substitution)
     }
 
-    // Both variants are closed - must have exactly the same constructors
-    if (constructors1 != constructors2) {
-        if (System.getProperty("funk.debug.unification") == "true") {
-            println("[DEBUG unifyVariants] CLOSED variant mismatch!")
-            println("[DEBUG unifyVariants] var1 constructors: $constructors1, rowVar=${var1.rowVar}")
-            println("[DEBUG unifyVariants] var2 constructors: $constructors2, rowVar=${var2.rowVar}")
-        }
+    // Both variants are closed - merge constructors for inference purposes
+    // This allows match expressions to return different constructors that get unified into
+    // a combined variant type: `match x is Red -> Blue | Green -> Yellow` produces `| Blue, Yellow |`
+    //
+    // NOTE: For type annotations with closed variants, mismatches are caught earlier
+    // during annotation validation, so this merging only happens during inference.
 
-        return UnificationResult.Failure(
-            message = "Variant constructor mismatch: [${constructors1.joinToString()}] vs [${constructors2.joinToString()}]",
-            type1 = var1,
-            type2 = var2
-        )
-    }
+    // Merge ALL constructors from both variants
+    val allConstructors = (constructors1 + constructors2).toSet()
 
-    // Unify each constructor's data type
     var substitution = Substitution.empty
-    for (constructorName in constructors1) {
+    for (constructorName in allConstructors) {
         val dataType1 = var1.constructors[constructorName]
         val dataType2 = var2.constructors[constructorName]
 
-        // Both must have data or both must not have data
-        if ((dataType1 == null) != (dataType2 == null)) {
-            return UnificationResult.Failure(
-                message = "Constructor '$constructorName' data mismatch",
-                type1 = var1,
-                type2 = var2
-            )
-        }
+        when {
+            constructorName in constructors1 && constructorName in constructors2 -> {
+                // Constructor in both - unify payload types
+                if ((dataType1 == null) != (dataType2 == null)) {
+                    return UnificationResult.Failure(
+                        message = "Constructor '$constructorName' data mismatch",
+                        type1 = var1,
+                        type2 = var2
+                    )
+                }
 
-        if (dataType1 != null && dataType2 != null) {
-            val appliedType1 = substitution.apply(dataType1)
-            val appliedType2 = substitution.apply(dataType2)
+                if (dataType1 != null && dataType2 != null) {
+                    val appliedType1 = substitution.apply(dataType1)
+                    val appliedType2 = substitution.apply(dataType2)
 
-            val constructorResult = unify(appliedType1, appliedType2, typeDeclarations)
-            if (constructorResult is UnificationResult.Failure) {
-                return UnificationResult.Failure(
-                    message = "Constructor '$constructorName' type mismatch: ${constructorResult.message}",
-                    type1 = var1,
-                    type2 = var2
-                )
+                    val constructorResult = unify(appliedType1, appliedType2, typeDeclarations)
+                    if (constructorResult is UnificationResult.Failure) {
+                        return UnificationResult.Failure(
+                            message = "Constructor '$constructorName' type mismatch: ${constructorResult.message}",
+                            type1 = var1,
+                            type2 = var2
+                        )
+                    }
+
+                    val constructorSubst = (constructorResult as UnificationResult.Success).substitution
+                    substitution = constructorSubst.compose(substitution)
+                }
             }
-
-            val constructorSubst = (constructorResult as UnificationResult.Success).substitution
-            substitution = constructorSubst.compose(substitution)
+            // Constructor only in one variant - allowed for merging during inference
+            else -> {}
         }
     }
 

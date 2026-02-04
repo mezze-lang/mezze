@@ -3,6 +3,7 @@ package com.funk.language.typechecker
 import com.funk.language.ast.*
 import com.funk.language.typechecker.NativeFunctionTypes
 import com.funk.language.typechecker.application.SubstitutionApplier
+import com.funk.language.typechecker.constraints.Constraint
 import com.funk.language.typechecker.constraints.ConstraintGenerator
 import com.funk.language.typechecker.context.ContextBuilder
 import com.funk.language.typechecker.context.TypingContext
@@ -176,6 +177,9 @@ class NewTypeChecker(
         )
         val context = buildResult.context
 
+        // Build type aliases for pretty printing (include imported types)
+        cachedTypeAliases = buildTypeAliases(program, contextBuilder, importContext)
+
         // PHASE 2: Generate Constraints
         // Include both local ability declarations AND imported ability declarations
         val abilityNames = buildResult.abilityDeclarations.keys +
@@ -197,7 +201,22 @@ class NewTypeChecker(
             effectNames = effectNames,
             abilityDeclarations = buildResult.abilityDeclarations
         )
-        val constraintResults = constraintGenerator.generateProgram(program, context)
+        val programConstraintResult = constraintGenerator.generateProgram(program, context)
+        val constraintResults = programConstraintResult.constraintResults
+        val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
+        val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
+
+        // Check for per-binding solve errors (e.g., type mismatches in variant payloads)
+        if (perBindingSolveErrors.isNotEmpty()) {
+            val errors = perBindingSolveErrors.map { error ->
+                TypeCheckError(
+                    phase = "Constraint Solving",
+                    message = error.message,
+                    sourceLocation = error.constraint.sourceLocation
+                )
+            }
+            return TypeCheckResult.Failure(errors)
+        }
 
         // Check for undefined variables BEFORE solving constraints
         // (If we wait until validation, constraint solving might fail first on those type variables)
@@ -249,8 +268,17 @@ class NewTypeChecker(
         }
 
         // Collect all constraints from all bindings (including ability constraints)
-        val allConstraints = constraintResults.values.flatMap { it.constraints } +
-                             constraintResults.values.flatMap { it.abilityConstraints }
+        // IMPORTANT: Filter out HasConstructor and HasField constraints!
+        // These structural constraints are already solved during per-binding constraint solving
+        // in ConstraintGenerator (Algorithm W). Re-solving them globally causes issues:
+        // - Type variables that were correctly extended to merged variants get re-processed
+        // - Different bindings' structural constraints can interfere with each other
+        // - The variant extensions done per-binding are lost when global solve creates new variants
+        val allConstraints = constraintResults.values.flatMap { it.constraints }
+            .filter { constraint ->
+                constraint !is Constraint.HasConstructor && constraint !is Constraint.HasField
+            } + constraintResults.values.flatMap { it.abilityConstraints }
+
 
         // PHASE 3: Solve Constraints
         val solver = ConstraintSolver(context, buildResult.typeDeclarations, buildResult.abilityDeclarations)
@@ -274,7 +302,15 @@ class NewTypeChecker(
                 // Continue to validation
                 val substitution = solveResult.substitution
                 val warnings = solveResult.warnings.toMutableList()
+
                 val resolvedAbilities = solveResult.resolvedAbilityConstraints
+                // CRITICAL: Merge per-binding mustBeOpenRowVars with global solver's results
+                // The per-binding solves resolved MustBeOpen constraints to row variables,
+                // but the global solver doesn't have access to these because HasConstructor
+                // constraints were filtered out. We need both sets.
+                val mustBeOpenRowVars = solveResult.mustBeOpenRowVars + perBindingMustBeOpenRowVars
+                val mustBeOpenBindings = solveResult.mustBeOpenBindings
+                val mustBeOpenTypes = solveResult.mustBeOpenTypes
 
                 // NOTE: We do NOT filter out ability constraints on concrete types!
                 // The old typechecker keeps ALL constraints for code generation (monomorphization).
@@ -291,15 +327,27 @@ class NewTypeChecker(
                 // The per-binding solves in ConstraintGenerator may have left type variables unsolved,
                 // but the global solve has the complete substitution. We need to update the constraint
                 // results with the globally solved types before passing to SubstitutionApplier.
+
+
+                // Need a ConstraintGenerator instance to call addAbilityConstraintsToFunctionType
+                val tempGenerator = ConstraintGenerator.create(buildResult.typeDeclarations)
+
                 val globallyResolvedConstraintResults = constraintResults.mapValues { (_, result) ->
-                    result.copy(type = substitution.apply(result.type))
+                    // Apply global substitution to get the final type
+                    val resolvedType = substitution.apply(result.type)
+                    // Add ability constraints to FunctionType
+                    val typeWithAbilities = tempGenerator.addAbilityConstraintsToFunctionType(resolvedType, result.abilityConstraints, substitution)
+                    result.copy(type = typeWithAbilities)
                 }
 
                 // PHASE 4: Apply Substitution (moved before validation so expressions have types)
                 val applier = SubstitutionApplier(
                     substitution,
                     globallyResolvedConstraintResults,
-                    buildResult.performerToEffect
+                    buildResult.performerToEffect,
+                    mustBeOpenRowVars,
+                    mustBeOpenBindings,
+                    mustBeOpenTypes
                 )
                 val typedProgram = applier.applyToProgram(program)
 
@@ -493,13 +541,79 @@ class NewTypeChecker(
     // COMPATIBILITY API - Instance Methods
     // ========================================================================
 
+    // Cached type aliases from the last type check
+    private var cachedTypeAliases: Map<String, TypeAliasInfo> = emptyMap()
+
     /**
      * Get type aliases (compatibility API).
-     * Returns empty map (new system doesn't expose this directly).
+     * Returns type alias information collected during type checking.
      */
     fun getTypeAliases(): Map<String, TypeAliasInfo> {
-        // New system doesn't expose type aliases this way
-        return emptyMap()
+        return cachedTypeAliases
+    }
+
+    /**
+     * Build type aliases from type declarations.
+     * Called during type checking to populate the cache.
+     * Includes both local type declarations and imported types.
+     */
+    private fun buildTypeAliases(
+        program: Program,
+        contextBuilder: ContextBuilder,
+        importContext: ModuleImportContext?
+    ): Map<String, TypeAliasInfo> {
+        val result = mutableMapOf<String, TypeAliasInfo>()
+
+        // Helper function to add a type declaration to the result
+        fun addTypeDeclaration(item: TypeDeclaration) {
+            // Convert the type definition to a FunkType
+            val definitionType = when (val def = item.definition) {
+                is VariantDefinition -> {
+                    // Build VariantType from constructors
+                    val constructors = def.constructors.associate { ctor ->
+                        val dataType = ctor.dataType?.let { contextBuilder.convertTypeAnnotation(it) }
+                        ctor.name to dataType
+                    }
+                    FunkType.VariantType(
+                        constructors = constructors,
+                        rowVar = if (def.isOpen) RowVar.fresh() else null
+                    )
+                }
+                is RecordDefinition -> {
+                    // Build RecordType from fields
+                    val fields = def.fields.associate { field ->
+                        field.name to contextBuilder.convertTypeAnnotation(field.type)
+                    }
+                    FunkType.RecordType(
+                        fields = fields,
+                        rowVar = if (def.isOpen) RowVar.fresh() else null
+                    )
+                }
+                else -> null
+            }
+
+            if (definitionType != null) {
+                result[item.name] = TypeAliasInfo(
+                    name = item.name,
+                    typeParams = item.typeParams,
+                    definition = definitionType
+                )
+            }
+        }
+
+        // Add local type declarations
+        for (item in program.items) {
+            if (item is TypeDeclaration) {
+                addTypeDeclaration(item)
+            }
+        }
+
+        // Add imported type declarations
+        importContext?.importedTypes?.values?.forEach { typeDecl ->
+            addTypeDeclaration(typeDecl)
+        }
+
+        return result
     }
 
     /**
@@ -644,6 +758,18 @@ class NewTypeChecker(
         @JvmStatic
         fun restoreModuleCache(modules: Map<String, Any>) {
             // No-op: new system handles caching internally
+        }
+    }
+
+    private fun debugTypeNTC(type: FunkType?, depth: Int = 0): String {
+        if (type == null) return "null"
+        if (depth > 3) return "..."
+        return when (type) {
+            is FunkType.FunctionType -> "FunctionType(param=${debugTypeNTC(type.paramType, depth + 1)}, return=${debugTypeNTC(type.returnType, depth + 1)})"
+            is FunkType.RecordType -> "RecordType(fields={${type.fields.map { (k, v) -> "$k: ${debugTypeNTC(v, depth + 1)}" }.joinToString(", ")}}, rowVar=${type.rowVar})"
+            is FunkType.VariantType -> "VariantType(constructors=${type.constructors.keys}, rowVar=${type.rowVar})"
+            is FunkType.VarType -> "VarType(${type.variable})"
+            else -> type::class.simpleName ?: type.toString()
         }
     }
 }

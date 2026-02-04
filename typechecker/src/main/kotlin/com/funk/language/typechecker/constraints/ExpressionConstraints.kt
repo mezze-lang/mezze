@@ -4,6 +4,7 @@ import com.funk.language.ast.*
 import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.context.TypingContext
 import com.funk.language.typechecker.TypeCheckError
+import com.funk.language.typechecker.solving.collectFreeTypeVars
 import com.funk.language.typechecker.ErrorType
 
 /**
@@ -1519,11 +1520,24 @@ class ExpressionConstraintGenerator {
 
                     // Result is a new function: remainingParams -> returnType
                     // Preserve effects from original function
+                    // Filter ability constraints to only keep those on type variables still present
+                    // in the remaining parameters (not bound to concrete types via provided args)
+                    val remainingTypeVars = collectFreeTypeVars(remainingParamType) + collectFreeTypeVars(functionType.returnType)
+                    val filteredAbilityConstraints = functionType.abilityConstraints.filter { constraint ->
+                        // Keep constraint if its type args contain a type variable that's still polymorphic
+                        constraint.typeArgs.any { typeArg ->
+                            when (typeArg) {
+                                is FunkType.VarType -> typeArg.variable in remainingTypeVars
+                                else -> false
+                            }
+                        }
+                    }
+
                     val partialResult = FunkType.FunctionType(
                         paramType = remainingParamType,
                         returnType = functionType.returnType,
                         effects = functionType.effects,
-                        abilityConstraints = functionType.abilityConstraints
+                        abilityConstraints = filteredAbilityConstraints
                     )
 
                     return ConstraintResult(
@@ -1680,7 +1694,28 @@ class ExpressionConstraintGenerator {
         val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
         duplicateBindings.addAll(scrutineeResult.duplicateBindings)
 
-        // Step 2: Process each match case
+        // Step 2: Check for wildcards - if present, scrutinee must be open variant
+        // IMPORTANT: Only check TOP-LEVEL patterns for wildcards/variables.
+        // A VariablePattern inside a ConstructorPattern (like `Pair {a}`) binds a payload field,
+        // not the whole variant, so it doesn't make the variant open.
+        val hasWildcard = expr.cases.any { matchCase ->
+            matchCase.patterns.any { pattern ->
+                // Only WildcardPattern or VariablePattern at top level make the variant open
+                pattern is WildcardPattern || pattern is VariablePattern
+            }
+        }
+        if (hasWildcard) {
+            // Mark the scrutinee type as must-be-open
+            constraints.add(
+                Constraint.MustBeOpen(
+                    type = scrutineeResult.type,
+                    bindingName = context.currentBindingName,
+                    context = "Match has wildcard pattern - scrutinee may have additional constructors"
+                )
+            )
+        }
+
+        // Step 3: Process each match case
         val patternGenerator = PatternConstraintGenerator()
         val caseResultTypes = mutableListOf<FunkType>()
 
@@ -1740,27 +1775,18 @@ class ExpressionConstraintGenerator {
             caseResultTypes.add(caseBodyResult.type)
         }
 
-        // Step 3: All case bodies must have the same type
-        if (caseResultTypes.isEmpty()) {
-            // Empty match expression - shouldn't happen in well-formed programs
-            // Return fresh type variable
-            return ConstraintResult(
-                type = FunkType.VarType(TypeVar.fresh()),
-                constraints = constraints,
-                effects = effects,
-                abilityConstraints = abilityConstraints,
-                undefinedVariables = undefinedVars,
-                duplicateBindings = duplicateBindings
-            )
-        }
+        // Step 4: All case bodies must have the same type
+        // Use a fresh type variable as the result type so variant constructors from different
+        // arms can be merged through unification. Without this, the first arm's concrete type
+        // would become the result type, and merging wouldn't work properly.
+        val resultType = FunkType.VarType(TypeVar.fresh())
 
-        val resultType = caseResultTypes.first()
-        for (i in 1 until caseResultTypes.size) {
+        for (caseType in caseResultTypes) {
             constraints.add(
                 Constraint.Equality(
-                    left = caseResultTypes[i],
+                    left = caseType,
                     right = resultType,
-                    context = "All match cases must have the same type"
+                    context = "Match case must have same type as other cases"
                 )
             )
         }

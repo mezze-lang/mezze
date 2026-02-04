@@ -20,7 +20,7 @@ let unifyRecord = {r, x} -> r.field + x                         # expected: unif
 # Unify across nested matches
 let unifyNested = {outer, x} -> match outer is
   Outer {inner} -> match inner is
-    Inner {val} -> val + x                                      # expected: unifyNested : { outer: | Outer { inner: 'a } |, x: 'b } with NumAdd 'b -> 'b
+    Inner {val} -> val + x                                      # expected: unifyNested : { outer: | Outer { inner: | Inner { val: 'a } | } |, x: 'a } with NumAdd 'a -> 'a
 
 # All parameters unified through chain
 let unifyChain = {a, b, c, d} -> match True is
@@ -50,7 +50,7 @@ let unifyCompare = {x, y, z} -> match x < y is
 let deepNest = {v} -> match v is
   A {b} -> match b is
     B {c} -> match c is
-      C {d} -> d + 1                                            # expected: deepNest : { v: | A { b: 'a } | } -> Int
+      C {d} -> d + 1                                            # expected: deepNest : { v: | A { b: | B { c: | C { d: Int } | } | } | } -> Int
 
 # Constraint preserved across branches
 let preserveConstraint = {mode, x, y, z} -> match mode is

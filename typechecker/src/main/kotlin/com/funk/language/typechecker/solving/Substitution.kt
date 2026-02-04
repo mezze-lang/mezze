@@ -62,12 +62,15 @@ data class Substitution(
                 rowVar = type.rowVar // Row variables handled separately in row unification
             )
 
-            is FunkType.VariantType -> FunkType.VariantType(
-                constructors = type.constructors.mapValues { (_, dataType) ->
+            is FunkType.VariantType -> {
+                val appliedConstructors = type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { apply(it) }
-                },
-                rowVar = type.rowVar // Row variables handled separately
-            )
+                }
+                FunkType.VariantType(
+                    constructors = appliedConstructors,
+                    rowVar = type.rowVar // Row variables handled separately
+                )
+            }
 
             is FunkType.TypeApplication -> FunkType.TypeApplication(
                 constructor = type.constructor,
@@ -136,14 +139,14 @@ data class Substitution(
      * (e.g., adding fields to a record type).
      */
     fun compose(other: Substitution): Substitution {
-        // Apply s1 to all mappings in s2
-        val composedMappings = other.mappings.mapValues { (_, type) ->
-            apply(type)
-        }
-
-        // Combine: composedMappings first, then s1's mappings override
-        // s1 takes precedence for duplicate keys
-        return Substitution(composedMappings + mappings)
+        // Simple merge: new mappings (this) take precedence over old mappings (other)
+        // We DON'T apply this to other's values because that would bake in intermediate
+        // results. Instead, we keep type variable references and let final `apply` resolve them.
+        //
+        // Example: if other = {v1 -> Variant(Pair -> v2)} and this = {v2 -> {fst}}
+        // We want to keep v2 as a reference so later {v2 -> {fst, snd}} can update it.
+        // If we applied here, Variant would have {fst} baked in.
+        return Substitution(other.mappings + mappings)
     }
 
     /**

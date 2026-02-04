@@ -15,14 +15,14 @@ let unwrapSafely = {w} -> match w is
 # Both closed
 let boolToResult = {b} -> match b is
   True -> Ok
-  False -> Err                                                  # expected: boolToResult : { b: Bool } -> { val: 'a } -> Result 'a 'b
+  False -> Err                                                  # expected: boolToResult : { b: Bool } -> Result 'a 'b
 
 # Both open
 let partialMatch = {x, y} -> match x is
   Some {val} -> match y is
     Some {val = b} -> val + b
     _ -> val
-  _ -> 0                                                        # expected: partialMatch : { x: | Some { val: Int }, ... |, y: | Some { val: Int }, ... | } -> Int
+  _ -> 0                                                        # expected: partialMatch : { x: Option Int, y: Option Int } -> Int
 
 # Closed input, multiple open outputs
 let branch = {choice} -> match choice is
@@ -34,7 +34,7 @@ let branch = {choice} -> match choice is
 let handleWithDefault = {opt} -> match opt is
   Some {val} -> val
   None -> 42
-  _ -> 0                                                        # expected: handleWithDefault : { opt: | Some { val: Int }, None, ... | } -> Int
+  _ -> 0                                                        # expected: handleWithDefault : { opt: Option Int } -> Int
 
 # Closed variant with polymorphic operations
 let closedMath = {op, x, y} -> match op is
@@ -59,7 +59,7 @@ let complexBranch = {mode, v1, v2} -> match mode is
 let nestedClosed = {outer} -> match outer is
   Container {inner} -> match inner is
     Red -> 1
-    Blue -> 2                                                   # expected: nestedClosed : { outer: | Container { inner: 'a } | } -> Int
+    Blue -> 2                                                   # expected: nestedClosed : { outer: | Container { inner: | Red, Blue | } | } -> Int
 
 # Exhaustive pattern creates closed, but returns open
 let exhaustiveInput = {x} -> match x is

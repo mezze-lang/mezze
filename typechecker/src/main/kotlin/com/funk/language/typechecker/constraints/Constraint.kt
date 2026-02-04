@@ -117,6 +117,24 @@ sealed interface Constraint {
         val context: String? = null,
         override val sourceLocation: SourceLocation? = null
     ) : Constraint
+
+    /**
+     * Constraint that marks a type as "must be open" (have a row variable).
+     *
+     * Generated when a match expression has a wildcard pattern, indicating
+     * the scrutinee type could have additional constructors beyond those
+     * explicitly matched.
+     *
+     * @param type The type that should be open
+     * @param bindingName The name of the binding containing this match (used for per-binding open tracking)
+     * @param context Human-readable context
+     */
+    data class MustBeOpen(
+        val type: FunkType,
+        val bindingName: String? = null,
+        val context: String? = null,
+        override val sourceLocation: SourceLocation? = null
+    ) : Constraint
 }
 
 /**
@@ -223,7 +241,8 @@ data class ConstraintContext(
     val performContext: PerformExpression? = null,  // Current perform context for effect associated type substitution
     val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),  // All ability declarations for method type lookup
     val recordLiteralBindings: Set<String> = emptySet(),  // Variables bound to explicit record literals (for field access validation)
-    val typeDeclarations: Map<String, TypeDeclaration> = emptyMap()  // Type declarations for validation only (NOT for general type resolution)
+    val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),  // Type declarations for validation only (NOT for general type resolution)
+    val currentBindingName: String? = null  // The name of the binding being generated (for per-binding open variant tracking)
 ) {
     /**
      * Extend context with new variable binding

@@ -50,6 +50,46 @@ class ConstraintSolver(
      * These inferences are stored here and applied to the final substitution.
      */
     private val deferredInference = mutableMapOf<TypeVar, FunkType>()
+
+    /**
+     * Track type variables that must be open (have row variables).
+     *
+     * When a match expression has a wildcard, the scrutinee type must be open
+     * because it could have additional constructors beyond those matched.
+     */
+    private val mustBeOpenTypes = mutableSetOf<TypeVar>()
+
+    /**
+     * Track row variables that must stay open.
+     *
+     * When a mustBeOpenType gets resolved to a variant with a row variable,
+     * we track that row variable so it won't be closed.
+     */
+    private val mustBeOpenRowVars = mutableSetOf<RowVar>()
+
+    /**
+     * Track binding names that must have open variants.
+     *
+     * This is more stable than tracking row variables, since binding names
+     * don't change across constraint solves.
+     */
+    private val mustBeOpenBindings = mutableSetOf<String>()
+
+    /**
+     * Get the set of type variables that must remain open (have row variables).
+     */
+    fun getMustBeOpenTypes(): Set<TypeVar> = mustBeOpenTypes.toSet()
+
+    /**
+     * Get the set of row variables that must remain open.
+     */
+    fun getMustBeOpenRowVars(): Set<RowVar> = mustBeOpenRowVars.toSet()
+
+    /**
+     * Get the set of binding names that must have open variants.
+     */
+    fun getMustBeOpenBindings(): Set<String> = mustBeOpenBindings.toSet()
+
     /**
      * Result of solving constraints.
      *
@@ -62,7 +102,10 @@ class ConstraintSolver(
         data class Success(
             val substitution: Substitution,
             val warnings: List<String> = emptyList(),
-            val resolvedAbilityConstraints: Set<Constraint.AbilityRequired> = emptySet()
+            val resolvedAbilityConstraints: Set<Constraint.AbilityRequired> = emptySet(),
+            val mustBeOpenTypes: Set<TypeVar> = emptySet(),
+            val mustBeOpenRowVars: Set<RowVar> = emptySet(),
+            val mustBeOpenBindings: Set<String> = emptySet()
         ) : SolveResult()
 
         /**
@@ -101,7 +144,8 @@ class ConstraintSolver(
      */
     private fun inferVariantTypes(constraints: List<Constraint>): Pair<List<Constraint.Equality>, List<String>> {
         // Group HasConstructor constraints by their variant type
-        val constructorsByType = mutableMapOf<FunkType, MutableSet<String>>()
+        // Also collect payload types for creating anonymous variants
+        val constructorsByType = mutableMapOf<FunkType, MutableMap<String, FunkType?>>()
 
         for (constraint in constraints) {
             if (constraint is Constraint.HasConstructor) {
@@ -109,8 +153,7 @@ class ConstraintSolver(
                 // Only infer for type variables
                 if (variantType is FunkType.VarType) {
                     constructorsByType
-                        .getOrPut(variantType) { mutableSetOf() }
-                        .add(constraint.constructorName)
+                        .getOrPut(variantType) { mutableMapOf() }[constraint.constructorName] = constraint.payloadType
                 }
             }
         }
@@ -119,9 +162,10 @@ class ConstraintSolver(
         val inferredEqualities = mutableListOf<Constraint.Equality>()
         val errors = mutableListOf<String>()
 
-        for ((typeVar, constructors) in constructorsByType) {
+        for ((typeVar, constructorsWithPayloads) in constructorsByType) {
+            val constructorNames = constructorsWithPayloads.keys
             // Find variant type declaration that has ALL these constructors
-            val result = findVariantWithConstructors(constructors)
+            val result = findVariantWithConstructors(constructorNames, constructorsWithPayloads)
 
             when {
                 result is VariantInferenceResult.Success -> {
@@ -130,18 +174,22 @@ class ConstraintSolver(
                         Constraint.Equality(
                             left = typeVar,
                             right = result.variantType,
-                            context = "Inferred from constructors: ${constructors.joinToString()}"
+                            context = "Inferred from constructors: ${constructorNames.joinToString()}"
                         )
                     )
+                    // Add payload type constraints to specialize type parameters
+                    inferredEqualities.addAll(result.payloadConstraints)
                 }
                 result is VariantInferenceResult.Failure -> {
                     // Found a closed variant with invalid constructors - record error!
                     errors.add(result.errorMessage)
                 }
                 result == null -> {
-                    // No matching variant found - this is OK
-                    // It means we're using an anonymous/structural variant type
-                    // The constructors will create an inferred variant type
+                    // No matching variant found - this is an anonymous/structural variant
+                    // Don't create the variant here - let HasConstructor constraints handle it
+                    // during phase 3 solving. This ensures the payload types are properly resolved
+                    // first (via HasField constraints).
+                    // The HasConstructor solver will create/extend an open variant as needed.
                 }
             }
         }
@@ -153,7 +201,10 @@ class ConstraintSolver(
      * Result of variant type inference from constructors.
      */
     private sealed class VariantInferenceResult {
-        data class Success(val variantType: FunkType) : VariantInferenceResult()
+        data class Success(
+            val variantType: FunkType,
+            val payloadConstraints: List<Constraint.Equality> = emptyList()
+        ) : VariantInferenceResult()
         data class Failure(val errorMessage: String) : VariantInferenceResult()
     }
 
@@ -172,7 +223,10 @@ class ConstraintSolver(
      * For `type Color = | Red, Blue, Green |`, seeing `{Red, Blue, Pink}` will return Failure
      * because Pink is not in the closed variant's constructor list.
      */
-    private fun findVariantWithConstructors(constructors: Set<String>): VariantInferenceResult? {
+    private fun findVariantWithConstructors(
+        constructors: Set<String>,
+        constructorPayloads: Map<String, FunkType?> = emptyMap()
+    ): VariantInferenceResult? {
         for ((typeName, typeDecl) in typeDeclarations) {
             val definition = typeDecl.definition
             if (definition is VariantDefinition) {
@@ -187,23 +241,38 @@ class ConstraintSolver(
                     continue
                 }
 
+                // Create fresh type variables for type parameters
+                val typeParams = typeDecl.typeParams
+                val freshArgs = typeParams.map { FunkType.VarType(TypeVar.fresh()) }
+                val typeParamSubst = typeParams.zip(freshArgs).toMap()
+
+                // Generate payload constraints to specialize type parameters
+                val payloadConstraints = mutableListOf<Constraint.Equality>()
+                for (constructorDef in definition.constructors) {
+                    val actualPayload = constructorPayloads[constructorDef.name]
+                    val declaredPayload = constructorDef.dataType?.let { convertTypeAnnotation(it, typeParamSubst) }
+
+                    if (actualPayload != null && declaredPayload != null) {
+                        payloadConstraints.add(
+                            Constraint.Equality(
+                                left = actualPayload,
+                                right = declaredPayload,
+                                context = "Constructor '${constructorDef.name}' payload type"
+                            )
+                        )
+                    }
+                }
+
                 if (definition.isOpen) {
                     // OPEN variant: Accept if SOME constructors match
-                    // Example: type List 'a = | Nil, Cons {head: 'a, tail: List 'a}, ... |
-                    // Can use additional constructors beyond Nil/Cons
-                    val typeParams = typeDecl.typeParams
-                    val freshArgs = typeParams.map { FunkType.VarType(TypeVar.fresh()) }
-
                     val variantType = if (freshArgs.isNotEmpty()) {
                         FunkType.TypeApplication(typeName, freshArgs)
                     } else {
                         FunkType.TypeApplication(typeName, emptyList())
                     }
-                    return VariantInferenceResult.Success(variantType)
+                    return VariantInferenceResult.Success(variantType, payloadConstraints)
                 } else {
                     // CLOSED variant: ALL constructors must be in the declaration
-                    // Example: type Color = | Red, Blue, Green |
-                    // Cannot use Pink - it's not in the declaration
                     val invalidConstructors = constructors - declaredConstructors
 
                     if (invalidConstructors.isNotEmpty()) {
@@ -214,16 +283,13 @@ class ConstraintSolver(
                     }
 
                     // All constructors match - this is the right variant
-                    val typeParams = typeDecl.typeParams
-                    val freshArgs = typeParams.map { FunkType.VarType(TypeVar.fresh()) }
-
                     val variantType = if (freshArgs.isNotEmpty()) {
                         FunkType.TypeApplication(typeName, freshArgs)
                     } else {
                         // Non-parametric variant type
                         FunkType.TypeApplication(typeName, emptyList())
                     }
-                    return VariantInferenceResult.Success(variantType)
+                    return VariantInferenceResult.Success(variantType, payloadConstraints)
                 }
             }
         }
@@ -266,10 +332,17 @@ class ConstraintSolver(
 
         val allConstraints = constraints + inferredEqualities
 
+        // PHASE 0.5: Process MustBeOpen constraints to track which types must stay open
+        val (mustBeOpenConstraints, constraintsAfterOpen) = allConstraints.partition { it is Constraint.MustBeOpen }
+        for (constraint in mustBeOpenConstraints) {
+            val result = solveConstraint(constraint, substitution)
+            // MustBeOpen constraints don't fail or produce substitutions
+        }
+
         // PHASE 1: Process AbilityRequired constraints FIRST to track ability constraints on type variables
         // This is CRITICAL: we need to track which abilities are required on which type variables
         // BEFORE we solve Equality constraints that bind those type variables.
-        val (abilityConstraints, nonAbilityConstraints) = allConstraints.partition { it is Constraint.AbilityRequired }
+        val (abilityConstraints, nonAbilityConstraints) = constraintsAfterOpen.partition { it is Constraint.AbilityRequired }
 
         for (constraint in abilityConstraints) {
             // Apply current substitution to constraint before solving
@@ -306,10 +379,15 @@ class ConstraintSolver(
         }
 
         // PHASE 2: Solve Equality constraints to bind type variables
-        // Now that we've tracked ability constraints, we can validate them during unification
+        // Type variables need to be bound before we can check structural constraints properly.
+        // For example, when checking HasConstructor(T, "Yellow") where T should be Color,
+        // we need the Equality(T, Color) constraint to be solved first.
         val (equalityConstraints, otherConstraints) = nonAbilityConstraints.partition { it is Constraint.Equality }
 
         for (constraint in equalityConstraints) {
+            // Keep track of the ORIGINAL constraint before substitution
+            val originalConstraint = constraint as Constraint.Equality
+
             // Apply current substitution to constraint before solving
             val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
 
@@ -321,6 +399,105 @@ class ConstraintSolver(
                     // Compose new substitution with existing one
                     substitution = result.substitution.compose(substitution)
                     warnings.addAll(result.warnings)
+
+                    // Handle variant merging for match expressions
+                    // When both sides of an Equality constraint resolve to variants,
+                    // we need to merge them. We track type variables from the ORIGINAL
+                    // constraint (before substitution was applied) to know which vars to update.
+                    //
+                    // This prevents cross-contamination between independent bindings that
+                    // happen to use the same constructor names (like different functions
+                    // both matching on Red/Green).
+                    val appliedEq = appliedConstraint as Constraint.Equality
+                    val leftType = substitution.apply(appliedEq.left)
+                    val rightType = substitution.apply(appliedEq.right)
+
+                    // DEBUG - unconditionally log all match case constraints
+                    if (originalConstraint.context?.contains("Match case") == true) {
+                        try {
+                            java.io.File("/tmp/variant_merge_debug.txt").appendText(
+                                "[CONSTRAINT] context=${originalConstraint.context}\n" +
+                                "  originalLeft=${originalConstraint.left}\n" +
+                                "  originalRight=${originalConstraint.right}\n" +
+                                "  appliedLeft=${appliedConstraint.left}\n" +
+                                "  appliedRight=${appliedConstraint.right}\n" +
+                                "  resolvedLeft=${substitution.apply(appliedEq.left)}\n" +
+                                "  resolvedRight=${substitution.apply(appliedEq.right)}\n\n"
+                            )
+                        } catch (e: Exception) {}
+                    }
+
+                    if (leftType is FunkType.VariantType && rightType is FunkType.VariantType) {
+                        // Both sides resolved to variants - check if they need merging
+                        val leftCtors = leftType.constructors.keys
+                        val rightCtors = rightType.constructors.keys
+
+                        // DEBUG
+                        try {
+                            java.io.File("/tmp/variant_merge_debug.txt").appendText(
+                                "[VARIANT TYPES] leftCtors=$leftCtors, rightCtors=$rightCtors, differ=${leftCtors != rightCtors}\n\n"
+                            )
+                        } catch (e: Exception) {}
+
+                        if (leftCtors != rightCtors) {
+                            // Different constructor sets - create merged variant
+                            val mergedConstructors = leftType.constructors.toMutableMap()
+                            for ((name, dataType) in rightType.constructors) {
+                                if (name !in mergedConstructors) {
+                                    mergedConstructors[name] = dataType
+                                }
+                            }
+
+                            // Create merged variant - preserve openness if either original was open
+                            val mergedRowVar = leftType.rowVar ?: rightType.rowVar
+                            val mergedVariant = FunkType.VariantType(
+                                constructors = mergedConstructors,
+                                rowVar = mergedRowVar
+                            )
+
+                            // DEBUG
+                            try {
+                                java.io.File("/tmp/variant_merge_debug.txt").appendText(
+                                    "[MERGING] mergedVariant=$mergedVariant\n\n"
+                                )
+                            } catch (e: Exception) {}
+
+                            // ONLY update type variables that are DIRECTLY part of this Equality constraint
+                            // Use the ORIGINAL constraint (before substitution) to find the type vars
+                            val updatedMappings = mutableMapOf<TypeVar, FunkType>()
+
+                            // Check original constraint's left/right for type variables
+                            if (originalConstraint.left is FunkType.VarType) {
+                                updatedMappings[(originalConstraint.left as FunkType.VarType).variable] = mergedVariant
+                            }
+                            if (originalConstraint.right is FunkType.VarType) {
+                                updatedMappings[(originalConstraint.right as FunkType.VarType).variable] = mergedVariant
+                            }
+
+                            // Also update any type vars that transitively map to these variants
+                            // (handle chains like 'a -> 'b -> VariantType)
+                            for ((typeVar, mappedType) in substitution.mappings) {
+                                val resolved = substitution.apply(mappedType)
+                                // Only update if the resolved type is EXACTLY the leftType or rightType
+                                // (not just any variant that shares constructors)
+                                if (resolved == leftType || resolved == rightType) {
+                                    updatedMappings[typeVar] = mergedVariant
+                                }
+                            }
+
+                            // DEBUG
+                            try {
+                                java.io.File("/tmp/variant_merge_debug.txt").appendText(
+                                    "[UPDATED] mappings=$updatedMappings\n\n"
+                                )
+                            } catch (e: Exception) {}
+
+                            // Apply the updates
+                            if (updatedMappings.isNotEmpty()) {
+                                substitution = Substitution(substitution.mappings + updatedMappings)
+                            }
+                        }
+                    }
                 }
                 is ConstraintResult.Failure -> {
                     // Collect error and continue (to find all errors)
@@ -350,13 +527,18 @@ class ConstraintSolver(
             )
         }
 
-        // PHASE 3: Solve other constraints after type variables are bound
+        // PHASE 3: Solve other constraints (HasConstructor, HasField, etc.) after type variables are bound
         for (constraint in otherConstraints) {
             // Apply current substitution to constraint before solving
             val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
 
             // Solve the constraint
-            val result = solveConstraint(appliedConstraint, substitution)
+            // For HasConstructor, pass the original constraint so we can track which type var to update
+            val result = if (constraint is Constraint.HasConstructor) {
+                solveHasConstructor(appliedConstraint as Constraint.HasConstructor, substitution, constraint)
+            } else {
+                solveConstraint(appliedConstraint, substitution)
+            }
 
             when (result) {
                 is ConstraintResult.Success -> {
@@ -384,9 +566,19 @@ class ConstraintSolver(
             substitution = deferredSubst.compose(substitution)
         }
 
+        // Before returning, resolve mustBeOpenTypes to their row variables
+        // For each type variable marked as must-be-open, if it resolves to a variant with a row var,
+        // track that row var so it won't be closed
+        for (typeVar in mustBeOpenTypes) {
+            val resolvedType = substitution.apply(FunkType.VarType(typeVar))
+            if (resolvedType is FunkType.VariantType && resolvedType.rowVar != null) {
+                mustBeOpenRowVars.add(resolvedType.rowVar!!)
+            }
+        }
+
         // Return result
         return if (errors.isEmpty()) {
-            SolveResult.Success(substitution, warnings, resolvedAbilities)
+            SolveResult.Success(substitution, warnings, resolvedAbilities, mustBeOpenTypes.toSet(), mustBeOpenRowVars.toSet(), mustBeOpenBindings.toSet())
         } else {
             SolveResult.Failure(errors)
         }
@@ -416,7 +608,8 @@ class ConstraintSolver(
             is Constraint.EffectUsed -> solveEffectUsed(constraint)
             is Constraint.Subsumes -> solveSubsumes(constraint)
             is Constraint.HasField -> solveHasField(constraint, currentSubst)
-            is Constraint.HasConstructor -> solveHasConstructor(constraint)
+            is Constraint.HasConstructor -> solveHasConstructor(constraint, currentSubst)
+            is Constraint.MustBeOpen -> solveMustBeOpen(constraint, currentSubst)
         }
     }
 
@@ -889,6 +1082,34 @@ class ConstraintSolver(
     }
 
     /**
+     * Solve a MustBeOpen constraint: type must have a row variable.
+     *
+     * This is generated when a match expression has a wildcard pattern,
+     * indicating the scrutinee may have additional constructors.
+     */
+    private fun solveMustBeOpen(constraint: Constraint.MustBeOpen, currentSubst: Substitution): ConstraintResult {
+        val type = constraint.type
+
+        // Track binding name if available - this is the stable identifier
+        constraint.bindingName?.let { mustBeOpenBindings.add(it) }
+
+        // If it's a type variable, track it for later processing
+        if (type is FunkType.VarType) {
+            mustBeOpenTypes.add(type.variable)
+
+            // Also try to resolve it NOW and track the row variable if available
+            val resolved = currentSubst.apply(type)
+            if (resolved is FunkType.VariantType && resolved.rowVar != null) {
+                mustBeOpenRowVars.add(resolved.rowVar!!)
+            }
+        }
+
+        // MustBeOpen constraints don't produce substitutions directly,
+        // they just mark types that should remain open during final processing
+        return ConstraintResult.Success(Substitution.empty)
+    }
+
+    /**
      * Solve a field access constraint: record has field with type
      *
      * Ensures the record type has the specified field.
@@ -897,7 +1118,6 @@ class ConstraintSolver(
         val recordType = constraint.recordType
         val fieldName = constraint.fieldName
         val expectedFieldType = constraint.fieldType
-
 
         // If record type is a TypeApplication (e.g., Person), expand it to RecordType first
         if (recordType is FunkType.TypeApplication) {
@@ -986,50 +1206,32 @@ class ConstraintSolver(
      * Solve a constructor constraint: variant has constructor with payload
      *
      * Ensures the variant type has the specified constructor.
+     *
+     * @param constraint The constraint AFTER substitution was applied
+     * @param currentSubst The current substitution
+     * @param originalConstraint The constraint BEFORE substitution (optional, for tracking original type var)
      */
-    private fun solveHasConstructor(constraint: Constraint.HasConstructor): ConstraintResult {
+    private fun solveHasConstructor(
+        constraint: Constraint.HasConstructor,
+        currentSubst: Substitution = Substitution.empty,
+        originalConstraint: Constraint.HasConstructor? = null
+    ): ConstraintResult {
         val variantType = constraint.variantType
         val constructorName = constraint.constructorName
         val expectedPayloadType = constraint.payloadType
-
-        // DEBUG - write to file for ALL calls
-        try {
-            val debugFile = java.io.File("/tmp/constructor_all.txt")
-            debugFile.appendText("[ENTRY] solveHasConstructor: $constructorName\n")
-        } catch (e: Exception) {
-            // Ignore
-        }
-
-        // DEBUG
-        if (constructorName == "Nil") {
-            println("[DEBUG solveHasConstructor] Checking for constructor 'Nil'")
-            println("[DEBUG solveHasConstructor] Variant type: ${formatType(variantType)}")
-            println("[DEBUG solveHasConstructor] Variant type class: ${variantType::class.simpleName}")
-        }
 
         // If variant type is a TypeApplication, expand it first
         // This handles non-parametric types like Color (TypeApplication("Color", []))
         // and parametric types like Option Int (TypeApplication("Option", [IntType]))
         if (variantType is FunkType.TypeApplication) {
-            // DEBUG
-            if (constructorName == "Nil" || constructorName == "Cons") {
-                println("[DEBUG solveHasConstructor] Expanding TypeApplication ${variantType.constructor} for constructor $constructorName")
-            }
-
             val expanded = expandTypeApplicationToVariant(variantType, typeDeclarations)
 
-            // DEBUG
-            if (constructorName == "Nil" || constructorName == "Cons") {
-                println("[DEBUG solveHasConstructor] Expanded to: $expanded")
-                if (expanded != null) {
-                    println("[DEBUG solveHasConstructor] Expanded constructors: ${expanded.constructors.keys}")
-                }
-            }
-
             if (expanded != null) {
-                // Recursively solve with the expanded variant type
+                // Recursively solve with the expanded variant type, preserving original constraint
                 return solveHasConstructor(
-                    constraint.copy(variantType = expanded)
+                    constraint.copy(variantType = expanded),
+                    currentSubst,
+                    originalConstraint ?: constraint
                 )
             } else {
                 return ConstraintResult.Failure(
@@ -1038,18 +1240,17 @@ class ConstraintSolver(
             }
         }
 
-        // If variant type is a type variable, we can't validate yet
-        // The type variable will be unified with a concrete type by Equality constraints
-        // OR it represents an anonymous/structural variant type (constructors without declarations)
+        // If variant type is a type variable, create an open variant with this constructor
+        // The open variant can be extended by other HasConstructor constraints on the same type var
         if (variantType is FunkType.VarType) {
-            // CRITICAL: Don't try to validate or create a variant type here!
-            // Multiple constructors from the same variant would create conflicting variants.
-            // Instead, let Equality constraints bind the type variable first.
-            //
-            // If NO Equality constraint was generated (no matching type declaration),
-            // this is an anonymous/structural variant - Funk allows using constructors
-            // without declaring types, inferring the variant from usage.
-            return ConstraintResult.Success(Substitution.empty)
+            // Create an open variant type with just this constructor
+            val newVariant = FunkType.VariantType(
+                constructors = mapOf(constructorName to expectedPayloadType),
+                rowVar = RowVar.fresh()  // Open so it can be extended
+            )
+            return ConstraintResult.Success(
+                Substitution.single(variantType.variable, newVariant)
+            )
         }
 
         // Special handling for BooleanType - allows pattern matching with True/False
@@ -1073,13 +1274,6 @@ class ConstraintSolver(
 
         // If it's a concrete variant type, check if constructor exists
         if (variantType is FunkType.VariantType) {
-            // DEBUG
-            if (constructorName == "Nil" || constructorName == "Cons") {
-                println("[DEBUG solveHasConstructor] VariantType with constructors: ${variantType.constructors.keys}")
-                println("[DEBUG solveHasConstructor] Looking for constructor: $constructorName")
-                println("[DEBUG solveHasConstructor] rowVar: ${variantType.rowVar}")
-            }
-
             val actualPayloadType = variantType.constructors[constructorName]
 
             // If constructor doesn't exist, check if variant is open (has row variable)
@@ -1092,25 +1286,40 @@ class ConstraintSolver(
                         constructors = newConstructors,
                         rowVar = variantType.rowVar  // Keep the row variable
                     )
-                    // Unify the original variant with the extended one
-                    // This will fail if they're already the same, or succeed with a substitution
+
+                    // Find the type variable that DIRECTLY maps to this variant (not through a chain)
+                    // This is important: we need to update the actual type var holding the variant,
+                    // not the original type var (which might just point to the actual one through unification)
+                    //
+                    // First, look for a DIRECT mapping (where mappedType IS the variant, not another VarType)
+                    var directTypeVar: TypeVar? = null
+                    var chainedTypeVar: TypeVar? = null
+
+                    for ((typeVar, mappedType) in currentSubst.mappings) {
+                        // Check for DIRECT mapping: typeVar -> VariantType
+                        if (mappedType == variantType) {
+                            directTypeVar = typeVar
+                            break // Direct mapping found, no need to search further
+                        }
+
+                        // Check for CHAINED mapping: typeVar -> VarType -> ... -> VariantType
+                        val resolvedMappedType = currentSubst.apply(mappedType)
+                        if (resolvedMappedType == variantType && chainedTypeVar == null) {
+                            chainedTypeVar = typeVar
+                        }
+                    }
+
+                    // Prefer direct mapping over chained mapping
+                    val targetTypeVar = directTypeVar ?: chainedTypeVar
+                    if (targetTypeVar != null) {
+                        return ConstraintResult.Success(
+                            Substitution.single(targetTypeVar, extendedVariant)
+                        )
+                    }
+                    // No type variable found - return success
                     return ConstraintResult.Success(Substitution.empty)
                 } else {
                     // Variant is closed - constructor must exist
-                    // DEBUG - write to file
-                    try {
-                        val debugFile = java.io.File("/tmp/constructor_debug.txt")
-                        debugFile.appendText("[DEBUG] FAILING: constructor '$constructorName' not in ${variantType.constructors.keys}\n")
-                        debugFile.appendText("[DEBUG] Full variant type: $variantType\n")
-                        debugFile.appendText("[DEBUG] Stack trace:\n")
-                        Thread.currentThread().stackTrace.take(10).forEach {
-                            debugFile.appendText("  $it\n")
-                        }
-                        debugFile.appendText("\n")
-                    } catch (e: Exception) {
-                        // Ignore debug errors
-                    }
-
                     return ConstraintResult.Failure(
                         "Variant type does not have constructor '$constructorName'. Available constructors: ${variantType.constructors.keys.joinToString()}"
                     )
@@ -1193,6 +1402,13 @@ class ConstraintSolver(
                 payloadType = constraint.payloadType?.let { substitution.apply(it) },
                 context = constraint.context
             )
+
+            is Constraint.MustBeOpen -> Constraint.MustBeOpen(
+                type = substitution.apply(constraint.type),
+                bindingName = constraint.bindingName,
+                context = constraint.context,
+                sourceLocation = constraint.sourceLocation
+            )
         }
     }
 
@@ -1207,6 +1423,7 @@ class ConstraintSolver(
             is Constraint.Subsumes -> this.context
             is Constraint.HasField -> this.context
             is Constraint.HasConstructor -> this.context
+            is Constraint.MustBeOpen -> this.context
         }
     }
 
@@ -1349,6 +1566,81 @@ class ConstraintSolver(
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
             is FunkType.OrderingType, is FunkType.EffectRow -> type
+        }
+    }
+
+    /**
+     * Convert a type annotation to FunkType with a substitution for type parameters.
+     */
+    private fun convertTypeAnnotation(
+        annotation: TypeAnnotation,
+        typeParamSubst: Map<String, FunkType>
+    ): FunkType {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                when (annotation.name) {
+                    "Int" -> FunkType.IntType
+                    "Float" -> FunkType.FloatType
+                    "String" -> FunkType.StringType
+                    "Bool" -> FunkType.VariantType(
+                        constructors = mapOf("True" to null, "False" to null),
+                        rowVar = null
+                    )
+                    "Nat" -> FunkType.NatType
+                    "Frac" -> FunkType.FracType
+                    "Ordering" -> FunkType.OrderingType
+                    else -> {
+                        // Type variable or type constructor
+                        if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
+                            // Look up in substitution first
+                            typeParamSubst[annotation.name]
+                                ?: typeParamSubst["'" + annotation.name.trimStart('\'')]
+                                ?: FunkType.VarType(TypeVar(annotation.name))
+                        } else {
+                            FunkType.TypeApplication(annotation.name, emptyList())
+                        }
+                    }
+                }
+            }
+            is FunctionTypeAnnotation -> {
+                FunkType.FunctionType(
+                    paramType = convertTypeAnnotation(annotation.paramType, typeParamSubst),
+                    returnType = convertTypeAnnotation(annotation.returnType, typeParamSubst),
+                    effects = annotation.effects?.let { effectRow ->
+                        FunkType.EffectRow(effectRow.effects.toSet())
+                    },
+                    abilityConstraints = emptyList()
+                )
+            }
+            is RecordTypeAnnotation -> {
+                FunkType.RecordType(
+                    fields = annotation.entries.associate { entry ->
+                        entry.name to convertTypeAnnotation(entry.type, typeParamSubst)
+                    },
+                    rowVar = annotation.restField?.let { RowVar(it) }
+                )
+            }
+            is VariantTypeAnnotation -> {
+                FunkType.VariantType(
+                    constructors = annotation.constructors.associate { ctor ->
+                        ctor.name to ctor.dataType?.let { convertTypeAnnotation(it, typeParamSubst) }
+                    }
+                )
+            }
+            is TypeApplicationAnnotation -> {
+                FunkType.TypeApplication(
+                    constructor = annotation.constructor,
+                    args = annotation.args.map { convertTypeAnnotation(it, typeParamSubst) }
+                )
+            }
+            is ArrayTypeAnnotation -> {
+                FunkType.ArrayType(
+                    elementType = convertTypeAnnotation(annotation.elementType, typeParamSubst)
+                )
+            }
+            is EffectRowAnnotation -> {
+                FunkType.EffectRow(annotation.effects.toSet())
+            }
         }
     }
 }

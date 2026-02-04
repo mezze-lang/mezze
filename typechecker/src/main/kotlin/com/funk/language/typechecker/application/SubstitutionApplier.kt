@@ -25,8 +25,30 @@ import com.funk.language.typechecker.solving.Substitution
 class SubstitutionApplier(
     private val substitution: Substitution,
     private val constraintResults: Map<String, com.funk.language.typechecker.constraints.ConstraintResult> = emptyMap(),
-    private val performerToEffect: Map<String, String> = emptyMap()
+    private val performerToEffect: Map<String, String> = emptyMap(),
+    private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
+    private val mustBeOpenBindings: Set<String> = emptySet(),
+    private val mustBeOpenTypes: Set<TypeVar> = emptySet()
 ) {
+    // Compute variants that must stay open by resolving type vars with substitution
+    // This handles the case where per-binding solving created different row vars than global solving
+    private val effectiveMustBeOpenRowVars: Set<RowVar> by lazy {
+        val result = mustBeOpenRowVars.toMutableSet()
+        for (typeVar in mustBeOpenTypes) {
+            val resolved = substitution.apply(FunkType.VarType(typeVar))
+            if (resolved is FunkType.VariantType && resolved.rowVar != null) {
+                result.add(resolved.rowVar!!)
+            }
+        }
+        result
+    }
+
+    // Map binding names to the constructor sets that should stay open in that binding
+    private val mustBeOpenBindingConstructors: Map<String, Set<Set<String>>> by lazy {
+        // TODO: We need the MustBeOpen constraints to build this properly
+        // For now, we use a simpler approach
+        emptyMap<String, Set<Set<String>>>()
+    }
     // Mutable context for tracking identifier types during traversal
     // This mimics OldTypeChecker's context map (OldTypeChecker.kt:1900-1910)
     // Maps identifier names to their types
@@ -105,6 +127,7 @@ class SubstitutionApplier(
         // Apply substitution to get the final type
         val substitutedType = baseInferredType?.let { substitution.apply(it) }
 
+
         // Get the effects from constraint results
         val effects = constraintResult?.effects ?: emptySet()
 
@@ -147,7 +170,8 @@ class SubstitutionApplier(
 
         // Close generated row variables in the final type
         // This matches old TypeChecker behavior where records inferred from field access are closed by default
-        val closedType = finalType?.let { closeGeneratedRowVars(it) }
+        // Pass the binding name so we can check if this binding should have open variants
+        val closedType = finalType?.let { closeGeneratedRowVars(it, bindingName) }
 
         return binding.copy(
             expression = updatedExpression,
@@ -942,7 +966,10 @@ class SubstitutionApplier(
      * This matches the old TypeChecker behavior where records inferred from
      * field access are closed by default.
      */
-    private fun closeGeneratedRowVars(type: FunkType): FunkType {
+    private fun closeGeneratedRowVars(type: FunkType, bindingName: String? = null): FunkType {
+        // Check if this binding should have open variants
+        val bindingShouldBeOpen = bindingName != null && mustBeOpenBindings.contains(bindingName)
+
         return when (type) {
             is FunkType.RecordType -> {
                 // Close the row variable if it's a generated one (starts with "row")
@@ -953,46 +980,62 @@ class SubstitutionApplier(
                     existingRowVar  // Keep it (user annotation)
                 }
                 FunkType.RecordType(
-                    fields = type.fields.mapValues { (_, fieldType) -> closeGeneratedRowVars(fieldType) },
+                    fields = type.fields.mapValues { (_, fieldType) -> closeGeneratedRowVars(fieldType, bindingName) },
                     rowVar = closedRowVar
                 )
             }
             is FunkType.VariantType -> {
-                // Close the row variable if it's a generated one (starts with "row")
+                // Check if this variant type should stay open
+                // It must stay open ONLY if its row variable is in the effectiveMustBeOpenRowVars set
+                //
+                // NOTE: We do NOT use binding-level openness as a fallback anymore!
+                // The old fallback (`mustBeOpenBindings.contains(bindingName)`) caused ALL variants
+                // in a binding to stay open when only the scrutinee should be open.
+                // This led to return types from variant constructions being incorrectly open.
+                //
+                // The proper solution requires tracking the per-binding substitutions and merging
+                // them with the global substitution so MustBeOpen constraints can be resolved.
+                // But since per-binding solving doesn't propagate substitutions back, we just
+                // close all generated row vars unless they're explicitly in effectiveMustBeOpenRowVars.
                 val existingRowVar = type.rowVar
-                val closedRowVar = if (existingRowVar != null && existingRowVar.name.startsWith("row")) {
+                val shouldStayOpen = existingRowVar != null && effectiveMustBeOpenRowVars.contains(existingRowVar)
+
+                // Close the row variable only if:
+                // 1. It's a generated one (starts with "row")
+                // 2. AND the type doesn't need to stay open
+                val closedRowVar = if (existingRowVar != null && existingRowVar.name.startsWith("row") && !shouldStayOpen) {
                     null  // Close it
                 } else {
-                    existingRowVar  // Keep it (user annotation)
+                    existingRowVar  // Keep it (user annotation or must stay open)
                 }
                 FunkType.VariantType(
                     constructors = type.constructors.mapValues { (_, payloadType) ->
-                        payloadType?.let { closeGeneratedRowVars(it) }
+                        payloadType?.let { closeGeneratedRowVars(it, bindingName) }
                     },
                     rowVar = closedRowVar
                 )
             }
             is FunkType.FunctionType -> {
                 FunkType.FunctionType(
-                    paramType = closeGeneratedRowVars(type.paramType),
-                    returnType = closeGeneratedRowVars(type.returnType),
+                    paramType = closeGeneratedRowVars(type.paramType, bindingName),
+                    returnType = closeGeneratedRowVars(type.returnType, bindingName),
                     effects = type.effects,
                     abilityConstraints = type.abilityConstraints
                 )
             }
-            is FunkType.ArrayType -> FunkType.ArrayType(closeGeneratedRowVars(type.elementType))
-            is FunkType.ListType -> FunkType.ListType(closeGeneratedRowVars(type.elementType))
-            is FunkType.SetType -> FunkType.SetType(closeGeneratedRowVars(type.elementType))
+            is FunkType.ArrayType -> FunkType.ArrayType(closeGeneratedRowVars(type.elementType, bindingName))
+            is FunkType.ListType -> FunkType.ListType(closeGeneratedRowVars(type.elementType, bindingName))
+            is FunkType.SetType -> FunkType.SetType(closeGeneratedRowVars(type.elementType, bindingName))
             is FunkType.MapType -> FunkType.MapType(
-                keyType = closeGeneratedRowVars(type.keyType),
-                valueType = closeGeneratedRowVars(type.valueType)
+                keyType = closeGeneratedRowVars(type.keyType, bindingName),
+                valueType = closeGeneratedRowVars(type.valueType, bindingName)
             )
             is FunkType.TypeApplication -> FunkType.TypeApplication(
                 constructor = type.constructor,
-                args = type.args.map { closeGeneratedRowVars(it) }
+                args = type.args.map { closeGeneratedRowVars(it, bindingName) }
             )
             is FunkType.SuspendedType -> FunkType.SuspendedType(
-                valueType = closeGeneratedRowVars(type.valueType),
+                valueType = closeGeneratedRowVars(type.valueType, bindingName),
                 effects = type.effects
             )
             // Types without row variables
@@ -1007,4 +1050,17 @@ class SubstitutionApplier(
             is FunkType.EffectRow -> type
         }
     }
+
+    private fun debugType(type: FunkType?, depth: Int = 0): String {
+        if (type == null) return "null"
+        if (depth > 3) return "..."
+        return when (type) {
+            is FunkType.FunctionType -> "FunctionType(param=${debugType(type.paramType, depth + 1)}, return=${debugType(type.returnType, depth + 1)})"
+            is FunkType.RecordType -> "RecordType(fields={${type.fields.map { (k, v) -> "$k: ${debugType(v, depth + 1)}" }.joinToString(", ")}}, rowVar=${type.rowVar})"
+            is FunkType.VariantType -> "VariantType(constructors=${type.constructors.keys}, rowVar=${type.rowVar})"
+            is FunkType.VarType -> "VarType(${type.variable})"
+            else -> type::class.simpleName ?: type.toString()
+        }
+    }
+
 }

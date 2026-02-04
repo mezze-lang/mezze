@@ -84,11 +84,105 @@ class FixtureBasedTypeCheckerTest {
     }
 
     /**
-     * Normalize a type string by sorting ability constraints alphabetically.
-     * This allows order-independent comparison since "with NumAdd 'a, NumSub 'a"
-     * is semantically equivalent to "with NumSub 'a, NumAdd 'a".
+     * Normalize a type string for order-independent comparison.
+     * - Sorts ability constraints alphabetically
+     * - Sorts variant constructors alphabetically
      */
     private fun normalizeTypeString(typeStr: String): String {
+        // First, normalize variant constructors
+        val normalizedVariants = normalizeVariantConstructors(typeStr)
+
+        // Then normalize ability constraints
+        return normalizeAbilityConstraints(normalizedVariants)
+    }
+
+    /**
+     * Normalize variant constructors by sorting them alphabetically.
+     * Handles variants like "| Red, Yellow, Green |" and "| A { x: Int }, B |"
+     */
+    private fun normalizeVariantConstructors(typeStr: String): String {
+        // Pattern to match variant syntax: | constructor1, constructor2, ... |
+        // The variant can be open (ends with "... |") or closed (ends with " |")
+        val variantPattern = Regex("""\|\s*([^|]+?)\s*\|""")
+
+        return variantPattern.replace(typeStr) { match ->
+            val contents = match.groupValues[1].trim()
+
+            // Check if it's an open variant (ends with "...")
+            val isOpen = contents.endsWith(", ...")
+            val constructorsPart = if (isOpen) {
+                contents.removeSuffix(", ...").trim()
+            } else {
+                contents
+            }
+
+            // Split and sort constructors
+            // Be careful with constructors that have payloads (contain spaces or braces)
+            val constructors = splitVariantConstructors(constructorsPart)
+            val sorted = constructors.sorted()
+
+            if (isOpen) {
+                "| ${sorted.joinToString(", ")}, ... |"
+            } else {
+                "| ${sorted.joinToString(", ")} |"
+            }
+        }
+    }
+
+    /**
+     * Split variant constructors carefully, handling payloads with nested braces.
+     */
+    private fun splitVariantConstructors(constructorsPart: String): List<String> {
+        val result = mutableListOf<String>()
+        var current = StringBuilder()
+        var braceDepth = 0
+        var parenDepth = 0
+
+        for (char in constructorsPart) {
+            when (char) {
+                '{' -> {
+                    braceDepth++
+                    current.append(char)
+                }
+                '}' -> {
+                    braceDepth--
+                    current.append(char)
+                }
+                '(' -> {
+                    parenDepth++
+                    current.append(char)
+                }
+                ')' -> {
+                    parenDepth--
+                    current.append(char)
+                }
+                ',' -> {
+                    if (braceDepth == 0 && parenDepth == 0) {
+                        val trimmed = current.toString().trim()
+                        if (trimmed.isNotEmpty()) {
+                            result.add(trimmed)
+                        }
+                        current = StringBuilder()
+                    } else {
+                        current.append(char)
+                    }
+                }
+                else -> current.append(char)
+            }
+        }
+
+        val trimmed = current.toString().trim()
+        if (trimmed.isNotEmpty()) {
+            result.add(trimmed)
+        }
+
+        return result
+    }
+
+    /**
+     * Normalize ability constraints by sorting them alphabetically.
+     */
+    private fun normalizeAbilityConstraints(typeStr: String): String {
         // Check if the type has ability constraints (contains "with")
         val withIndex = typeStr.indexOf(" with ")
         if (withIndex == -1) {

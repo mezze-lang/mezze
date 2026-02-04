@@ -14,7 +14,7 @@ let handleTrafficLight = {light} -> match light is
 # Exhaustive with data fields - closed
 let handleOption = {opt} -> match opt is
   Some {val} -> val
-  None -> 0                                                     # expected: handleOption : { opt: | Some { val: Int }, None | } -> Int
+  None -> 0                                                     # expected: handleOption : { opt: Option Int } -> Int
 
 # Exhaustive match with operations - closed variant
 let compute = {op, x, y} -> match op is

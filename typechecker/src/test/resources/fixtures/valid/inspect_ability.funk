@@ -25,7 +25,7 @@ let polyInspect = {x} -> Inspect.to_str {val = x}                     # expected
 # Using inspect in a match expression - Inspect is implicit
 let inspectMatch = {opt} -> match opt is
   Some {val} -> Inspect.to_str {val = val}
-  None -> "none"                                                        # expected: inspectMatch : { opt: | Some { val: 'a }, None | } -> String
+  None -> "none"                                                        # expected: inspectMatch : { opt: Option 'a } -> String
 
 # Inspect with conditional - Inspect is implicit, x and y can be different types
 let inspectCond = {flag, x, y} ->
