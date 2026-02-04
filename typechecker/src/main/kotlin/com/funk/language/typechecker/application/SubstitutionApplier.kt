@@ -153,13 +153,61 @@ class SubstitutionApplier(
 
     /**
      * Apply substitution to a type declaration.
+     *
+     * CRITICAL: If inferredType is null, compute it from the definition.
+     * This matches OldTypeChecker.kt:1569 which does `item.copy(inferredType = definitionType)`
      */
     private fun applyToTypeDeclaration(typeDecl: TypeDeclaration): TypeDeclaration {
-        val updatedInferredType = typeDecl.inferredType?.let { substitution.apply(it) }
+        val computedType = typeDecl.inferredType ?: convertTypeDefinition(typeDecl.definition)
+        val updatedInferredType = substitution.apply(computedType)
 
         return typeDecl.copy(
             inferredType = updatedInferredType
         )
+    }
+
+    /**
+     * Convert a TypeDefinition to a FunkType.
+     *
+     * This matches OldTypeChecker.kt:10808-10852.
+     * CRITICAL: Preserves isOpen flag and rowVar for variants.
+     */
+    private fun convertTypeDefinition(definition: TypeDefinition): FunkType {
+        return when (definition) {
+            is NewtypeDefinition -> {
+                // Convert the wrapped type
+                val wrappedFunkType = convertTypeAnnotation(definition.wrappedType)
+                // Newtypes are represented as single-constructor variants internally
+                FunkType.VariantType(
+                    constructors = mapOf(definition.constructor to wrappedFunkType),
+                    rowVar = null  // Newtypes are always closed
+                )
+            }
+            is RecordDefinition -> {
+                val fields = definition.fields.associate { field ->
+                    field.name to convertTypeAnnotation(field.type)
+                }
+                // CRITICAL: Preserve isOpen flag from RecordDefinition
+                if (definition.isOpen) {
+                    FunkType.RecordType(fields, RowVar("rest"))
+                } else {
+                    FunkType.RecordType(fields)
+                }
+            }
+            is VariantDefinition -> {
+                val constructors = definition.constructors.associate { constructor ->
+                    constructor.name to constructor.dataType?.let { convertTypeAnnotation(it) }
+                }
+                // CRITICAL: Preserve isOpen flag from VariantDefinition
+                if (definition.isOpen) {
+                    // Create open variant with a row variable
+                    FunkType.VariantType(constructors, RowVar("rest"))
+                } else {
+                    // Create closed variant
+                    FunkType.VariantType(constructors)
+                }
+            }
+        }
     }
 
     /**

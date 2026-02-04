@@ -407,7 +407,7 @@ private fun unifyRecords(rec1: FunkType.RecordType, rec2: FunkType.RecordType, t
 /**
  * Unify two variant types.
  */
-private fun unifyVariants(var1: FunkType.VariantType, var2: FunkType.VariantType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+internal fun unifyVariants(var1: FunkType.VariantType, var2: FunkType.VariantType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
     val constructors1 = var1.constructors.keys
     val constructors2 = var2.constructors.keys
 
@@ -510,8 +510,20 @@ private fun unifyVariants(var1: FunkType.VariantType, var2: FunkType.VariantType
  * Unify two type applications.
  */
 private fun unifyTypeApplications(app1: FunkType.TypeApplication, app2: FunkType.TypeApplication, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
-    // Type constructors must match
+    // Type constructors must match - unless one is an open variant
     if (app1.constructor != app2.constructor) {
+        // OPEN VARIANT HANDLING: If one type is an open variant, expand both and unify as variants
+        // This allows open variants to accept constructors from other types
+        val expanded1 = expandTypeApplicationToVariant(app1, typeDeclarations)
+        val expanded2 = expandTypeApplicationToVariant(app2, typeDeclarations)
+
+        if (expanded1 != null && expanded2 != null) {
+            // At least one must be open for cross-type unification
+            if (expanded1.rowVar != null || expanded2.rowVar != null) {
+                return unifyVariants(expanded1, expanded2, typeDeclarations)
+            }
+        }
+
         return UnificationResult.Failure(
             message = "Type constructor mismatch: ${app1.constructor} vs ${app2.constructor}",
             type1 = app1,
