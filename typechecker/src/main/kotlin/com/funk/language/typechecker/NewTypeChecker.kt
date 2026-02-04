@@ -253,7 +253,7 @@ class NewTypeChecker(
                              constraintResults.values.flatMap { it.abilityConstraints }
 
         // PHASE 3: Solve Constraints
-        val solver = ConstraintSolver(context, buildResult.typeDeclarations)
+        val solver = ConstraintSolver(context, buildResult.typeDeclarations, buildResult.abilityDeclarations)
         val solveResult = solver.solve(allConstraints)
 
         // Check if solving failed

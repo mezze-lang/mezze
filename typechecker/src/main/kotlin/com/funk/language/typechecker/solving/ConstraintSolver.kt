@@ -1,6 +1,7 @@
 package com.funk.language.typechecker.solving
 
 import com.funk.language.ast.*
+import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.constraints.Constraint
 import com.funk.language.typechecker.context.TypingContext
 
@@ -25,7 +26,8 @@ import com.funk.language.typechecker.context.TypingContext
  */
 class ConstraintSolver(
     private val context: TypingContext,
-    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap()
+    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
+    private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap()
 ) {
     /**
      * Track ability constraints on type variables.
@@ -472,8 +474,7 @@ class ConstraintSolver(
                         // Check if implementation exists
                         val hasImpl = checkAbilityImplementation(abilityName, concreteTypeArgs)
                         if (!hasImpl) {
-                            val typeNames: String = concreteTypeArgs.joinToString(", ") { formatType(it) }
-                            return "No implementation of $abilityName for types: $typeNames"
+                            return generateAbilityErrorMessage(abilityName, concreteTypeArgs)
                         }
                     } else {
                         // Some types are still type variables - try bidirectional inference!
@@ -522,10 +523,12 @@ class ConstraintSolver(
             .add(abilityName to trackingArgs)
 
         // Also track for any type variables in typeArgs
+        // CRITICAL: Use trackingArgs (which includes ALL type arguments), not just typeArgs
+        // Otherwise, when 'to is resolved in Convert 'from 'to, we'd only check ['to] instead of ['from, 'to]
         for (typeArg in typeArgs) {
             if (typeArg is FunkType.VarType && typeArg.variable != constraint.typeVar) {
                 val constraints = typeVarAbilityConstraints.getOrPut(typeArg.variable) { mutableListOf() }
-                constraints.add(abilityName to typeArgs)
+                constraints.add(abilityName to trackingArgs)
             }
         }
 
@@ -539,10 +542,9 @@ class ConstraintSolver(
 
             if (!hasImpl) {
                 // No implementation found - this is a type error
-                val typeNames = trackingArgs.map { formatType(it) }.joinToString(", ")
-                return ConstraintResult.Failure(
-                    "No implementation of $abilityName for types: $typeNames"
-                )
+                // Generate better error messages for specific cases
+                val errorMessage = generateAbilityErrorMessage(abilityName, trackingArgs)
+                return ConstraintResult.Failure(errorMessage)
             }
 
             // Implementation exists - constraint is satisfied
@@ -570,8 +572,13 @@ class ConstraintSolver(
      * Also checks for built-in ability implementations.
      */
     private fun checkAbilityImplementation(abilityName: String, typeArgs: List<FunkType>): Boolean {
-        // First check built-in abilities (single-parameter abilities like Ord Int)
-        if (typeArgs.size == 1) {
+        // Check if the user has defined their own version of this ability.
+        // If so, the user-defined ability SHADOWS the built-in one, and we must NOT
+        // use the built-in implementation. The user must provide an explicit impl.
+        val isUserDefinedAbility = abilityDeclarations.containsKey(abilityName)
+
+        // Check built-in abilities ONLY if there's no user-defined ability with the same name
+        if (!isUserDefinedAbility && typeArgs.size == 1) {
             if (isBuiltInAbilityImplementation(abilityName, typeArgs.first())) {
                 return true
             }
@@ -583,13 +590,6 @@ class ConstraintSolver(
 
         // Check if implementation exists in context
         val hasImpl = context.getAbilityImpl(implKey) != null
-
-        // DEBUG
-        if (System.getProperty("funk.debug.abilities") == "true") {
-            println("[DEBUG] Checking ability $abilityName for types $typeNames")
-            println("[DEBUG] Implementation key: $implKey")
-            println("[DEBUG] Has implementation: $hasImpl")
-        }
 
         return hasImpl
     }
@@ -647,10 +647,46 @@ class ConstraintSolver(
     /**
      * Check if a type is the Bool variant type.
      */
+    /**
+     * Generate a user-friendly error message for ability constraint failures.
+     * Provides specific messages for common cases like arithmetic with function types.
+     */
+    private fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<FunkType>): String {
+        // Check if any type argument is a function type
+        val hasFunctionType = typeArgs.any { it is FunkType.FunctionType }
+
+        if (hasFunctionType) {
+            // Generate special error message for arithmetic with function types
+            val operatorName = when (abilityName) {
+                "NumAdd" -> "(+)"
+                "NumSub" -> "(-)"
+                "NumMul" -> "(*)"
+                "NumDiv" -> "(/)"
+                "NumMod" -> "(%)"
+                "NumNeg" -> "(-)"
+                else -> abilityName
+            }
+
+            val functionType = typeArgs.find { it is FunkType.FunctionType }
+            val functionTypeStr = formatType(functionType!!)
+
+            return when (abilityName) {
+                "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "NumNeg" ->
+                    "Cannot apply arithmetic operator '$operatorName' to a function type $functionTypeStr - functions don't implement the $abilityName ability"
+                else -> {
+                    val typeNames = typeArgs.map { formatType(it) }.joinToString(", ")
+                    "No implementation of $abilityName for types: $typeNames (function types don't implement abilities)"
+                }
+            }
+        }
+
+        // Default error message
+        val typeNames = typeArgs.map { formatType(it) }.joinToString(", ")
+        return "No implementation of $abilityName for types: $typeNames"
+    }
+
     private fun isBoolVariant(type: FunkType): Boolean {
-        return type is FunkType.VariantType &&
-               type.constructors.keys.containsAll(setOf("True", "False")) &&
-               type.constructors.size == 2
+        return BuiltInAbilities.isBoolVariant(type)
     }
 
     /**

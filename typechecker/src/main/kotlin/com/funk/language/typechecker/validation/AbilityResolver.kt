@@ -1,6 +1,7 @@
 package com.funk.language.typechecker.validation
 
 import com.funk.language.ast.*
+import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.context.TypingContext
 
 /**
@@ -351,7 +352,16 @@ class AbilityResolver(
             // For complex types, use a generic name (these are rare as ability targets)
             is FunkType.FunctionType -> "Function"
             is FunkType.RecordType -> "Record"
-            is FunkType.VariantType -> "Variant"
+            is FunkType.VariantType -> {
+                // Check if this is the Bool type (True | False)
+                // Uses the centralized check in BuiltInAbilities to avoid duplicating logic
+                if (BuiltInAbilities.isBoolVariant(type)) {
+                    "Bool"
+                } else {
+                    // For other variant types, generate a name based on constructors
+                    "Variant_${type.constructors.keys.sorted().joinToString("_")}"
+                }
+            }
             is FunkType.SuspendedType -> getTypeName(type.valueType)
             is FunkType.EffectRow -> "EffectRow"
         }

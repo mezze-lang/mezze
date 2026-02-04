@@ -1,6 +1,7 @@
 package com.funk.language.typechecker.constraints
 
 import com.funk.language.ast.*
+import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.context.TypingContext
 import com.funk.language.typechecker.context.TypeScheme
 
@@ -69,7 +70,7 @@ class ConstraintGenerator(
         val recordLiteralBindings = mutableSetOf<String>()
 
         // Import constraint solver for incremental solving
-        val solver = com.funk.language.typechecker.solving.ConstraintSolver(context, typeDeclarations)
+        val solver = com.funk.language.typechecker.solving.ConstraintSolver(context, typeDeclarations, abilityDeclarations)
 
         // FIRST PASS: Add placeholders for function bindings to support mutual recursion
         // This allows functions to reference themselves and each other
@@ -228,10 +229,12 @@ class ConstraintGenerator(
                                 }
 
                                 // 3. ABILITY VALIDATION
-                                // Check that abilities are applied to correct type variables (by ID, not name).
+                                // Check that abilities are applied to correct type variables.
                                 // This catches cases like: annotation declares NumAdd 'b but impl uses NumAdd 'a
                                 if (annotation is FunctionTypeAnnotation && annotation.abilityConstraints.isNotEmpty()) {
                                     // Apply substitution to ability constraints to map fresh type vars back
+                                    // The substitution may map in either direction (annotation->inferred or inferred->annotation)
+                                    // so we try to resolve in both directions
                                     val resolvedAbilityConstraints = result.abilityConstraints.map { constraint ->
                                         val resolvedTypeVar = substitution.apply(FunkType.VarType(constraint.typeVar))
                                         if (resolvedTypeVar is FunkType.VarType) {
@@ -243,7 +246,8 @@ class ConstraintGenerator(
                                     validateAbilityOnCorrectTypeVar(
                                         preConvertedAnnotationType,
                                         resolvedAbilityConstraints,
-                                        varName
+                                        varName,
+                                        substitution
                                     )
                                 }
                             }
@@ -280,33 +284,65 @@ class ConstraintGenerator(
                                 // Quantify variables that don't appear in context
                                 val quantifiableVars = freeVars - contextVars
 
-                                // CRITICAL FIX: Don't generalize if there are unsatisfied ability constraints
+                                // CRITICAL FIX: Don't generalize if there are USER-DEFINED ability constraints
                                 // on the quantifiable variables. This prevents premature generalization that
                                 // breaks type inference when constraints are satisfied later.
                                 //
                                 // Example: let x = Parse.decode ... should NOT be generalized to forall 'a. Parse 'a => 'a
                                 // because when x is used in "10 + x", we need the SAME type variable to unify with Int.
                                 //
-                                // We check if any quantifiable variable has an ability constraint that references it.
-                                val hasUnsatisfiedAbilityConstraints = result.abilityConstraints.any { constraint ->
+                                // BUT: Built-in abilities like NumAdd, Eq, Ord SHOULD be generalized!
+                                // Example: let addTwo = { x } -> x + x SHOULD be forall 'a. NumAdd 'a => { x: 'a } -> 'a
+                                // because NumAdd has built-in implementations for all numeric types.
+                                //
+                                // We only prevent generalization for user-defined abilities that need explicit implementations.
+                                val hasUserDefinedAbilityConstraints = result.abilityConstraints.any { constraint ->
                                     when (constraint) {
                                         is Constraint.AbilityRequired -> {
-                                            quantifiableVars.contains(constraint.typeVar)
+                                            // Check if this is a built-in ability with built-in implementations
+                                            val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(constraint.abilityName)
+
+                                            if (isBuiltInAbility) {
+                                                // Built-in abilities like NumAdd, Eq, etc. should allow generalization
+                                                false
+                                            } else {
+                                                // User-defined ability - check if the type variable is quantifiable
+                                                // Apply substitution to handle 'a -> 'b chains
+                                                val resolvedType = substitution.apply(FunkType.VarType(constraint.typeVar))
+                                                val resolvedTypeVar = if (resolvedType is FunkType.VarType) {
+                                                    resolvedType.variable
+                                                } else {
+                                                    // If resolved to concrete type, constraint is satisfied
+                                                    null
+                                                }
+                                                resolvedTypeVar != null && quantifiableVars.contains(resolvedTypeVar)
+                                            }
                                         }
                                         else -> false
                                     }
                                 }
 
-                                if (quantifiableVars.isNotEmpty() && !hasUnsatisfiedAbilityConstraints) {
+                                if (quantifiableVars.isNotEmpty() && !hasUserDefinedAbilityConstraints) {
                                     // Polymorphic binding - generalize into TypeScheme
                                     // Extract ability constraints for quantified variables
+                                    // CRITICAL: Compare by ID since TypeVar instances may differ even for same logical variable
+                                    val quantifiableVarIds = quantifiableVars.map { it.id }.toSet()
                                     val abilityConstraints = result.abilityConstraints.mapNotNull { constraint ->
                                         when (constraint) {
                                             is Constraint.AbilityRequired -> {
-                                                if (quantifiableVars.contains(constraint.typeVar)) {
+                                                // Check if constraint's typeVar matches any quantifiable var by ID
+                                                val resolvedConstraintVar = substitution.apply(FunkType.VarType(constraint.typeVar))
+                                                val constraintVarId = if (resolvedConstraintVar is FunkType.VarType) {
+                                                    resolvedConstraintVar.variable.id
+                                                } else {
+                                                    constraint.typeVar.id
+                                                }
+                                                if (quantifiableVarIds.contains(constraintVarId)) {
+                                                    // Find the actual quantifiable var to get its name
+                                                    val quantVar = quantifiableVars.find { it.id == constraintVarId }
                                                     AbilityConstraint(
                                                         abilityName = constraint.abilityName,
-                                                        typeParam = constraint.typeVar.name
+                                                        typeParam = quantVar?.name ?: constraint.typeVar.name
                                                     )
                                                 } else null
                                             }
@@ -858,7 +894,7 @@ class ConstraintGenerator(
                 }
 
                 // Solve constraints to get actual body type
-                val solver = com.funk.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations)
+                val solver = com.funk.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
                 val solveResult = solver.solve(bodyResult.constraints)
 
                 when (solveResult) {
@@ -882,7 +918,7 @@ class ConstraintGenerator(
 
                             if (hasTypeVariables) {
                                 // Try unification for polymorphic types
-                                val unificationSolver = com.funk.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations)
+                                val unificationSolver = com.funk.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
                                 val unificationResult = unificationSolver.solve(
                                     listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Ability body validation"))
                                 )
@@ -1251,23 +1287,34 @@ class ConstraintGenerator(
      * This catches cases like:
      * - Annotation declares `NumAdd 'b` but implementation uses `NumAdd 'a`
      *
-     * IMPORTANT: Compares type variables by ID, not by name, because fresh type vars
-     * may have different IDs even if they end up with the same name after substitution.
+     * The substitution is used to check if type variables are unified (in either direction).
      */
     private fun validateAbilityOnCorrectTypeVar(
         annotationType: FunkType,
         inferredAbilityConstraints: List<Constraint.AbilityRequired>,
-        varName: String
+        varName: String,
+        substitution: com.funk.language.typechecker.solving.Substitution
     ) {
         if (annotationType !is FunkType.FunctionType) return
 
         val annotatedAbilities = annotationType.abilityConstraints
         val annotationTypeVars = collectTypeVars(annotationType)
-        val annotationTypeVarIds = annotationTypeVars.map { it.id }.toSet()
 
         // Filter out constraints from annotation itself
         val actualUsageConstraints = inferredAbilityConstraints.filter { constraint ->
             constraint.context == null || !constraint.context.startsWith("Type annotation on")
+        }
+
+        // Helper function to check if two type variables are unified through substitution
+        fun areUnified(tv1: TypeVar, tv2: TypeVar): Boolean {
+            if (tv1.id == tv2.id) return true
+            // Check if substitution maps tv1 to tv2 or vice versa
+            val resolved1 = substitution.apply(FunkType.VarType(tv1))
+            val resolved2 = substitution.apply(FunkType.VarType(tv2))
+            // They're unified if they resolve to the same thing
+            return resolved1 == resolved2 ||
+                   (resolved1 is FunkType.VarType && resolved1.variable.id == tv2.id) ||
+                   (resolved2 is FunkType.VarType && resolved2.variable.id == tv1.id)
         }
 
         for (usage in actualUsageConstraints) {
@@ -1276,20 +1323,24 @@ class ConstraintGenerator(
             val matchingAnnotated = annotatedAbilities.find { it.abilityName == usage.abilityName }
 
             if (matchingAnnotated != null) {
-                // Check type variables match by ID
+                // Check type variables are unified through substitution
                 for (annotatedTypeArg in matchingAnnotated.typeArgs) {
                     if (annotatedTypeArg is FunkType.VarType) {
-                        if (usage.typeVar.id != annotatedTypeArg.variable.id) {
+                        // Check if usage.typeVar is unified with the annotation's type var
+                        if (!areUnified(usage.typeVar, annotatedTypeArg.variable)) {
                             throw com.funk.language.typechecker.TypeCheckError(
                                 "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
-                                "Annotation declares constraint on '${annotatedTypeArg.variable.name}' but implementation uses it on a different type variable."
+                                "Annotation declares constraint on '${annotatedTypeArg.variable.name}' but implementation uses it on '${usage.typeVar.name}'."
                             )
                         }
                     }
                 }
             } else {
                 // Implementation uses ability not in annotation - error if on annotation's type var
-                val isOnAnnotationTypeVar = annotationTypeVarIds.contains(usage.typeVar.id)
+                // Check if usage.typeVar is unified with any annotation type var
+                val isOnAnnotationTypeVar = annotationTypeVars.any { annotationVar ->
+                    areUnified(usage.typeVar, annotationVar)
+                }
                 if (isOnAnnotationTypeVar) {
                     throw com.funk.language.typechecker.TypeCheckError(
                         "Type annotation mismatch for '$varName': Implementation requires '${usage.abilityName}' on type variable '${usage.typeVar.name}', " +

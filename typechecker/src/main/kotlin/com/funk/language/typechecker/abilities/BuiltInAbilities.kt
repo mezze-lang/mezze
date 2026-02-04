@@ -280,6 +280,27 @@ object BuiltInAbilities {
     }
 
     /**
+     * Check if a variant type is the Bool variant: | True, False |
+     *
+     * Bool is represented as a closed variant with exactly two constructors (True and False),
+     * both with no payloads. This function allows other parts of the typechecker to recognize
+     * Bool variants without duplicating the check logic.
+     */
+    fun isBoolVariant(type: FunkType): Boolean {
+        return type is FunkType.VariantType &&
+               type.constructors.size == 2 &&
+               type.constructors.containsKey("True") &&
+               type.constructors.containsKey("False") &&
+               type.constructors["True"] == null &&
+               type.constructors["False"] == null
+    }
+
+    /**
+     * Get the canonical Bool type.
+     */
+    fun getBoolType(): FunkType.VariantType = boolType
+
+    /**
      * Get all method names for an ability.
      */
     fun getAvailableMethods(abilityName: String): List<String> {

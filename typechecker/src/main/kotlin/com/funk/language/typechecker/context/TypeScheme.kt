@@ -27,10 +27,17 @@ data class TypeScheme(
      */
     fun instantiate(): InstantiationResult {
         if (isMonomorphic) {
+            // Convert AbilityConstraint to FreshAbilityConstraint for monomorphic case
+            val monoConstraints = constraints.map { constraint ->
+                FreshAbilityConstraint(
+                    abilityName = constraint.abilityName,
+                    typeVar = TypeVar(constraint.typeParam)
+                )
+            }
             return InstantiationResult(
                 type = type,
                 substitution = emptyMap(),
-                freshConstraints = constraints
+                freshConstraints = monoConstraints
             )
         }
 
@@ -42,23 +49,42 @@ data class TypeScheme(
         // Apply substitution to type
         val instantiatedType = applySubstitutionToType(type, substitution)
 
+        // Create a lookup from type param NAME to the fresh TypeVar
+        // This handles both "'a" and "a" formats
+        val nameToFreshVar = mutableMapOf<String, TypeVar>()
+        for ((oldVar, newType) in substitution) {
+            if (newType is FunkType.VarType) {
+                // Map both with and without the ' prefix
+                val baseName = oldVar.name.removePrefix("'")
+                nameToFreshVar[baseName] = newType.variable
+                nameToFreshVar["'$baseName"] = newType.variable
+                nameToFreshVar[oldVar.name] = newType.variable
+            }
+        }
+
         // Instantiate constraints with fresh variables
-        val freshConstraints = constraints.map { constraint ->
-            val freshTypeParam = substitution[TypeVar(constraint.typeParam)]
-            when (freshTypeParam) {
-                is FunkType.VarType -> AbilityConstraint(
-                    constraint.abilityName,
-                    freshTypeParam.variable.name
+        // Use the name lookup to get the correct fresh TypeVar
+        val freshConstraintsWithVars = constraints.mapNotNull { constraint ->
+            val baseName = constraint.typeParam.removePrefix("'")
+            val freshTypeVar = nameToFreshVar[baseName] ?: nameToFreshVar[constraint.typeParam]
+            if (freshTypeVar != null) {
+                FreshAbilityConstraint(
+                    abilityName = constraint.abilityName,
+                    typeVar = freshTypeVar
                 )
-                null -> constraint // Not quantified, keep as-is
-                else -> constraint // Shouldn't happen, but keep constraint
+            } else {
+                // Not quantified - create a TypeVar from the name for now
+                FreshAbilityConstraint(
+                    abilityName = constraint.abilityName,
+                    typeVar = TypeVar(constraint.typeParam)
+                )
             }
         }
 
         return InstantiationResult(
             type = instantiatedType,
             substitution = substitution,
-            freshConstraints = freshConstraints
+            freshConstraints = freshConstraintsWithVars
         )
     }
 
@@ -68,7 +94,16 @@ data class TypeScheme(
     data class InstantiationResult(
         val type: FunkType,
         val substitution: Map<TypeVar, FunkType>,
-        val freshConstraints: List<AbilityConstraint>
+        val freshConstraints: List<FreshAbilityConstraint>
+    )
+
+    /**
+     * Ability constraint with the actual fresh TypeVar (not just a name string).
+     * This is used during instantiation to preserve TypeVar identity.
+     */
+    data class FreshAbilityConstraint(
+        val abilityName: String,
+        val typeVar: TypeVar
     )
 
     companion object {

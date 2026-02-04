@@ -224,13 +224,14 @@ class ExpressionConstraintGenerator {
                         // Polymorphic variable - instantiate with fresh type variables
                         val instantiation = binding.scheme.instantiate()
 
-                        // Convert AST AbilityConstraints to typechecker Constraint.AbilityRequired
-                        val abilityConstraints = instantiation.freshConstraints.map { astConstraint ->
+                        // Convert FreshAbilityConstraints to typechecker Constraint.AbilityRequired
+                        // The fresh constraints now contain the actual TypeVar (not just a name string)
+                        val abilityConstraints = instantiation.freshConstraints.map { freshConstraint ->
                             Constraint.AbilityRequired(
-                                typeVar = TypeVar(astConstraint.typeParam),
-                                abilityName = astConstraint.abilityName,
+                                typeVar = freshConstraint.typeVar,
+                                abilityName = freshConstraint.abilityName,
                                 typeArgs = emptyList(),
-                                context = null
+                                context = "Polymorphic instantiation of '${expr.name}'"
                             )
                         }
 
@@ -519,8 +520,11 @@ class ExpressionConstraintGenerator {
         }
 
         if (receiverName != null) {
-            // Check if this is a built-in ability
-            if (BuiltInAbilities.isBuiltInAbility(receiverName)) {
+            // Check if user has defined their own ability with this name (shadowing built-in)
+            val userDefinedAbility = context.abilityDeclarations[receiverName]
+
+            // Only use built-in ability if there's no user-defined ability with the same name
+            if (userDefinedAbility == null && BuiltInAbilities.isBuiltInAbility(receiverName)) {
                 val freshTypeVar = FunkType.VarType(TypeVar.fresh())
                 val methodType = BuiltInAbilities.getAbilityMethodType(
                     receiverName,
@@ -698,7 +702,9 @@ class ExpressionConstraintGenerator {
 
         // Add ability constraint to the function type
         if (instantiatedMethodType is FunkType.FunctionType) {
-            val typeVars = extractTypeVariables(instantiatedMethodType)
+            // CRITICAL: Use distinct() to avoid duplicate type variables
+            // Example: {val: 'a} -> 'a has 'a in both param and return, but we only want ['a] not ['a, 'a]
+            val typeVars = extractTypeVariables(instantiatedMethodType).distinct()
 
             if (typeVars.isEmpty()) {
                 // No type variables, no constraint needed
@@ -707,6 +713,8 @@ class ExpressionConstraintGenerator {
 
             // Create ability constraint for the primary type variable
             // Convert type variables to type arguments (wrapped in VarType)
+            // For single-parameter abilities (like Identity 'a), typeArgs will be empty
+            // For multi-parameter abilities (like Convert 'a 'b), typeArgs will be ['b]
             val typeArgs = typeVars.drop(1).map { FunkType.VarType(it) }
 
             val abilityConstraint = Constraint.AbilityRequired(

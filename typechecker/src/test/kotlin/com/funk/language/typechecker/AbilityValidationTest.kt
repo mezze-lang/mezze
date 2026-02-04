@@ -25,6 +25,9 @@ class AbilityValidationTest {
     @Test
     fun `test simple ability implementation with all operations`() {
         val source = """
+            # Define a helper function to compare strings
+            let stringEquals = {a: String, b: String} -> a == b
+
             ability Eq 'a where {
               eq: {l: 'a, r: 'a} -> Bool,
               neq: {l: 'a, r: 'a} -> Bool
@@ -32,7 +35,7 @@ class AbilityValidationTest {
 
             impl Eq String where {
               eq: {l: String, r: String} -> Bool = {l, r} -> stringEquals {a = l, b = r},
-              neq: {l: String, r: String} -> Bool = {l, r} -> stringEquals {a = l, b = r}
+              neq: {l: String, r: String} -> Bool = {l, r} -> !(stringEquals {a = l, b = r})
 
             }
 
@@ -125,6 +128,9 @@ class AbilityValidationTest {
     @Test
     fun `test ability with dependencies`() {
         val source = """
+            # Define a helper function to compare strings
+            let stringEquals = {a: String, b: String} -> a == b
+
             ability Eq 'a where {
               eq: {l: 'a, r: 'a} -> Bool
             }
