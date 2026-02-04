@@ -248,8 +248,9 @@ class NewTypeChecker(
             return TypeCheckResult.Failure(errors)
         }
 
-        // Collect all constraints from all bindings
-        val allConstraints = constraintResults.values.flatMap { it.constraints }
+        // Collect all constraints from all bindings (including ability constraints)
+        val allConstraints = constraintResults.values.flatMap { it.constraints } +
+                             constraintResults.values.flatMap { it.abilityConstraints }
 
         // PHASE 3: Solve Constraints
         val solver = ConstraintSolver(context, buildResult.typeDeclarations)

@@ -37,6 +37,15 @@ class ConstraintSolver(
      * on type variables during ability method calls.
      */
     private val typeVarAbilityConstraints = mutableMapOf<TypeVar, MutableList<Pair<String, List<FunkType>>>>()
+
+    /**
+     * Deferred type inferences from bidirectional ability inference.
+     *
+     * When we have a multi-parameter ability like Convert 'a 'b and 'a = Int,
+     * we can look up the implementation Convert_Int_String and infer 'b = String.
+     * These inferences are stored here and applied to the final substitution.
+     */
+    private val deferredInference = mutableMapOf<TypeVar, FunkType>()
     /**
      * Result of solving constraints.
      *
@@ -322,6 +331,19 @@ class ConstraintSolver(
             }
         }
 
+        // Validate ability constraints with the FULL accumulated substitution
+        // This is done after all equality constraints are solved so we have all type bindings
+        val validationError = validateAbilityConstraints(substitution)
+        if (validationError != null) {
+            errors.add(
+                ConstraintError(
+                    message = validationError,
+                    constraint = Constraint.Equality(FunkType.IntType, FunkType.IntType),  // Placeholder
+                    context = "ability constraint validation"
+                )
+            )
+        }
+
         // PHASE 3: Solve other constraints after type variables are bound
         for (constraint in otherConstraints) {
             // Apply current substitution to constraint before solving
@@ -347,6 +369,13 @@ class ConstraintSolver(
                     )
                 }
             }
+        }
+
+        // Apply deferred inferences from bidirectional ability inference
+        // These are types inferred from multi-parameter ability implementations
+        if (deferredInference.isNotEmpty()) {
+            val deferredSubst = Substitution(deferredInference.toMap())
+            substitution = deferredSubst.compose(substitution)
         }
 
         // Return result
@@ -389,22 +418,17 @@ class ConstraintSolver(
      * Solve an equality constraint: t1 = t2
      *
      * Uses unification to find substitution.
-     * Also validates ability constraints on type variables being unified.
+     * Note: Ability constraint validation is done AFTER all equality constraints are solved,
+     * so we have access to the full accumulated substitution.
      */
     private fun solveEquality(constraint: Constraint.Equality): ConstraintResult {
         val result = unify(constraint.left, constraint.right, typeDeclarations)
 
         return when (result) {
             is UnificationResult.Success -> {
-                // CRITICAL: When unification succeeds and binds a type variable to a concrete type,
-                // we need to validate that the concrete type satisfies all ability constraints
-                // that were tracked on that type variable.
-                val validationError = validateAbilityConstraints(result.substitution)
-                if (validationError != null) {
-                    ConstraintResult.Failure(validationError)
-                } else {
-                    ConstraintResult.Success(result.substitution)
-                }
+                // Don't validate ability constraints here - we need the full accumulated substitution
+                // Validation happens after all equality constraints are solved in solve()
+                ConstraintResult.Success(result.substitution)
             }
             is UnificationResult.Failure -> ConstraintResult.Failure(result.message)
         }
@@ -417,12 +441,17 @@ class ConstraintSolver(
      * we check that Int has implementations for all abilities required by 'a.
      *
      * Returns error message if validation fails, null if all constraints are satisfied.
+     * Also returns a substitution for any types inferred through bidirectional inference.
      */
     private fun validateAbilityConstraints(substitution: Substitution): String? {
         for ((typeVar, abilityConstraints) in typeVarAbilityConstraints) {
             // Check if this type variable was bound to a concrete type
-            val boundType = substitution.mappings[typeVar]
-            if (boundType != null && boundType !is FunkType.VarType) {
+            // Use substitution.apply() to transitively resolve type variable chains
+            val varType = FunkType.VarType(typeVar)
+            val boundType = substitution.apply(varType)
+
+            // If the type variable is still a VarType (possibly different), it's not concrete yet
+            if (boundType !is FunkType.VarType) {
                 // Type variable was bound to a concrete type - validate abilities
                 for ((abilityName, typeArgs) in abilityConstraints) {
                     // Skip Inspect - it's universally available (already filtered in solveAbilityRequired, but double-check)
@@ -445,6 +474,15 @@ class ConstraintSolver(
                         if (!hasImpl) {
                             val typeNames: String = concreteTypeArgs.joinToString(", ") { formatType(it) }
                             return "No implementation of $abilityName for types: $typeNames"
+                        }
+                    } else {
+                        // Some types are still type variables - try bidirectional inference!
+                        // This is key for multi-parameter abilities like Convert 'a 'b
+                        // When 'a = Int, we can look for impl Convert Int String and infer 'b = String
+                        val inferredSubst = tryBidirectionalInference(abilityName, concreteTypeArgs)
+                        if (inferredSubst != null) {
+                            // Store the inferred substitution for later application
+                            deferredInference.putAll(inferredSubst.mappings)
                         }
                     }
                 }
@@ -476,8 +514,10 @@ class ConstraintSolver(
         // When we see AbilityRequired('a, Parse, [...]), we store this constraint
         // so that later when 'a = Int is unified, we can validate Int has Parse implementation.
         //
-        // Track constraint on the primary typeVar (always)
-        val trackingArgs = if (typeArgs.isNotEmpty()) typeArgs else listOf(FunkType.VarType(constraint.typeVar))
+        // Build full list of type arguments for the ability
+        // For Convert 'a 'b, the constraint has typeVar='a and typeArgs=['b]
+        // We need trackingArgs = ['a, 'b] for proper matching against implementations
+        val trackingArgs = listOf(FunkType.VarType(constraint.typeVar)) + typeArgs
         typeVarAbilityConstraints.getOrPut(constraint.typeVar) { mutableListOf() }
             .add(abilityName to trackingArgs)
 
@@ -509,20 +549,17 @@ class ConstraintSolver(
             // Return success without warnings (constraint is resolved)
             return ConstraintResult.Success(Substitution.empty)
         } else {
-            // Some types are still type variables - try bidirectional inference!
-            // Example: NumAdd 'b Int => if only NumAdd Int Int exists, infer 'b = Int
-            val inferredSubstitution = tryBidirectionalInference(abilityName, trackingArgs)
-
-            if (inferredSubstitution != null) {
-                // Successfully inferred type variable from ability constraint
-                return ConstraintResult.Success(inferredSubstitution)
-            } else {
-                // Could not infer - defer checking to validation
-                return ConstraintResult.Success(
-                    Substitution.empty,
-                    warnings = listOf("Ability constraint $abilityName deferred (has type variables)")
-                )
-            }
+            // Some types are still type variables
+            // DON'T do bidirectional inference here! We need to wait until all equality
+            // constraints are solved to know the actual types. Otherwise, we might
+            // prematurely infer 'a = Int when the usage site wants 'a = Float.
+            //
+            // Bidirectional inference is only done in validateAbilityConstraints()
+            // AFTER all equality constraints are solved.
+            return ConstraintResult.Success(
+                Substitution.empty,
+                warnings = listOf("Ability constraint $abilityName deferred (has type variables)")
+            )
         }
     }
 
@@ -530,8 +567,16 @@ class ConstraintSolver(
      * Check if an ability implementation exists for the given types.
      *
      * Looks up implementation in context using the pattern: "AbilityName_Type1_Type2_..."
+     * Also checks for built-in ability implementations.
      */
     private fun checkAbilityImplementation(abilityName: String, typeArgs: List<FunkType>): Boolean {
+        // First check built-in abilities (single-parameter abilities like Ord Int)
+        if (typeArgs.size == 1) {
+            if (isBuiltInAbilityImplementation(abilityName, typeArgs.first())) {
+                return true
+            }
+        }
+
         // Build implementation key: "NumAdd_Int", "Convert_Int_String", etc.
         val typeNames = typeArgs.map { getTypeName(it) }
         val implKey = "${abilityName}_${typeNames.joinToString("_")}"
@@ -547,6 +592,65 @@ class ConstraintSolver(
         }
 
         return hasImpl
+    }
+
+    /**
+     * Check if this is a built-in ability with built-in implementation.
+     *
+     * Built-in abilities have implicit implementations for certain types:
+     * - NumAdd, NumSub, NumMul, NumDiv, NumMod, NumNeg: Int, Float, Nat, Frac
+     * - Eq: Int, Float, String, Bool, Nat, Frac, Ordering
+     * - Ord: Int, Float, String, Nat, Frac
+     * - Inspect: All primitive types
+     */
+    private fun isBuiltInAbilityImplementation(abilityName: String, type: FunkType): Boolean {
+        // Unwrap SuspendedType to check the inner value type
+        val unwrappedType = if (type is FunkType.SuspendedType) type.valueType else type
+
+        return when (abilityName) {
+            // Numeric abilities - implemented for Int, Float, Nat, Frac
+            "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "NumNeg" -> {
+                unwrappedType is FunkType.IntType ||
+                unwrappedType is FunkType.FloatType ||
+                unwrappedType is FunkType.NatType ||
+                unwrappedType is FunkType.FracType
+            }
+
+            // Equality - implemented for most primitive types
+            "Eq" -> {
+                unwrappedType is FunkType.IntType ||
+                unwrappedType is FunkType.FloatType ||
+                unwrappedType is FunkType.StringType ||
+                unwrappedType is FunkType.BooleanType ||
+                unwrappedType is FunkType.NatType ||
+                unwrappedType is FunkType.FracType ||
+                unwrappedType is FunkType.OrderingType ||
+                isBoolVariant(unwrappedType)
+            }
+
+            // Ordering - implemented for comparable types
+            "Ord" -> {
+                unwrappedType is FunkType.IntType ||
+                unwrappedType is FunkType.FloatType ||
+                unwrappedType is FunkType.StringType ||
+                unwrappedType is FunkType.NatType ||
+                unwrappedType is FunkType.FracType
+            }
+
+            // Inspect - built-in ability for displaying values
+            "Inspect" -> true  // All types can be inspected
+
+            else -> false
+        }
+    }
+
+    /**
+     * Check if a type is the Bool variant type.
+     */
+    private fun isBoolVariant(type: FunkType): Boolean {
+        return type is FunkType.VariantType &&
+               type.constructors.keys.containsAll(setOf("True", "False")) &&
+               type.constructors.size == 2
     }
 
     /**
@@ -592,6 +696,19 @@ class ConstraintSolver(
             is FunkType.ListType -> "List_${getTypeName(type.elementType)}"
             is FunkType.SetType -> "Set_${getTypeName(type.elementType)}"
             is FunkType.MapType -> "Map_${getTypeName(type.keyType)}_${getTypeName(type.valueType)}"
+            is FunkType.VariantType -> {
+                // Check if this is the Bool type (True | False)
+                if (isBoolVariant(type)) {
+                    "Bool"
+                } else {
+                    // For other variant types, use a generated name
+                    // This is a simplification - ideally we'd look up the type alias
+                    "Variant_${type.constructors.keys.sorted().joinToString("_")}"
+                }
+            }
+            is FunkType.RecordType -> "Record"
+            is FunkType.FunctionType -> "Function"
+            is FunkType.SuspendedType -> getTypeName(type.valueType)
             else -> type.toString()
         }
     }

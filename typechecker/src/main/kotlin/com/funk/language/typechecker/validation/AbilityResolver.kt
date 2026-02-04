@@ -120,10 +120,7 @@ class AbilityResolver(
             "Show", "Inspect" ->
                 AbilityCheckResult.Satisfied("Built-in displayable")
 
-            else -> AbilityCheckResult.Unsatisfied(
-                reason = "Numeric types do not support ability '$abilityName'",
-                suggestions = listOf("NumAdd", "NumSub", "Eq", "Ord", "Show")
-            )
+            else -> checkUserDefinedAbilityImpl(type, abilityName)
         }
     }
 
@@ -139,10 +136,7 @@ class AbilityResolver(
             "Show", "Inspect" ->
                 AbilityCheckResult.Satisfied("Built-in displayable")
 
-            else -> AbilityCheckResult.Unsatisfied(
-                reason = "String does not support ability '$abilityName'",
-                suggestions = listOf("Eq", "Ord", "Show", "Inspect")
-            )
+            else -> checkUserDefinedAbilityImpl(FunkType.StringType, abilityName)
         }
     }
 
@@ -154,10 +148,7 @@ class AbilityResolver(
             "Eq" -> AbilityCheckResult.Satisfied("Built-in")
             "Show", "Inspect" -> AbilityCheckResult.Satisfied("Built-in displayable")
 
-            else -> AbilityCheckResult.Unsatisfied(
-                reason = "Bool does not support ability '$abilityName'",
-                suggestions = listOf("Eq", "Show", "Inspect")
-            )
+            else -> checkUserDefinedAbilityImpl(FunkType.BooleanType, abilityName)
         }
     }
 
@@ -169,10 +160,7 @@ class AbilityResolver(
             "Eq" -> AbilityCheckResult.Satisfied("Built-in")
             "Show", "Inspect" -> AbilityCheckResult.Satisfied("Built-in displayable")
 
-            else -> AbilityCheckResult.Unsatisfied(
-                reason = "Ordering does not support ability '$abilityName'",
-                suggestions = listOf("Eq", "Show", "Inspect")
-            )
+            else -> checkUserDefinedAbilityImpl(FunkType.OrderingType, abilityName)
         }
     }
 
@@ -216,10 +204,7 @@ class AbilityResolver(
             // Collections are iterable
             "Iterable" -> AbilityCheckResult.Satisfied("Built-in")
 
-            else -> AbilityCheckResult.Unsatisfied(
-                reason = "Collections do not support ability '$abilityName'",
-                suggestions = listOf("Eq", "Show", "Inspect", "Iterable")
-            )
+            else -> checkUserDefinedAbilityImpl(type, abilityName)
         }
     }
 
@@ -244,10 +229,7 @@ class AbilityResolver(
 
             "Show", "Inspect" -> AbilityCheckResult.Satisfied("Built-in displayable")
 
-            else -> AbilityCheckResult.Unsatisfied(
-                reason = "Map does not support ability '$abilityName'",
-                suggestions = listOf("Eq", "Show", "Inspect")
-            )
+            else -> checkUserDefinedAbilityImpl(type, abilityName)
         }
     }
 
@@ -272,10 +254,7 @@ class AbilityResolver(
             // Records can be shown
             "Show", "Inspect" -> AbilityCheckResult.Satisfied("Records can always be displayed")
 
-            else -> AbilityCheckResult.Unsatisfied(
-                reason = "Records do not support ability '$abilityName'",
-                suggestions = listOf("Eq", "Show", "Inspect")
-            )
+            else -> checkUserDefinedAbilityImpl(type, abilityName)
         }
     }
 
@@ -302,10 +281,7 @@ class AbilityResolver(
             // Variants can be shown
             "Show", "Inspect" -> AbilityCheckResult.Satisfied("Variants can always be displayed")
 
-            else -> AbilityCheckResult.Unsatisfied(
-                reason = "Variants do not support ability '$abilityName'",
-                suggestions = listOf("Eq", "Show", "Inspect")
-            )
+            else -> checkUserDefinedAbilityImpl(type, abilityName)
         }
     }
 
@@ -333,21 +309,7 @@ class AbilityResolver(
         }
 
         // Look up user-defined ability implementation in context
-        val typeName = getTypeName(type)
-        val implKey = "${abilityName}_${typeName}"
-
-        return if (context.hasAbilityImpl(implKey)) {
-            val implInfo = context.getAbilityImpl(implKey)
-            AbilityCheckResult.Satisfied("User-defined impl: $implKey${implInfo?.sourceModule?.let { " from $it" } ?: ""}")
-        } else {
-            AbilityCheckResult.Unsatisfied(
-                reason = "No implementation of ability '$abilityName' for type '$typeName'",
-                suggestions = listOf(
-                    "Add an implementation: impl $abilityName $typeName { ... }",
-                    "Or import a module that provides this implementation"
-                )
-            )
-        }
+        return checkUserDefinedAbilityImpl(type, abilityName)
     }
 
     /**
@@ -409,6 +371,45 @@ class AbilityResolver(
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
             else -> type.toString()
+        }
+    }
+
+    /**
+     * Check for user-defined ability implementation.
+     *
+     * This is called when built-in ability checks fail, to check if a user
+     * has defined an implementation for this ability and type.
+     *
+     * For multi-parameter abilities like Convert 'a 'b, we look for implementations
+     * with partial type information (e.g., Convert_Int_* matches Convert_Int_String).
+     */
+    private fun checkUserDefinedAbilityImpl(type: FunkType, abilityName: String): AbilityCheckResult {
+        val typeName = getTypeName(type)
+
+        // First check for exact match (single-parameter ability)
+        val exactImplKey = "${abilityName}_$typeName"
+        if (context.hasAbilityImpl(exactImplKey)) {
+            return AbilityCheckResult.Satisfied("User-defined impl: $exactImplKey")
+        }
+
+        // Check for partial match (multi-parameter abilities)
+        // Get all implementations for this ability and check if any have this type as first arg
+        val allImpls = context.getAbilityImpls(abilityName)
+        val matchingImpl = allImpls.find { impl ->
+            impl.targetTypes.isNotEmpty() && impl.targetTypes.first() == typeName
+        }
+
+        return if (matchingImpl != null) {
+            val implKey = "${matchingImpl.abilityName}_${matchingImpl.targetTypes.joinToString("_")}"
+            AbilityCheckResult.Satisfied("User-defined impl: $implKey")
+        } else {
+            AbilityCheckResult.Unsatisfied(
+                reason = "No implementation of ability '$abilityName' for type '$typeName'",
+                suggestions = listOf(
+                    "Add an implementation: impl $abilityName $typeName { ... }",
+                    "Or import a module that provides this implementation"
+                )
+            )
         }
     }
 }
