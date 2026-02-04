@@ -42,7 +42,7 @@ class NewTypeCheckerCompatibilityTest {
     fun `test function definition and call`() {
         val source = """
             let add = {a, b} -> a + b
-            let result = add {x = 5, y = 10}
+            let result = add {a = 5, b = 10}
         """.trimIndent()
 
         val program = FunkParser().parse(source)
@@ -78,8 +78,8 @@ class NewTypeCheckerCompatibilityTest {
     fun `test monomorphization`() {
         val source = """
             let identity = {x} -> x
-            let a = identity 5
-            let b = identity "hello"
+            let a = identity {x = 5}
+            let b = identity {x = "hello"}
         """.trimIndent()
 
         val program = FunkParser().parse(source)
@@ -96,7 +96,7 @@ class NewTypeCheckerCompatibilityTest {
         val source = """
             let point = {x = 10, y = 20}
             let getX = {p} -> p.x
-            let xValue = getX point
+            let xValue = getX {p = point}
         """.trimIndent()
 
         val program = FunkParser().parse(source)
@@ -110,15 +110,15 @@ class NewTypeCheckerCompatibilityTest {
     @Test
     fun `test variant types`() {
         val source = """
-            type Option a = Some a | None
+            type MyOption = | MySome { val: Int }, MyNone |
 
-            let x = Some 42
-            let y = None
+            let x = MySome {val = 42}
+            let y = MyNone
 
-            let getOr = {opt, default} -> match opt {
-                Some {val} -> val
-                None -> default
-            }
+            let getOr = {opt, default} ->
+                match opt is
+                  MySome {val} -> val
+                  MyNone -> default
 
             let value = getOr {opt = x, default = 0}
         """.trimIndent()

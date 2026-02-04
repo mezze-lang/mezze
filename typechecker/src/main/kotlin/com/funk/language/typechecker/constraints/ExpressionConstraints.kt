@@ -136,7 +136,8 @@ class ExpressionConstraintGenerator {
                         Constraint.Equality(
                             left = exprResult.type,
                             right = FunkType.StringType,
-                            context = "String interpolation requires String type"
+                            context = "String interpolation requires String type",
+                            sourceLocation = part.expression.sourceLocation
                         )
                     )
                 }
@@ -176,7 +177,8 @@ class ExpressionConstraintGenerator {
                 Constraint.Equality(
                     left = elementResults[i].type,
                     right = firstElementType,
-                    context = "Array elements must have same type"
+                    context = "Array elements must have same type",
+                    sourceLocation = expr.elements.getOrNull(i)?.sourceLocation
                 )
             )
         }
@@ -231,7 +233,8 @@ class ExpressionConstraintGenerator {
                                 typeVar = freshConstraint.typeVar,
                                 abilityName = freshConstraint.abilityName,
                                 typeArgs = emptyList(),
-                                context = "Polymorphic instantiation of '${expr.name}'"
+                                context = "Polymorphic instantiation of '${expr.name}'",
+                                sourceLocation = expr.sourceLocation
                             )
                         }
 
@@ -354,7 +357,8 @@ class ExpressionConstraintGenerator {
             Constraint.Equality(
                 left = arrayResult.type,
                 right = FunkType.ArrayType(elementType),
-                context = "Array access requires array type"
+                context = "Array access requires array type",
+                sourceLocation = expr.array.sourceLocation
             )
         )
 
@@ -363,7 +367,8 @@ class ExpressionConstraintGenerator {
             Constraint.Equality(
                 left = indexResult.type,
                 right = FunkType.IntType,
-                context = "Array index must be Int"
+                context = "Array index must be Int",
+                sourceLocation = expr.index.sourceLocation
             )
         )
 
@@ -539,7 +544,8 @@ class ExpressionConstraintGenerator {
                         typeVar = freshTypeVar.variable,
                         abilityName = receiverName,
                         typeArgs = emptyList(),
-                        context = "Built-in ability method call: $receiverName.${expr.member}"
+                        context = "Built-in ability method call: $receiverName.${expr.member}",
+                        sourceLocation = expr.sourceLocation
                     )
 
                     return ConstraintResult(
@@ -721,7 +727,8 @@ class ExpressionConstraintGenerator {
                 typeVar = typeVars.first(),
                 abilityName = abilityName,
                 typeArgs = typeArgs,  // Additional type arguments if multi-parameter ability
-                context = "Ability method call: $abilityName.$methodName"
+                context = "Ability method call: $abilityName.$methodName",
+                sourceLocation = expr.sourceLocation
             )
 
             return ConstraintResult(
@@ -1488,7 +1495,8 @@ class ExpressionConstraintGenerator {
                                 Constraint.Equality(
                                     left = providedType,
                                     right = expectedType,
-                                    context = "Partial application field $fieldName"
+                                    context = "Partial application field $fieldName",
+                                    sourceLocation = expr.sourceLocation
                                 )
                             )
                         }
@@ -1538,7 +1546,8 @@ class ExpressionConstraintGenerator {
                     Constraint.Equality(
                         left = argumentResult.type,
                         right = functionType.paramType,
-                        context = "Function application argument"
+                        context = "Function application argument",
+                        sourceLocation = expr.sourceLocation
                     )
                 )
 
@@ -1573,7 +1582,8 @@ class ExpressionConstraintGenerator {
                     paramType = argumentResult.type,
                     returnType = returnType
                 ),
-                context = "Function application"
+                context = "Function application",
+                sourceLocation = expr.sourceLocation
             )
         )
 
@@ -1617,7 +1627,8 @@ class ExpressionConstraintGenerator {
                     constructors = mapOf("True" to null, "False" to null),
                     rowVar = null
                 ),
-                context = "If condition must be Bool"
+                context = "If condition must be Bool",
+                sourceLocation = expr.condition.sourceLocation
             )
         )
 
@@ -1626,7 +1637,8 @@ class ExpressionConstraintGenerator {
             Constraint.Equality(
                 left = thenResult.type,
                 right = elseResult.type,
-                context = "If branches must have same type"
+                context = "If branches must have same type",
+                sourceLocation = expr.sourceLocation
             )
         )
 

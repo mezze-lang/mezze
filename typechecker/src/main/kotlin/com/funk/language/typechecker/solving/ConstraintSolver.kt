@@ -37,8 +37,10 @@ class ConstraintSolver(
      *
      * This is inspired by OldTypeChecker.kt:15318-15328 where ability constraints are tracked
      * on type variables during ability method calls.
+     *
+     * Each entry contains: (abilityName, typeArgs, sourceLocation)
      */
-    private val typeVarAbilityConstraints = mutableMapOf<TypeVar, MutableList<Pair<String, List<FunkType>>>>()
+    private val typeVarAbilityConstraints = mutableMapOf<TypeVar, MutableList<Triple<String, List<FunkType>, SourceLocation?>>>()
 
     /**
      * Deferred type inferences from bidirectional ability inference.
@@ -335,12 +337,14 @@ class ConstraintSolver(
 
         // Validate ability constraints with the FULL accumulated substitution
         // This is done after all equality constraints are solved so we have all type bindings
-        val validationError = validateAbilityConstraints(substitution)
-        if (validationError != null) {
+        val validationResult = validateAbilityConstraints(substitution)
+        if (validationResult != null) {
+            val (validationError, sourceLocation) = validationResult
             errors.add(
                 ConstraintError(
                     message = validationError,
-                    constraint = Constraint.Equality(FunkType.IntType, FunkType.IntType),  // Placeholder
+                    // Create a constraint with the source location for error reporting
+                    constraint = Constraint.Equality(FunkType.IntType, FunkType.IntType, sourceLocation = sourceLocation),
                     context = "ability constraint validation"
                 )
             )
@@ -442,10 +446,10 @@ class ConstraintSolver(
      * When a type variable 'a with ability constraints is unified with a concrete type Int,
      * we check that Int has implementations for all abilities required by 'a.
      *
-     * Returns error message if validation fails, null if all constraints are satisfied.
+     * Returns (error message, sourceLocation) pair if validation fails, null if all constraints are satisfied.
      * Also returns a substitution for any types inferred through bidirectional inference.
      */
-    private fun validateAbilityConstraints(substitution: Substitution): String? {
+    private fun validateAbilityConstraints(substitution: Substitution): Pair<String, SourceLocation?>? {
         for ((typeVar, abilityConstraints) in typeVarAbilityConstraints) {
             // Check if this type variable was bound to a concrete type
             // Use substitution.apply() to transitively resolve type variable chains
@@ -455,7 +459,7 @@ class ConstraintSolver(
             // If the type variable is still a VarType (possibly different), it's not concrete yet
             if (boundType !is FunkType.VarType) {
                 // Type variable was bound to a concrete type - validate abilities
-                for ((abilityName, typeArgs) in abilityConstraints) {
+                for ((abilityName, typeArgs, sourceLocation) in abilityConstraints) {
                     // Skip Inspect - it's universally available (already filtered in solveAbilityRequired, but double-check)
                     if (abilityName == "Inspect") continue
                     // Substitute the type variable in typeArgs with the bound type
@@ -474,7 +478,7 @@ class ConstraintSolver(
                         // Check if implementation exists
                         val hasImpl = checkAbilityImplementation(abilityName, concreteTypeArgs)
                         if (!hasImpl) {
-                            return generateAbilityErrorMessage(abilityName, concreteTypeArgs)
+                            return Pair(generateAbilityErrorMessage(abilityName, concreteTypeArgs), sourceLocation)
                         }
                     } else {
                         // Some types are still type variables - try bidirectional inference!
@@ -520,7 +524,7 @@ class ConstraintSolver(
         // We need trackingArgs = ['a, 'b] for proper matching against implementations
         val trackingArgs = listOf(FunkType.VarType(constraint.typeVar)) + typeArgs
         typeVarAbilityConstraints.getOrPut(constraint.typeVar) { mutableListOf() }
-            .add(abilityName to trackingArgs)
+            .add(Triple(abilityName, trackingArgs, constraint.sourceLocation))
 
         // Also track for any type variables in typeArgs
         // CRITICAL: Use trackingArgs (which includes ALL type arguments), not just typeArgs
@@ -528,7 +532,7 @@ class ConstraintSolver(
         for (typeArg in typeArgs) {
             if (typeArg is FunkType.VarType && typeArg.variable != constraint.typeVar) {
                 val constraints = typeVarAbilityConstraints.getOrPut(typeArg.variable) { mutableListOf() }
-                constraints.add(abilityName to trackingArgs)
+                constraints.add(Triple(abilityName, trackingArgs, constraint.sourceLocation))
             }
         }
 
