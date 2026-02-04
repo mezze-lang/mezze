@@ -385,14 +385,16 @@ class ExpressionConstraintGenerator {
 
     private fun generateRecordLiteral(expr: RecordLiteral, context: ConstraintContext): ConstraintResult {
         // {field1 = expr1, field2 = expr2, ...}
+        // or {...spread, field1 = expr1, ...}
 
-        val fields = mutableMapOf<String, FunkType>()
+        val fields = linkedMapOf<String, FunkType>()  // Preserve insertion order
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
 
-        // Collect all present field names for validation
-        val presentFields = expr.entries.filterIsInstance<RecordFieldEntry>().map { it.name }.toSet()
+        // First pass: collect explicit field types (but don't add to fields yet)
+        val explicitFieldTypes = mutableMapOf<String, FunkType>()
+        val explicitFieldNames = mutableSetOf<String>()
 
         for (entry in expr.entries) {
             when (entry) {
@@ -400,7 +402,8 @@ class ExpressionConstraintGenerator {
                     val fieldValue = entry.value ?: Identifier(entry.name)
                     val fieldResult = generate(fieldValue, context)
 
-                    fields[entry.name] = fieldResult.type
+                    explicitFieldTypes[entry.name] = fieldResult.type
+                    explicitFieldNames.add(entry.name)
                     constraints.addAll(fieldResult.constraints)
                     undefinedVars.addAll(fieldResult.undefinedVariables)
                     abilityConstraints.addAll(fieldResult.abilityConstraints)
@@ -417,13 +420,11 @@ class ExpressionConstraintGenerator {
                     // The spread expression must be a record type (or unify with one via constraints)
                     when (val spreadType = spreadResult.type) {
                         is FunkType.RecordType -> {
-                            // Merge all fields from the spread record into our result
-                            // Explicit fields (RecordFieldEntry) will override spread fields if they have the same name
+                            // Add all fields from the spread record in their original order
+                            // Explicit fields will override values but we use spread order as base
                             for ((fieldName, fieldType) in spreadType.fields) {
-                                // Only add if not already explicitly defined
-                                if (fieldName !in presentFields) {
-                                    fields[fieldName] = fieldType
-                                }
+                                // Use explicit type if available, otherwise spread type
+                                fields[fieldName] = explicitFieldTypes[fieldName] ?: fieldType
                             }
                         }
                         is FunkType.VarType -> {
@@ -438,6 +439,13 @@ class ExpressionConstraintGenerator {
                         }
                     }
                 }
+            }
+        }
+
+        // Second pass: add any explicit fields that weren't in a spread (new fields)
+        for ((fieldName, fieldType) in explicitFieldTypes) {
+            if (fieldName !in fields) {
+                fields[fieldName] = fieldType
             }
         }
 
@@ -464,22 +472,22 @@ class ExpressionConstraintGenerator {
                 // If resolved type is a closed record, validate fields
                 if (resolvedType.rowVar == null) {
                 // Expected type is a closed record - validate fields match exactly
-                val missingFields = resolvedType.fields.keys - presentFields
+                val missingFields = resolvedType.fields.keys - explicitFieldNames
                 if (missingFields.isNotEmpty()) {
                     throw TypeCheckError(
                         message = "Record literal missing required fields from type annotation: ${missingFields.joinToString(", ")}. " +
                                 "Expected: ${prettyPrintType(expectedType)}, " +
-                                "Got fields: ${presentFields.joinToString(", ")}",
+                                "Got fields: ${explicitFieldNames.joinToString(", ")}",
                         expression = expr,
                         errorType = ErrorType.MISSING_FIELD,
                         context = mapOf(
                             "missingFields" to missingFields.toList(),
-                            "presentFields" to presentFields.toList()
+                            "explicitFieldNames" to explicitFieldNames.toList()
                         )
                     )
                 }
 
-                val extraFields = presentFields - resolvedType.fields.keys
+                val extraFields = explicitFieldNames - resolvedType.fields.keys
                 if (extraFields.isNotEmpty()) {
                     throw TypeCheckError(
                         message = "Record literal has extra fields not in type annotation: ${extraFields.joinToString(", ")}. " +
