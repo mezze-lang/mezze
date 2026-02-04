@@ -383,6 +383,7 @@ class ExpressionConstraintGenerator {
         val fields = mutableMapOf<String, FunkType>()
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
+        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
 
         // Collect all present field names for validation
         val presentFields = expr.entries.filterIsInstance<RecordFieldEntry>().map { it.name }.toSet()
@@ -396,6 +397,7 @@ class ExpressionConstraintGenerator {
                     fields[entry.name] = fieldResult.type
                     constraints.addAll(fieldResult.constraints)
                     undefinedVars.addAll(fieldResult.undefinedVariables)
+                    abilityConstraints.addAll(fieldResult.abilityConstraints)
                 }
                 is RecordSpreadEntry -> {
                     // Spread: {...baseRecord}
@@ -403,6 +405,7 @@ class ExpressionConstraintGenerator {
                     val spreadResult = generate(entry.expression, context)
                     constraints.addAll(spreadResult.constraints)
                     undefinedVars.addAll(spreadResult.undefinedVariables)
+                    abilityConstraints.addAll(spreadResult.abilityConstraints)
 
                     // Extract fields from the spread type and merge into our record
                     // The spread expression must be a record type (or unify with one via constraints)
@@ -497,7 +500,8 @@ class ExpressionConstraintGenerator {
         return ConstraintResult(
             type = recordType,
             constraints = constraints,
-            undefinedVariables = undefinedVars
+            undefinedVariables = undefinedVars,
+            abilityConstraints = abilityConstraints
         )
     }
 
@@ -540,9 +544,13 @@ class ExpressionConstraintGenerator {
                         abilityConstraints = listOf(abilityConstraint)
                     )
                 } else {
-                    // Method not found on this ability
-                    // For now, return a fresh type variable
-                    return ConstraintResult.simple(FunkType.VarType(TypeVar.fresh()))
+                    // Method not found on built-in ability - throw error
+                    val availableMethods = BuiltInAbilities.getAvailableMethods(receiverName).joinToString(", ")
+                    throw TypeCheckError(
+                        message = "Method '${expr.member}' not found in ability '$receiverName'. Available methods: $availableMethods",
+                        expression = expr,
+                        errorType = ErrorType.MISSING_FIELD
+                    )
                 }
             }
 
@@ -677,8 +685,10 @@ class ExpressionConstraintGenerator {
         if (methodType == null) {
             // Method not found
             val availableMethods = abilityType.fields.keys.joinToString(", ")
-            throw IllegalStateException(
-                "Method '$methodName' not found in ability '$abilityName'. Available methods: $availableMethods"
+            throw TypeCheckError(
+                message = "Method '$methodName' not found in ability '$abilityName'. Available methods: $availableMethods",
+                expression = expr,
+                errorType = ErrorType.MISSING_FIELD
             )
         }
 

@@ -345,6 +345,28 @@ sealed interface ValidationError {
 
         override fun location() = sourceLocation
     }
+
+    /**
+     * Missing ability implementation.
+     *
+     * Example: Show.show {val = 42} when there's no impl Show Int
+     */
+    data class MissingAbilityImplementation(
+        val abilityName: String,
+        val typeName: String,
+        val context: String? = null,
+        val sourceLocation: SourceLocation? = null
+    ) : ValidationError {
+        override fun message(): String = buildString {
+            append("No implementation found for ability '$abilityName' with type '$typeName'")
+            if (context != null) {
+                append(" in $context")
+            }
+            append(". You need to define: impl $abilityName $typeName where { ... }")
+        }
+
+        override fun location() = sourceLocation
+    }
 }
 
 /**

@@ -81,7 +81,8 @@ class TypeValidator(
             val abilityErrors = validateAbilityConstraints(
                 result.abilityConstraints,
                 finalType,
-                bindingName
+                bindingName,
+                substitution
             )
             errors.addAll(abilityErrors)
 
@@ -281,30 +282,245 @@ class TypeValidator(
 
     /**
      * Validate ability constraints.
+     *
+     * After constraint solving, we check if concrete types have implementations
+     * for the required abilities.
+     *
+     * Example: Show.show {val = 42} generates AbilityRequired(typeVar='a, abilityName=Show)
+     * After substitution, 'a = Int, so we check if Show_Int implementation exists.
      */
     private fun validateAbilityConstraints(
         constraints: List<Constraint.AbilityRequired>,
         type: FunkType,
-        context: String
+        bindingContext: String,
+        substitution: Substitution
     ): List<ValidationError> {
         val errors = mutableListOf<ValidationError>()
 
-        // If this is a function type with ability constraints, skip validation
-        // Function types with constraints like "{ l: 'a, r: 'a } -> 'a with Ord 'a"
-        // have polymorphic constraints that should only be validated at call sites
-        if (type is FunkType.FunctionType && type.abilityConstraints.isNotEmpty()) {
-            // Polymorphic function - constraints will be checked at call site
-            return emptyList()
-        }
+        // NOTE: We iterate through ALL constraints and check each one individually.
+        // If a constraint's type variable is still polymorphic after substitution,
+        // we skip it (it will be checked when instantiated with a concrete type).
+        // This allows us to catch errors where CONCRETE types are used with abilities
+        // that don't have implementations, even inside polymorphic functions.
 
         for (constraint in constraints) {
-            // Don't validate constraints - they're polymorphic and will be checked at call sites
-            // Type variables in constraints haven't been substituted yet, so we can't check them
-            // Example: for "let min : { l: 'a, r: 'a } -> 'a with Ord 'a", the constraint
-            // is on type variable 'a, which will be checked when min is called with concrete types
+            // Apply substitution to get the concrete type
+            val typeVarType = FunkType.VarType(constraint.typeVar)
+            val concreteType = substitution.apply(typeVarType)
+
+            // Get type name for implementation lookup
+            val typeName = getTypeNameForAbility(concreteType)
+
+            // If the type is still a type variable (polymorphic), skip validation
+            // It will be checked when instantiated with a concrete type
+            if (typeName.startsWith("'") || typeName == "Unknown") {
+                continue
+            }
+
+            // Check if this is a built-in ability with built-in implementation
+            val abilityName = constraint.abilityName
+
+            if (isBuiltInAbilityImplementation(abilityName, concreteType)) {
+                // Built-in ability for built-in type (e.g., Eq for Int)
+                continue
+            }
+
+            // Check if user-defined implementation exists
+            // Handle multi-type abilities like Convert 'a 'b
+            val implTypeParts = mutableListOf(typeName)
+            var hasPolymorphicTypeArg = false
+            for (typeArg in constraint.typeArgs) {
+                val argType = substitution.apply(typeArg)
+                val argTypeName = getTypeNameForAbility(argType)
+                if (argTypeName.startsWith("'") || argTypeName == "Unknown") {
+                    // Type argument is still polymorphic - can't validate yet
+                    hasPolymorphicTypeArg = true
+                    break
+                }
+                implTypeParts.add(argTypeName)
+            }
+
+            // If any type argument is still polymorphic, skip validation for this constraint
+            // (it will be checked when fully instantiated)
+            if (hasPolymorphicTypeArg) {
+                continue
+            }
+
+            val implKey = "${abilityName}_${implTypeParts.joinToString("_")}"
+
+            // Check for exact match first
+            if (context.hasAbilityImpl(implKey)) {
+                continue
+            }
+
+            // For multi-parameter abilities, try to find a partial match
+            // For example, if we're looking for Convert_Int and there's Convert_Int_String, that's a match
+            val hasPartialMatch = if (implTypeParts.size == 1 && constraint.typeArgs.isNotEmpty()) {
+                // We only have the first type arg - look for any impl that starts with this prefix
+                findMatchingMultiParameterImpl(abilityName, implTypeParts)
+            } else {
+                false
+            }
+
+            if (hasPartialMatch) {
+                continue
+            }
+
+            // Implementation not found - this is an error
+            val typeDisplay = if (implTypeParts.size == 1) {
+                implTypeParts[0]
+            } else {
+                implTypeParts.joinToString(", ")
+            }
+
+            errors.add(
+                ValidationError.MissingAbilityImplementation(
+                    abilityName = abilityName,
+                    typeName = typeDisplay,
+                    context = constraint.context ?: bindingContext
+                )
+            )
         }
 
         return errors
+    }
+
+    /**
+     * Find a matching multi-parameter ability implementation.
+     *
+     * For multi-parameter abilities like Convert 'a 'b, when we only know the first type arg,
+     * we look for any implementation that matches the prefix.
+     *
+     * Example: Looking for Convert_Int when impl Convert_Int_String exists -> returns true
+     */
+    private fun findMatchingMultiParameterImpl(
+        abilityName: String,
+        knownTypeParts: List<String>
+    ): Boolean {
+        // Build prefix to search for
+        val prefix = "${abilityName}_${knownTypeParts.joinToString("_")}_"
+
+        // Check if any impl key starts with this prefix
+        return context.getAllAbilityImpls().keys.any { implKey ->
+            implKey.startsWith(prefix) || implKey == "${abilityName}_${knownTypeParts.joinToString("_")}"
+        }
+    }
+
+    /**
+     * Check if this is a built-in ability with built-in implementation.
+     */
+    private fun isBuiltInAbilityImplementation(abilityName: String, type: FunkType): Boolean {
+        // Unwrap SuspendedType to check the inner value type
+        val unwrappedType = if (type is FunkType.SuspendedType) type.valueType else type
+
+        // Built-in abilities have implicit implementations for certain types
+        return when (abilityName) {
+            // Numeric abilities - implemented for Int, Float, Nat, Frac
+            "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "NumNeg" -> {
+                unwrappedType is FunkType.IntType ||
+                unwrappedType is FunkType.FloatType ||
+                unwrappedType is FunkType.NatType ||
+                unwrappedType is FunkType.FracType
+            }
+
+            // Equality - implemented for most primitive types
+            "Eq" -> {
+                unwrappedType is FunkType.IntType ||
+                unwrappedType is FunkType.FloatType ||
+                unwrappedType is FunkType.StringType ||
+                unwrappedType is FunkType.BooleanType ||
+                unwrappedType is FunkType.NatType ||
+                unwrappedType is FunkType.FracType ||
+                unwrappedType is FunkType.OrderingType ||
+                isBoolVariant(unwrappedType)
+            }
+
+            // Ordering - implemented for comparable types
+            "Ord" -> {
+                unwrappedType is FunkType.IntType ||
+                unwrappedType is FunkType.FloatType ||
+                unwrappedType is FunkType.StringType ||
+                unwrappedType is FunkType.NatType ||
+                unwrappedType is FunkType.FracType
+            }
+
+            // Inspect - built-in ability for displaying values (to_str)
+            // Note: "Show" is NOT a built-in ability - it's commonly used as a user-defined ability name
+            "Inspect" -> {
+                unwrappedType is FunkType.IntType ||
+                unwrappedType is FunkType.FloatType ||
+                unwrappedType is FunkType.StringType ||
+                unwrappedType is FunkType.BooleanType ||
+                unwrappedType is FunkType.NatType ||
+                unwrappedType is FunkType.FracType ||
+                unwrappedType is FunkType.OrderingType ||
+                isBoolVariant(unwrappedType)
+            }
+
+            // Logical operations - only for Bool
+            "LogicalAnd", "LogicalOr", "LogicalNot" -> {
+                unwrappedType is FunkType.BooleanType || isBoolVariant(unwrappedType)
+            }
+
+            else -> false
+        }
+    }
+
+    /**
+     * Check if type is the Bool variant type.
+     */
+    private fun isBoolVariant(type: FunkType): Boolean {
+        return type is FunkType.VariantType &&
+               type.constructors.keys == setOf("True", "False")
+    }
+
+    /**
+     * Get type name for ability implementation lookup.
+     */
+    private fun getTypeNameForAbility(type: FunkType): String {
+        return when (type) {
+            is FunkType.IntType -> "Int"
+            is FunkType.FloatType -> "Float"
+            is FunkType.StringType -> "String"
+            is FunkType.BooleanType -> "Bool"
+            is FunkType.NatType -> "Nat"
+            is FunkType.FracType -> "Frac"
+            is FunkType.OrderingType -> "Ordering"
+
+            is FunkType.VarType -> type.variable.name  // Still polymorphic
+
+            is FunkType.VariantType -> {
+                // Special case: Bool variant
+                if (type.constructors.keys == setOf("True", "False")) {
+                    "Bool"
+                } else {
+                    "Variant"
+                }
+            }
+
+            is FunkType.RecordType -> {
+                // For record types, extract the field types (used for ability method arguments)
+                type.fields.values.firstOrNull()?.let { getTypeNameForAbility(it) } ?: "Record"
+            }
+
+            is FunkType.TypeApplication -> {
+                if (type.args.isEmpty()) {
+                    type.constructor
+                } else {
+                    val argNames = type.args.map { getTypeNameForAbility(it) }
+                    "${type.constructor}_${argNames.joinToString("_")}"
+                }
+            }
+
+            is FunkType.ArrayType -> "Array_${getTypeNameForAbility(type.elementType)}"
+            is FunkType.ListType -> "List_${getTypeNameForAbility(type.elementType)}"
+            is FunkType.SetType -> "Set_${getTypeNameForAbility(type.elementType)}"
+            is FunkType.MapType -> "Map_${getTypeNameForAbility(type.keyType)}_${getTypeNameForAbility(type.valueType)}"
+
+            is FunkType.SuspendedType -> getTypeNameForAbility(type.valueType)
+            is FunkType.FunctionType -> "Function"
+            is FunkType.EffectRow -> "EffectRow"
+        }
     }
 
     /**
@@ -781,6 +997,11 @@ class TypeValidator(
                     scrutineeType  // Not a variant, keep as-is
                 }
             }
+            // BooleanType is internally optimized but behaves like variant for pattern matching
+            is FunkType.BooleanType -> FunkType.VariantType(
+                constructors = mapOf("True" to null, "False" to null),
+                rowVar = null
+            )
             else -> scrutineeType
         }
 

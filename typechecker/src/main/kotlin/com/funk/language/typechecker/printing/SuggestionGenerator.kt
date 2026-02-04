@@ -109,6 +109,11 @@ object SuggestionGenerator {
                 "Remove one of the overlapping implementations",
                 "Check if this ability is already implemented elsewhere"
             )
+
+            is ValidationError.MissingAbilityImplementation -> listOf(
+                "Add an implementation: impl ${error.abilityName} ${error.typeName} where { ... }",
+                "Import a module that provides this implementation"
+            )
         }
     }
 

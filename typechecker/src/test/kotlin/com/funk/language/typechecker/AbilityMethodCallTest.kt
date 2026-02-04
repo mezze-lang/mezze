@@ -315,7 +315,7 @@ class AbilityMethodCallTest {
                 show: {val: 'a} -> String
             }
 
-            ability Eq 'a where {
+            ability MyEq 'a where {
                 eq: {x: 'a, y: 'a} -> Bool
             }
 
@@ -323,12 +323,12 @@ class AbilityMethodCallTest {
                 show: {val: Bool} -> String = {val} -> if val then "true" else "false"
             }
 
-            impl Eq Bool where {
+            impl MyEq Bool where {
                 eq: {x: Bool, y: Bool} -> Bool = {x, y} -> if x then y else bool::not {b = y}
             }
 
             let showIfEqual = {x, y} ->
-                if Eq.eq {x = x, y = y} then Show.show {val = x} else "not equal"
+                if MyEq.eq {x = x, y = y} then Show.show {val = x} else "not equal"
 
             showIfEqual
         """.trimIndent()
@@ -344,10 +344,10 @@ class AbilityMethodCallTest {
         val funcType = letBinding!!.inferredType as FunkType.FunctionType
         assertEquals(2, funcType.abilityConstraints.size)
 
-        // Check that we have both Show and Eq (order may vary)
+        // Check that we have both Show and MyEq (order may vary)
         val constraintNames = funcType.abilityConstraints.map { it.abilityName }.toSet()
         assertTrue(constraintNames.contains("Show"))
-        assertTrue(constraintNames.contains("Eq"))
+        assertTrue(constraintNames.contains("MyEq"))
     }
 
     @Test

@@ -92,6 +92,7 @@ object ErrorFormatter {
             is ValidationError.CircularDependency -> formatCircularDependencyError(error, sourceCode)
             is ValidationError.OrphanInstance -> formatOrphanInstanceError(error, sourceCode)
             is ValidationError.OverlappingInstance -> formatOverlappingInstanceError(error, sourceCode)
+            is ValidationError.MissingAbilityImplementation -> formatMissingAbilityImplementationError(error, sourceCode)
         }
     }
 
@@ -510,6 +511,20 @@ object ErrorFormatter {
             sourceCode = sourceCode,
             additionalInfo = additionalInfo,
             suggestion = "Remove one of the overlapping implementations"
+        )
+    }
+
+    private fun formatMissingAbilityImplementationError(
+        error: ValidationError.MissingAbilityImplementation,
+        sourceCode: String?
+    ): String {
+        return SourceContext.formatError(
+            errorType = "Type Error [Validation - Missing Ability Implementation]",
+            message = error.message(),
+            location = error.location(),
+            sourceCode = sourceCode,
+            additionalInfo = emptyMap(),
+            suggestion = "Add an implementation: impl ${error.abilityName} ${error.typeName} where { ... }"
         )
     }
 

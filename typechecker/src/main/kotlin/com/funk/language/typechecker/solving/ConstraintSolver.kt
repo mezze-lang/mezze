@@ -883,6 +883,25 @@ class ConstraintSolver(
             return ConstraintResult.Success(Substitution.empty)
         }
 
+        // Special handling for BooleanType - allows pattern matching with True/False
+        // Bool is internally BooleanType for optimization, but users can pattern match
+        // on it as if it were `type Bool = | True | False |`
+        if (variantType is FunkType.BooleanType) {
+            if (constructorName == "True" || constructorName == "False") {
+                // Valid Bool constructor with no payload
+                if (expectedPayloadType != null) {
+                    return ConstraintResult.Failure(
+                        "Constructor '$constructorName' does not have a payload"
+                    )
+                }
+                return ConstraintResult.Success(Substitution.empty)
+            } else {
+                return ConstraintResult.Failure(
+                    "Bool type only has constructors 'True' and 'False', not '$constructorName'"
+                )
+            }
+        }
+
         // If it's a concrete variant type, check if constructor exists
         if (variantType is FunkType.VariantType) {
             // DEBUG
@@ -1037,7 +1056,14 @@ class ConstraintSolver(
             is FunkType.OrderingType -> "Ordering"
             is FunkType.FunctionType -> "{...} -> ..."
             is FunkType.RecordType -> "{${type.fields.keys.take(3).joinToString()}}"
-            is FunkType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}]"
+            is FunkType.VariantType -> {
+                // Recognize Bool variant type specially
+                if (type.constructors.keys == setOf("True", "False")) {
+                    "Bool"
+                } else {
+                    "[${type.constructors.keys.take(3).joinToString()}]"
+                }
+            }
             is FunkType.TypeApplication -> type.constructor
             is FunkType.ArrayType -> "Array ${formatType(type.elementType)}"
             is FunkType.ListType -> "List ${formatType(type.elementType)}"
