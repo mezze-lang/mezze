@@ -1124,21 +1124,34 @@ class ConstraintSolver(
         val fieldName = constraint.fieldName
         val expectedFieldType = constraint.fieldType
 
-        // If record type is a TypeApplication (e.g., Person), expand it to RecordType first
+        // If record type is a TypeApplication (e.g., Person), expand it first
         if (recordType is FunkType.TypeApplication) {
-            val expanded = expandTypeApplicationToRecord(recordType, typeDeclarations)
-
-            if (expanded != null) {
+            // First try expanding to RecordType (for record type aliases)
+            val expandedRecord = expandTypeApplicationToRecord(recordType, typeDeclarations)
+            if (expandedRecord != null) {
                 // Recursively solve with the expanded record type
                 return solveHasField(
-                    constraint.copy(recordType = expanded),
+                    constraint.copy(recordType = expandedRecord),
                     currentSubst
                 )
-            } else {
-                return ConstraintResult.Failure(
-                    "Cannot expand type application ${recordType.constructor} to check field '$fieldName'"
+            }
+
+            // Then try expanding to VariantType (for single-constructor variants like newtypes)
+            // Example: type User = | User { name: String, age: Int } |
+            // Field access on User should delegate to the payload
+            val expandedVariant = expandTypeApplicationToVariant(recordType, typeDeclarations)
+            if (expandedVariant != null) {
+                // Recursively solve with the expanded variant type
+                // The code below handles single-constructor variants
+                return solveHasField(
+                    constraint.copy(recordType = expandedVariant),
+                    currentSubst
                 )
             }
+
+            return ConstraintResult.Failure(
+                "Cannot expand type application ${recordType.constructor} to check field '$fieldName'"
+            )
         }
 
         // If record type is a type variable, we can't check yet
