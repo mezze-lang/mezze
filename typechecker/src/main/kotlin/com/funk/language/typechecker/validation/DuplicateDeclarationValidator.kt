@@ -2,6 +2,7 @@ package com.funk.language.typechecker.validation
 
 import com.funk.language.ast.*
 import com.funk.language.typechecker.TypeCheckError
+import com.funk.language.typechecker.abilities.BuiltInAbilities
 
 /**
  * Validates that declarations are not duplicated within a program.
@@ -30,6 +31,7 @@ object DuplicateDeclarationValidator {
     fun validateProgram(program: Program) {
         validateDuplicateTypes(program)
         validateDuplicateConstructors(program)
+        validateNewtypeConstructors(program)
         validateDuplicateEffects(program)
         validateDuplicatePerformers(program)
         validateDuplicateAbilities(program)
@@ -61,9 +63,23 @@ object DuplicateDeclarationValidator {
 
         for (typeDecl in program.items.filterIsInstance<TypeDeclaration>()) {
             val definition = typeDecl.definition
-            if (definition is VariantDefinition) {
-                for (constructor in definition.constructors) {
-                    val constructorName = constructor.name
+            when (definition) {
+                is VariantDefinition -> {
+                    for (constructor in definition.constructors) {
+                        val constructorName = constructor.name
+                        val existingType = constructorToTypeMap[constructorName]
+
+                        if (existingType != null) {
+                            throw TypeCheckError(
+                                "Duplicate constructor name: constructor '$constructorName' is already defined " +
+                                "in type '$existingType', cannot reuse in type '${typeDecl.name}'"
+                            )
+                        }
+                        constructorToTypeMap[constructorName] = typeDecl.name
+                    }
+                }
+                is NewtypeDefinition -> {
+                    val constructorName = definition.constructor
                     val existingType = constructorToTypeMap[constructorName]
 
                     if (existingType != null) {
@@ -73,6 +89,38 @@ object DuplicateDeclarationValidator {
                         )
                     }
                     constructorToTypeMap[constructorName] = typeDecl.name
+                }
+                is RecordDefinition -> {
+                    // Records don't have constructors in the same way
+                }
+            }
+        }
+    }
+
+    /**
+     * Validate newtype constructor naming conventions (OldTypeChecker.kt:1517-1530)
+     *
+     * - Constructor must start with an uppercase letter
+     * - Constructor cannot collide with built-in ability names
+     */
+    private fun validateNewtypeConstructors(program: Program) {
+        for (typeDecl in program.items.filterIsInstance<TypeDeclaration>()) {
+            val definition = typeDecl.definition
+            if (definition is NewtypeDefinition) {
+                val constructorName = definition.constructor
+
+                // Validate constructor naming convention (must start with uppercase)
+                if (!constructorName.first().isUpperCase()) {
+                    throw TypeCheckError(
+                        "Newtype constructor '$constructorName' must start with an uppercase letter"
+                    )
+                }
+
+                // Validate constructor doesn't collide with built-in ability names
+                if (BuiltInAbilities.isBuiltInAbility(constructorName)) {
+                    throw TypeCheckError(
+                        "Newtype constructor '$constructorName' is already used by a built-in ability"
+                    )
                 }
             }
         }
