@@ -39,7 +39,8 @@ class ConstraintGenerator(
     private val performerToEffect: Map<String, String> = emptyMap(),
     private val abilityNames: Set<String> = emptySet(),
     private val effectNames: Set<String> = emptySet(),
-    private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap()
+    private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),
+    private val effectDeclarations: Map<String, EffectDeclaration> = emptyMap()
 ) {
     // Cache for type variables within a single type annotation
     // Ensures all occurrences of 'a in an annotation refer to the same TypeVar instance
@@ -398,10 +399,15 @@ class ConstraintGenerator(
                 }
                 is TypeDeclaration,
                 is AbilityDeclaration,
-                is EffectDeclaration,
-                is ImplDeclaration -> {
+                is EffectDeclaration -> {
                     // These are handled by ContextBuilder in Phase 1
                     // Nothing to do here
+                }
+                is ImplDeclaration -> {
+                    // CRITICAL: Validate effect implementation bodies
+                    // ContextBuilder registers the performer in Phase 1
+                    // Here in Phase 2, we type-check the implementation bodies
+                    validateEffectImplementation(item, currentContext)
                 }
                 is ImplAbilityDeclaration -> {
                     // CRITICAL: Validate ability implementation bodies
@@ -979,6 +985,144 @@ class ConstraintGenerator(
     }
 
     /**
+     * Validate effect implementation bodies.
+     *
+     * Similar to validateAbilityImplementation but for effects (ImplDeclaration).
+     * For each operation:
+     * - Get the expected return type from the effect declaration
+     * - Substitute associated types with the performer's bindings
+     * - Type-check the lambda body
+     * - Compare inferred body type with expected return type
+     * - Throw TypeCheckError if types don't match
+     */
+    private fun validateEffectImplementation(impl: ImplDeclaration, context: TypingContext) {
+        // Find the effect declaration
+        val effectDeclaration = effectDeclarations[impl.effectName]
+            ?: return  // Effect not found - will be caught elsewhere
+
+        // Build substitution map: 'state -> Int, etc. (associated type bindings)
+        val associatedTypeSubstitution = impl.associatedTypeBindings.mapKeys { (key, _) ->
+            // Keys might have or not have the ' prefix, normalize to have it
+            if (key.startsWith("'")) key else "'$key"
+        }.mapValues { (_, typeAnnotation) ->
+            convertTypeAnnotation(typeAnnotation)
+        }
+
+        // Also add version without ' prefix for matching
+        val fullSubstitution = associatedTypeSubstitution + associatedTypeSubstitution.mapKeys { (k, _) ->
+            k.removePrefix("'")
+        }
+
+        // Add performer parameters to context for all operations
+        // e.g., impl State for ConfigState {initial: Int} makes 'initial' available in operation bodies
+        var baseContext = context
+        for (param in impl.performerParams) {
+            val paramType = convertTypeAnnotation(param.type)
+            baseContext = baseContext.extendMono(param.name, paramType)
+        }
+
+        // Validate each operation's implementation body
+        for (implOp in impl.operations) {
+            val declOp = effectDeclaration.operations.find { it.name == implOp.name }
+                ?: continue  // Extra operations caught elsewhere
+
+            // Convert param and return types from the declaration
+            val declParamType = convertTypeAnnotation(declOp.paramType)
+            val declReturnType = convertTypeAnnotation(declOp.returnType)
+
+            // Substitute associated types to get expected types
+            // Example: {} -> 'state <State> with 'state = Int becomes {} -> Int <State>
+            val expectedParamType = substituteTypeParams(declParamType, fullSubstitution)
+            val expectedReturnType = substituteTypeParams(declReturnType, fullSubstitution)
+
+            // Type-check the implementation body (must be a lambda)
+            if (implOp.implementation is LambdaExpression) {
+                val lambda = implOp.implementation as LambdaExpression
+
+                // Extract parameter names from lambda
+                val paramNames = when (val params = lambda.parameters) {
+                    is UntypedParameters -> params.names
+                    is TypedParameters -> params.recordType.entries.map { it.name }
+                }
+
+                // Build parameter type map for scoped context
+                val paramTypes = if (expectedParamType is FunkType.RecordType) {
+                    paramNames.associateWith { name ->
+                        expectedParamType.fields[name] ?: FunkType.VarType(TypeVar.fresh())
+                    }
+                } else {
+                    // Single parameter case - wrap in record
+                    paramNames.associateWith { expectedParamType }
+                }
+
+                // Type-check the lambda body with parameters in scope (including performer params)
+                var bodyContext = baseContext
+                for ((name, type) in paramTypes) {
+                    bodyContext = bodyContext.extendMono(name, type)
+                }
+
+                val constraintContext = ConstraintContext(
+                    bodyContext,
+                    expectedType = null,
+                    performerToEffect = performerToEffect,
+                    abilityNames = abilityNames,
+                    effectNames = effectNames,
+                    abilityDeclarations = abilityDeclarations,
+                    typeDeclarations = typeDeclarations
+                )
+
+                // Generate constraints for lambda body
+                val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
+
+                // If there are undefined variables, skip detailed validation
+                // The body may reference external performers or functions not yet in context
+                // Full validation will happen during the normal type-checking phase
+                if (bodyResult.undefinedVariables.isNotEmpty()) {
+                    // Skip validation - let the normal type-checking catch errors later
+                    continue
+                }
+
+                // Solve constraints to get actual body type
+                val solver = com.funk.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
+                val solveResult = solver.solve(bodyResult.constraints)
+
+                when (solveResult) {
+                    is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
+                        // Solver failures might be due to external references
+                        // Skip validation - let the normal type-checking catch errors later
+                        continue
+                    }
+                    is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
+                        val substitution = solveResult.substitution
+                        val actualBodyType = substitution.apply(bodyResult.type)
+
+                        // Check that actual body type matches expected return type using unification
+                        // This is more permissive than string comparison - it allows [] to unify with List String
+                        val unificationSolver = com.funk.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
+                        val unificationResult = unificationSolver.solve(
+                            listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Effect body validation"))
+                        )
+
+                        when (unificationResult) {
+                            is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
+                                val actualTypeStr = com.funk.language.ast.prettyPrintType(actualBodyType)
+                                val expectedTypeStr = com.funk.language.ast.prettyPrintType(expectedReturnType)
+                                throw com.funk.language.typechecker.TypeCheckError(
+                                    "Implementation body type mismatch in effect '${impl.effectName}' operation '${implOp.name}': " +
+                                    "body has type $actualTypeStr but operation signature requires $expectedTypeStr"
+                                )
+                            }
+                            is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
+                                // Unification succeeded - types are compatible
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Substitute type parameters in a type.
      *
      * Helper for ability implementation validation.
@@ -1503,7 +1647,8 @@ class ConstraintGenerator(
             performerToEffect: Map<String, String> = emptyMap(),
             abilityNames: Set<String> = emptySet(),
             effectNames: Set<String> = emptySet(),
-            abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap()
+            abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),
+            effectDeclarations: Map<String, EffectDeclaration> = emptyMap()
         ): ConstraintGenerator {
             val expressionGen = ExpressionConstraintGenerator()
             val patternGen = PatternConstraintGenerator()
@@ -1519,7 +1664,8 @@ class ConstraintGenerator(
                 performerToEffect,
                 abilityNames,
                 effectNames,
-                abilityDeclarations
+                abilityDeclarations,
+                effectDeclarations
             )
         }
     }

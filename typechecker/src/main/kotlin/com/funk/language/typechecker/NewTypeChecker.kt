@@ -194,12 +194,17 @@ class NewTypeChecker(
             println("[DEBUG NewTypeChecker] effectNames = $effectNames")
         }
 
+        // Merge local and imported effect declarations
+        val allEffectDeclarations = buildResult.effectDeclarations +
+            (importContext?.importedEffects ?: emptyMap())
+
         val constraintGenerator = ConstraintGenerator.create(
             typeDeclarations = buildResult.typeDeclarations,
             performerToEffect = buildResult.performerToEffect,
             abilityNames = abilityNames,
             effectNames = effectNames,
-            abilityDeclarations = buildResult.abilityDeclarations
+            abilityDeclarations = buildResult.abilityDeclarations,
+            effectDeclarations = allEffectDeclarations
         )
         val programConstraintResult = constraintGenerator.generateProgram(program, context)
         val constraintResults = programConstraintResult.constraintResults

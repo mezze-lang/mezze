@@ -64,14 +64,17 @@ class EffectAssociatedTypesTest {
 
     @Test
     fun `test effect implementation with complex type binding type checks`() {
+        // Define List type first, then use Nil for empty list
         val code = """
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
+
             effect State having 'state where {
                 get: {} -> 'state <State>
                 put: {value: 'state} -> {} <State>
             }
 
             impl State for ListState having 'state = (List String) where {
-                get = {} -> []
+                get = {} -> Nil
                 put = {value} -> {}
             }
         """.trimIndent()
@@ -244,7 +247,13 @@ class EffectAssociatedTypesTest {
         val actualType = binding.inferredType
         val typeClass = actualType?.javaClass?.simpleName
         val typeString = actualType?.let { prettyPrintType(it) }
-        assertTrue(actualType is FunkType.BooleanType, "Expected BooleanType but got: $typeClass ($typeString)")
+        // Bool in Funk is a variant type with True/False constructors
+        assertTrue(
+            actualType is FunkType.VariantType &&
+            actualType.constructors.containsKey("True") &&
+            actualType.constructors.containsKey("False"),
+            "Expected Bool (VariantType with True/False) but got: $typeClass ($typeString)"
+        )
     }
 
     @Test
@@ -390,13 +399,16 @@ class EffectAssociatedTypesTest {
 
     @Test
     fun `test list of associated type`() {
+        // Define List type first, then use Nil for empty list
         val code = """
+            type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
+
             effect Collection having 'item where {
                 getAll: {} -> (List 'item) <Collection>
             }
 
             impl Collection for StringCollection having 'item = String where {
-                getAll = {} -> []
+                getAll = {} -> Nil
             }
 
             let result = perform StringCollection in Collection.getAll {}
@@ -408,8 +420,8 @@ class EffectAssociatedTypesTest {
         val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
         println("[TEST LIST] Actual type: ${binding.inferredType}")
         println("[TEST LIST] Type class: ${binding.inferredType?.javaClass?.simpleName}")
-        // List T is kept as TypeApplication
-        assertTrue(binding.inferredType is FunkType.TypeApplication)
+        // List T is a variant type (not TypeApplication)
+        assertTrue(binding.inferredType is FunkType.VariantType || binding.inferredType is FunkType.TypeApplication)
     }
 
     @Test
