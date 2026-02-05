@@ -79,24 +79,24 @@ class FunctionAbilityConstraintTypeCheckerTest {
             ability Encoder 'a where {
                 encode : {val: 'a} -> String
             }
-            
+
             { val: 'a } -> String with Encoder 'a = {val} -> "test"
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
+
         assertEquals(2, typedProgram.items.size)
-        
+
         val topLevel = typedProgram.items[1] as TopLevelExpression
         assertTrue(topLevel.expression is LambdaExpression)
-        
+
         val lambda = topLevel.expression as LambdaExpression
         assertNotNull(lambda.inferredType)
-        
+
         assertTrue(lambda.inferredType is FunkType.FunctionType)
         val functionType = lambda.inferredType as FunkType.FunctionType
-        
+
         // Check that ability constraints are preserved in lambda
         assertEquals(1, functionType.abilityConstraints.size)
         val constraint = functionType.abilityConstraints[0]

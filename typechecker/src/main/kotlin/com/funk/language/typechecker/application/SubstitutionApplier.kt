@@ -673,9 +673,26 @@ class SubstitutionApplier(
                 }
             }
 
+            // CRITICAL: Include ability constraints from the lambda expression
+            // The parser attaches ability constraints to LambdaExpression when parsing
+            // `type with Ability = lambda` syntax. We must preserve these constraints!
+            val abilityConstraints = if (expr.abilityConstraints.isNotEmpty()) {
+                expr.abilityConstraints.map { constraint ->
+                    FunkType.FunctionAbilityConstraint(
+                        abilityName = constraint.abilityName,
+                        typeArgs = constraint.typeArgs.map { typeAnn ->
+                            convertTypeAnnotation(typeAnn)
+                        }
+                    )
+                }
+            } else {
+                emptyList()
+            }
+
             val functionType = FunkType.FunctionType(
                 paramType = paramType,
-                returnType = bodyType
+                returnType = bodyType,
+                abilityConstraints = abilityConstraints
             )
             substitution.apply(functionType)
         }

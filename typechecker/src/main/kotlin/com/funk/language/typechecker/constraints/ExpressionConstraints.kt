@@ -1518,10 +1518,32 @@ class ExpressionConstraintGenerator {
             else -> bodyType
         }
 
+        // CRITICAL: Include ability constraints from multiple sources:
+        // 1. From the lambda's own abilityConstraints (parsed from `type with Ability = lambda`)
+        // 2. From the expected type annotation (if present)
+        // The lambda's own constraints take precedence since they're explicitly specified
+        val abilityConstraints = when {
+            expr.abilityConstraints.isNotEmpty() -> {
+                // Convert from AST FunctionAbilityConstraint to FunkType.FunctionAbilityConstraint
+                val contextBuilder = com.funk.language.typechecker.context.ContextBuilder()
+                expr.abilityConstraints.map { constraint ->
+                    FunkType.FunctionAbilityConstraint(
+                        abilityName = constraint.abilityName,
+                        typeArgs = constraint.typeArgs.map { typeAnn ->
+                            contextBuilder.convertTypeAnnotation(typeAnn)
+                        }
+                    )
+                }
+            }
+            expectedFunctionType?.abilityConstraints?.isNotEmpty() == true -> expectedFunctionType.abilityConstraints
+            else -> emptyList()
+        }
+
         val functionType = FunkType.FunctionType(
             paramType = paramType,
             returnType = returnType,
-            effects = effectRow
+            effects = effectRow,
+            abilityConstraints = abilityConstraints
         )
 
         // CRITICAL: Propagate ability constraints from body
