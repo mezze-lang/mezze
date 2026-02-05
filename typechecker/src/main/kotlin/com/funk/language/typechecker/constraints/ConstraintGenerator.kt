@@ -776,6 +776,7 @@ class ConstraintGenerator(
                     "Nat" -> FunkType.NatType
                     "Frac" -> FunkType.FracType
                     "Ordering" -> FunkType.OrderingType
+                    "Unit" -> FunkType.RecordType(emptyMap())  // Unit is an empty record type
                     else -> {
                         // Type variable or type constructor
                         if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
