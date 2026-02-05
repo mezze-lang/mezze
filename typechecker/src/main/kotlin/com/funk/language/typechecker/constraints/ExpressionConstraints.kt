@@ -601,46 +601,65 @@ class ExpressionConstraintGenerator {
         val fieldType = FunkType.VarType(TypeVar.fresh())
 
         // CRITICAL: Validate field access on record literals (matches OldTypeChecker.kt:6260-6310)
-        // If receiver is an identifier bound to a RecordLiteral, check field exists immediately
-        if (expr.receiver is Identifier) {
+        // Check if field exists for:
+        // 1. Identifiers bound to record literals (e.g., let x = {a = 1}; x.b)
+        // 2. Nested field access where intermediate type is a known RecordType (e.g., data.point.z)
+
+        // First, determine if we should validate field existence
+        val shouldValidate = if (expr.receiver is Identifier) {
+            // For identifiers, only validate if bound to a record literal
             val receiverName = (expr.receiver as Identifier).name
+            receiverName in context.recordLiteralBindings
+        } else if (expr.receiver is MemberAccess) {
+            // For nested access, validate if the receiver type is a known RecordType
+            // This handles cases like data.point.z where point has type {x: Int, y: Int}
+            receiverResult.type is FunkType.RecordType
+        } else {
+            false
+        }
 
-            // Check if this variable was bound to a record literal
-            if (receiverName in context.recordLiteralBindings) {
-                // This is a record literal - validate field exists in the record type
-                if (receiverResult.type is FunkType.RecordType) {
-                    val recordType = receiverResult.type as FunkType.RecordType
-
-                    // Check if field exists
-                    if (!recordType.fields.containsKey(expr.member)) {
-                        // Field doesn't exist - check if record is closed or open
-                        if (recordType.rowVar == null) {
-                            // Closed record - field must exist, throw error
-                            val availableFields = recordType.fields.keys.toList()
-                            throw TypeCheckError(
-                                message = "Field '${expr.member}' not found in record type. Available fields: ${availableFields.joinToString()}",
-                                expression = expr,
-                                errorType = ErrorType.MISSING_FIELD,
-                                context = mapOf(
-                                    "field" to expr.member,
-                                    "availableFields" to availableFields
-                                )
-                            )
-                        } else {
-                            // Open record with explicit literal - still fail
-                            // OldTypeChecker validates this too (line 6285-6300)
-                            val availableFields = recordType.fields.keys.toList()
-                            throw TypeCheckError(
-                                message = "Field '${expr.member}' not found in open record. Explicitly declared fields: ${availableFields.joinToString()}",
-                                expression = expr,
-                                errorType = ErrorType.MISSING_FIELD,
-                                context = mapOf(
-                                    "field" to expr.member,
-                                    "availableFields" to availableFields
-                                )
-                            )
+        if (shouldValidate) {
+            // CRITICAL: Resolve TypeApplication to get the actual fields
+            val (fieldNames, isOpen) = when (val t = receiverResult.type) {
+                is FunkType.RecordType -> t.fields.keys to (t.rowVar != null)
+                is FunkType.TypeApplication -> {
+                    // Look up the type alias definition to get its fields
+                    context.typeDeclarations[t.constructor]?.let { typeDecl ->
+                        when (val def = typeDecl.definition) {
+                            is RecordDefinition -> def.fields.map { it.name }.toSet() to def.isOpen
+                            else -> null
                         }
-                    }
+                    } ?: (emptySet<String>() to false)
+                }
+                else -> emptySet<String>() to false
+            }
+
+            // Check if field exists
+            if (fieldNames.isNotEmpty() && !fieldNames.contains(expr.member)) {
+                // Field doesn't exist - check if record is closed or open
+                if (!isOpen) {
+                    // Closed record - field must exist, throw error
+                    throw TypeCheckError(
+                        message = "Field '${expr.member}' not found in record type. Available fields: ${fieldNames.joinToString()}",
+                        expression = expr,
+                        errorType = ErrorType.MISSING_FIELD,
+                        context = mapOf(
+                            "field" to expr.member,
+                            "availableFields" to fieldNames.toList()
+                        )
+                    )
+                } else {
+                    // Open record with explicit literal - still fail
+                    // OldTypeChecker validates this too (line 6285-6300)
+                    throw TypeCheckError(
+                        message = "Field '${expr.member}' not found in open record. Explicitly declared fields: ${fieldNames.joinToString()}",
+                        expression = expr,
+                        errorType = ErrorType.MISSING_FIELD,
+                        context = mapOf(
+                            "field" to expr.member,
+                            "availableFields" to fieldNames.toList()
+                        )
+                    )
                 }
             }
         }
