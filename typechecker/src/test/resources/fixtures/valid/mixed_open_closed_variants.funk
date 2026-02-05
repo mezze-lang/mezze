@@ -12,10 +12,10 @@ let unwrapSafely = {w} -> match w is
   Wrapped {val} -> Some {val = val}
   _ -> None                                                     # expected: unwrapSafely : { w: | Wrapped { val: 'a }, ... | } -> Option 'a
 
-# Both closed
+# Both closed - Ok/Err without payloads is NOT Result type
 let boolToResult = {b} -> match b is
   True -> Ok
-  False -> Err                                                  # expected: boolToResult : { b: Bool } -> Result 'a 'b
+  False -> Err                                                  # expected: boolToResult : { b: Bool } -> | Err, Ok |
 
 # Both open
 let partialMatch = {x, y} -> match x is

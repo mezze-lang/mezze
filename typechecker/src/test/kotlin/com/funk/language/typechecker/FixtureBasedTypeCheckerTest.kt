@@ -58,13 +58,16 @@ class FixtureBasedTypeCheckerTest {
         val result = typeChecker.typeCheck(program).program
         val typeAliases = typeChecker.getTypeAliases()
 
+        // Collect type declarations for pretty printing
+        val typeDeclarations = result.items.filterIsInstance<TypeDeclaration>()
+
         val actualTypes = mutableMapOf<String, String>()
 
         for (item in result.items) {
             when (item) {
                 is LetBinding -> {
                     val typeStr = item.inferredType?.let {
-                        prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false)
+                        prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false, typeDeclarations = typeDeclarations)
                     } ?: "unknown"
                     actualTypes[item.variableName] = typeStr
                 }

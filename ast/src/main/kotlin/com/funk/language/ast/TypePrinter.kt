@@ -394,6 +394,27 @@ private fun prettyPrintTypeWithAliasesRecursive(
         if (isBoolVariant) {
             "Bool"
         } else {
+            // Special case: Option variant prints as "Option T" instead of "| Some { val: T }, None |"
+            val isOptionVariant = type.constructors.size == 2 &&
+                    type.constructors.containsKey("Some") &&
+                    type.constructors.containsKey("None") &&
+                    type.constructors["None"] == null &&
+                    !type.isOpen
+
+            if (isOptionVariant) {
+                // Extract the type parameter from Some { val: T }
+                val someType = type.constructors["Some"]
+                val valueType = when (someType) {
+                    is FunkType.RecordType -> someType.fields["val"]
+                    else -> someType
+                }
+                val valueTypeStr = if (valueType != null) {
+                    prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+                } else {
+                    "'a"
+                }
+                "Option $valueTypeStr"
+            } else {
             // First, check if this variant matches a known type declaration
             val declMatch = findTypeDeclarationForVariant(type, typeDeclarations, typeVarMapping)
             if (declMatch != null) {
@@ -405,12 +426,9 @@ private fun prettyPrintTypeWithAliasesRecursive(
                 }
                 declMatch.declName + typeArgsStr
             } else {
-            // Check if this is a Result type (has Ok and Err constructors)
+            // Check if this is a Result type (has Ok and Err constructors with proper payloads)
             val hasOk = type.constructors.containsKey("Ok")
             val hasErr = type.constructors.containsKey("Err")
-
-            if (hasOk && hasErr && type.constructors.size == 2) {
-            // This is a Result type - print as: Result valueType | errors |
             val okType = type.constructors["Ok"]
             val errType = type.constructors["Err"]
 
@@ -420,17 +438,19 @@ private fun prettyPrintTypeWithAliasesRecursive(
                 else -> null
             }
 
-            // Extract error variant from Err { error: VariantType }
+            // Extract error variant from Err { error: E }
             val errorVariant = when (errType) {
                 is FunkType.RecordType -> errType.fields["error"]
                 else -> null
             }
 
-            val valueTypeStr = if (valueType != null) {
-                prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
-            } else {
-                "'unknown"
-            }
+            // Only treat as Result if both constructors have the expected payload structure
+            val isProperResult = hasOk && hasErr && type.constructors.size == 2 &&
+                    valueType != null && errorVariant != null
+
+            if (isProperResult) {
+            // This is a Result type - print as: Result valueType errorType
+            val valueTypeStr = prettyPrintWithAliasCheck(valueType!!, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
 
             val errorTypeStr = when (errorVariant) {
                 is FunkType.VariantType -> {
@@ -443,7 +463,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
                     }
                     "| ${errorConstructors.joinToString(", ")} |"
                 }
-                else -> if (errorVariant != null) prettyPrintWithAliasCheck(errorVariant, typeAliases, showExpansion, typeVarMapping, typeDeclarations) else "'unknown"
+                else -> prettyPrintWithAliasCheck(errorVariant!!, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
             }
 
             "Result $valueTypeStr $errorTypeStr"
@@ -464,6 +484,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
             }
         }
+            }
     }
     is FunkType.ArrayType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}]"
     is FunkType.TypeApplication -> {

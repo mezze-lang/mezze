@@ -1278,6 +1278,19 @@ class ConstraintSolver(
             val isPatternContext = constraint.context?.contains("Constructor pattern") == true
 
             if (isPatternContext) {
+                // SPECIAL CASE: Built-in Bool constructors (True, False)
+                // These are handled specially because Bool is a built-in type without a type declaration
+                if (constructorName == "True" || constructorName == "False") {
+                    // Use the closed Bool variant type
+                    val boolType = FunkType.VariantType(
+                        constructors = mapOf("True" to null, "False" to null),
+                        rowVar = null  // Bool is closed
+                    )
+                    return ConstraintResult.Success(
+                        Substitution.single(variantType.variable, boolType)
+                    )
+                }
+
                 // Look up type declaration that contains this constructor
                 // This ensures exhaustiveness checking works with inferred types
                 val declaringType = findTypeDeclarationForConstructor(constructorName)
@@ -1289,10 +1302,16 @@ class ConstraintSolver(
                     // and there's a type Color = | Red, Blue, Green |, we should use
                     // the full Color type (with Green) so exhaustiveness checking works.
                     val variantDef = declaringType.definition as VariantDefinition
+
+                    // Create a shared mapping for type parameters so all constructors use the same type vars
+                    val typeParamMapping = declaringType.typeParams.associate { param ->
+                        param to FunkType.VarType(TypeVar.fresh())
+                    }
+
                     val constructors = variantDef.constructors.associate { ctor ->
                         val payloadType = ctor.dataType?.let { dataTypeAnnotation ->
-                            // Convert annotation to FunkType
-                            convertTypeAnnotationForSolver(dataTypeAnnotation, declaringType.typeParams)
+                            // Convert annotation to FunkType using the shared type param mapping
+                            convertTypeAnnotation(dataTypeAnnotation, typeParamMapping)
                         }
                         ctor.name to payloadType
                     }
@@ -1302,10 +1321,42 @@ class ConstraintSolver(
                         rowVar = if (variantDef.isOpen) RowVar.fresh() else null  // Use declared openness
                     )
 
-                    return ConstraintResult.Success(
-                        Substitution.single(variantType.variable, declaredVariant)
-                    )
+                    // CRITICAL: Unify the expected payload type with the declared constructor's payload type
+                    // This ensures that pattern bindings like `Some { val }` get the correct type for `val`
+                    var resultSubst = Substitution.single(variantType.variable, declaredVariant)
+
+                    if (expectedPayloadType != null) {
+                        val declaredPayload = constructors[constructorName]
+                        if (declaredPayload != null) {
+                            val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
+                            when (unifyResult) {
+                                is UnificationResult.Success -> {
+                                    resultSubst = resultSubst.compose(unifyResult.substitution)
+                                }
+                                is UnificationResult.Failure -> {
+                                    // This shouldn't happen for well-formed patterns
+                                    return ConstraintResult.Failure(
+                                        "Pattern payload type mismatch for constructor '$constructorName': ${unifyResult.message}"
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    return ConstraintResult.Success(resultSubst)
                 }
+            }
+
+            // SPECIAL CASE: Built-in Bool constructors in expression context
+            // Even when not in pattern context, True/False should resolve to Bool
+            if (constructorName == "True" || constructorName == "False") {
+                val boolType = FunkType.VariantType(
+                    constructors = mapOf("True" to null, "False" to null),
+                    rowVar = null  // Bool is closed
+                )
+                return ConstraintResult.Success(
+                    Substitution.single(variantType.variable, boolType)
+                )
             }
 
             // Not a pattern context OR no type declaration found - create an open variant
