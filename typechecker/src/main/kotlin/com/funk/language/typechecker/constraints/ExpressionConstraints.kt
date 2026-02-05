@@ -1466,7 +1466,13 @@ class ExpressionConstraintGenerator {
                 // Check if the pattern is open (has ...)
                 isOpenPattern = params.recordType.restField != null
                 paramNames = params.recordType.entries.map { it.name }
-                paramFields = paramNames.associateWith { FunkType.VarType(TypeVar.fresh()) }
+                // CRITICAL: Convert annotated types using ContextBuilder instead of fresh vars!
+                // This ensures parameter types like `opt: Option Int` actually use `Option Int`
+                // instead of a fresh type variable.
+                val contextBuilder = com.funk.language.typechecker.context.ContextBuilder()
+                paramFields = params.recordType.entries.associate { entry ->
+                    entry.name to contextBuilder.convertTypeAnnotation(entry.type)
+                }
             }
         }
 

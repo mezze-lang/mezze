@@ -288,8 +288,9 @@ class MatchEffectUnificationTest {
 
         assertTrue(
             exception.message?.contains("incompatible types") == true ||
-            exception.message?.contains("Type error") == true,
-            "Should report incompatible value types"
+            exception.message?.contains("Type error") == true ||
+            exception.message?.contains("Cannot unify") == true,
+            "Should report incompatible value types, got: ${exception.message}"
         )
     }
 

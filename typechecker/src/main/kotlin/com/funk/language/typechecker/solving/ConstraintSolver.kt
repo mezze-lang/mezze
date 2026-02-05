@@ -378,185 +378,180 @@ class ConstraintSolver(
             }
         }
 
-        // PHASE 2: Solve Equality constraints to bind type variables
-        // Type variables need to be bound before we can check structural constraints properly.
-        // For example, when checking HasConstructor(T, "Yellow") where T should be Color,
-        // we need the Equality(T, Color) constraint to be solved first.
-        val (equalityConstraints, otherConstraints) = nonAbilityConstraints.partition { it is Constraint.Equality }
+        // PHASE 2: Solve all constraints using a worklist algorithm
+        // We iterate until no more progress can be made. This is necessary because:
+        // - Equality constraints bind type variables
+        // - HasConstructor/HasField constraints establish type relationships
+        // - These may depend on each other in arbitrary order
+        //
+        // For example, in `match opt is Some { val } -> val`:
+        // - HasConstructor establishes that val's type comes from Option's payload
+        // - Equality constraints unify case result types with the match result
+        // Both need to be solved together for correct type checking.
 
-        for (constraint in equalityConstraints) {
-            // Keep track of the ORIGINAL constraint before substitution
-            val originalConstraint = constraint as Constraint.Equality
+        val constraintWorklist = nonAbilityConstraints.toMutableList()
+        val processedInThisPass = mutableSetOf<Constraint>()
+        var madeProgress = true
+        var iterationCount = 0
+        val maxIterations = 100  // Safety limit
 
-            // Apply current substitution to constraint before solving
-            val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
+        while (madeProgress && constraintWorklist.isNotEmpty() && iterationCount < maxIterations) {
+            madeProgress = false
+            iterationCount++
+            processedInThisPass.clear()
 
-            // Solve the constraint
-            val result = solveConstraint(appliedConstraint, substitution)
+            // DEBUG
+            if (System.getProperty("funk.typecheck.debug") == "true") {
+                println("[DEBUG] Worklist iteration $iterationCount, ${constraintWorklist.size} constraints remaining")
+            }
 
-            when (result) {
-                is ConstraintResult.Success -> {
-                    // Compose new substitution with existing one
-                    substitution = result.substitution.compose(substitution)
-                    warnings.addAll(result.warnings)
+            val iterator = constraintWorklist.iterator()
+            while (iterator.hasNext()) {
+                val constraint = iterator.next()
 
-                    // Handle variant merging for match expressions
-                    // When both sides of an Equality constraint resolve to variants,
-                    // we need to merge them. We track type variables from the ORIGINAL
-                    // constraint (before substitution was applied) to know which vars to update.
-                    //
-                    // This prevents cross-contamination between independent bindings that
-                    // happen to use the same constructor names (like different functions
-                    // both matching on Red/Green).
-                    val appliedEq = appliedConstraint as Constraint.Equality
-                    val leftType = substitution.apply(appliedEq.left)
-                    val rightType = substitution.apply(appliedEq.right)
+                // Apply current substitution to constraint before solving
+                val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
 
-                    // DEBUG - unconditionally log all match case constraints
-                    if (originalConstraint.context?.contains("Match case") == true) {
-                        try {
-                            java.io.File("/tmp/variant_merge_debug.txt").appendText(
-                                "[CONSTRAINT] context=${originalConstraint.context}\n" +
-                                "  originalLeft=${originalConstraint.left}\n" +
-                                "  originalRight=${originalConstraint.right}\n" +
-                                "  appliedLeft=${appliedConstraint.left}\n" +
-                                "  appliedRight=${appliedConstraint.right}\n" +
-                                "  resolvedLeft=${substitution.apply(appliedEq.left)}\n" +
-                                "  resolvedRight=${substitution.apply(appliedEq.right)}\n\n"
-                            )
-                        } catch (e: Exception) {}
-                    }
+                // Solve the constraint
+                val result = when (constraint) {
+                    is Constraint.HasConstructor -> solveHasConstructor(appliedConstraint as Constraint.HasConstructor, substitution, constraint)
+                    else -> solveConstraint(appliedConstraint, substitution)
+                }
 
-                    if (leftType is FunkType.VariantType && rightType is FunkType.VariantType) {
-                        // Both sides resolved to variants - check if they need merging
-                        val leftCtors = leftType.constructors.keys
-                        val rightCtors = rightType.constructors.keys
+                when (result) {
+                    is ConstraintResult.Success -> {
+                        val newSubst = result.substitution
+                        if (newSubst.mappings.isNotEmpty()) {
+                            // Made progress - new substitution bindings
+                            substitution = newSubst.compose(substitution)
+                            madeProgress = true
+                        }
+                        warnings.addAll(result.warnings)
 
-                        // DEBUG
-                        try {
-                            java.io.File("/tmp/variant_merge_debug.txt").appendText(
-                                "[VARIANT TYPES] leftCtors=$leftCtors, rightCtors=$rightCtors, differ=${leftCtors != rightCtors}\n\n"
-                            )
-                        } catch (e: Exception) {}
+                        // Handle variant merging for match expressions (Equality constraints only)
+                        if (constraint is Constraint.Equality) {
+                            val originalConstraint = constraint
+                            val appliedEq = appliedConstraint as Constraint.Equality
+                            val leftType = substitution.apply(appliedEq.left)
+                            val rightType = substitution.apply(appliedEq.right)
 
-                        if (leftCtors != rightCtors) {
-                            // Different constructor sets - create merged variant
-                            val mergedConstructors = leftType.constructors.toMutableMap()
-                            for ((name, dataType) in rightType.constructors) {
-                                if (name !in mergedConstructors) {
-                                    mergedConstructors[name] = dataType
+                            if (leftType is FunkType.VariantType && rightType is FunkType.VariantType) {
+                                val leftCtors = leftType.constructors.keys
+                                val rightCtors = rightType.constructors.keys
+
+                                if (leftCtors != rightCtors) {
+                                    // CRITICAL: Only merge variants in match expression contexts
+                                    // For other contexts (like let bindings with explicit type annotations),
+                                    // don't merge - let unification fail properly if types don't match.
+                                    //
+                                    // Match case contexts have "Match case" in the context string.
+                                    val isMatchContext = originalConstraint.context?.contains("Match case") == true
+
+                                    // Also allow merging if BOTH variants are open (have row variables)
+                                    // This supports row polymorphism where we accumulate constructors
+                                    val bothOpen = leftType.rowVar != null && rightType.rowVar != null
+
+                                    if (isMatchContext || bothOpen) {
+                                        // Merge variants
+                                        val mergedConstructors = leftType.constructors.toMutableMap()
+                                        for ((name, dataType) in rightType.constructors) {
+                                            if (name !in mergedConstructors) {
+                                                mergedConstructors[name] = dataType
+                                            }
+                                        }
+
+                                        val mergedRowVar = leftType.rowVar ?: rightType.rowVar
+                                        val mergedVariant = FunkType.VariantType(
+                                            constructors = mergedConstructors,
+                                            rowVar = mergedRowVar
+                                        )
+
+                                        val updatedMappings = mutableMapOf<TypeVar, FunkType>()
+                                        if (originalConstraint.left is FunkType.VarType) {
+                                            updatedMappings[(originalConstraint.left as FunkType.VarType).variable] = mergedVariant
+                                        }
+                                        if (originalConstraint.right is FunkType.VarType) {
+                                            updatedMappings[(originalConstraint.right as FunkType.VarType).variable] = mergedVariant
+                                        }
+
+                                        for ((typeVar, mappedType) in substitution.mappings) {
+                                            val resolved = substitution.apply(mappedType)
+                                            if (resolved == leftType || resolved == rightType) {
+                                                updatedMappings[typeVar] = mergedVariant
+                                            }
+                                        }
+
+                                        if (updatedMappings.isNotEmpty()) {
+                                            substitution = Substitution(substitution.mappings + updatedMappings)
+                                            madeProgress = true
+                                        }
+                                    }
+                                    // If not a match context and not both open, don't merge -
+                                    // unification should handle the error via normal type checking
                                 }
-                            }
-
-                            // Create merged variant - preserve openness if either original was open
-                            val mergedRowVar = leftType.rowVar ?: rightType.rowVar
-                            val mergedVariant = FunkType.VariantType(
-                                constructors = mergedConstructors,
-                                rowVar = mergedRowVar
-                            )
-
-                            // DEBUG
-                            try {
-                                java.io.File("/tmp/variant_merge_debug.txt").appendText(
-                                    "[MERGING] mergedVariant=$mergedVariant\n\n"
-                                )
-                            } catch (e: Exception) {}
-
-                            // ONLY update type variables that are DIRECTLY part of this Equality constraint
-                            // Use the ORIGINAL constraint (before substitution) to find the type vars
-                            val updatedMappings = mutableMapOf<TypeVar, FunkType>()
-
-                            // Check original constraint's left/right for type variables
-                            if (originalConstraint.left is FunkType.VarType) {
-                                updatedMappings[(originalConstraint.left as FunkType.VarType).variable] = mergedVariant
-                            }
-                            if (originalConstraint.right is FunkType.VarType) {
-                                updatedMappings[(originalConstraint.right as FunkType.VarType).variable] = mergedVariant
-                            }
-
-                            // Also update any type vars that transitively map to these variants
-                            // (handle chains like 'a -> 'b -> VariantType)
-                            for ((typeVar, mappedType) in substitution.mappings) {
-                                val resolved = substitution.apply(mappedType)
-                                // Only update if the resolved type is EXACTLY the leftType or rightType
-                                // (not just any variant that shares constructors)
-                                if (resolved == leftType || resolved == rightType) {
-                                    updatedMappings[typeVar] = mergedVariant
-                                }
-                            }
-
-                            // DEBUG
-                            try {
-                                java.io.File("/tmp/variant_merge_debug.txt").appendText(
-                                    "[UPDATED] mappings=$updatedMappings\n\n"
-                                )
-                            } catch (e: Exception) {}
-
-                            // Apply the updates
-                            if (updatedMappings.isNotEmpty()) {
-                                substitution = Substitution(substitution.mappings + updatedMappings)
                             }
                         }
+
+                        // Constraint solved successfully - remove from worklist
+                        iterator.remove()
+                        processedInThisPass.add(constraint)
                     }
-                }
-                is ConstraintResult.Failure -> {
-                    // Collect error and continue (to find all errors)
-                    errors.add(
-                        ConstraintError(
-                            message = result.message,
-                            constraint = appliedConstraint,
-                            context = appliedConstraint.getContext()
-                        )
-                    )
+                    is ConstraintResult.Failure -> {
+                        // Check if this constraint might succeed with more information
+                        // For type variable constraints, we might need to wait for more bindings
+                        val constraintType = when (appliedConstraint) {
+                            is Constraint.HasField -> appliedConstraint.recordType
+                            is Constraint.HasConstructor -> appliedConstraint.variantType
+                            else -> null
+                        }
+
+                        if (constraintType is FunkType.VarType) {
+                            // Keep in worklist - might resolve later
+                        } else {
+                            // This is a real error - collect it
+                            errors.add(
+                                ConstraintError(
+                                    message = result.message,
+                                    constraint = appliedConstraint,
+                                    context = appliedConstraint.getContext()
+                                )
+                            )
+                            iterator.remove()
+                        }
+                    }
                 }
             }
         }
 
+        // Any remaining constraints that couldn't be solved are errors
+        for (constraint in constraintWorklist) {
+            val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
+            val result = when (constraint) {
+                is Constraint.HasConstructor -> solveHasConstructor(appliedConstraint as Constraint.HasConstructor, substitution, constraint)
+                else -> solveConstraint(appliedConstraint, substitution)
+            }
+            if (result is ConstraintResult.Failure) {
+                errors.add(
+                    ConstraintError(
+                        message = result.message,
+                        constraint = appliedConstraint,
+                        context = appliedConstraint.getContext()
+                    )
+                )
+            }
+        }
+
         // Validate ability constraints with the FULL accumulated substitution
-        // This is done after all equality constraints are solved so we have all type bindings
         val validationResult = validateAbilityConstraints(substitution)
         if (validationResult != null) {
             val (validationError, sourceLocation) = validationResult
             errors.add(
                 ConstraintError(
                     message = validationError,
-                    // Create a constraint with the source location for error reporting
                     constraint = Constraint.Equality(FunkType.IntType, FunkType.IntType, sourceLocation = sourceLocation),
                     context = "ability constraint validation"
                 )
             )
-        }
-
-        // PHASE 3: Solve other constraints (HasConstructor, HasField, etc.) after type variables are bound
-        for (constraint in otherConstraints) {
-            // Apply current substitution to constraint before solving
-            val appliedConstraint = applySubstitutionToConstraint(constraint, substitution)
-
-            // Solve the constraint
-            // For HasConstructor, pass the original constraint so we can track which type var to update
-            val result = if (constraint is Constraint.HasConstructor) {
-                solveHasConstructor(appliedConstraint as Constraint.HasConstructor, substitution, constraint)
-            } else {
-                solveConstraint(appliedConstraint, substitution)
-            }
-
-            when (result) {
-                is ConstraintResult.Success -> {
-                    // Compose new substitution with existing one
-                    substitution = result.substitution.compose(substitution)
-                    warnings.addAll(result.warnings)
-                }
-                is ConstraintResult.Failure -> {
-                    // Collect error and continue (to find all errors)
-                    errors.add(
-                        ConstraintError(
-                            message = result.message,
-                            constraint = appliedConstraint,
-                            context = appliedConstraint.getContext()
-                        )
-                    )
-                }
-            }
         }
 
         // Apply deferred inferences from bidirectional ability inference
@@ -621,7 +616,17 @@ class ConstraintSolver(
      * so we have access to the full accumulated substitution.
      */
     private fun solveEquality(constraint: Constraint.Equality): ConstraintResult {
+        // DEBUG: Log equality constraint solving
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("[DEBUG] solveEquality: ${constraint.left} = ${constraint.right} (${constraint.context})")
+        }
+
         val result = unify(constraint.left, constraint.right, typeDeclarations)
+
+        // DEBUG: Log result
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("[DEBUG]   result: $result")
+        }
 
         return when (result) {
             is UnificationResult.Success -> {
@@ -1149,6 +1154,27 @@ class ConstraintSolver(
                 is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
                 is UnificationResult.Failure -> ConstraintResult.Failure(result.message)
             }
+        }
+
+        // Handle single-constructor variants (newtypes) - allow field access on the payload
+        // Example: type User = | User { name: String, age: Int } |
+        // Accessing user.name on a User value should work by accessing the payload's field
+        if (recordType is FunkType.VariantType) {
+            // Check if it's a single-constructor variant (newtype pattern)
+            if (recordType.constructors.size == 1 && recordType.rowVar == null) {
+                val (_, payloadType) = recordType.constructors.entries.first()
+                if (payloadType != null) {
+                    // Delegate field access to the payload type
+                    return solveHasField(
+                        constraint.copy(recordType = payloadType),
+                        currentSubst
+                    )
+                }
+            }
+            // Multi-constructor variants or no payload - can't access fields
+            return ConstraintResult.Failure(
+                "Cannot access field '$fieldName' on variant type: ${formatType(recordType)}"
+            )
         }
 
         // If it's a concrete record type, check if field exists
