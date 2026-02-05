@@ -66,6 +66,16 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int = 0) {
             return TypeVar(name, level, id)
         }
 
+        /**
+         * Create a TypeVar with the given name but a unique ID from the global counter.
+         * This is useful for type annotations where we want to preserve the user's name
+         * but still need unique identity to avoid collision with inference variables.
+         */
+        fun freshWithName(name: String, level: Int = currentLevel): TypeVar {
+            val id = globalCounter++
+            return TypeVar(name, level, id)
+        }
+
         fun resetCounter() {
             globalCounter = 0
             currentLevel = 0

@@ -776,8 +776,14 @@ class ConstraintGenerator(
                             // CRITICAL: Cache type variables by name to ensure all occurrences of 'a
                             // in a single annotation refer to the same TypeVar instance
                             // Matches old typechecker behavior EXACTLY
+                            //
+                            // IMPORTANT: Use TypeVar.freshWithName() to generate unique IDs for annotation type vars.
+                            // This preserves the original name from the annotation while ensuring the ID
+                            // doesn't collide with inference type variables which also use fresh().
+                            // Without this, annotation 'a (id=0) and pattern-fresh 'a (id=0) would be
+                            // structurally equal, causing incorrect unifications.
                             val typeVar = typeVarCache.getOrPut(annotation.name) {
-                                TypeVar(annotation.name)
+                                TypeVar.freshWithName(annotation.name)
                             }
                             FunkType.VarType(typeVar)
                         } else {

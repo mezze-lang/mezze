@@ -211,11 +211,13 @@ fun unify(type1: FunkType, type2: FunkType, typeDeclarations: Map<String, TypeDe
         type1 is FunkType.OrderingType && type2 is FunkType.OrderingType -> UnificationResult.Success(Substitution.empty)
 
         // CASE 14: Type mismatch
-        else -> UnificationResult.Failure(
-            message = "Cannot unify ${formatType(type1)} with ${formatType(type2)}",
-            type1 = type1,
-            type2 = type2
-        )
+        else -> {
+            UnificationResult.Failure(
+                message = "Cannot unify ${formatType(type1)} with ${formatType(type2)}",
+                type1 = type1,
+                type2 = type2
+            )
+        }
     }
 }
 
@@ -813,7 +815,14 @@ internal fun expandTypeApplicationToVariant(typeApp: FunkType.TypeApplication, t
         return when (type) {
             is FunkType.VarType -> {
                 // Check if this type variable matches a type parameter
-                typeParamSubst[type.variable.name] ?: type
+                // Try both with and without the ' prefix since formats may differ:
+                // - typeDecl.typeParams uses "'a" format (from parser)
+                // - ContextBuilder.convertTypeAnnotation creates TypeVar with "a" format (without ')
+                val varName = type.variable.name
+                typeParamSubst[varName]
+                    ?: typeParamSubst["'$varName"]
+                    ?: typeParamSubst[varName.removePrefix("'")]
+                    ?: type
             }
             is FunkType.RecordType -> {
                 FunkType.RecordType(
