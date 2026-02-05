@@ -246,8 +246,15 @@ class EffectHandlerRulesTest {
 
     @Test
     fun `test perform on pure function should fail`() {
+        // Define effect and impl inline instead of using stdlib imports
         val source = """
-            use std::effects::log::{Console}
+            effect Log where {
+              info: { msg: String } -> {} <Log>
+            }
+
+            impl Log for Console where {
+              info: { msg: String } -> {} = { msg } -> {}
+            }
 
             let pureFunction = { x } -> x + 1
 

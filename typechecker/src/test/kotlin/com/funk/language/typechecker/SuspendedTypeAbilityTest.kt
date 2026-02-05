@@ -499,7 +499,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Int"
+            "Int <Log>"  // Condition effects propagate to result type
         )
     }
 }

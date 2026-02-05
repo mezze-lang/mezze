@@ -591,7 +591,27 @@ class ExpressionConstraintGenerator {
                     return generateAbilityMethodCall(expr, receiverName, lookup.binding, context)
                 }
                 is TypingContext.LookupResult.NotFound -> {
-                    // Not an ability or effect, continue to regular field access
+                    // Not an ability or effect, continue to check performer
+                }
+            }
+
+            // Check if this is a performer method call (e.g., BasicLogger.info)
+            // Performers implement effects, so we need to look up the effect and its operations
+            val effectName = context.performerToEffect[receiverName]
+            if (effectName != null) {
+                // This is a performer - look up the effect operations
+                val effectKey = "${effectName}_ability"
+                when (val effectLookup = context.typingContext.lookup(effectKey)) {
+                    is TypingContext.LookupResult.Found -> {
+                        // Generate performer method call - similar to effect operation but bound to specific performer
+                        val performerResult = tryGeneratePerformerMethodCall(expr, receiverName, effectName, effectLookup.binding, context)
+                        if (performerResult != null) {
+                            return performerResult
+                        }
+                    }
+                    is TypingContext.LookupResult.NotFound -> {
+                        // Effect not found - will be caught later
+                    }
                 }
             }
         }
@@ -880,6 +900,76 @@ class ExpressionConstraintGenerator {
             type = instantiatedOperationType,
             constraints = emptyList(),
             effects = setOf(effectName),  // Track effect here, not in function type
+            undefinedVariables = emptyList()
+        )
+    }
+
+    /**
+     * Try to generate a performer method call (e.g., BasicLogger.info).
+     *
+     * Performers are concrete implementations of effects. When accessing a method
+     * on a performer, we look up the corresponding effect's operation type.
+     * The call still produces the effect (it's not handled by the performer itself).
+     *
+     * @return ConstraintResult if this is a valid performer method call, null otherwise
+     */
+    private fun tryGeneratePerformerMethodCall(
+        expr: MemberAccess,
+        performerName: String,
+        effectName: String,
+        effectBinding: TypingContext.Binding,
+        context: ConstraintContext
+    ): ConstraintResult? {
+        // Get effect type from binding
+        val effectType = when (effectBinding) {
+            is TypingContext.Binding.Monomorphic -> effectBinding.type
+            is TypingContext.Binding.Polymorphic -> {
+                effectBinding.scheme.instantiate().type
+            }
+        }
+
+        // Effect should be stored as RecordType with operations as fields
+        if (effectType !is FunkType.RecordType) {
+            return null
+        }
+
+        // Look up operation in effect
+        val operationName = expr.member
+        val operationType = effectType.fields[operationName] ?: return null
+
+        // Get the performer's associated type bindings (if any)
+        var instantiatedOperationType = operationType
+        val performerKey = "${performerName}_performer"
+        when (val lookup = context.typingContext.lookup(performerKey)) {
+            is TypingContext.LookupResult.Found -> {
+                val performerBinding = lookup.binding
+                val performerType = when (performerBinding) {
+                    is TypingContext.Binding.Monomorphic -> performerBinding.type
+                    is TypingContext.Binding.Polymorphic -> performerBinding.scheme.type
+                }
+
+                if (performerType is FunkType.RecordType) {
+                    // Substitute associated types in the operation type
+                    instantiatedOperationType = substituteAssociatedTypesInType(
+                        instantiatedOperationType,
+                        performerType.fields
+                    )
+                }
+            }
+            is TypingContext.LookupResult.NotFound -> {
+                // No associated type bindings - use operation type as-is
+            }
+        }
+
+        // Instantiate with fresh vars
+        instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
+
+        // Return the function type with the effect tracked
+        // Performer method calls still produce effects - they need to be handled by perform
+        return ConstraintResult(
+            type = instantiatedOperationType,
+            constraints = emptyList(),
+            effects = setOf(effectName),
             undefinedVariables = emptyList()
         )
     }
@@ -1414,9 +1504,17 @@ class ExpressionConstraintGenerator {
             null
         }
 
+        // CRITICAL: Unwrap SuspendedType from body result - effects are already in effectRow
+        // This prevents double-wrapping: FunctionType already has effects in its `effects` field,
+        // so the return type should be the plain value type, not SuspendedType(value, effects)
+        val returnType = when (val bodyType = bodyResult.type) {
+            is FunkType.SuspendedType -> bodyType.valueType
+            else -> bodyType
+        }
+
         val functionType = FunkType.FunctionType(
             paramType = paramType,
-            returnType = bodyResult.type,
+            returnType = returnType,
             effects = effectRow
         )
 
@@ -1598,9 +1696,14 @@ class ExpressionConstraintGenerator {
                     effects = effectRow
                 )
 
+                // CRITICAL FIX: Propagate effects from the function type to ConstraintResult.effects
+                // This allows generatePerform to track which effects are used by the expression
+                val propagatedEffects = effectRow.effects + functionResult.effects + argumentResult.effects
+
                 return ConstraintResult(
                     type = resultType,
                     constraints = constraints,
+                    effects = propagatedEffects,  // Propagate effects from function type
                     undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables
                 )
             }
@@ -1683,7 +1786,9 @@ class ExpressionConstraintGenerator {
             )
         )
 
-        // Collect effects from all branches (condition + then + else)
+        // EFFECT SEMANTICS: Propagate effects from condition AND branches
+        // If the condition has effects, the whole if expression has those effects
+        // Example: `if getBool {} then 1 else 2` where getBool has <Log> → result is Int <Log>
         val effects = conditionResult.effects + thenResult.effects + elseResult.effects
         val abilityConstraints = conditionResult.abilityConstraints + thenResult.abilityConstraints + elseResult.abilityConstraints
 
@@ -1891,10 +1996,18 @@ class ExpressionConstraintGenerator {
         effects.addAll(resultResult.effects)
         abilityConstraints.addAll(resultResult.abilityConstraints)
 
+        // CRITICAL: If do block has effects, wrap the result in SuspendedType
+        // This allows perform expressions to properly detect and handle effects
+        val resultType = if (effects.isNotEmpty()) {
+            FunkType.SuspendedType(resultResult.type, FunkType.EffectRow(effects))
+        } else {
+            resultResult.type
+        }
+
         return ConstraintResult(
-            type = resultResult.type,
+            type = resultType,
             constraints = constraints,
-            effects = effects,
+            effects = effects,  // Still track effects for propagation
             abilityConstraints = abilityConstraints,
             undefinedVariables = undefinedVars
         )
@@ -1915,9 +2028,69 @@ class ExpressionConstraintGenerator {
         val exprResult = generate(expr.expression, contextWithPerform)
 
         // Map each handler name to the effect it handles
-        val handledEffects = expr.handlers.mapNotNull { handler ->
-            context.performerToEffect[handler.name]
-        }.toSet()
+        val handlerEffects = expr.handlers.mapNotNull { handler ->
+            context.performerToEffect[handler.name]?.let { handler.name to it }
+        }
+        val handledEffects = handlerEffects.map { it.second }.toSet()
+
+        // VALIDATION 1: Check for duplicate handlers for the same effect
+        val effectCounts = handlerEffects.groupBy { it.second }
+        for ((effect, handlers) in effectCounts) {
+            if (handlers.size > 1) {
+                val handlerNames = handlers.map { it.first }.joinToString(", ")
+                throw TypeCheckError(
+                    message = "Multiple handlers for the same effect '$effect': $handlerNames. Each effect can only be handled by one performer.",
+                    expression = expr,
+                    errorType = ErrorType.CONSTRAINT_VIOLATION
+                )
+            }
+        }
+
+        // VALIDATION 2: Check that handlers are meaningful
+        // Skip validation for nested performs - inner performs may have handlers that produce effects
+        // which need to be handled by outer performs. We can't track those effects statically yet.
+        val isNestedPerform = expr.expression is PerformExpression
+
+        // Also check for effects in the result TYPE (for function references with effects)
+        // e.g., `perform Console in myEffectfulFunc` where myEffectfulFunc has type `{} -> T <Log>`
+        val typeEffects = extractEffectsFromType(exprResult.type)
+        val allEffects = exprResult.effects + typeEffects
+
+        // CRITICAL: We validate based on effects, not types
+        // If effects are empty, the expression is pure - we can validate
+        // If effects are non-empty, we know what effects the expression uses - we can validate
+        // We only skip validation for nested performs (which may have complex effect flows)
+        if (!isNestedPerform) {
+            // If the expression has no effects (neither tracked nor in type), providing handlers is meaningless
+            if (handlerEffects.isNotEmpty() && allEffects.isEmpty()) {
+                // Expression is pure but handlers provided
+                val handlerNames = handlerEffects.map { it.first }.joinToString(", ")
+                throw TypeCheckError(
+                    message = "Expression is pure (has no effects), but handlers were provided: $handlerNames. " +
+                        "Remove the perform block or use an expression that actually uses effects.",
+                    expression = expr,
+                    errorType = ErrorType.CONSTRAINT_VIOLATION
+                )
+            }
+
+            if (allEffects.isNotEmpty() && handlerEffects.isNotEmpty()) {
+                // Check if at least one handler handles an effect the expression actually uses
+                val handlersHandleUsedEffects = handlerEffects.any { (_, effectName) ->
+                    effectName in allEffects
+                }
+                if (!handlersHandleUsedEffects) {
+                    // None of the handlers handle effects that the expression uses
+                    val handlersList = handlerEffects.map { (name, effect) -> "$name (handles $effect)" }.joinToString(", ")
+                    throw TypeCheckError(
+                        message = "None of the provided handlers handle effects used by the expression. " +
+                            "Expression uses: ${allEffects.joinToString(", ")}. " +
+                            "Handlers provided: $handlersList",
+                        expression = expr,
+                        errorType = ErrorType.CONSTRAINT_VIOLATION
+                    )
+                }
+            }
+        }
 
         // DEBUG
         if (System.getProperty("funk.debug.effects") == "true") {
@@ -1948,6 +2121,20 @@ class ExpressionConstraintGenerator {
             effects = remainingEffects,  // Return remaining unhandled effects
             undefinedVariables = exprResult.undefinedVariables
         )
+    }
+
+    /**
+     * Extract effects from a type.
+     *
+     * Returns effects from FunctionType.effects or SuspendedType.effects.
+     * Used to detect if a function reference has effects that need handling.
+     */
+    private fun extractEffectsFromType(type: FunkType): Set<String> {
+        return when (type) {
+            is FunkType.FunctionType -> type.effects?.effects ?: emptySet()
+            is FunkType.SuspendedType -> type.effects.effects
+            else -> emptySet()
+        }
     }
 
     /**

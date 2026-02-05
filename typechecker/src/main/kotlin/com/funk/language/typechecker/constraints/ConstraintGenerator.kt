@@ -289,9 +289,27 @@ class ConstraintGenerator(
                                 addAbilityConstraintsToFunctionType(solvedType, result.abilityConstraints, substitution)
                             }
 
+                            // CRITICAL: Wrap types in SuspendedType if the binding has effects
+                            // This allows subsequent lookups to see the effects
+                            // Example: let program = Log.info {...} should have type {} <Log>, not just {}
+                            val solvedBindingsWithEffects = if (result.effects.isNotEmpty()) {
+                                solvedBindingsWithAbilities.mapValues { (_, solvedType) ->
+                                    when (solvedType) {
+                                        is FunkType.SuspendedType -> solvedType  // Already suspended
+                                        is FunkType.FunctionType -> solvedType    // Functions have effects in signature
+                                        else -> FunkType.SuspendedType(
+                                            valueType = solvedType,
+                                            effects = FunkType.EffectRow(result.effects)
+                                        )
+                                    }
+                                }
+                            } else {
+                                solvedBindingsWithAbilities
+                            }
+
                             // GENERALIZATION: Check if bindings should be polymorphic
                             // Convert pattern bindings to context bindings with generalization
-                            val contextBindings = solvedBindingsWithAbilities.mapValues { (name, solvedType) ->
+                            val contextBindings = solvedBindingsWithEffects.mapValues { (name, solvedType) ->
                                 // Collect free type variables in the solved type
                                 val freeVars = com.funk.language.typechecker.context.collectFreeTypeVars(solvedType)
 
@@ -385,10 +403,10 @@ class ConstraintGenerator(
                             // Polymorphic bindings will be instantiated at use sites
                             currentContext = currentContext.extendAll(contextBindings)
 
-                            // CRITICAL FIX: Update results map with types that have ability constraints
+                            // CRITICAL FIX: Update results map with types that have ability constraints and effects
                             // SubstitutionApplier reads from this map, so we need the types with constraints here
                             // This ensures ability constraints make it to the final LetBinding.inferredType
-                            for ((bindingName, solvedType) in solvedBindingsWithAbilities) {
+                            for ((bindingName, solvedType) in solvedBindingsWithEffects) {
                                 if (results.containsKey(bindingName)) {
                                     val existingResult = results[bindingName]!!
                                     results[bindingName] = existingResult.copy(type = solvedType)
