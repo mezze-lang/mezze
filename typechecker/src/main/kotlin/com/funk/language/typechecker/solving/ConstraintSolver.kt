@@ -1266,10 +1266,51 @@ class ConstraintSolver(
             }
         }
 
-        // If variant type is a type variable, create an open variant with this constructor
-        // The open variant can be extended by other HasConstructor constraints on the same type var
+        // If variant type is a type variable, check if the constructor belongs to a known type declaration
+        // If so, use the declared type (with all its constructors). Otherwise, create an open variant.
         if (variantType is FunkType.VarType) {
-            // Create an open variant type with just this constructor
+            // CRITICAL: Only use declared type for PATTERN matching contexts, not for expression contexts
+            // Pattern contexts need the full type for exhaustiveness checking.
+            // Expression contexts should create open variants that can unify with annotated types.
+            //
+            // Pattern context: "Constructor pattern Foo"
+            // Expression context: "Variant constructor Foo" or "Variant construction Foo"
+            val isPatternContext = constraint.context?.contains("Constructor pattern") == true
+
+            if (isPatternContext) {
+                // Look up type declaration that contains this constructor
+                // This ensures exhaustiveness checking works with inferred types
+                val declaringType = findTypeDeclarationForConstructor(constructorName)
+
+                if (declaringType != null) {
+                    // Constructor belongs to a known type - use the full declared type
+                    // This is important for exhaustiveness checking: if the user writes
+                    //   match color is Red -> ... | Blue -> ...
+                    // and there's a type Color = | Red, Blue, Green |, we should use
+                    // the full Color type (with Green) so exhaustiveness checking works.
+                    val variantDef = declaringType.definition as VariantDefinition
+                    val constructors = variantDef.constructors.associate { ctor ->
+                        val payloadType = ctor.dataType?.let { dataTypeAnnotation ->
+                            // Convert annotation to FunkType
+                            convertTypeAnnotationForSolver(dataTypeAnnotation, declaringType.typeParams)
+                        }
+                        ctor.name to payloadType
+                    }
+
+                    val declaredVariant = FunkType.VariantType(
+                        constructors = constructors,
+                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null  // Use declared openness
+                    )
+
+                    return ConstraintResult.Success(
+                        Substitution.single(variantType.variable, declaredVariant)
+                    )
+                }
+            }
+
+            // Not a pattern context OR no type declaration found - create an open variant
+            // The open variant can be extended by other HasConstructor constraints and
+            // can be unified with annotated types like `let y: Color = Yellow`
             val newVariant = FunkType.VariantType(
                 constructors = mapOf(constructorName to expectedPayloadType),
                 rowVar = RowVar.fresh()  // Open so it can be extended
@@ -1598,6 +1639,43 @@ class ConstraintSolver(
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
             is FunkType.OrderingType, is FunkType.EffectRow -> type
         }
+    }
+
+    /**
+     * Find the type declaration that contains the given constructor.
+     *
+     * This is used to resolve constructor names to their declaring types,
+     * enabling exhaustiveness checking with inferred types.
+     *
+     * Example: findTypeDeclarationForConstructor("Red") might return
+     * TypeDeclaration("Color", VariantDefinition([Red, Blue, Green]))
+     */
+    private fun findTypeDeclarationForConstructor(constructorName: String): TypeDeclaration? {
+        for ((_, typeDecl) in typeDeclarations) {
+            val definition = typeDecl.definition
+            if (definition is VariantDefinition) {
+                val hasConstructor = definition.constructors.any { it.name == constructorName }
+                if (hasConstructor) {
+                    return typeDecl
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Convert a type annotation to FunkType for solver use.
+     * Creates fresh type variables for declared type parameters.
+     */
+    private fun convertTypeAnnotationForSolver(
+        annotation: TypeAnnotation,
+        declaredTypeParams: List<String>
+    ): FunkType {
+        // Create fresh type variables for each declared type parameter
+        val typeParamSubst = declaredTypeParams.associate { param ->
+            param to FunkType.VarType(TypeVar.fresh())
+        }
+        return convertTypeAnnotation(annotation, typeParamSubst)
     }
 
     /**

@@ -139,7 +139,6 @@ class NewMatchSyntaxTest {
         assertNotNull(program)
     }
 
-    @Disabled("Exhaustiveness checking not yet implemented in NewTypeChecker constraint-based system")
     @Test
     fun `test exhaustiveness checking - non-exhaustive match without wildcard`() {
         val code = """
@@ -172,7 +171,6 @@ class NewMatchSyntaxTest {
         assertNotNull(program)
     }
 
-    @Disabled("Exhaustiveness checking not yet implemented in NewTypeChecker constraint-based system")
     @Test
     fun `test exhaustiveness checking with guards - should require wildcard`() {
         val code = """
