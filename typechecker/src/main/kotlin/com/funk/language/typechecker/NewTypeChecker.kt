@@ -136,12 +136,15 @@ class NewTypeChecker(
      * Check a program through all 7 phases.
      *
      * This is the main entry point!
+     *
+     * @param program The program to type-check
+     * @param currentPath Optional path for module resolution (defaults to current directory)
      */
-    fun checkProgram(program: Program): TypeCheckResult {
+    fun checkProgram(program: Program, currentPath: Path = Paths.get(".")): TypeCheckResult {
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
         val enhancedContext = if (hasImports(program)) {
-            val moduleLoader = ModuleLoader.create()
+            val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
             // CRITICAL FIX: Pass the ModuleResolver to ModuleTypeChecker so it can update
             // the resolver's cache with real inferred types after type-checking
             val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
@@ -623,11 +626,20 @@ class NewTypeChecker(
 
     /**
      * Get current type context (compatibility API).
-     * Returns empty map (new system uses immutable context internally).
+     *
+     * DEPRECATED: Use typedProgram.items and check inferredType on each item instead.
+     * The new type checker stores types directly on AST nodes, not in a separate context.
+     *
+     * Example:
+     * ```kotlin
+     * val binding = typedProgram.items.filterIsInstance<LetBinding>()
+     *     .find { it.variableName == "x" }
+     * val type = binding?.inferredType
+     * ```
      */
+    @Deprecated("Use inferredType on AST nodes instead", ReplaceWith("typedProgram.items"))
     fun getContext(): Map<String, FunkType> {
-        // New system uses immutable TypingContext internally
-        // Tests shouldn't need this, but for compatibility return empty
+        // Return empty - tests should use inferredType on AST nodes
         return emptyMap()
     }
 
@@ -668,7 +680,7 @@ class NewTypeChecker(
         // Reset type variable counter for consistent naming (old behavior)
         com.funk.language.ast.TypeVar.resetCounter()
 
-        val result = checkProgram(program)
+        val result = checkProgram(program, currentPath)
 
         return when (result) {
             is TypeCheckResult.Success -> {
@@ -728,23 +740,22 @@ class NewTypeChecker(
 
         /**
          * Clear the module cache (compatibility API).
-         * No-op in new system (module caching handled differently).
+         * Clears the ModuleResolver's global cache.
          */
         @JvmStatic
         fun clearCache() {
-            // No-op: new system doesn't use a global cache
-            // Module loading is handled per type-check invocation
+            // Clear the ModuleResolver's cache
+            ModuleResolver.clearCache()
         }
 
         /**
          * Get a cached typed module's Program if available (compatibility API).
-         * Returns null if the module hasn't been type-checked yet.
+         * Returns the Program if the module has been type-checked, null otherwise.
          */
         @JvmStatic
         fun getTypedModule(modulePath: String): Program? {
-            // The new system uses ModuleLoader's cache internally
-            // For compatibility, we return null (cached modules are handled internally)
-            return null
+            // Get from ModuleResolver's cache
+            return ModuleResolver.getFromCache(modulePath)?.program
         }
 
         /**

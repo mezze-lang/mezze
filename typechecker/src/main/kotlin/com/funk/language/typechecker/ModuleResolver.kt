@@ -609,23 +609,26 @@ class ModuleResolver(
     
     /**
      * Check if a module can access internal modules of another module
-     * TODO: Implement proper access control logic
      */
     fun canAccessInternal(fromModule: String, toModule: String): Boolean {
         // Internal modules can only be accessed by modules in the same parent hierarchy
         // For example: math::internal::helpers can only be accessed by modules under math::
-        
+
         if (!toModule.contains("::internal::")) {
             return true // Not an internal module, access allowed
         }
-        
+
         // Extract the parent module path from the internal module
         val internalIndex = toModule.indexOf("::internal::")
         val parentModule = toModule.substring(0, internalIndex)
-        
+
+        // Empty fromModule means a top-level script, which CANNOT access internal modules
+        if (fromModule.isEmpty()) {
+            return false
+        }
+
         // Allow access if the fromModule is within the same parent hierarchy
-        // or if fromModule is empty (top-level module)
-        return fromModule.isEmpty() || fromModule.startsWith("$parentModule::")
+        return fromModule.startsWith("$parentModule::")
     }
     
     /**

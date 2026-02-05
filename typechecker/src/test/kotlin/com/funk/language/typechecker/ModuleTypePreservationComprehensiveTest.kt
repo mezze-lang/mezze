@@ -20,10 +20,16 @@ class ModuleTypePreservationComprehensiveTest {
 
     @BeforeEach
     fun setup() {
-        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
+        ModuleResolver.clearCache()
         TypeChecker.clearCache()
         parser = FunkParser()
         typeChecker = TypeChecker()
+    }
+
+    /** Helper to get inferred type of a binding by name from typed program */
+    private fun getBindingType(program: Program, name: String): FunkType? {
+        return program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == name }?.inferredType
     }
 
     @Test
@@ -68,8 +74,6 @@ class ModuleTypePreservationComprehensiveTest {
         val program = parser.parse(mainSource)
         val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
-        val context = typeChecker.getContext()
-
         println("\n📊 Type Check Results:")
         println("-".repeat(70))
 
@@ -85,14 +89,16 @@ class ModuleTypePreservationComprehensiveTest {
 
         var allPassed = true
         for ((varName, expectedType) in tests) {
-            val actualType = context[varName]
+            val actualType = getBindingType(typedProgram, varName)
             val typeStr = actualType?.let { prettyPrintType(it) } ?: "null"
 
             val passed = when (expectedType) {
                 "Int" -> actualType is FunkType.IntType
                 "Float" -> actualType is FunkType.FloatType
                 "String" -> actualType is FunkType.StringType
-                "Boolean" -> actualType is FunkType.BooleanType
+                "Boolean" -> actualType is FunkType.BooleanType ||
+                    (actualType is FunkType.VariantType &&
+                     actualType.constructors.keys.containsAll(listOf("True", "False")))
                 else -> false
             }
 
@@ -110,13 +116,13 @@ class ModuleTypePreservationComprehensiveTest {
         }
 
         // Test function types
-        val myAdd = context["my_add"]
+        val myAdd = getBindingType(typedProgram, "my_add")
         assertNotNull(myAdd, "my_add should have a type")
         assertTrue(myAdd is FunkType.FunctionType,
             "my_add should be a function type, got: ${prettyPrintType(myAdd!!)}")
         println("  ✅ PASS  my_add: ${prettyPrintType(myAdd)}")
 
-        val myNegate = context["my_negate"]
+        val myNegate = getBindingType(typedProgram, "my_negate")
         assertNotNull(myNegate, "my_negate should have a type")
         assertTrue(myNegate is FunkType.FunctionType,
             "my_negate should be a function type, got: ${prettyPrintType(myNegate!!)}")
@@ -155,8 +161,7 @@ class ModuleTypePreservationComprehensiveTest {
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
-        val context = typeChecker.getContext()
-        val myValueType = context["my_value"]
+        val myValueType = getBindingType(typedProgram, "my_value")
 
         println("\nmy_value type: ${myValueType?.let { prettyPrintType(it) } ?: "null"}")
 

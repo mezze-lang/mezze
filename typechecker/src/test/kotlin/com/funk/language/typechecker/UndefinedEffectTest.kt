@@ -1,10 +1,10 @@
 package com.funk.language.typechecker
 
+import com.funk.language.ast.*
 import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertTrue
-import kotlin.test.fail
 
 /**
  * Test that using undefined effects/identifiers produces errors
@@ -16,10 +16,16 @@ class UndefinedEffectTest {
 
     @BeforeEach
     fun setup() {
-        ModuleResolver.clearCache()  // Clear module cache to prevent state pollution between tests
+        ModuleResolver.clearCache()
         TypeChecker.clearCache()
         parser = FunkParser()
         typeChecker = TypeChecker()
+    }
+
+    /** Helper to get inferred type of a binding by name from typed program */
+    private fun getBindingType(program: Program, name: String): FunkType? {
+        return program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == name }?.inferredType
     }
 
     @Test
@@ -30,12 +36,6 @@ class UndefinedEffectTest {
 
         try {
             val program = parser.parse(source)
-            if (program == null) {
-                println("✅ Parser correctly rejected undefined effect 'UndefinedEffect'")
-                assertTrue(true, "Parse error prevents undefined effect usage")
-                return
-            }
-
             val typedProgram = typeChecker.typeCheck(program).program
 
             // If we get here, the typechecker is being too permissive
@@ -65,18 +65,11 @@ class UndefinedEffectTest {
 
         try {
             val program = parser.parse(source)
-            if (program == null) {
-                println("✅ Parser correctly rejected Log without import")
-                assertTrue(true, "Parse error prevents undefined effect usage")
-                return
-            }
-
             val typedProgram = typeChecker.typeCheck(program).program
 
-            val context = typeChecker.getContext()
-            val noiseAddType = context["noise_add"]
+            val noiseAddType = getBindingType(typedProgram, "noise_add")
 
-            println("noise_add type: ${noiseAddType?.toString() ?: "null"}")
+            println("noise_add type: ${noiseAddType?.let { prettyPrintType(it) } ?: "null"}")
 
             // Currently this will pass because the typechecker is permissive
             // The type will NOT include <Log> effect because Log is undefined

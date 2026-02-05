@@ -4,7 +4,6 @@ import com.funk.language.ast.*
 import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
-import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 import kotlin.io.path.writeText
@@ -15,13 +14,10 @@ import kotlin.io.path.writeText
  */
 class ModuleTypePreservationTest {
 
-    companion object {
-        @JvmStatic
-        @BeforeAll
-        fun setup() {
-            // Enable debug logging
-            System.setProperty("funk.typecheck.debug", "true")
-        }
+    /** Helper to get inferred type of a binding by name from typed program */
+    private fun getBindingType(program: Program, name: String): FunkType? {
+        return program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == name }?.inferredType
     }
 
     @Test
@@ -29,6 +25,10 @@ class ModuleTypePreservationTest {
         println("\n========================================")
         println("TEST: Module with explicit type annotations")
         println("========================================\n")
+
+        // Clear caches
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
 
         // Create a simple module file with explicit type annotations
         val moduleFile = tempDir.resolve("test_module.funk")
@@ -57,21 +57,11 @@ class ModuleTypePreservationTest {
             println("RESULTS:")
             println("========================================\n")
 
-            // Check the types of the imported values
-            val context = typeChecker.getContext()
-            println("Final context size: ${context.size}")
-            println("Final context keys: ${context.keys.joinToString(", ")}")
+            // Get types from the typed program
+            val simpleIntType = getBindingType(typedProgram, "test_int")
+            val simpleFuncType = getBindingType(typedProgram, "test_func")
 
-            context.forEach { (k, v) ->
-                println("  $k -> ${prettyPrintType(v)}")
-            }
-
-            // Verify simple_int has type Int
-            val simpleIntType = context["test_int"]
-            println("\ntest_int type: ${simpleIntType?.let { prettyPrintType(it) } ?: "null"}")
-
-            // Verify simple_func has the correct function type
-            val simpleFuncType = context["test_func"]
+            println("test_int type: ${simpleIntType?.let { prettyPrintType(it) } ?: "null"}")
             println("test_func type: ${simpleFuncType?.let { prettyPrintType(it) } ?: "null"}")
 
             // Assertions
@@ -101,6 +91,10 @@ class ModuleTypePreservationTest {
         println("TEST: Module with inferred types (no annotations)")
         println("========================================\n")
 
+        // Clear caches
+        ModuleResolver.clearCache()
+        TypeChecker.clearCache()
+
         // Create a simple module file WITHOUT explicit type annotations
         val moduleFile = tempDir.resolve("test_inferred.funk")
         moduleFile.writeText("""
@@ -124,36 +118,32 @@ class ModuleTypePreservationTest {
             val program = parser.parse(mainSource)
             val typedProgram = typeChecker.typeCheck(program, tempDir).program
 
-            println("\n========================================")
-            println("RESULTS:")
-            println("========================================\n")
+            // Get types from the typed program
+            val testIntType = getBindingType(typedProgram, "test_int")
+            val testFuncType = getBindingType(typedProgram, "test_func")
 
-            // Check the types of the imported values
-            val context = typeChecker.getContext()
-            println("Final context size: ${context.size}")
-            println("Final context keys: ${context.keys.joinToString(", ")}")
+            println("test_int type: ${testIntType?.let { prettyPrintType(it) } ?: "null"}")
+            println("test_func type: ${testFuncType?.let { prettyPrintType(it) } ?: "null"}")
 
-            context.forEach { (k, v) ->
-                println("  $k -> ${prettyPrintType(v)}")
-            }
+            assertNotNull(testIntType, "test_int should have a type")
+            assertNotNull(testFuncType, "test_func should have a type")
 
-            // Verify inferred_int has type Int
-            val inferredIntType = context["test_int"]
-            println("\ntest_int type: ${inferredIntType?.let { prettyPrintType(it) } ?: "null"}")
+            // The bug was that it became 'a (a fresh type variable)
+            // After the fix, it should be Int
+            val typeStr = prettyPrintType(testIntType!!)
 
-            // Verify inferred_func has the correct function type
-            val inferredFuncType = context["test_func"]
-            println("test_func type: ${inferredFuncType?.let { prettyPrintType(it) } ?: "null"}")
+            // Check it's NOT a bare type variable like 'a, 'b, etc.
+            val isFreshVar = testIntType is FunkType.VarType &&
+                             typeStr.matches(Regex("'[a-z]"))
 
-            // Assertions
-            assertNotNull(inferredIntType, "test_int should have a type")
-            assertNotNull(inferredFuncType, "test_func should have a type")
+            assertFalse(isFreshVar,
+                "test_int should NOT be a fresh type variable like 'a, got: $typeStr")
 
-            // Check that types are not just 'a (fresh type variables)
-            // This test is expected to FAIL until the module system is fixed
-            println("\nExpected behavior: These should NOT be type variables")
-            println("Actual test_int type: ${prettyPrintType(inferredIntType!!)}")
-            println("Actual test_func type: ${prettyPrintType(inferredFuncType!!)}")
+            assertTrue(testIntType is FunkType.IntType,
+                "test_int should be Int, got: $typeStr")
+
+            println("✅ VERIFIED: Import is NOT a fresh type variable!")
+            println("✅ Type is correctly preserved as: $typeStr")
 
         } catch (e: Exception) {
             println("\n========================================")

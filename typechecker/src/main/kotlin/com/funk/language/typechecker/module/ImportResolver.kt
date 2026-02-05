@@ -155,6 +155,14 @@ class ImportResolver(
     ): ProcessResult {
         val modulePath = path.segments.joinToString("::")
 
+        // Check for internal module access
+        // Top-level imports (fromModule = "") cannot access internal modules
+        if (!loader.getResolver().canAccessInternal("", modulePath)) {
+            return ProcessResult.Failure(
+                listOf(ModuleError.InternalModuleAccess("", modulePath))
+            )
+        }
+
         // Load the module
         val loadResult = loader.loadModule(modulePath)
 
@@ -220,6 +228,14 @@ class ImportResolver(
         isPublic: Boolean
     ): ProcessResult {
         val modulePath = path.module.joinToString("::")
+
+        // Check for internal module access
+        // Top-level imports (fromModule = "") cannot access internal modules
+        if (!loader.getResolver().canAccessInternal("", modulePath)) {
+            return ProcessResult.Failure(
+                listOf(ModuleError.InternalModuleAccess("", modulePath))
+            )
+        }
 
         // Load the module
         val loadResult = loader.loadModule(modulePath)
