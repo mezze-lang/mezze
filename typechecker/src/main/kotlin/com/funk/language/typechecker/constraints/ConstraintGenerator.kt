@@ -769,7 +769,7 @@ class ConstraintGenerator(
                     "Int" -> FunkType.IntType
                     "Float" -> FunkType.FloatType
                     "String" -> FunkType.StringType
-                    "Bool" -> FunkType.VariantType(
+                    "Bool", "Boolean" -> FunkType.VariantType(
                         constructors = mapOf("True" to null, "False" to null),
                         rowVar = null
                     )
