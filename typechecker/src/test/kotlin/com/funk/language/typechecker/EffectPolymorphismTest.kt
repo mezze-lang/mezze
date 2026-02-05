@@ -304,9 +304,9 @@ class EffectPolymorphismTest {
 
     @Test
     fun `test validation allows effect extension in function signature - pure function`() {
-        // This should pass: effect extension is allowed in function signatures
-        // The function itself is pure, but the annotation says it can have Log + other effects
-        // This is valid for higher-order functions that might receive effectful callbacks
+        // Effect widening is allowed: a pure function can be assigned to a type that declares effects
+        // This is useful for higher-order functions that might receive effectful callbacks
+        // The pure implementation is a valid subtype of an effectful type
         val code = """
             effect Log where {
                 info: {msg: String} -> {} <Log>
@@ -315,14 +315,10 @@ class EffectPolymorphismTest {
             let f: { x: Int } -> Int <Log, ...> = { x } -> x + 1
         """.trimIndent()
 
-        // This will fail validation because the annotation declares Log but doesn't use it
-        // That's a different validation (effect usage validation), not polymorphic effect validation
-        val exception = assertThrows<TypeCheckError> {
-            val program = parser.parse(code)
-            typeChecker.typeCheck(program).program
-        }
-
-        assertTrue(exception.message?.contains("Annotation declares effects Log which are not used") == true)
+        // This should pass - effect widening is allowed (pure is a subtype of effectful)
+        val program = parser.parse(code)
+        val typedProgram = typeChecker.typeCheck(program).program
+        assertNotNull(typedProgram)
     }
 
     @Test
