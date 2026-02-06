@@ -1,8 +1,8 @@
 package com.funk.language.parser.internal
 
 import com.funk.language.ast.*
-import com.funk.language.parser.*
-
+import com.funk.language.parser.OperatorMapping
+import com.funk.language.parser.ParseException
 import com.funk.language.parser.internal.lib.*
 /**
  * Parser helper functions and utilities.
@@ -139,22 +139,9 @@ internal fun desugarBinaryOperator(
     right: Expression,
     location: SourceLocation?
 ): Expression {
-    val (abilityName, operationName) = when (operator) {
-        "+" -> "NumAdd" to "add"
-        "-" -> "NumSub" to "sub"
-        "*" -> "NumMul" to "mul"
-        "/" -> "NumDiv" to "div"
-        "%" -> "NumMod" to "mod"
-        "==" -> "Eq" to "eq"
-        "!=" -> "Eq" to "neq"
-        "<" -> "Ord" to "lt"
-        ">" -> "Ord" to "gt"
-        "<=" -> "Ord" to "le"
-        ">=" -> "Ord" to "ge"
-        "&&" -> "LogicalAnd" to "and"
-        "||" -> "LogicalOr" to "or"
-        else -> throw IllegalArgumentException("Unknown binary operator: $operator")
-    }
+    val op = OperatorMapping.getBinaryOp(operator)
+        ?: throw IllegalArgumentException("Unknown binary operator: $operator")
+    val (abilityName, operationName) = op.ability to op.method
 
     val desugared = FunctionCall(
         function = MemberAccess(
@@ -189,11 +176,9 @@ internal fun desugarUnaryOperator(
     operand: Expression,
     location: SourceLocation?
 ): Expression {
-    val (abilityName, operationName, fieldName) = when (operator) {
-        "-" -> Triple("NumSub", "neg", "n")
-        "!" -> Triple("LogicalNot", "not", "val")
-        else -> throw IllegalArgumentException("Unknown unary operator: $operator")
-    }
+    val op = OperatorMapping.getUnaryOp(operator)
+        ?: throw IllegalArgumentException("Unknown unary operator: $operator")
+    val (abilityName, operationName, fieldName) = Triple(op.ability, op.method, op.fieldName)
 
     val desugared = FunctionCall(
         function = MemberAccess(
