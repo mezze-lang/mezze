@@ -47,7 +47,6 @@ class TypeValidator(
         constraintResults: Map<String, ConstraintResult>,
         substitution: Substitution
     ): ValidationResult {
-
         val errors = mutableListOf<ValidationError>()
         val warnings = mutableListOf<String>()
 
@@ -167,6 +166,32 @@ class TypeValidator(
                     // Other items don't need validation here
                 }
             }
+        }
+
+        // Validate perform expressions (handler type compatibility)
+        val implDeclarations = program.items.filterIsInstance<ImplDeclaration>()
+            .associateBy { it.performerName }
+        val effectDeclarations = program.items.filterIsInstance<EffectDeclaration>()
+            .associateBy { it.name }
+        // Build map of function definitions for looking up function bodies
+        val functionDefinitions = buildFunctionDefinitions(program)
+        for (item in program.items) {
+            val performErrors = when (item) {
+                is LetBinding -> validatePerformExpressionsInExpression(
+                    item.expression,
+                    implDeclarations,
+                    effectDeclarations,
+                    functionDefinitions
+                )
+                is TopLevelExpression -> validatePerformExpressionsInExpression(
+                    item.expression,
+                    implDeclarations,
+                    effectDeclarations,
+                    functionDefinitions
+                )
+                else -> emptyList()
+            }
+            errors.addAll(performErrors)
         }
 
         // Return result
@@ -1083,6 +1108,88 @@ class TypeValidator(
             )
         }
 
+        // Check for unreachable patterns: if all constructors are covered BEFORE a wildcard,
+        // the wildcard is unreachable.
+        // IMPORTANT: Only apply this check for BooleanType matches, where unreachable wildcards
+        // after true/false are clearly mistakes. For other variant types (like Option), allowing
+        // defensive wildcards after exhaustive patterns is reasonable and often intentional.
+        //
+        // We detect Bool matches either by:
+        // 1. scrutineeType is BooleanType (explicit annotation)
+        // 2. The patterns include boolean literals (true/false) - indicates inferred Bool type
+        val hasBoolLiteralPatterns = matchExpr.cases.any { case ->
+            case.patterns.any { pattern ->
+                pattern is LiteralPattern && pattern.value is BooleanLiteralValue
+            }
+        }
+        val isBoolMatch = scrutineeType is FunkType.BooleanType || hasBoolLiteralPatterns
+        if (isBoolMatch && hasWildcard && uncoveredConstructors.isEmpty()) {
+            // Find the wildcard pattern to report its location
+            for (case in matchExpr.cases) {
+                for (pattern in case.patterns) {
+                    if ((pattern is WildcardPattern || pattern is VariablePattern) && case.guard == null) {
+                        errors.add(
+                            ValidationError.UnreachablePattern(
+                                pattern = pattern,
+                                reason = "All constructors are already matched: ${allConstructors.joinToString(", ")}",
+                                sourceLocation = matchExpr.sourceLocation  // Use match expression's location
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        return if (errors.isEmpty()) {
+            ValidationResult.Success()
+        } else {
+            ValidationResult.Failure(errors)
+        }
+    }
+
+    /**
+     * Validate that there are no unreachable patterns in a match expression.
+     *
+     * A pattern is unreachable if a previous pattern (without a guard) already matches all cases.
+     * This applies to:
+     * - Wildcard patterns `_`
+     * - Variable patterns `x`
+     *
+     * This check applies to ALL match expressions, not just variants.
+     * Matches OldTypeChecker.kt lines 8147-8213.
+     */
+    fun validateUnreachablePatterns(
+        matchExpr: MatchExpression
+    ): ValidationResult {
+        val errors = mutableListOf<ValidationError>()
+        var isExhausted = false
+
+        for ((index, case) in matchExpr.cases.withIndex()) {
+            if (isExhausted) {
+                // Previous pattern was exhaustive - this pattern is unreachable
+                errors.add(
+                    ValidationError.UnreachablePattern(
+                        pattern = case.patterns.firstOrNull() ?: WildcardPattern(),
+                        reason = "Previous pattern already matches all cases",
+                        sourceLocation = case.expression.sourceLocation
+                    )
+                )
+                // Continue checking to report all unreachable patterns
+                continue
+            }
+
+            // Check if this case makes subsequent patterns unreachable (no guard required)
+            if (case.guard == null) {
+                for (pattern in case.patterns) {
+                    // Wildcard and variable patterns are exhaustive - they match everything
+                    if (pattern is WildcardPattern || pattern is VariablePattern) {
+                        isExhausted = true
+                        break
+                    }
+                }
+            }
+        }
+
         return if (errors.isEmpty()) {
             ValidationResult.Success()
         } else {
@@ -1409,6 +1516,12 @@ class TypeValidator(
                     }
                 }
 
+                // Check for unreachable patterns (applies to all match expressions, not just variants)
+                val unreachableResult = validateUnreachablePatterns(expr)
+                if (unreachableResult is ValidationResult.Failure) {
+                    errors.addAll(unreachableResult.errors)
+                }
+
                 for (case in expr.cases) {
                     val caseErrors = validatePatternsInExpression(case.expression, substitution)
                     errors.addAll(caseErrors)
@@ -1505,9 +1618,7 @@ class TypeValidator(
         // Get the inferred type for the expression
         val inferredType = variantExpr.inferredType
 
-        if (System.getProperty("funk.debug.validation") == "true") {
-            println("[DEBUG validateVariantConstructor] constructor=${variantExpr.constructor}, inferredType=$inferredType")
-        }
+        java.io.File("/tmp/funk_debug.log").appendText("[DEBUG validateVariantConstructor] constructor=${variantExpr.constructor}, inferredType=$inferredType\n")
 
         if (inferredType == null) {
             return emptyList()  // No type yet, skip validation
@@ -1516,26 +1627,19 @@ class TypeValidator(
         // Apply substitution to get final type
         val finalType = substitution.apply(inferredType)
 
-        if (System.getProperty("funk.debug.validation") == "true") {
-            println("[DEBUG validateVariantConstructor] finalType=$finalType")
-        }
+        java.io.File("/tmp/funk_debug.log").appendText("[DEBUG validateVariantConstructor] finalType=$finalType\n")
 
         // Only validate if the final type is a VariantType
         val variantType = finalType as? FunkType.VariantType
         if (variantType == null) {
-            if (System.getProperty("funk.debug.validation") == "true") {
-                println("[DEBUG validateVariantConstructor] finalType is not VariantType, skipping")
-            }
+            java.io.File("/tmp/funk_debug.log").appendText("[DEBUG validateVariantConstructor] finalType is not VariantType, skipping\n")
             return emptyList()
         }
 
         // Get the constructor name
         val constructorName = variantExpr.constructor
 
-        if (System.getProperty("funk.debug.validation") == "true") {
-            println("[DEBUG validateVariantConstructor] variantType.constructors=${variantType.constructors.keys}")
-            println("[DEBUG validateVariantConstructor] variantType.rowVar=${variantType.rowVar}")
-        }
+        java.io.File("/tmp/funk_debug.log").appendText("[DEBUG validateVariantConstructor] variantType.constructors=${variantType.constructors.keys}, rowVar=${variantType.rowVar}\n")
 
         // Check if constructor exists in the variant type
         if (!variantType.constructors.containsKey(constructorName)) {
@@ -1606,5 +1710,620 @@ class TypeValidator(
         }
 
         return null  // Couldn't infer type
+    }
+
+    // ========================================================================
+    // PERFORM EXPRESSION VALIDATION
+    // ========================================================================
+
+    /**
+     * Build a map of function definitions from the program.
+     * This maps function names to their lambda bodies.
+     */
+    private fun buildFunctionDefinitions(program: Program): Map<String, LambdaExpression> {
+        val result = mutableMapOf<String, LambdaExpression>()
+        for (item in program.items) {
+            if (item is LetBinding && item.isSimpleBinding && item.expression is LambdaExpression) {
+                result[item.variableName] = item.expression as LambdaExpression
+            }
+        }
+        return result
+    }
+
+    /**
+     * Validate perform expressions in an expression tree.
+     *
+     * This checks that handler associated types match what the expression throws.
+     */
+    private fun validatePerformExpressionsInExpression(
+        expr: Expression,
+        implDeclarations: Map<String, ImplDeclaration>,
+        effectDeclarations: Map<String, EffectDeclaration>,
+        functionDefinitions: Map<String, LambdaExpression>
+    ): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+
+        when (expr) {
+            is PerformExpression -> {
+                // Validate this perform expression
+                val performErrors = validatePerformExpression(
+                    expr,
+                    implDeclarations,
+                    effectDeclarations,
+                    functionDefinitions
+                )
+                errors.addAll(performErrors)
+
+                // Also validate the inner expression
+                val innerErrors = validatePerformExpressionsInExpression(
+                    expr.expression,
+                    implDeclarations,
+                    effectDeclarations,
+                    functionDefinitions
+                )
+                errors.addAll(innerErrors)
+            }
+
+            is DoExpression -> {
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is LetStatement -> {
+                            val stmtErrors = validatePerformExpressionsInExpression(
+                                stmt.expression,
+                                implDeclarations,
+                                effectDeclarations,
+                                functionDefinitions
+                            )
+                            errors.addAll(stmtErrors)
+                        }
+                        is ExpressionStatement -> {
+                            val stmtErrors = validatePerformExpressionsInExpression(
+                                stmt.expression,
+                                implDeclarations,
+                                effectDeclarations,
+                                functionDefinitions
+                            )
+                            errors.addAll(stmtErrors)
+                        }
+                    }
+                }
+                val resultErrors = validatePerformExpressionsInExpression(
+                    expr.result,
+                    implDeclarations,
+                    effectDeclarations,
+                    functionDefinitions
+                )
+                errors.addAll(resultErrors)
+            }
+
+            is LambdaExpression -> {
+                val bodyErrors = validatePerformExpressionsInExpression(
+                    expr.body,
+                    implDeclarations,
+                    effectDeclarations,
+                    functionDefinitions
+                )
+                errors.addAll(bodyErrors)
+            }
+
+            is IfExpression -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.condition, implDeclarations, effectDeclarations, functionDefinitions))
+                errors.addAll(validatePerformExpressionsInExpression(expr.thenBranch, implDeclarations, effectDeclarations, functionDefinitions))
+                errors.addAll(validatePerformExpressionsInExpression(expr.elseBranch, implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
+            is FunctionCall -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.function, implDeclarations, effectDeclarations, functionDefinitions))
+                errors.addAll(validatePerformExpressionsInExpression(expr.arguments, implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
+            is RecordLiteral -> {
+                for (entry in expr.entries) {
+                    when (entry) {
+                        is RecordFieldEntry -> {
+                            entry.value?.let { value ->
+                                errors.addAll(validatePerformExpressionsInExpression(value, implDeclarations, effectDeclarations, functionDefinitions))
+                            }
+                        }
+                        is RecordSpreadEntry -> {
+                            errors.addAll(validatePerformExpressionsInExpression(entry.expression, implDeclarations, effectDeclarations, functionDefinitions))
+                        }
+                    }
+                }
+            }
+
+            is MatchExpression -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.expression, implDeclarations, effectDeclarations, functionDefinitions))
+                for (case in expr.cases) {
+                    case.guard?.let { guard ->
+                        errors.addAll(validatePerformExpressionsInExpression(guard, implDeclarations, effectDeclarations, functionDefinitions))
+                    }
+                    errors.addAll(validatePerformExpressionsInExpression(case.expression, implDeclarations, effectDeclarations, functionDefinitions))
+                }
+            }
+
+            is VariantConstruction -> {
+                expr.value?.let { value ->
+                    errors.addAll(validatePerformExpressionsInExpression(value, implDeclarations, effectDeclarations, functionDefinitions))
+                }
+            }
+
+            is MemberAccess -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.receiver, implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
+            is ArrayAccess -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.array, implDeclarations, effectDeclarations, functionDefinitions))
+                errors.addAll(validatePerformExpressionsInExpression(expr.index, implDeclarations, effectDeclarations, functionDefinitions))
+            }
+
+            is ArrayLiteral -> {
+                for (element in expr.elements) {
+                    errors.addAll(validatePerformExpressionsInExpression(element, implDeclarations, effectDeclarations, functionDefinitions))
+                }
+            }
+
+            is RecordUpdate -> {
+                errors.addAll(validatePerformExpressionsInExpression(expr.record, implDeclarations, effectDeclarations, functionDefinitions))
+                for (update in expr.updates) {
+                    update.value?.let { value ->
+                        errors.addAll(validatePerformExpressionsInExpression(value, implDeclarations, effectDeclarations, functionDefinitions))
+                    }
+                }
+            }
+
+            is StringLiteral -> {
+                expr.parts?.forEach { part ->
+                    if (part is ExpressionPart) {
+                        errors.addAll(validatePerformExpressionsInExpression(part.expression, implDeclarations, effectDeclarations, functionDefinitions))
+                    }
+                }
+            }
+
+            // Leaf nodes
+            is Identifier,
+            is IntLiteral,
+            is NatLiteral,
+            is FloatLiteral,
+            is FractionLiteral,
+            is BooleanLiteral,
+            is PlaceholderExpression,
+            is RecordUpdateExpression,
+            is EffectCallExpression,
+            is StateMachineExpression -> {
+                // No sub-expressions to validate
+            }
+        }
+
+        return errors
+    }
+
+    /**
+     * Validate a single perform expression.
+     *
+     * Checks that each handler's associated type bindings are compatible
+     * with what the expression actually throws.
+     */
+    private fun validatePerformExpression(
+        expr: PerformExpression,
+        implDeclarations: Map<String, ImplDeclaration>,
+        effectDeclarations: Map<String, EffectDeclaration>,
+        functionDefinitions: Map<String, LambdaExpression>
+    ): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+
+        // Collect thrown error types from the inner expression
+        val thrownTypes = collectThrownErrorTypes(expr.expression, effectDeclarations, functionDefinitions)
+
+        // Validate each handler
+        for (handler in expr.handlers) {
+            val handlerName = handler.name
+            val implDecl = implDeclarations[handlerName]
+
+            if (implDecl == null) {
+                // Handler not found - this should be caught elsewhere
+                continue
+            }
+
+            val effectName = implDecl.effectName
+
+            // Check if handler has associated type bindings
+            if (implDecl.associatedTypeBindings.isEmpty()) {
+                // Handler has no associated type bindings - nothing to check
+                continue
+            }
+
+            // Get thrown types for this effect
+            val thrownForEffect = thrownTypes[effectName] ?: continue
+
+            // Check each associated type binding
+            for ((typeName, handlerTypeAnnotation) in implDecl.associatedTypeBindings) {
+                val thrownType = thrownForEffect[typeName]
+
+                if (thrownType == null) {
+                    // No thrown type inferred for this binding - skip
+                    continue
+                }
+
+                // Convert handler's type annotation to FunkType
+                // If it's a user-defined type, expand it using the type declarations
+                val handlerType = expandTypeAnnotation(handlerTypeAnnotation)
+
+                // Check compatibility
+                val compatible = areAssociatedTypesCompatible(handlerType, thrownType)
+
+                if (!compatible) {
+                    errors.add(
+                        ValidationError.HandlerTypeMismatch(
+                            handlerName = handlerName,
+                            effectName = effectName,
+                            expectedType = handlerType,
+                            actualType = thrownType,
+                            sourceLocation = expr.sourceLocation
+                        )
+                    )
+                }
+            }
+        }
+
+        return errors
+    }
+
+    /**
+     * Collect thrown error types from an expression.
+     *
+     * Returns a map from effect name to a map of associated type name to thrown type.
+     */
+    private fun collectThrownErrorTypes(
+        expr: Expression,
+        effectDeclarations: Map<String, EffectDeclaration>,
+        functionDefinitions: Map<String, LambdaExpression>
+    ): Map<String, Map<String, FunkType>> {
+        val result = mutableMapOf<String, MutableMap<String, FunkType>>()
+        // Track visited functions to avoid infinite recursion
+        val visitedFunctions = mutableSetOf<String>()
+
+        fun traverse(e: Expression) {
+            when (e) {
+                is EffectCallExpression -> {
+                    val effectName = e.effectName
+                    val operationName = e.operationName
+
+                    // Check if this effect has associated types
+                    val effectDecl = effectDeclarations[effectName]
+                    if (effectDecl != null && effectDecl.associatedTypes.isNotEmpty()) {
+                        // For Exception effect, look for 'throw' operation
+                        if (effectName == "Exception" && operationName == "throw") {
+                            extractThrownErrorType(e.arguments)?.let { errorType ->
+                                val effectMap = result.getOrPut(effectName) { mutableMapOf() }
+                                unifyThrownType(effectMap, "'error", errorType)
+                            }
+                        }
+                    }
+                }
+
+                is FunctionCall -> {
+                    // Check if this is an effect call (Effect.operation {args})
+                    if (e.function is MemberAccess) {
+                        val memberAccess = e.function as MemberAccess
+                        val operationName = memberAccess.member
+
+                        val effectName = when (val receiver = memberAccess.receiver) {
+                            is Identifier -> receiver.name
+                            is VariantConstruction -> receiver.constructor
+                            else -> null
+                        }
+
+
+                        if (effectName != null) {
+                            val effectDecl = effectDeclarations[effectName]
+                            if (effectDecl != null && effectDecl.associatedTypes.isNotEmpty()) {
+                                if (effectName == "Exception" && operationName == "throw") {
+                                    val errorType = extractThrownErrorType(e.arguments)
+                                    errorType?.let {
+                                        val effectMap = result.getOrPut(effectName) { mutableMapOf() }
+                                        unifyThrownType(effectMap, "'error", it)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // If the function being called is an Identifier, look up its definition and traverse the body
+                    if (e.function is Identifier) {
+                        val funcName = (e.function as Identifier).name
+                        if (!visitedFunctions.contains(funcName)) {
+                            val funcDef = functionDefinitions[funcName]
+                            if (funcDef != null) {
+                                visitedFunctions.add(funcName)
+                                traverse(funcDef.body)
+                            }
+                        }
+                    }
+
+                    // Recurse into function and arguments
+                    traverse(e.function)
+                    traverse(e.arguments)
+                }
+
+                is DoExpression -> {
+                    for (stmt in e.statements) {
+                        when (stmt) {
+                            is LetStatement -> traverse(stmt.expression)
+                            is ExpressionStatement -> traverse(stmt.expression)
+                        }
+                    }
+                    traverse(e.result)
+                }
+
+                is IfExpression -> {
+                    traverse(e.condition)
+                    traverse(e.thenBranch)
+                    traverse(e.elseBranch)
+                }
+
+                is MatchExpression -> {
+                    traverse(e.expression)
+                    for (case in e.cases) {
+                        traverse(case.expression)
+                    }
+                }
+
+                is LambdaExpression -> traverse(e.body)
+
+                is RecordLiteral -> {
+                    for (entry in e.entries) {
+                        when (entry) {
+                            is RecordFieldEntry -> entry.value?.let { traverse(it) }
+                            is RecordSpreadEntry -> traverse(entry.expression)
+                        }
+                    }
+                }
+
+                is VariantConstruction -> e.value?.let { traverse(it) }
+                is MemberAccess -> traverse(e.receiver)
+                is ArrayAccess -> {
+                    traverse(e.array)
+                    traverse(e.index)
+                }
+                is ArrayLiteral -> e.elements.forEach { traverse(it) }
+                is RecordUpdate -> {
+                    traverse(e.record)
+                    for (update in e.updates) {
+                        update.value?.let { traverse(it) }
+                    }
+                }
+                is StringLiteral -> {
+                    e.parts?.forEach { part ->
+                        if (part is ExpressionPart) traverse(part.expression)
+                    }
+                }
+                is PerformExpression -> {
+                    // CRITICAL: Do NOT traverse into nested perform expressions!
+                    // The nested perform has its own handler that catches errors from its inner expression.
+                    // We only care about errors that escape to the OUTER perform block.
+                    // So we just skip the entire PerformExpression - any errors inside are handled.
+                }
+
+                // Leaf nodes
+                is Identifier,
+                is IntLiteral,
+                is NatLiteral,
+                is FloatLiteral,
+                is FractionLiteral,
+                is BooleanLiteral,
+                is PlaceholderExpression,
+                is RecordUpdateExpression,
+                is EffectCallExpression,
+                is StateMachineExpression -> { }
+            }
+        }
+
+        traverse(expr)
+        return result
+    }
+
+    /**
+     * Extract the error type from a throw call's arguments.
+     */
+    private fun extractThrownErrorType(args: Expression): FunkType? {
+        if (args !is RecordLiteral) {
+            return null
+        }
+
+        val errorEntry = args.entries.filterIsInstance<RecordFieldEntry>()
+            .find { it.name == "error" }
+
+        val errorValue = errorEntry?.value ?: return null
+
+        // If inferredType is already set, use it
+        if (errorValue.inferredType != null) {
+            return errorValue.inferredType
+        }
+
+        // If inferredType is not set, try to determine type from the expression itself
+        // For VariantConstruction, we can construct the type directly
+        if (errorValue is VariantConstruction) {
+            val constructorName = errorValue.constructor
+            // Create a VariantType with just this constructor
+            // Recursively construct the payload type from the value expression
+            val payloadType = constructTypeFromExpression(errorValue.value)
+            val variantType = FunkType.VariantType(
+                constructors = mapOf(constructorName to payloadType),
+                rowVar = RowVar.fresh()  // Open variant - may be extended
+            )
+            return variantType
+        }
+
+        return null
+    }
+
+    /**
+     * Construct a FunkType from an expression when inferredType is not available.
+     *
+     * This is used for expressions inside function definitions that haven't been
+     * processed by SubstitutionApplier yet.
+     */
+    private fun constructTypeFromExpression(expr: Expression?): FunkType? {
+        if (expr == null) return null
+
+        // If inferredType is available, use it
+        if (expr.inferredType != null) {
+            return expr.inferredType
+        }
+
+        return when (expr) {
+            is RecordLiteral -> {
+                // Construct RecordType from the literal
+                val fields = mutableMapOf<String, FunkType>()
+                for (entry in expr.entries) {
+                    if (entry is RecordFieldEntry && entry.value != null) {
+                        val fieldType = constructTypeFromExpression(entry.value)
+                        if (fieldType != null) {
+                            fields[entry.name] = fieldType
+                        }
+                    }
+                }
+                FunkType.RecordType(fields, null)
+            }
+            is VariantConstruction -> {
+                val payloadType = constructTypeFromExpression(expr.value)
+                FunkType.VariantType(
+                    constructors = mapOf(expr.constructor to payloadType),
+                    rowVar = RowVar.fresh()
+                )
+            }
+            is StringLiteral -> FunkType.StringType
+            is IntLiteral -> FunkType.IntType
+            is BooleanLiteral -> FunkType.BooleanType
+            is FloatLiteral -> FunkType.FloatType
+            is Identifier -> {
+                // For identifiers, we don't know the type without context
+                // Return a fresh type variable
+                FunkType.VarType(TypeVar.fresh())
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Expand a type annotation using the type declarations.
+     *
+     * This converts user-defined types (like PartialError) to their full type definition
+     * (like VariantType with the constructors from the type declaration).
+     */
+    private fun expandTypeAnnotation(annotation: TypeAnnotation): FunkType {
+        when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                val name = annotation.name
+                // Check if it's a primitive type
+                when (name) {
+                    "Int" -> return FunkType.IntType
+                    "Float" -> return FunkType.FloatType
+                    "String" -> return FunkType.StringType
+                    "Boolean", "Bool" -> return FunkType.BooleanType
+                    "Nat" -> return FunkType.NatType
+                    "Frac" -> return FunkType.FracType
+                    "Ordering" -> return FunkType.OrderingType
+                }
+
+                // Check if it's a user-defined type
+                val typeDecl = typeDeclarations[name]
+                if (typeDecl != null) {
+                    val definition = typeDecl.definition
+                    return when (definition) {
+                        is VariantDefinition -> {
+                            // Build VariantType from definition
+                            FunkType.VariantType(
+                                constructors = definition.constructors.associate { ctor ->
+                                    ctor.name to ctor.dataType?.let { convertTypeAnnotation(it) }
+                                },
+                                rowVar = if (definition.isOpen) RowVar.fresh() else null
+                            )
+                        }
+                        is RecordDefinition -> {
+                            // Build RecordType from definition
+                            FunkType.RecordType(
+                                fields = definition.fields.associate { field ->
+                                    field.name to convertTypeAnnotation(field.type)
+                                },
+                                rowVar = null
+                            )
+                        }
+                        is NewtypeDefinition -> {
+                            // Expand newtypes to their underlying type
+                            convertTypeAnnotation(definition.wrappedType)
+                        }
+                    }
+                }
+
+                // Fall back to type variable if not found
+                return FunkType.VarType(TypeVar(name))
+            }
+            is TypeApplicationAnnotation -> {
+                // For type applications like `List Int`, expand the constructor
+                val constructorName = annotation.constructor
+                val typeDecl = typeDeclarations[constructorName]
+                if (typeDecl != null) {
+                    // TODO: handle type arguments properly
+                    return expandTypeAnnotation(IdentifierTypeAnnotation(constructorName))
+                }
+                return convertTypeAnnotation(annotation)
+            }
+            else -> {
+                return convertTypeAnnotation(annotation)
+            }
+        }
+    }
+
+    /**
+     * Unify a thrown type with existing types in the map.
+     */
+    private fun unifyThrownType(
+        effectMap: MutableMap<String, FunkType>,
+        typeName: String,
+        newType: FunkType
+    ) {
+        val existing = effectMap[typeName]
+        if (existing == null) {
+            effectMap[typeName] = newType
+        } else if (existing is FunkType.VariantType && newType is FunkType.VariantType) {
+            // Merge variant constructors
+            val mergedConstructors = existing.constructors + newType.constructors
+            effectMap[typeName] = FunkType.VariantType(mergedConstructors, null)
+        }
+        // Otherwise keep existing (first wins for non-variants)
+    }
+
+    /**
+     * Check if handler's associated type is compatible with expression's inferred type.
+     *
+     * For variants, handler must accept all variants that expression throws.
+     */
+    private fun areAssociatedTypesCompatible(handlerType: FunkType, exprType: FunkType): Boolean {
+        // If types are exactly equal, they're compatible
+        if (handlerType == exprType) return true
+
+        // If handler type is polymorphic (type variable), it accepts any concrete type
+        if (handlerType is FunkType.VarType) {
+            return true
+        }
+
+        // For variant types, check if handler accepts all expr variants
+        if (handlerType is FunkType.VariantType && exprType is FunkType.VariantType) {
+            val handlerVariantNames = handlerType.constructors.keys
+            val exprVariantNames = exprType.constructors.keys
+
+            // Handler must accept ALL variants from expression
+            return exprVariantNames.all { it in handlerVariantNames }
+        }
+
+        // For mixed types (one variant, one not), they are incompatible
+        if ((handlerType is FunkType.VariantType) != (exprType is FunkType.VariantType)) {
+            return false
+        }
+
+        // For other types, they must be exactly equal
+        return handlerType == exprType
     }
 }
