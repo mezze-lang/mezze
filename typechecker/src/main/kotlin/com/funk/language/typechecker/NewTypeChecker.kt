@@ -201,8 +201,13 @@ class NewTypeChecker(
         val allEffectDeclarations = buildResult.effectDeclarations +
             (importContext?.importedEffects ?: emptyMap())
 
+        // Merge local and imported type declarations
+        // CRITICAL: Imported types must be available for TypeApplication expansion (e.g., Continuation)
+        val allTypeDeclarations = buildResult.typeDeclarations +
+            (importContext?.importedTypes ?: emptyMap())
+
         val constraintGenerator = ConstraintGenerator.create(
-            typeDeclarations = buildResult.typeDeclarations,
+            typeDeclarations = allTypeDeclarations,
             performerToEffect = buildResult.performerToEffect,
             abilityNames = abilityNames,
             effectNames = effectNames,
@@ -230,7 +235,7 @@ class NewTypeChecker(
         // (If we wait until validation, constraint solving might fail first on those type variables)
         val undefinedVars = constraintResults.values.flatMap { it.undefinedVariables }
         if (undefinedVars.isNotEmpty()) {
-            val validator = TypeValidator(context, buildResult.typeDeclarations)
+            val validator = TypeValidator(context, allTypeDeclarations)
             val allVariables = context.getAllBindings()
             val errors = undefinedVars.map { undefinedVar ->
                 // Special case: Check if this is an ability or effect being used as a value
@@ -289,7 +294,7 @@ class NewTypeChecker(
 
 
         // PHASE 3: Solve Constraints
-        val solver = ConstraintSolver(context, buildResult.typeDeclarations, buildResult.abilityDeclarations)
+        val solver = ConstraintSolver(context, allTypeDeclarations, buildResult.abilityDeclarations)
         val solveResult = solver.solve(allConstraints)
 
         // Check if solving failed
@@ -360,7 +365,7 @@ class NewTypeChecker(
                 val typedProgram = applier.applyToProgram(program)
 
                 // PHASE 5: Validate Types (moved after substitution so we can check inferred types)
-                val validator = TypeValidator(context, buildResult.typeDeclarations)
+                val validator = TypeValidator(context, allTypeDeclarations)
 
                 // First, validate the constraints (like HasConstructor)
                 val constraintValidation = validator.validateConstraints(allConstraints, substitution)

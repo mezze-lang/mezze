@@ -344,10 +344,20 @@ class ImportResolver(
                     )
                 }
                 ExportedItemType.TYPE -> {
-                    // Create a TypeDeclaration from the export
-                    // Note: This is a simplified version, actual type declarations
-                    // should be extracted from the module's typed program
-                    // For now, we just track the name and type
+                    // CRITICAL FIX: Extract actual TypeDeclaration from the module
+                    // This allows TypeApplication expansion (e.g., Continuation field access)
+                    val typeDecl = module?.program?.items
+                        ?.filterIsInstance<TypeDeclaration>()
+                        ?.find { it.name == export.originalName }
+
+                    if (typeDecl != null) {
+                        // CRITICAL: Store under ORIGINAL name (not qualified name)!
+                        // TypeApplication.constructor contains the unqualified type name (e.g., "Continuation")
+                        // so the lookup in expandTypeApplicationToRecord must find it by that name.
+                        types[export.originalName] = typeDecl
+                    }
+
+                    // Also add as a binding for name resolution
                     bindings[localName] = ImportedBinding(
                         name = localName,
                         originalName = export.originalName,

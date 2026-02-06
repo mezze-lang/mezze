@@ -66,8 +66,9 @@ object FunkTestHelper {
     fun execute(program: Program, monomorphicInstances: Map<String, com.funk.language.ast.LetBinding>, projectRoot: Path? = null): FunkValue {
         val root = projectRoot ?: Paths.get(System.getProperty("funk.project.root", "."))
 
-        // Clear module cache to ensure clean state for each test execution
-        com.funk.language.typechecker.ModuleResolver.clearCache()
+        // NOTE: Do NOT clear module cache here!
+        // The type-checker has already populated the cache with typed modules during type-checking.
+        // Clearing it would break module imports since the interpreter expects modules to be in the typed cache.
 
         // Create polyglot context with multi-threading enabled for Loom concurrency
         // Use the shared engine to avoid sharing layer violations

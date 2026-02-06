@@ -405,11 +405,17 @@ class ExpressionConstraintGenerator {
         // First pass: collect explicit field types
         val explicitFieldTypes = mutableMapOf<String, FunkType>()
 
+        // IMPORTANT: Clear expected type when generating field values
+        // The expected type is for the record as a whole, not individual field values.
+        // Without this, a type annotation like `{} -> Continuation` would propagate
+        // the `Continuation` expected type to all field value expressions (including lambdas).
+        val fieldContext = context.clearExpectedType()
+
         for (entry in expr.entries) {
             when (entry) {
                 is RecordFieldEntry -> {
                     val fieldValue = entry.value ?: Identifier(entry.name)
-                    val fieldResult = generate(fieldValue, context)
+                    val fieldResult = generate(fieldValue, fieldContext)
 
                     explicitFieldTypes[entry.name] = fieldResult.type
                     constraints.addAll(fieldResult.constraints)
@@ -419,7 +425,7 @@ class ExpressionConstraintGenerator {
                 is RecordSpreadEntry -> {
                     // Spread: {...baseRecord}
                     // Process the spread expression and extract its fields
-                    val spreadResult = generate(entry.expression, context)
+                    val spreadResult = generate(entry.expression, fieldContext)
                     constraints.addAll(spreadResult.constraints)
                     undefinedVars.addAll(spreadResult.undefinedVariables)
                     abilityConstraints.addAll(spreadResult.abilityConstraints)
@@ -1630,7 +1636,11 @@ class ExpressionConstraintGenerator {
         }
 
         val functionResult = generate(expr.function, context)
-        val argumentResult = generate(expr.arguments, context)
+        // CRITICAL: Clear expected type when generating function arguments!
+        // The argument's expected type should come from the function's parameter type,
+        // not from the outer context. Otherwise, expected types from outer scope
+        // (like Continuation) would incorrectly propagate to argument record literals.
+        val argumentResult = generate(expr.arguments, context.clearExpectedType())
 
         // PARTIAL APPLICATION DETECTION
         // If function type is known AND argument is a record, check for partial application
@@ -1988,7 +1998,11 @@ class ExpressionConstraintGenerator {
     private fun generateDo(expr: DoExpression, context: ConstraintContext): ConstraintResult {
         // do { stmt1; stmt2; result }
 
-        var currentContext = context
+        // IMPORTANT: Clear expected type for intermediate statements in do block
+        // The expected type should only apply to the final result expression, not
+        // intermediate let bindings or expression statements. Otherwise, a type
+        // annotation like `{} -> Continuation` would propagate to all sub-expressions.
+        var currentContext = context.clearExpectedType()
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val effects = mutableSetOf<String>()
@@ -2045,8 +2059,14 @@ class ExpressionConstraintGenerator {
             }
         }
 
-        // Process result expression
-        val resultResult = generate(expr.result, currentContext)
+        // Process result expression - restore expected type from the original context
+        // The result expression is what should match the expected type (e.g., Continuation)
+        val resultContext = if (context.expectedType != null) {
+            currentContext.withExpectedType(context.expectedType)
+        } else {
+            currentContext
+        }
+        val resultResult = generate(expr.result, resultContext)
         constraints.addAll(resultResult.constraints)
         undefinedVars.addAll(resultResult.undefinedVariables)
         effects.addAll(resultResult.effects)

@@ -452,7 +452,7 @@ class TypeValidator(
                 unwrappedType is FunkType.FracType
             }
 
-            // Equality - implemented for most primitive types
+            // Equality - implemented for most primitive types and derivable for records/variants/lists
             "Eq" -> {
                 unwrappedType is FunkType.IntType ||
                 unwrappedType is FunkType.FloatType ||
@@ -461,30 +461,39 @@ class TypeValidator(
                 unwrappedType is FunkType.NatType ||
                 unwrappedType is FunkType.FracType ||
                 unwrappedType is FunkType.OrderingType ||
-                isBoolVariant(unwrappedType)
+                isBoolVariant(unwrappedType) ||
+                // Derive Eq for records if all fields have Eq
+                (unwrappedType is FunkType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Eq", it) }) ||
+                // Derive Eq for variants if all constructor payloads have Eq (or no payload)
+                (unwrappedType is FunkType.VariantType && unwrappedType.constructors.values.all { it == null || isBuiltInAbilityImplementation("Eq", it) }) ||
+                // Derive Eq for lists if element type has Eq
+                (unwrappedType is FunkType.ListType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType)) ||
+                // Derive Eq for arrays if element type has Eq
+                (unwrappedType is FunkType.ArrayType && isBuiltInAbilityImplementation("Eq", unwrappedType.elementType))
             }
 
-            // Ordering - implemented for comparable types
+            // Ordering - implemented for comparable types and derivable for records/variants/lists
             "Ord" -> {
                 unwrappedType is FunkType.IntType ||
                 unwrappedType is FunkType.FloatType ||
                 unwrappedType is FunkType.StringType ||
                 unwrappedType is FunkType.NatType ||
-                unwrappedType is FunkType.FracType
+                unwrappedType is FunkType.FracType ||
+                // Derive Ord for records if all fields have Ord
+                (unwrappedType is FunkType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Ord", it) }) ||
+                // Derive Ord for variants if all constructor payloads have Ord (or no payload)
+                (unwrappedType is FunkType.VariantType && unwrappedType.constructors.values.all { it == null || isBuiltInAbilityImplementation("Ord", it) }) ||
+                // Derive Ord for lists if element type has Ord
+                (unwrappedType is FunkType.ListType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType)) ||
+                // Derive Ord for arrays if element type has Ord
+                (unwrappedType is FunkType.ArrayType && isBuiltInAbilityImplementation("Ord", unwrappedType.elementType))
             }
 
             // Inspect - built-in ability for displaying values (to_str)
+            // CRITICAL: Inspect is universally available for ALL types (per OldTypeChecker line 2806-2807)
+            // This includes newtypes, records, variants, functions, etc.
             // Note: "Show" is NOT a built-in ability - it's commonly used as a user-defined ability name
-            "Inspect" -> {
-                unwrappedType is FunkType.IntType ||
-                unwrappedType is FunkType.FloatType ||
-                unwrappedType is FunkType.StringType ||
-                unwrappedType is FunkType.BooleanType ||
-                unwrappedType is FunkType.NatType ||
-                unwrappedType is FunkType.FracType ||
-                unwrappedType is FunkType.OrderingType ||
-                isBoolVariant(unwrappedType)
-            }
+            "Inspect" -> true
 
             // Logical operations - only for Bool
             "LogicalAnd", "LogicalOr", "LogicalNot" -> {

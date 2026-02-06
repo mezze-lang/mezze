@@ -270,6 +270,13 @@ data class ConstraintContext(
     }
 
     /**
+     * Clear expected type (for intermediate expressions in do blocks)
+     */
+    fun clearExpectedType(): ConstraintContext {
+        return copy(expectedType = null)
+    }
+
+    /**
      * Add allowed effects (inside handle block)
      */
     fun withAllowedEffects(effects: Set<String>): ConstraintContext {

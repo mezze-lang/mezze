@@ -31,14 +31,28 @@ data class Substitution(
      *   apply({x: α, y: β}) = {x: Int, y: String}
      */
     fun apply(type: FunkType): FunkType {
+        return applyWithVisited(type, emptySet())
+    }
+
+    /**
+     * Internal apply function with cycle detection.
+     * Tracks visited type variables to prevent infinite recursion from cyclic substitutions.
+     */
+    private fun applyWithVisited(type: FunkType, visitedVars: Set<TypeVar>): FunkType {
         return when (type) {
             is FunkType.VarType -> {
+                // Cycle detection: if we've seen this variable before, stop recursion
+                if (type.variable in visitedVars) {
+                    return type // Return as-is to break cycle
+                }
+
                 // Look up the type variable in mappings
                 val substitutedType = mappings[type.variable]
                 if (substitutedType != null) {
                     // Apply substitution recursively to handle chains
                     // Example: {α -> β, β -> Int}, apply(α) = Int
-                    apply(substitutedType)
+                    // Track this variable as visited to detect cycles
+                    applyWithVisited(substitutedType, visitedVars + type.variable)
                 } else {
                     // Type variable not in substitution, keep as-is
                     type
@@ -46,25 +60,25 @@ data class Substitution(
             }
 
             is FunkType.FunctionType -> FunkType.FunctionType(
-                paramType = apply(type.paramType),
-                returnType = apply(type.returnType),
-                effects = type.effects?.let { applyToEffectRow(it) },
+                paramType = applyWithVisited(type.paramType, visitedVars),
+                returnType = applyWithVisited(type.returnType, visitedVars),
+                effects = type.effects?.let { applyToEffectRowWithVisited(it, visitedVars) },
                 abilityConstraints = type.abilityConstraints.map { constraint ->
                     FunkType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { apply(it) }
+                        typeArgs = constraint.typeArgs.map { applyWithVisited(it, visitedVars) }
                     )
                 }
             )
 
             is FunkType.RecordType -> FunkType.RecordType(
-                fields = type.fields.mapValues { (_, fieldType) -> apply(fieldType) },
+                fields = type.fields.mapValues { (_, fieldType) -> applyWithVisited(fieldType, visitedVars) },
                 rowVar = type.rowVar // Row variables handled separately in row unification
             )
 
             is FunkType.VariantType -> {
                 val appliedConstructors = type.constructors.mapValues { (_, dataType) ->
-                    dataType?.let { apply(it) }
+                    dataType?.let { applyWithVisited(it, visitedVars) }
                 }
                 FunkType.VariantType(
                     constructors = appliedConstructors,
@@ -74,32 +88,32 @@ data class Substitution(
 
             is FunkType.TypeApplication -> FunkType.TypeApplication(
                 constructor = type.constructor,
-                args = type.args.map { apply(it) }
+                args = type.args.map { applyWithVisited(it, visitedVars) }
             )
 
             is FunkType.ArrayType -> FunkType.ArrayType(
-                elementType = apply(type.elementType)
+                elementType = applyWithVisited(type.elementType, visitedVars)
             )
 
             is FunkType.ListType -> FunkType.ListType(
-                elementType = apply(type.elementType)
+                elementType = applyWithVisited(type.elementType, visitedVars)
             )
 
             is FunkType.SetType -> FunkType.SetType(
-                elementType = apply(type.elementType)
+                elementType = applyWithVisited(type.elementType, visitedVars)
             )
 
             is FunkType.MapType -> FunkType.MapType(
-                keyType = apply(type.keyType),
-                valueType = apply(type.valueType)
+                keyType = applyWithVisited(type.keyType, visitedVars),
+                valueType = applyWithVisited(type.valueType, visitedVars)
             )
 
             is FunkType.SuspendedType -> FunkType.SuspendedType(
-                valueType = apply(type.valueType),
-                effects = applyToEffectRow(type.effects)
+                valueType = applyWithVisited(type.valueType, visitedVars),
+                effects = applyToEffectRowWithVisited(type.effects, visitedVars)
             )
 
-            is FunkType.EffectRow -> applyToEffectRow(type)
+            is FunkType.EffectRow -> applyToEffectRowWithVisited(type, visitedVars)
 
             // Concrete types remain unchanged
             is FunkType.IntType,
@@ -119,6 +133,15 @@ data class Substitution(
      * handle the row variable if present.
      */
     private fun applyToEffectRow(effectRow: FunkType.EffectRow): FunkType.EffectRow {
+        // Effect names are not types, so they don't change
+        // Row variables are handled separately in row unification
+        return effectRow
+    }
+
+    /**
+     * Apply substitution to an effect row (with cycle detection).
+     */
+    private fun applyToEffectRowWithVisited(effectRow: FunkType.EffectRow, visitedVars: Set<TypeVar>): FunkType.EffectRow {
         // Effect names are not types, so they don't change
         // Row variables are handled separately in row unification
         return effectRow
