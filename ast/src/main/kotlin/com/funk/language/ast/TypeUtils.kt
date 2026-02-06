@@ -13,6 +13,127 @@ package com.funk.language.ast
  */
 
 // ============================================================================
+// IDENTITY-BASED TYPE VARIABLE MAP
+// ============================================================================
+
+/**
+ * A Map implementation that uses object identity (System.identityHashCode) for TypeVar keys.
+ * This is necessary because TypeVar is a data class and uses structural equality by default,
+ * but we sometimes need to distinguish type variables by identity (e.g., during normalization).
+ */
+private class IdentityBasedTypeVarMap(
+    private val identityToValue: Map<Int, TypeVar>
+) : Map<TypeVar, TypeVar> {
+
+    override val entries: Set<Map.Entry<TypeVar, TypeVar>>
+        get() = emptySet() // Not used by substituteTypeVariables
+
+    override val keys: Set<TypeVar>
+        get() = emptySet() // Not used by substituteTypeVariables
+
+    override val size: Int
+        get() = identityToValue.size
+
+    override val values: Collection<TypeVar>
+        get() = identityToValue.values
+
+    override fun isEmpty(): Boolean = identityToValue.isEmpty()
+
+    override fun get(key: TypeVar): TypeVar? =
+        identityToValue[System.identityHashCode(key)]
+
+    override fun containsKey(key: TypeVar): Boolean =
+        identityToValue.containsKey(System.identityHashCode(key))
+
+    override fun containsValue(value: TypeVar): Boolean =
+        identityToValue.containsValue(value)
+}
+
+// ============================================================================
+// TYPE VARIABLE COLLECTION
+// ============================================================================
+
+/**
+ * Core function: Collect all type variables from a type in order of appearance (left-to-right, depth-first).
+ * This is the single source of truth for type variable traversal - all other collection functions
+ * should use this one.
+ *
+ * @param type The type to collect variables from
+ * @param sortFields If true, sorts record fields and variant constructors alphabetically for consistent ordering.
+ *                   Use true for normalization/printing, false for simple collection.
+ * @return List of type variables in order of appearance (may contain duplicates)
+ */
+fun collectTypeVarsInOrder(type: FunkType, sortFields: Boolean = true): List<TypeVar> {
+    val result = mutableListOf<TypeVar>()
+    collectTypeVarsRecursive(type, result, sortFields)
+    return result
+}
+
+/**
+ * Collect type variables into a mutable set (for generalization and other uses that need unique variables).
+ * This is a convenience wrapper around collectTypeVarsInOrder.
+ */
+internal fun collectTypeVariables(type: FunkType, collector: MutableSet<TypeVar>) {
+    collector.addAll(collectTypeVarsInOrder(type, sortFields = false))
+}
+
+/**
+ * Internal recursive helper for type variable collection.
+ */
+private fun collectTypeVarsRecursive(type: FunkType, collector: MutableList<TypeVar>, sortFields: Boolean) {
+    when (type) {
+        is FunkType.VarType -> collector.add(type.variable)
+        is FunkType.FunctionType -> {
+            collectTypeVarsRecursive(type.paramType, collector, sortFields)
+            collectTypeVarsRecursive(type.returnType, collector, sortFields)
+            // Also collect type variables from ability constraints
+            type.abilityConstraints.forEach { constraint ->
+                constraint.typeArgs.forEach { arg ->
+                    collectTypeVarsRecursive(arg, collector, sortFields)
+                }
+            }
+        }
+        is FunkType.RecordType -> {
+            val fieldEntries = if (sortFields) {
+                type.fields.entries.sortedBy { it.key }
+            } else {
+                type.fields.entries
+            }
+            fieldEntries.forEach { (_, fieldType) ->
+                collectTypeVarsRecursive(fieldType, collector, sortFields)
+            }
+        }
+        is FunkType.VariantType -> {
+            val constructorEntries = if (sortFields) {
+                type.constructors.entries.sortedBy { it.key }
+            } else {
+                type.constructors.entries
+            }
+            constructorEntries.forEach { (_, constructorType) ->
+                constructorType?.let { collectTypeVarsRecursive(it, collector, sortFields) }
+            }
+        }
+        is FunkType.TypeApplication -> {
+            type.args.forEach { arg ->
+                collectTypeVarsRecursive(arg, collector, sortFields)
+            }
+        }
+        is FunkType.ListType -> collectTypeVarsRecursive(type.elementType, collector, sortFields)
+        is FunkType.MapType -> {
+            collectTypeVarsRecursive(type.keyType, collector, sortFields)
+            collectTypeVarsRecursive(type.valueType, collector, sortFields)
+        }
+        is FunkType.SetType -> collectTypeVarsRecursive(type.elementType, collector, sortFields)
+        is FunkType.ArrayType -> collectTypeVarsRecursive(type.elementType, collector, sortFields)
+        is FunkType.SuspendedType -> collectTypeVarsRecursive(type.valueType, collector, sortFields)
+        // Base types don't contain type variables
+        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
+        is FunkType.OrderingType, is FunkType.EffectRow -> { }
+    }
+}
+
+// ============================================================================
 // TYPE NORMALIZATION
 // ============================================================================
 
@@ -20,8 +141,7 @@ package com.funk.language.ast
  * Normalize type variables with constraint awareness to preserve unification relationships
  */
 fun normalizeTypeVariablesWithConstraints(type: FunkType, constraints: List<Pair<FunkType, FunkType>>): FunkType {
-    val typeVarsInOrder = mutableListOf<TypeVar>()
-    collectTypeVariablesInOrder(type, typeVarsInOrder)
+    val typeVarsInOrder = collectTypeVarsInOrder(type)
 
     // Create equivalence classes based on constraints
     val equivalenceClasses = mutableListOf<MutableSet<TypeVar>>()
@@ -36,8 +156,8 @@ fun normalizeTypeVariablesWithConstraints(type: FunkType, constraints: List<Pair
 
         // Find all type variables that should be unified with this one
         for ((type1, type2) in constraints) {
-            val vars1 = extractTypeVariables(type1)
-            val vars2 = extractTypeVariables(type2)
+            val vars1 = collectTypeVarsInOrder(type1, sortFields = false).toSet()
+            val vars2 = collectTypeVarsInOrder(type2, sortFields = false).toSet()
 
             if (typeVar in vars1) {
                 vars2.forEach { otherVar ->
@@ -72,62 +192,11 @@ fun normalizeTypeVariablesWithConstraints(type: FunkType, constraints: List<Pair
 }
 
 /**
- * Extract type variables from a type
- */
-private fun extractTypeVariables(type: FunkType): Set<TypeVar> {
-    val result = mutableSetOf<TypeVar>()
-    when (type) {
-        is FunkType.VarType -> result.add(type.variable)
-        is FunkType.FunctionType -> {
-            result.addAll(extractTypeVariables(type.paramType))
-            result.addAll(extractTypeVariables(type.returnType))
-        }
-        is FunkType.RecordType -> {
-            type.fields.values.forEach { fieldType ->
-                fieldType?.let { result.addAll(extractTypeVariables(it)) }
-            }
-        }
-        is FunkType.VariantType -> {
-            type.constructors.values.forEach { constructorType ->
-                constructorType?.let { result.addAll(extractTypeVariables(it)) }
-            }
-        }
-        is FunkType.TypeApplication -> {
-            type.args.forEach { arg ->
-                result.addAll(extractTypeVariables(arg))
-            }
-        }
-        is FunkType.ListType -> {
-            result.addAll(extractTypeVariables(type.elementType))
-        }
-        is FunkType.MapType -> {
-            result.addAll(extractTypeVariables(type.keyType))
-            result.addAll(extractTypeVariables(type.valueType))
-        }
-        is FunkType.SetType -> {
-            result.addAll(extractTypeVariables(type.elementType))
-        }
-        is FunkType.ArrayType -> {
-            result.addAll(extractTypeVariables(type.elementType))
-        }
-        is FunkType.SuspendedType -> {
-            result.addAll(extractTypeVariables(type.valueType))
-        }
-        // Base types don't contain type variables
-        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
-        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType, is FunkType.EffectRow -> { }
-    }
-    return result
-}
-
-/**
  * Normalize type variables in a type to start from 'a, 'b, 'c, etc.
  * This provides clean, readable output by renaming type variables in order of appearance.
  */
 fun normalizeTypeVariables(type: FunkType): FunkType {
-    val typeVarsInOrder = mutableListOf<TypeVar>()
-    collectTypeVariablesInOrder(type, typeVarsInOrder)
+    val typeVarsInOrder = collectTypeVarsInOrder(type)
 
     // CRITICAL FIX: Use identity-based distinct to preserve independence of type variables
     // TypeVar is a data class, so .distinct() uses structural equality (name + level)
@@ -145,150 +214,21 @@ fun normalizeTypeVariables(type: FunkType): FunkType {
     }
 
     // Create mapping from old type variables to new normalized names
-    // Use a custom map that compares by identity, not structural equality
-    val mapping = object : MutableMap<TypeVar, TypeVar> by mutableMapOf() {
-        private val identityMap = mutableMapOf<Int, TypeVar>()
-
-        override fun get(key: TypeVar): TypeVar? {
-            return identityMap[System.identityHashCode(key)]
-        }
-
-        override fun put(key: TypeVar, value: TypeVar): TypeVar? {
-            val identity = System.identityHashCode(key)
-            return identityMap.put(identity, value)
-        }
-
-        override fun containsKey(key: TypeVar): Boolean {
-            return identityMap.containsKey(System.identityHashCode(key))
-        }
-    }
+    // Use identity-based lookup since we need to distinguish type variables by identity
+    val identityToNewVar = mutableMapOf<Int, TypeVar>()
 
     uniqueTypeVars.forEachIndexed { index, typeVar ->
         val normalizedName = "'${('a' + index)}"
         val newTypeVar = TypeVar(normalizedName, typeVar.level)
-        mapping[typeVar] = newTypeVar
+        identityToNewVar[System.identityHashCode(typeVar)] = newTypeVar
     }
+
+    // Create a wrapper that looks up by identity
+    val mapping = IdentityBasedTypeVarMap(identityToNewVar)
 
     return substituteTypeVariables(type, mapping)
 }
 
-/**
- * Collect all type variables in a type in order of appearance (left-to-right, depth-first)
- */
-private fun collectTypeVariablesInOrder(type: FunkType, collector: MutableList<TypeVar>) {
-    when (type) {
-        is FunkType.VarType -> collector.add(type.variable)
-        is FunkType.FunctionType -> {
-            // Collect parameters first (left side), then return type (right side)
-            collectTypeVariablesInOrder(type.paramType, collector)
-            collectTypeVariablesInOrder(type.returnType, collector)
-            // CRITICAL FIX: Also collect type variables from ability constraints
-            // This ensures constraint type variables get the same normalized names as param/return types
-            type.abilityConstraints.forEach { constraint ->
-                constraint.typeArgs.forEach { arg ->
-                    collectTypeVariablesInOrder(arg, collector)
-                }
-            }
-            type.effects?.let { /* Effect collection if needed */ }
-        }
-        is FunkType.RecordType -> {
-            // Collect field types in alphabetical order for consistency
-            type.fields.keys.sorted().forEach { fieldName ->
-                type.fields[fieldName]?.let { collectTypeVariablesInOrder(it, collector) }
-            }
-            type.rowVar?.let { /* RowVar collection if needed */ }
-        }
-        is FunkType.VariantType -> {
-            // Collect constructor types in alphabetical order for consistency
-            type.constructors.keys.sorted().forEach { constructorName ->
-                type.constructors[constructorName]?.let { collectTypeVariablesInOrder(it, collector) }
-            }
-        }
-        is FunkType.TypeApplication -> {
-            type.args.forEach { arg ->
-                collectTypeVariablesInOrder(arg, collector)
-            }
-        }
-        is FunkType.ListType -> {
-            collectTypeVariablesInOrder(type.elementType, collector)
-        }
-        is FunkType.MapType -> {
-            collectTypeVariablesInOrder(type.keyType, collector)
-            collectTypeVariablesInOrder(type.valueType, collector)
-        }
-        is FunkType.SetType -> {
-            collectTypeVariablesInOrder(type.elementType, collector)
-        }
-        is FunkType.ArrayType -> {
-            collectTypeVariablesInOrder(type.elementType, collector)
-        }
-        is FunkType.SuspendedType -> {
-            collectTypeVariablesInOrder(type.valueType, collector)
-        }
-        // Base types don't contain type variables
-        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
-        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType -> {
-            // No type variables to collect
-        }
-        is FunkType.EffectRow -> {
-            // Effect rows might contain type variables in the future
-        }
-    }
-}
-
-/**
- * Collect all type variables in a type (old version for compatibility)
- */
-internal fun collectTypeVariables(type: FunkType, collector: MutableSet<TypeVar>) {
-    when (type) {
-        is FunkType.VarType -> collector.add(type.variable)
-        is FunkType.FunctionType -> {
-            collectTypeVariables(type.paramType, collector)
-            collectTypeVariables(type.returnType, collector)
-            type.effects?.let { /* Effect collection if needed */ }
-        }
-        is FunkType.RecordType -> {
-            type.fields.values.forEach { collectTypeVariables(it, collector) }
-            type.rowVar?.let { /* RowVar collection if needed */ }
-        }
-        is FunkType.VariantType -> {
-            type.constructors.values.forEach { caseType ->
-                caseType?.let { collectTypeVariables(it, collector) }
-            }
-        }
-        is FunkType.TypeApplication -> {
-            type.args.forEach { arg ->
-                collectTypeVariables(arg, collector)
-            }
-        }
-        is FunkType.ListType -> {
-            collectTypeVariables(type.elementType, collector)
-        }
-        is FunkType.MapType -> {
-            collectTypeVariables(type.keyType, collector)
-            collectTypeVariables(type.valueType, collector)
-        }
-        is FunkType.SetType -> {
-            collectTypeVariables(type.elementType, collector)
-        }
-        is FunkType.ArrayType -> {
-            collectTypeVariables(type.elementType, collector)
-        }
-        is FunkType.SuspendedType -> {
-            collectTypeVariables(type.valueType, collector)
-        }
-        // Base types don't contain type variables
-        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
-        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType -> {
-            // No type variables to collect
-        }
-        is FunkType.EffectRow -> {
-            // Effect rows might contain type variables in the future
-        }
-    }
-}
 
 /**
  * Substitute type variables in a type according to the mapping
@@ -346,8 +286,14 @@ fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVar>): Fun
             val newElementType = substituteTypeVariables(type.elementType, mapping)
             FunkType.ArrayType(newElementType)
         }
+        is FunkType.SuspendedType -> {
+            val newValueType = substituteTypeVariables(type.valueType, mapping)
+            FunkType.SuspendedType(newValueType, type.effects)
+        }
         // Base types and effect rows remain unchanged
-        else -> type
+        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
+        is FunkType.OrderingType, is FunkType.EffectRow -> type
     }
 }
 

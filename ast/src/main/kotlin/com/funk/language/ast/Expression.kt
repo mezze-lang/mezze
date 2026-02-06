@@ -180,9 +180,6 @@ data class PlaceholderExpression(
     override val sourceLocation: SourceLocation? = null
 ) : Expression
 
-// PipeExpression removed - pipe operator is now desugared during parsing
-// BinaryOperation and UnaryOperation removed - operators are now desugared during parsing
-
 // ============================================================================
 // RECORDS
 // ============================================================================
@@ -198,27 +195,41 @@ data class RecordLiteral(
     companion object {
         internal val toStringDepth = ThreadLocal.withInitial { 0 }
         internal const val MAX_DEPTH = 20
-    }
+        internal const val TRUNCATE_DEPTH = 5
 
-    override fun toString(): String {
-        val depth = toStringDepth.get()
-        if (depth > MAX_DEPTH) {
-            return "RecordLiteral{<max depth reached>}"
-        }
-
-        return try {
-            toStringDepth.set(depth + 1)
-            val entriesStr = if (depth > 5) "<truncated>" else "size=${entries.size}"
-            "RecordLiteral($entriesStr)"
-        } catch (e: StackOverflowError) {
-            "RecordLiteral{<StackOverflowError during toString>}"
-        } finally {
-            toStringDepth.set(depth)
-            if (depth == 0) {
-                toStringDepth.remove() // Clean up thread-local when back to top level
+        /**
+         * Helper for safe toString() implementations with depth tracking.
+         */
+        internal inline fun safeToString(
+            typeName: String,
+            truncatedContent: () -> String,
+            fullContent: () -> String
+        ): String {
+            val depth = toStringDepth.get()
+            if (depth > MAX_DEPTH) {
+                return "$typeName{<max depth>}"
+            }
+            return try {
+                toStringDepth.set(depth + 1)
+                if (depth > TRUNCATE_DEPTH) {
+                    "$typeName{${truncatedContent()}}"
+                } else {
+                    "$typeName(${fullContent()})"
+                }
+            } catch (e: StackOverflowError) {
+                "$typeName{<StackOverflowError>}"
+            } finally {
+                toStringDepth.set(depth)
+                if (depth == 0) toStringDepth.remove()
             }
         }
     }
+
+    override fun toString(): String = Companion.safeToString(
+        "RecordLiteral",
+        truncatedContent = { "truncated" },
+        fullContent = { "size=${entries.size}" }
+    )
 }
 
 @Serializable
@@ -229,42 +240,22 @@ data class RecordFieldEntry(
     val name: String,
     val value: Expression? = null  // null for shorthand {x} instead of {x = x}
 ) : RecordLiteralEntry() {
-    override fun toString(): String {
-        val depth = RecordLiteral.toStringDepth.get()
-        if (depth > 5) {
-            return "RecordFieldEntry{<truncated>}"
-        }
-
-        return try {
-            RecordLiteral.toStringDepth.set(depth + 1)
-            "RecordFieldEntry($name)"
-        } catch (e: StackOverflowError) {
-            "RecordFieldEntry{<StackOverflowError>}"
-        } finally {
-            RecordLiteral.toStringDepth.set(depth)
-        }
-    }
+    override fun toString(): String = RecordLiteral.safeToString(
+        "RecordFieldEntry",
+        truncatedContent = { "truncated" },
+        fullContent = { name }
+    )
 }
 
 @Serializable
 data class RecordSpreadEntry(
     val expression: Expression
 ) : RecordLiteralEntry() {
-    override fun toString(): String {
-        val depth = RecordLiteral.toStringDepth.get()
-        if (depth > 5) {
-            return "RecordSpreadEntry{<truncated>}"
-        }
-
-        return try {
-            RecordLiteral.toStringDepth.set(depth + 1)
-            "RecordSpreadEntry(...)"
-        } catch (e: StackOverflowError) {
-            "RecordSpreadEntry{<StackOverflowError>}"
-        } finally {
-            RecordLiteral.toStringDepth.set(depth)
-        }
-    }
+    override fun toString(): String = RecordLiteral.safeToString(
+        "RecordSpreadEntry",
+        truncatedContent = { "truncated" },
+        fullContent = { "..." }
+    )
 }
 
 // Helper extension functions for backward compatibility
@@ -385,21 +376,11 @@ data class FunctionCall(
     // This allows ability resolution to see concrete types instead of type variables
     val instantiatedFunctionType: FunkType.FunctionType? = null
 ) : Expression {
-    override fun toString(): String {
-        val depth = RecordLiteral.toStringDepth.get()
-        if (depth > 5) {
-            return "FunctionCall{<truncated>}"
-        }
-
-        return try {
-            RecordLiteral.toStringDepth.set(depth + 1)
-            "FunctionCall(...)"
-        } catch (e: StackOverflowError) {
-            "FunctionCall{<StackOverflowError>}"
-        } finally {
-            RecordLiteral.toStringDepth.set(depth)
-        }
-    }
+    override fun toString(): String = RecordLiteral.safeToString(
+        "FunctionCall",
+        truncatedContent = { "truncated" },
+        fullContent = { "..." }
+    )
 }
 
 // ============================================================================

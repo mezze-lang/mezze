@@ -30,6 +30,35 @@ sealed interface FunkType {
         // Thread-local to track nesting depth to prevent infinite recursion in toString()
         internal val toStringDepth = ThreadLocal.withInitial { 0 }
         internal const val MAX_DEPTH = 10
+        internal const val TRUNCATE_DEPTH = 3
+
+        /**
+         * Helper for safe toString() implementations with depth tracking.
+         * Prevents StackOverflowError and provides consistent truncation behavior.
+         */
+        internal inline fun safeToString(
+            typeName: String,
+            truncatedContent: () -> String,
+            fullContent: () -> String
+        ): String {
+            val depth = toStringDepth.get()
+            if (depth > MAX_DEPTH) {
+                return "$typeName{<max depth>}"
+            }
+            return try {
+                toStringDepth.set(depth + 1)
+                if (depth > TRUNCATE_DEPTH) {
+                    "$typeName{${truncatedContent()}}"
+                } else {
+                    "$typeName(${fullContent()})"
+                }
+            } catch (e: StackOverflowError) {
+                "$typeName{<StackOverflowError>}"
+            } finally {
+                toStringDepth.set(depth)
+                if (depth == 0) toStringDepth.remove()
+            }
+        }
     }
 
     // Primitive types
@@ -65,25 +94,11 @@ sealed interface FunkType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 
-        override fun toString(): String {
-            val depth = FunkType.toStringDepth.get()
-            if (depth > MAX_DEPTH) {
-                return "RecordType{<max depth>}"
-            }
-            return try {
-                FunkType.toStringDepth.set(depth + 1)
-                if (depth > 3) {
-                    "RecordType{${fields.size} fields}"
-                } else {
-                    "RecordType(${fields.keys.take(3)}${if (fields.size > 3) "..." else ""})"
-                }
-            } catch (e: StackOverflowError) {
-                "RecordType{<StackOverflowError>}"
-            } finally {
-                FunkType.toStringDepth.set(depth)
-                if (depth == 0) FunkType.toStringDepth.remove()
-            }
-        }
+        override fun toString(): String = safeToString(
+            "RecordType",
+            truncatedContent = { "${fields.size} fields" },
+            fullContent = { "${fields.keys.take(3)}${if (fields.size > 3) "..." else ""}" }
+        )
     }
 
     // Variant types
@@ -95,25 +110,11 @@ sealed interface FunkType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 
-        override fun toString(): String {
-            val depth = FunkType.toStringDepth.get()
-            if (depth > MAX_DEPTH) {
-                return "VariantType{<max depth>}"
-            }
-            return try {
-                FunkType.toStringDepth.set(depth + 1)
-                if (depth > 3) {
-                    "VariantType{${constructors.size} constructors}"
-                } else {
-                    "VariantType(${constructors.keys.take(3)}${if (constructors.size > 3) "..." else ""})"
-                }
-            } catch (e: StackOverflowError) {
-                "VariantType{<StackOverflowError>}"
-            } finally {
-                FunkType.toStringDepth.set(depth)
-                if (depth == 0) FunkType.toStringDepth.remove()
-            }
-        }
+        override fun toString(): String = safeToString(
+            "VariantType",
+            truncatedContent = { "${constructors.size} constructors" },
+            fullContent = { "${constructors.keys.take(3)}${if (constructors.size > 3) "..." else ""}" }
+        )
     }
 
     // Built-in core types (always available)
@@ -135,25 +136,11 @@ sealed interface FunkType {
     // This represents applying type arguments to a type constructor
     @Serializable
     data class TypeApplication(val constructor: String, val args: List<FunkType>) : FunkType {
-        override fun toString(): String {
-            val depth = FunkType.toStringDepth.get()
-            if (depth > MAX_DEPTH) {
-                return "TypeApplication{<max depth>}"
-            }
-            return try {
-                FunkType.toStringDepth.set(depth + 1)
-                if (depth > 3) {
-                    "TypeApplication($constructor, ${args.size} args)"
-                } else {
-                    "TypeApplication($constructor)"
-                }
-            } catch (e: StackOverflowError) {
-                "TypeApplication{<StackOverflowError>}"
-            } finally {
-                FunkType.toStringDepth.set(depth)
-                if (depth == 0) FunkType.toStringDepth.remove()
-            }
-        }
+        override fun toString(): String = safeToString(
+            "TypeApplication",
+            truncatedContent = { "$constructor, ${args.size} args" },
+            fullContent = { constructor }
+        )
     }
 
     // Built-in ordering type for comparisons
@@ -172,32 +159,18 @@ sealed interface FunkType {
         val effects: EffectRow? = null,  // null = pure function, non-null = effectful function
         val abilityConstraints: List<FunctionAbilityConstraint> = emptyList()  // Ability constraints for this function
     ) : FunkType {
-        override fun toString(): String {
-            val depth = FunkType.toStringDepth.get()
-            if (depth > MAX_DEPTH) {
-                return "FunctionType{<max depth>}"
+        override fun toString(): String = safeToString(
+            "FunctionType",
+            truncatedContent = { "..." },
+            fullContent = {
+                val effectsStr = if (effects != null) {
+                    val effectList = effects.effects.take(3).joinToString(", ")
+                    val suffix = if (effects.effects.size > 3) ", ..." else ""
+                    " <$effectList$suffix>"
+                } else ""
+                "${if (effects != null) "effectful" else "pure"}$effectsStr"
             }
-            return try {
-                FunkType.toStringDepth.set(depth + 1)
-                if (depth > 3) {
-                    "FunctionType{...}"
-                } else {
-                    val effectsStr = if (effects != null) {
-                        val effectList = effects.effects.take(3).joinToString(", ")
-                        val suffix = if (effects.effects.size > 3) ", ..." else ""
-                        " <$effectList$suffix>"
-                    } else {
-                        ""
-                    }
-                    "FunctionType(${if (effects != null) "effectful" else "pure"}$effectsStr)"
-                }
-            } catch (e: StackOverflowError) {
-                "FunctionType{<StackOverflowError>}"
-            } finally {
-                FunkType.toStringDepth.set(depth)
-                if (depth == 0) FunkType.toStringDepth.remove()
-            }
-        }
+        )
     }
 
     // Suspended computation types (values with unhandled effects)
@@ -210,21 +183,13 @@ sealed interface FunkType {
         val effects: EffectRow
     ) : FunkType {
         override fun toString(): String {
-            val depth = FunkType.toStringDepth.get()
-            if (depth > MAX_DEPTH) {
-                return "SuspendedType{<max depth>}"
-            }
-            return try {
-                FunkType.toStringDepth.set(depth + 1)
-                val effectList = effects.effects.take(3).joinToString(", ")
-                val suffix = if (effects.effects.size > 3) ", ..." else ""
-                "SuspendedType($effectList$suffix)"
-            } catch (e: StackOverflowError) {
-                "SuspendedType{<StackOverflowError>}"
-            } finally {
-                FunkType.toStringDepth.set(depth)
-                if (depth == 0) FunkType.toStringDepth.remove()
-            }
+            val effectList = effects.effects.take(3).joinToString(", ")
+            val suffix = if (effects.effects.size > 3) ", ..." else ""
+            return safeToString(
+                "SuspendedType",
+                truncatedContent = { "${effects.effects.size} effects" },
+                fullContent = { "$effectList$suffix" }
+            )
         }
     }
 
@@ -238,21 +203,13 @@ sealed interface FunkType {
         val isClosed: Boolean get() = rowVar == null
 
         override fun toString(): String {
-            val depth = FunkType.toStringDepth.get()
-            if (depth > MAX_DEPTH) {
-                return "EffectRow{<max depth>}"
-            }
-            return try {
-                FunkType.toStringDepth.set(depth + 1)
-                val effectList = effects.take(5).joinToString(", ")
-                val suffix = if (effects.size > 5) ", ..." else ""
-                "EffectRow($effectList$suffix)"
-            } catch (e: StackOverflowError) {
-                "EffectRow{<StackOverflowError>}"
-            } finally {
-                FunkType.toStringDepth.set(depth)
-                if (depth == 0) FunkType.toStringDepth.remove()
-            }
+            val effectList = effects.take(5).joinToString(", ")
+            val suffix = if (effects.size > 5) ", ..." else ""
+            return safeToString(
+                "EffectRow",
+                truncatedContent = { "${effects.size} effects" },
+                fullContent = { "$effectList$suffix" }
+            )
         }
     }
 

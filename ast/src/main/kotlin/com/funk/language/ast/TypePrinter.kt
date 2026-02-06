@@ -1,5 +1,9 @@
 package com.funk.language.ast
 
+// ============================================================================
+// VARIANT TYPE HELPERS
+// ============================================================================
+
 /**
  * Check if a variant type represents the built-in Bool type.
  */
@@ -12,6 +16,131 @@ private fun isBoolVariant(type: FunkType.VariantType): Boolean =
     !type.isOpen
 
 /**
+ * Check if a variant type represents the Option type.
+ */
+private fun isOptionVariant(type: FunkType.VariantType): Boolean =
+    type.constructors.size == 2 &&
+    type.constructors.containsKey("Some") &&
+    type.constructors.containsKey("None") &&
+    type.constructors["None"] == null &&
+    !type.isOpen
+
+/**
+ * Check if a variant type represents the Result type.
+ * Returns the value type and error type if it's a proper Result, null otherwise.
+ */
+private fun getResultTypes(type: FunkType.VariantType): Pair<FunkType, FunkType>? {
+    if (type.constructors.size != 2 || type.isOpen) return null
+
+    val okType = type.constructors["Ok"] ?: return null
+    val errType = type.constructors["Err"] ?: return null
+
+    // Extract value type from Ok { val: T }
+    val valueType = when (okType) {
+        is FunkType.RecordType -> okType.fields["val"]
+        else -> null
+    } ?: return null
+
+    // Extract error type from Err { error: E }
+    val errorType = when (errType) {
+        is FunkType.RecordType -> errType.fields["error"]
+        else -> null
+    } ?: return null
+
+    return Pair(valueType, errorType)
+}
+
+/**
+ * Extract the value type from an Option's Some constructor.
+ */
+private fun getOptionValueType(type: FunkType.VariantType): FunkType? {
+    val someType = type.constructors["Some"] ?: return null
+    return when (someType) {
+        is FunkType.RecordType -> someType.fields["val"]
+        else -> someType
+    }
+}
+
+/**
+ * Print a variant type, handling special cases (Bool, Option, Result) and named type declarations.
+ */
+private fun printVariantType(
+    type: FunkType.VariantType,
+    typeAliases: Map<String, TypeAliasInfo>,
+    showExpansion: Boolean,
+    typeVarMapping: Map<TypeVar, String>,
+    typeDeclarations: List<TypeDeclaration>
+): String {
+    // Special case: Bool variant
+    if (isBoolVariant(type)) {
+        return "Bool"
+    }
+
+    // Special case: Option variant
+    if (isOptionVariant(type)) {
+        val valueType = getOptionValueType(type)
+        val valueTypeStr = if (valueType != null) {
+            prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+        } else {
+            "'a"
+        }
+        return "Option $valueTypeStr"
+    }
+
+    // Check if this variant matches a known type declaration
+    val declMatch = findTypeDeclarationForVariant(type, typeDeclarations, typeVarMapping)
+    if (declMatch != null) {
+        val typeArgsStr = if (declMatch.typeArgs.isEmpty()) {
+            ""
+        } else {
+            " " + declMatch.typeArgs.joinToString(" ") {
+                prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+            }
+        }
+        return declMatch.declName + typeArgsStr
+    }
+
+    // Special case: Result variant
+    val resultTypes = getResultTypes(type)
+    if (resultTypes != null) {
+        val (valueType, errorType) = resultTypes
+        val valueTypeStr = prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+        val errorTypeStr = when (errorType) {
+            is FunkType.VariantType -> {
+                val errorConstructors = errorType.constructors.entries.map { (name, dataType) ->
+                    if (dataType != null) {
+                        "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
+                    } else {
+                        name
+                    }
+                }
+                "| ${errorConstructors.joinToString(", ")} |"
+            }
+            else -> prettyPrintWithAliasCheck(errorType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+        }
+        return "Result $valueTypeStr $errorTypeStr"
+    }
+
+    // Regular variant type
+    val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
+        when (dataType) {
+            null -> name
+            is FunkType.RecordType -> "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
+            else -> "$name(${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)})"
+        }
+    }
+    return if (type.isOpen) {
+        "| $constructors, ... |"
+    } else {
+        "| $constructors |"
+    }
+}
+
+// ============================================================================
+// PRETTY PRINTING
+// ============================================================================
+
+/**
  * Pretty printer for Funk types with proper type variable naming
  */
 fun prettyPrintType(type: FunkType): String {
@@ -20,75 +149,17 @@ fun prettyPrintType(type: FunkType): String {
 }
 
 /**
- * Collect all type variables in a type and assign them readable names
+ * Collect all type variables in a type and assign them readable names.
+ * Uses the consolidated collectTypeVarsInOrder from TypeUtils.
  */
 private fun collectTypeVariables(type: FunkType): Map<TypeVar, String> {
-    val variables = mutableListOf<TypeVar>()
-    collectTypeVariablesRecursive(type, variables)
-
-    // Remove duplicates while preserving order of first appearance
-    val orderedVars = variables.distinct()
+    val orderedVars = collectTypeVarsInOrder(type).distinct()
 
     // Assign names 'a, 'b, 'c, etc. in order of appearance
     return orderedVars.mapIndexed { index, typeVar ->
         val letter = ('a' + index).toString()
         typeVar to "'$letter"
     }.toMap()
-}
-
-/**
- * Recursively collect type variables from a type in order of first appearance
- */
-private fun collectTypeVariablesRecursive(type: FunkType, variables: MutableList<TypeVar>) {
-    when (type) {
-        is FunkType.VarType -> variables.add(type.variable)
-        is FunkType.RecordType -> {
-            // Sort fields by name for consistent type variable ordering
-            type.fields.entries.sortedBy { it.key }.forEach { (_, fieldType) ->
-                collectTypeVariablesRecursive(fieldType, variables)
-            }
-        }
-        is FunkType.VariantType -> {
-            // Sort constructors by name for consistent type variable ordering
-            type.constructors.entries.sortedBy { it.key }.forEach { (_, constructorType) ->
-                constructorType?.let { collectTypeVariablesRecursive(it, variables) }
-            }
-        }
-        is FunkType.ArrayType -> {
-            collectTypeVariablesRecursive(type.elementType, variables)
-        }
-        is FunkType.TypeApplication -> {
-            type.args.forEach { arg ->
-                collectTypeVariablesRecursive(arg, variables)
-            }
-        }
-        is FunkType.ListType -> {
-            collectTypeVariablesRecursive(type.elementType, variables)
-        }
-        is FunkType.MapType -> {
-            collectTypeVariablesRecursive(type.keyType, variables)
-            collectTypeVariablesRecursive(type.valueType, variables)
-        }
-        is FunkType.SetType -> {
-            collectTypeVariablesRecursive(type.elementType, variables)
-        }
-        is FunkType.SuspendedType -> {
-            collectTypeVariablesRecursive(type.valueType, variables)
-        }
-        is FunkType.FunctionType -> {
-            collectTypeVariablesRecursive(type.paramType, variables)
-            collectTypeVariablesRecursive(type.returnType, variables)
-            type.abilityConstraints.forEach { constraint ->
-                constraint.typeArgs.forEach { arg ->
-                    collectTypeVariablesRecursive(arg, variables)
-                }
-            }
-        }
-        // Base types don't contain type variables
-        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
-        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType, is FunkType.EffectRow -> { /* no type variables */ }
-    }
 }
 
 /**
@@ -199,7 +270,11 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
         // Construct final string: param with constraints -> return effects
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
-    else -> type.toString() // Fallback for any other types
+    is FunkType.OrderingType -> "Ordering"
+    is FunkType.EffectRow -> {
+        val effectList = type.effects.sorted().joinToString(", ")
+        if (type.isOpen) "<$effectList, ...>" else "<$effectList>"
+    }
 }
 
 /**
@@ -236,10 +311,9 @@ private fun findTypeDeclarationForVariant(
         // try a more lenient approach - collect all distinct type vars and use those
         if (decl.typeParams.size == 1) {
             // For single-parameter types, collect all type variables that appear
-            val allTypeVarsList = mutableListOf<TypeVar>()
-            for (constructorType in variantType.constructors.values) {
-                constructorType?.let { collectTypeVars(it, allTypeVarsList) }
-            }
+            val allTypeVarsList = variantType.constructors.values
+                .filterNotNull()
+                .flatMap { collectTypeVarsInOrder(it, sortFields = false) }
             // Get the most common type variable (heuristic: the "main" type parameter)
             val typeVarCounts = allTypeVarsList.groupingBy { it }.eachCount()
             val mostCommonVar = typeVarCounts.maxByOrNull { it.value }?.key
@@ -256,11 +330,10 @@ private fun extractTypeArgumentsFromVariant(
     expectedParamCount: Int,
     typeVarMapping: Map<TypeVar, String>
 ): List<FunkType>? {
-    // Collect all type variables from the variant constructors
-    val typeVars = mutableListOf<TypeVar>()
-    for (constructorType in variantType.constructors.values) {
-        constructorType?.let { collectTypeVars(it, typeVars) }
-    }
+    // Collect all type variables from the variant constructors using consolidated function
+    val typeVars = variantType.constructors.values
+        .filterNotNull()
+        .flatMap { collectTypeVarsInOrder(it, sortFields = false) }
 
     // Get unique type variables in order of appearance
     val uniqueTypeVars = typeVars.distinctBy { typeVarMapping[it] ?: it.name }
@@ -270,26 +343,6 @@ private fun extractTypeArgumentsFromVariant(
     }
 
     return uniqueTypeVars.map { FunkType.VarType(it) }
-}
-
-private fun collectTypeVars(type: FunkType, result: MutableList<TypeVar>) {
-    when (type) {
-        is FunkType.VarType -> result.add(type.variable)
-        is FunkType.RecordType -> type.fields.values.forEach { collectTypeVars(it, result) }
-        is FunkType.VariantType -> type.constructors.values.forEach { it?.let { t -> collectTypeVars(t, result) } }
-        is FunkType.TypeApplication -> type.args.forEach { collectTypeVars(it, result) }
-        is FunkType.FunctionType -> {
-            collectTypeVars(type.paramType, result)
-            collectTypeVars(type.returnType, result)
-        }
-        is FunkType.ListType -> collectTypeVars(type.elementType, result)
-        is FunkType.ArrayType -> collectTypeVars(type.elementType, result)
-        is FunkType.MapType -> {
-            collectTypeVars(type.keyType, result)
-            collectTypeVars(type.valueType, result)
-        }
-        else -> {} // Primitive types have no type variables
-    }
 }
 
 /**
@@ -385,101 +438,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
         }
     }
     is FunkType.VariantType -> {
-        // Special case: Bool variant prints as "Bool" instead of "| True, False |"
-        if (isBoolVariant(type)) {
-            "Bool"
-        } else {
-            // Special case: Option variant prints as "Option T" instead of "| Some { val: T }, None |"
-            val isOptionVariant = type.constructors.size == 2 &&
-                    type.constructors.containsKey("Some") &&
-                    type.constructors.containsKey("None") &&
-                    type.constructors["None"] == null &&
-                    !type.isOpen
-
-            if (isOptionVariant) {
-                // Extract the type parameter from Some { val: T }
-                val someType = type.constructors["Some"]
-                val valueType = when (someType) {
-                    is FunkType.RecordType -> someType.fields["val"]
-                    else -> someType
-                }
-                val valueTypeStr = if (valueType != null) {
-                    prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
-                } else {
-                    "'a"
-                }
-                "Option $valueTypeStr"
-            } else {
-            // First, check if this variant matches a known type declaration
-            val declMatch = findTypeDeclarationForVariant(type, typeDeclarations, typeVarMapping)
-            if (declMatch != null) {
-                // Print as named type (e.g., "Tree 'a" instead of expanded variant)
-                val typeArgsStr = if (declMatch.typeArgs.isEmpty()) {
-                    ""
-                } else {
-                    " " + declMatch.typeArgs.joinToString(" ") { prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping, typeDeclarations) }
-                }
-                declMatch.declName + typeArgsStr
-            } else {
-            // Check if this is a Result type (has Ok and Err constructors with proper payloads)
-            val hasOk = type.constructors.containsKey("Ok")
-            val hasErr = type.constructors.containsKey("Err")
-            val okType = type.constructors["Ok"]
-            val errType = type.constructors["Err"]
-
-            // Extract value type from Ok { val: T }
-            val valueType = when (okType) {
-                is FunkType.RecordType -> okType.fields["val"]
-                else -> null
-            }
-
-            // Extract error variant from Err { error: E }
-            val errorVariant = when (errType) {
-                is FunkType.RecordType -> errType.fields["error"]
-                else -> null
-            }
-
-            // Only treat as Result if both constructors have the expected payload structure
-            val isProperResult = hasOk && hasErr && type.constructors.size == 2 &&
-                    valueType != null && errorVariant != null
-
-            if (isProperResult && valueType != null && errorVariant != null) {
-                // This is a Result type - print as: Result valueType errorType
-                val valueTypeStr = prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
-
-                val errorTypeStr = when (errorVariant) {
-                    is FunkType.VariantType -> {
-                        val errorConstructors = errorVariant.constructors.entries.map { (name, dataType) ->
-                            if (dataType != null) {
-                                "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
-                            } else {
-                                name
-                            }
-                        }
-                        "| ${errorConstructors.joinToString(", ")} |"
-                    }
-                    else -> prettyPrintWithAliasCheck(errorVariant, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
-                }
-
-            "Result $valueTypeStr $errorTypeStr"
-        } else {
-            // Regular variant type
-            val constructors = type.constructors.entries.joinToString(", ") { (name, dataType) ->
-                when (dataType) {
-                    null -> name
-                    is FunkType.RecordType -> "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
-                    else -> "$name(${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)})"
-                }
-            }
-            if (type.isOpen) {
-                "| $constructors, ... |"
-            } else {
-                "| $constructors |"
-            }
-        }
-            }
-        }
-            }
+        printVariantType(type, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
     }
     is FunkType.ArrayType -> "[${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}]"
     is FunkType.TypeApplication -> {
@@ -550,7 +509,11 @@ private fun prettyPrintTypeWithAliasesRecursive(
         val effectList = type.effects.effects.sorted().joinToString(", ")
         "$valueTypeStr <$effectList>"
     }
-    else -> type.toString() // Fallback for any other types
+    is FunkType.OrderingType -> "Ordering"
+    is FunkType.EffectRow -> {
+        val effectList = type.effects.sorted().joinToString(", ")
+        if (type.isOpen) "<$effectList, ...>" else "<$effectList>"
+    }
 }
 
 /**
