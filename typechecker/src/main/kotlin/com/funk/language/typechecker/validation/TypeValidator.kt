@@ -1523,11 +1523,10 @@ class TypeValidator(
                 val scrutineeErrors = validatePatternsInExpression(expr.expression, substitution)
                 errors.addAll(scrutineeErrors)
 
-                // CRITICAL: Validate match exhaustiveness
+                // Validate match exhaustiveness
                 // Get the scrutinee type and check if all constructors are covered
-                // FIXED: SubstitutionApplier now maintains a context map (like OldTypeChecker) that tracks
-                // identifier types as it traverses the AST. This allows identifiers in nested expressions
-                // (like lambda parameters, do-block let bindings) to get their types set properly.
+                // SubstitutionApplier maintains a context map that tracks identifier types as it
+                // traverses the AST, allowing identifiers in nested expressions to get their types set.
                 val scrutineeType = expr.expression.inferredType
 
                 if (scrutineeType != null) {

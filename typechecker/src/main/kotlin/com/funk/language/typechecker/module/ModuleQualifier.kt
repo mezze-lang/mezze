@@ -318,9 +318,6 @@ class ModuleQualifier {
             // Literals don't need qualification
             is IntLiteral, is NatLiteral, is FloatLiteral,
             is BooleanLiteral, is FractionLiteral, is PlaceholderExpression -> expr
-
-            // Fallback for any other expression types
-            else -> expr
         }
     }
 
@@ -339,7 +336,6 @@ class ModuleQualifier {
             is ExpressionStatement -> stmt.copy(
                 expression = qualifyExpression(stmt.expression, moduleNames, prefix)
             )
-            else -> stmt // Other statement types don't need qualification
         }
     }
 

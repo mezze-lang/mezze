@@ -334,28 +334,23 @@ class ConstraintGenerator(
                                 //
                                 // We only prevent generalization for user-defined abilities that need explicit implementations.
                                 val hasUserDefinedAbilityConstraints = result.abilityConstraints.any { constraint ->
-                                    when (constraint) {
-                                        is Constraint.AbilityRequired -> {
-                                            // Check if this is a built-in ability with built-in implementations
-                                            val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(constraint.abilityName)
+                                    // Check if this is a built-in ability with built-in implementations
+                                    val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(constraint.abilityName)
 
-                                            if (isBuiltInAbility) {
-                                                // Built-in abilities like NumAdd, Eq, etc. should allow generalization
-                                                false
-                                            } else {
-                                                // User-defined ability - check if the type variable is quantifiable
-                                                // Apply substitution to handle 'a -> 'b chains
-                                                val resolvedType = substitution.apply(FunkType.VarType(constraint.typeVar))
-                                                val resolvedTypeVar = if (resolvedType is FunkType.VarType) {
-                                                    resolvedType.variable
-                                                } else {
-                                                    // If resolved to concrete type, constraint is satisfied
-                                                    null
-                                                }
-                                                resolvedTypeVar != null && quantifiableVars.contains(resolvedTypeVar)
-                                            }
+                                    if (isBuiltInAbility) {
+                                        // Built-in abilities like NumAdd, Eq, etc. should allow generalization
+                                        false
+                                    } else {
+                                        // User-defined ability - check if the type variable is quantifiable
+                                        // Apply substitution to handle 'a -> 'b chains
+                                        val resolvedType = substitution.apply(FunkType.VarType(constraint.typeVar))
+                                        val resolvedTypeVar = if (resolvedType is FunkType.VarType) {
+                                            resolvedType.variable
+                                        } else {
+                                            // If resolved to concrete type, constraint is satisfied
+                                            null
                                         }
-                                        else -> false
+                                        resolvedTypeVar != null && quantifiableVars.contains(resolvedTypeVar)
                                     }
                                 }
 
@@ -365,26 +360,21 @@ class ConstraintGenerator(
                                     // CRITICAL: Compare by ID since TypeVar instances may differ even for same logical variable
                                     val quantifiableVarIds = quantifiableVars.map { it.id }.toSet()
                                     val abilityConstraints = result.abilityConstraints.mapNotNull { constraint ->
-                                        when (constraint) {
-                                            is Constraint.AbilityRequired -> {
-                                                // Check if constraint's typeVar matches any quantifiable var by ID
-                                                val resolvedConstraintVar = substitution.apply(FunkType.VarType(constraint.typeVar))
-                                                val constraintVarId = if (resolvedConstraintVar is FunkType.VarType) {
-                                                    resolvedConstraintVar.variable.id
-                                                } else {
-                                                    constraint.typeVar.id
-                                                }
-                                                if (quantifiableVarIds.contains(constraintVarId)) {
-                                                    // Find the actual quantifiable var to get its name
-                                                    val quantVar = quantifiableVars.find { it.id == constraintVarId }
-                                                    AbilityConstraint(
-                                                        abilityName = constraint.abilityName,
-                                                        typeParam = quantVar?.name ?: constraint.typeVar.name
-                                                    )
-                                                } else null
-                                            }
-                                            else -> null
+                                        // Check if constraint's typeVar matches any quantifiable var by ID
+                                        val resolvedConstraintVar = substitution.apply(FunkType.VarType(constraint.typeVar))
+                                        val constraintVarId = if (resolvedConstraintVar is FunkType.VarType) {
+                                            resolvedConstraintVar.variable.id
+                                        } else {
+                                            constraint.typeVar.id
                                         }
+                                        if (quantifiableVarIds.contains(constraintVarId)) {
+                                            // Find the actual quantifiable var to get its name
+                                            val quantVar = quantifiableVars.find { it.id == constraintVarId }
+                                            AbilityConstraint(
+                                                abilityName = constraint.abilityName,
+                                                typeParam = quantVar?.name ?: constraint.typeVar.name
+                                            )
+                                        } else null
                                     }
 
                                     val scheme = TypeScheme(

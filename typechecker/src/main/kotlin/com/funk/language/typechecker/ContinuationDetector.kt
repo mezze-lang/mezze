@@ -34,12 +34,6 @@ class ContinuationDetector {
                 expr.statements.any { usesContinuations(it) } ||
                     usesContinuations(expr.result)
             }
-            is LetStatement -> {
-                usesContinuations(expr.expression)
-            }
-            is ExpressionStatement -> {
-                usesContinuations(expr.expression)
-            }
             is IfExpression -> {
                 usesContinuations(expr.condition) ||
                     usesContinuations(expr.thenBranch) ||

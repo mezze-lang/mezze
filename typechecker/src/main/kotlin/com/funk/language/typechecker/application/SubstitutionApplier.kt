@@ -37,8 +37,8 @@ class SubstitutionApplier(
         val result = mustBeOpenRowVars.toMutableSet()
         for (typeVar in mustBeOpenTypes) {
             val resolved = substitution.apply(FunkType.VarType(typeVar))
-            if (resolved is FunkType.VariantType && resolved.rowVar != null) {
-                result.add(resolved.rowVar!!)
+            if (resolved is FunkType.VariantType) {
+                resolved.rowVar?.let { result.add(it) }
             }
         }
         result
@@ -77,8 +77,10 @@ class SubstitutionApplier(
                 } catch (e: Exception) {
                     null
                 }
-                if (bindingName != null && updatedItem.inferredType != null) {
-                    identifierContext[bindingName] = updatedItem.inferredType!!
+                updatedItem.inferredType?.let { type ->
+                    if (bindingName != null) {
+                        identifierContext[bindingName] = type
+                    }
                 }
             }
         }
@@ -585,9 +587,7 @@ class SubstitutionApplier(
 
         // Compute the record type from its entries if not already set
         // This is needed for ability resolution where argument types must be known
-        val computedType = if (expr.inferredType != null) {
-            substitution.apply(expr.inferredType!!)
-        } else {
+        val computedType = expr.inferredType?.let { substitution.apply(it) } ?: run {
             // Build record type from entries
             val fields = mutableMapOf<String, FunkType>()
             for (entry in updatedEntries) {

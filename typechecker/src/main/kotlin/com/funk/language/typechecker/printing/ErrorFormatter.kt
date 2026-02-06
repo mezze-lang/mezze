@@ -298,14 +298,16 @@ object ErrorFormatter {
             appendLine("━".repeat(50))
 
             // Location
-            if (error.location() != null) {
-                val fileInfo = error.location()!!.file ?: "<input>"
-                appendLine("   --> $fileInfo:${error.location()!!.line}:${error.location()!!.column}")
+            error.location()?.let { loc ->
+                val fileInfo = loc.file ?: "<input>"
+                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
             }
 
             // Source code context
-            if (sourceCode != null && error.location() != null) {
-                append(SourceContext.formatCodeSnippet(sourceCode, error.location()!!))
+            error.location()?.let { loc ->
+                if (sourceCode != null) {
+                    append(SourceContext.formatCodeSnippet(sourceCode, loc))
+                }
             }
 
             // Error message with type diff
@@ -341,14 +343,16 @@ object ErrorFormatter {
             appendLine("━".repeat(50))
 
             // Location
-            if (error.location() != null) {
-                val fileInfo = error.location()!!.file ?: "<input>"
-                appendLine("   --> $fileInfo:${error.location()!!.line}:${error.location()!!.column}")
+            error.location()?.let { loc ->
+                val fileInfo = loc.file ?: "<input>"
+                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
             }
 
             // Source code context
-            if (sourceCode != null && error.location() != null) {
-                append(SourceContext.formatCodeSnippet(sourceCode, error.location()!!))
+            error.location()?.let { loc ->
+                if (sourceCode != null) {
+                    append(SourceContext.formatCodeSnippet(sourceCode, loc))
+                }
             }
 
             // Error message with type diff
@@ -555,14 +559,16 @@ object ErrorFormatter {
             appendLine("━".repeat(50))
 
             // Location
-            if (error.location() != null) {
-                val fileInfo = error.location()!!.file ?: "<input>"
-                appendLine("   --> $fileInfo:${error.location()!!.line}:${error.location()!!.column}")
+            error.location()?.let { loc ->
+                val fileInfo = loc.file ?: "<input>"
+                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
             }
 
             // Source code context
-            if (sourceCode != null && error.location() != null) {
-                append(SourceContext.formatCodeSnippet(sourceCode, error.location()!!))
+            error.location()?.let { loc ->
+                if (sourceCode != null) {
+                    append(SourceContext.formatCodeSnippet(sourceCode, loc))
+                }
             }
 
             // Error message with type diff
@@ -588,14 +594,16 @@ object ErrorFormatter {
             appendLine("━".repeat(50))
 
             // Location
-            if (error.location() != null) {
-                val fileInfo = error.location()!!.file ?: "<input>"
-                appendLine("   --> $fileInfo:${error.location()!!.line}:${error.location()!!.column}")
+            error.location()?.let { loc ->
+                val fileInfo = loc.file ?: "<input>"
+                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
             }
 
             // Source code context
-            if (sourceCode != null && error.location() != null) {
-                append(SourceContext.formatCodeSnippet(sourceCode, error.location()!!))
+            error.location()?.let { loc ->
+                if (sourceCode != null) {
+                    append(SourceContext.formatCodeSnippet(sourceCode, loc))
+                }
             }
 
             // Error message

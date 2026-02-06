@@ -468,8 +468,8 @@ class ConstraintSolver(
             if (System.getProperty("funk.typecheck.debug") == "true") {
                 println("[DEBUG] MustBeOpen typeVar=$typeVar resolved to $resolved")
             }
-            if (resolved is FunkType.VariantType && resolved.rowVar != null) {
-                mustBeOpenRowVars.add(resolved.rowVar!!)
+            if (resolved is FunkType.VariantType) {
+                resolved.rowVar?.let { mustBeOpenRowVars.add(it) }
                 if (System.getProperty("funk.typecheck.debug") == "true") {
                     println("[DEBUG] Added rowVar=${resolved.rowVar} to mustBeOpenRowVars")
                 }
@@ -671,8 +671,8 @@ class ConstraintSolver(
         // track that row var so it won't be closed
         for (typeVar in mustBeOpenTypes) {
             val resolvedType = substitution.apply(FunkType.VarType(typeVar))
-            if (resolvedType is FunkType.VariantType && resolvedType.rowVar != null) {
-                mustBeOpenRowVars.add(resolvedType.rowVar!!)
+            if (resolvedType is FunkType.VariantType) {
+                resolvedType.rowVar?.let { mustBeOpenRowVars.add(it) }
             }
         }
 
@@ -1002,7 +1002,7 @@ class ConstraintSolver(
             }
 
             val functionType = typeArgs.find { it is FunkType.FunctionType }
-            val functionTypeStr = formatType(functionType!!)
+            val functionTypeStr = functionType?.let { formatType(it) } ?: "function"
 
             return when (abilityName) {
                 "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "NumNeg" ->
@@ -1236,8 +1236,8 @@ class ConstraintSolver(
 
             // Also try to resolve it NOW and track the row variable if available
             val resolved = currentSubst.apply(type)
-            if (resolved is FunkType.VariantType && resolved.rowVar != null) {
-                mustBeOpenRowVars.add(resolved.rowVar!!)
+            if (resolved is FunkType.VariantType) {
+                resolved.rowVar?.let { mustBeOpenRowVars.add(it) }
             }
         }
 
