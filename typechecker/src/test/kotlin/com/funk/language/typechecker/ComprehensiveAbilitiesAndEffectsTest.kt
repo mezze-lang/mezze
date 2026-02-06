@@ -63,35 +63,36 @@ class ComprehensiveAbilitiesAndEffectsTest {
 
     @Test
     fun testAbilityWithDependencies() {
+        // Note: Using MyEq/MyOrd to avoid conflict with built-in Eq ability
         val source = """
-            ability Eq 'a where {
-              equals : {left: 'a, right: 'a} -> Boolean
+            ability MyEq 'a where {
+              equals : {left: 'a, right: 'a} -> Bool
             }
-            
-            ability Ord 'a with Eq 'a where {
+
+            ability MyOrd 'a with MyEq 'a where {
               compare : {left: 'a, right: 'a} -> Int
             }
-            
-            impl Eq Int where {
-              equals : {left: Int, right: Int} -> Boolean = {left, right} -> intEquals {a = left, b = right}
+
+            impl MyEq Int where {
+              equals : {left: Int, right: Int} -> Bool = {left, right} -> left == right
             }
-            
-            impl Ord Int where {
-              compare : {left: Int, right: Int} -> Int = {left, right} -> 
-                if Eq.equals {left = left, right = right} then 0 else 1
+
+            impl MyOrd Int where {
+              compare : {left: Int, right: Int} -> Int = {left, right} ->
+                if MyEq.equals {left = left, right = right} then 0 else 1
             }
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
-        // Verify Ord ability has dependency on Eq
-        val ordDecl = typedProgram.items.find { 
-            it is AbilityDeclaration && it.name == "Ord" 
+        // Verify MyOrd ability has dependency on MyEq
+        val ordDecl = typedProgram.items.find {
+            it is AbilityDeclaration && it.name == "MyOrd"
         } as AbilityDeclaration?
         assertNotNull(ordDecl)
         assertTrue(ordDecl.dependencies.isNotEmpty())
-        assertEquals("Eq", ordDecl.dependencies.first().abilityName)
+        assertEquals("MyEq", ordDecl.dependencies.first().abilityName)
     }
 
     @Test
@@ -265,14 +266,16 @@ class ComprehensiveAbilitiesAndEffectsTest {
             use std::int
 
             effect Log where {
-              log : {message: String} -> Unit <Log>
+              log : {message: String} -> {} <Log>
             }
 
             impl Log for ConsoleLogger where {
-              log : {message: String} -> Unit = {message} -> {}
+              log : {message: String} -> {} = {message} -> {}
             }
 
-            let loggedOperation: {value: Int} -> Int <Log> = {value} -> Log.log {message = int::to_string{n = value * 2 }}
+            let loggedOperation: {value: Int} -> Int <Log> = {value} -> do
+              Log.log {message = int::to_string{n = value * 2 }}
+              value * 2
 
             let result = perform ConsoleLogger in loggedOperation {value = 42}
         """.trimIndent()
@@ -281,19 +284,19 @@ class ComprehensiveAbilitiesAndEffectsTest {
         val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify loggedOperation has Log effect
-        val operationBinding = typedProgram.items.find { 
-            it is LetBinding && it.variableName == "loggedOperation" 
+        val operationBinding = typedProgram.items.find {
+            it is LetBinding && it.variableName == "loggedOperation"
         } as LetBinding?
         assertNotNull(operationBinding)
-        
+
         val functionType = operationBinding.inferredType as? FunkType.FunctionType
         assertNotNull(functionType)
         assertNotNull(functionType.effects)
         assertTrue(functionType.effects!!.effects.contains("Log"))
 
         // Verify result doesn't have Log effect (handled)
-        val resultBinding = typedProgram.items.find { 
-            it is LetBinding && it.variableName == "result" 
+        val resultBinding = typedProgram.items.find {
+            it is LetBinding && it.variableName == "result"
         } as LetBinding?
         assertNotNull(resultBinding)
         assertTrue(resultBinding.inferredType is FunkType.IntType)

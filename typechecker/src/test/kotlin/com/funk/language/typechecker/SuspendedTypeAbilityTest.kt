@@ -205,6 +205,8 @@ class SuspendedTypeAbilityTest {
 
     @Test
     fun `test String suspended type supports string interpolation`() {
+        // When an effectful function is called inside string interpolation,
+        // the effect should propagate to the resulting string type
         assertTypeChecks(
             """
             effect Log where {
@@ -223,7 +225,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "String"
+            "String <Log>"  // Effect propagates through string interpolation
         )
     }
 

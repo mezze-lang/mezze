@@ -132,7 +132,8 @@ class PatternConstraintGenerator {
                     variantType = scrutineeType,
                     constructorName = pattern.constructor,
                     payloadType = null,
-                    context = "Constructor pattern ${pattern.constructor}"
+                    context = "Constructor pattern ${pattern.constructor}",
+                    isPatternContext = true  // This is a pattern context - variant should be closed
                 )
             )
 
@@ -152,7 +153,8 @@ class PatternConstraintGenerator {
                     variantType = scrutineeType,
                     constructorName = pattern.constructor,
                     payloadType = payloadType,
-                    context = "Constructor pattern ${pattern.constructor}"
+                    context = "Constructor pattern ${pattern.constructor}",
+                    isPatternContext = true  // This is a pattern context - variant should be closed
                 )
             )
 

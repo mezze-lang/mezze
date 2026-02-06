@@ -166,11 +166,8 @@ class UnificationAbilityIntegrationTest {
         
         assertTrue(exception.message!!.contains("Bool"))
         assertTrue(exception.message!!.contains("NumAdd"))
-        val boolVariant = FunkType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, exception.type)
+        // BooleanType is now a built-in primitive type, not a variant
+        assertEquals(FunkType.BooleanType, exception.type)
         assertEquals("NumAdd", exception.ability)
     }
 }

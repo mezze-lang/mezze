@@ -251,7 +251,8 @@ class InvalidConstructorInMatchTest {
         }
         assertTrue(exception.message?.contains("Pink") == true)
         assertTrue(exception.message?.contains("not a member") == true ||
-                   exception.message?.contains("closed variant") == true)
+                   exception.message?.contains("closed variant") == true ||
+                   exception.message?.contains("Variant type does not have constructor") == true)
     }
 
     @Test

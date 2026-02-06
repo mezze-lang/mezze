@@ -116,6 +116,8 @@ class ExpressionConstraintGenerator {
         // Interpolated string: each ExpressionPart must have type String
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
+        val effects = mutableSetOf<String>()
+        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
 
         for (part in expr.parts!!) {
             when (part) {
@@ -127,6 +129,9 @@ class ExpressionConstraintGenerator {
                     val exprResult = generate(part.expression, context)
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
+                    // Propagate effects and ability constraints from interpolated expressions
+                    effects.addAll(exprResult.effects)
+                    abilityConstraints.addAll(exprResult.abilityConstraints)
                     constraints.add(
                         Constraint.Equality(
                             left = exprResult.type,
@@ -142,6 +147,8 @@ class ExpressionConstraintGenerator {
         return ConstraintResult(
             type = FunkType.StringType,
             constraints = constraints,
+            effects = effects,
+            abilityConstraints = abilityConstraints,
             undefinedVariables = undefinedVars
         )
     }

@@ -46,6 +46,11 @@ object SuggestionGenerator {
                 add("Add a catch-all pattern: _ -> ...")
             }
 
+            is ValidationError.UnreachablePattern -> listOf(
+                "Remove the unreachable pattern",
+                "Add a guard condition if this case should sometimes match"
+            )
+
             is ValidationError.NonExhaustiveRecordPattern -> buildList {
                 if (error.missingFields.isNotEmpty()) {
                     add("Add missing fields to the pattern: ${error.missingFields.joinToString()}")
@@ -113,6 +118,17 @@ object SuggestionGenerator {
             is ValidationError.MissingAbilityImplementation -> listOf(
                 "Add an implementation: impl ${error.abilityName} ${error.typeName} where { ... }",
                 "Import a module that provides this implementation"
+            )
+
+            is ValidationError.HandlerTypeMismatch -> listOf(
+                "Use a handler that expects ${TypeDiffPrinter.formatType(error.actualType)}",
+                "Ensure all throw calls in the expression throw values of type ${TypeDiffPrinter.formatType(error.expectedType)}",
+                "Check the handler's associated type binding"
+            )
+
+            is ValidationError.UnitVariantPayloadMismatch -> listOf(
+                "Remove the payload pattern from constructor '${error.constructorName}'",
+                "If you need to match a payload, add fields to the variant constructor definition"
             )
         }
     }

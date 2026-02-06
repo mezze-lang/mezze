@@ -1513,20 +1513,30 @@ class ConstraintGenerator(
         for (usage in actualUsageConstraints) {
             if (usage.abilityName == "Inspect") continue  // Skip implicit Inspect
 
-            val matchingAnnotated = annotatedAbilities.find { it.abilityName == usage.abilityName }
+            // Find ALL annotated abilities with the same name (there might be multiple, e.g., Show 'x and Show 'y)
+            val matchingAnnotatedList = annotatedAbilities.filter { it.abilityName == usage.abilityName }
 
-            if (matchingAnnotated != null) {
-                // Check type variables are unified through substitution
-                for (annotatedTypeArg in matchingAnnotated.typeArgs) {
-                    if (annotatedTypeArg is FunkType.VarType) {
-                        // Check if usage.typeVar is unified with the annotation's type var
-                        if (!areUnified(usage.typeVar, annotatedTypeArg.variable)) {
-                            throw com.funk.language.typechecker.TypeCheckError(
-                                "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
-                                "Annotation declares constraint on '${annotatedTypeArg.variable.name}' but implementation uses it on '${usage.typeVar.name}'."
-                            )
-                        }
+            if (matchingAnnotatedList.isNotEmpty()) {
+                // Check if ANY of the matching annotated abilities have a type variable that's unified
+                // with the usage's type variable. This handles cases like:
+                //   annotation: Show 'x, Show 'y
+                //   usage: Show on 'y (should match Show 'y, not fail because it doesn't match Show 'x)
+                val hasMatchingTypeVar = matchingAnnotatedList.any { matchingAnnotated ->
+                    matchingAnnotated.typeArgs.any { annotatedTypeArg ->
+                        annotatedTypeArg is FunkType.VarType && areUnified(usage.typeVar, annotatedTypeArg.variable)
                     }
+                }
+
+                if (!hasMatchingTypeVar) {
+                    // The ability is declared but not on a matching type variable
+                    val declaredVars = matchingAnnotatedList.flatMap { it.typeArgs }
+                        .filterIsInstance<FunkType.VarType>()
+                        .map { it.variable.name }
+                        .distinct()
+                    throw com.funk.language.typechecker.TypeCheckError(
+                        "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
+                        "Annotation declares constraint on ${declaredVars.joinToString()} but implementation uses it on '${usage.typeVar.name}'."
+                    )
                 }
             } else {
                 // Implementation uses ability not in annotation - error if on annotation's type var

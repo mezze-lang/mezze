@@ -110,6 +110,24 @@ sealed interface ValidationError {
     }
 
     /**
+     * Unreachable pattern - pattern can never be matched because previous patterns cover all cases.
+     *
+     * Example: match y is true -> 1 | false -> 0 | _ -> -1 (wildcard unreachable after true/false)
+     */
+    data class UnreachablePattern(
+        val pattern: Pattern,
+        val reason: String,
+        val sourceLocation: SourceLocation? = null
+    ) : ValidationError {
+        override fun message(): String = buildString {
+            append("Unreachable pattern")
+            append(": $reason")
+        }
+
+        override fun location() = sourceLocation
+    }
+
+    /**
      * Record pattern not exhaustive - missing fields without ellipsis.
      *
      * Example: let {x, y} = {x = 1, y = 2, z = 3} (missing z, no ...)
@@ -363,6 +381,46 @@ sealed interface ValidationError {
                 append(" in $context")
             }
             append(". You need to define: impl $abilityName $typeName where { ... }")
+        }
+
+        override fun location() = sourceLocation
+    }
+
+    /**
+     * Handler type mismatch in perform expression.
+     *
+     * Example: Handler expects String error type but expression throws ValidationError
+     */
+    data class HandlerTypeMismatch(
+        val handlerName: String,
+        val effectName: String,
+        val expectedType: FunkType,
+        val actualType: FunkType,
+        val sourceLocation: SourceLocation? = null
+    ) : ValidationError {
+        override fun message(): String = buildString {
+            append("Handler type mismatch for effect '$effectName':\n")
+            append("  Handler '$handlerName' expects '${formatType(expectedType)}'\n")
+            append("  But expression throws '${formatType(actualType)}'\n\n")
+            append("Suggestion: Use a handler that expects ${formatType(actualType)}, or ensure all ")
+            append("throw calls in the expression throw values of type ${formatType(expectedType)}")
+        }
+
+        override fun location() = sourceLocation
+    }
+
+    /**
+     * Unit variant (no payload) used with a payload pattern.
+     *
+     * Example: match color is Blue { val } -> ... when Blue has no payload
+     */
+    data class UnitVariantPayloadMismatch(
+        val constructorName: String,
+        val variantType: FunkType,
+        val sourceLocation: SourceLocation? = null
+    ) : ValidationError {
+        override fun message(): String = buildString {
+            append("Constructor '$constructorName' has no payload, but pattern attempts to destructure it")
         }
 
         override fun location() = sourceLocation

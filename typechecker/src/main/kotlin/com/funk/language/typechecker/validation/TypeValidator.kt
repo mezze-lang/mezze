@@ -1061,6 +1061,20 @@ class TypeValidator(
                         if (case.guard == null) {
                             coveredConstructors.add(pattern.constructor)
                         }
+
+                        // BUG FIX: Validate that unit variants (no payload) don't have payload patterns
+                        // If the constructor has no payload (null in constructors map) but the pattern
+                        // has a recordPattern, that's an error
+                        val constructorPayload = expandedType.constructors[pattern.constructor]
+                        if (constructorPayload == null && pattern.recordPattern != null) {
+                            errors.add(
+                                ValidationError.UnitVariantPayloadMismatch(
+                                    constructorName = pattern.constructor,
+                                    variantType = expandedType,
+                                    sourceLocation = case.expression.sourceLocation
+                                )
+                            )
+                        }
                     }
                     is WildcardPattern -> {
                         // Only count as wildcard if there's no guard condition

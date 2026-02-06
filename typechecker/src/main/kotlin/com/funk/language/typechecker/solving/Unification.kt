@@ -435,20 +435,26 @@ private fun unifyRecords(rec1: FunkType.RecordType, rec2: FunkType.RecordType, t
     }
 
     // CASE 2: Both records are CLOSED
-    // Support partial application: one must be subset of the other
-    // Shared fields must have EXACT name match
-    val sharedFields = fields1.intersect(fields2)
-
-    // One must be subset of the other for partial application/currying
-    val isSubset = fields1.containsAll(fields2) || fields2.containsAll(fields1)
-
-    if (!isSubset) {
+    // For closed records, fields must match EXACTLY
+    // Unlike open records, closed records don't allow extra fields
+    if (fields1 != fields2) {
+        val extraIn1 = fields1 - fields2
+        val extraIn2 = fields2 - fields1
+        val mismatchParts = mutableListOf<String>()
+        if (extraIn1.isNotEmpty()) {
+            mismatchParts.add("extra fields in first: ${extraIn1.joinToString()}")
+        }
+        if (extraIn2.isNotEmpty()) {
+            mismatchParts.add("extra fields in second: ${extraIn2.joinToString()}")
+        }
         return UnificationResult.Failure(
-            message = "Record field mismatch: {${fields1.joinToString()}} vs {${fields2.joinToString()}}",
+            message = "Closed record field mismatch: {${fields1.joinToString()}} vs {${fields2.joinToString()}}. ${mismatchParts.joinToString("; ")}",
             type1 = rec1,
             type2 = rec2
         )
     }
+
+    val sharedFields = fields1  // They're equal, so use either
 
     // Unify all shared fields (must have matching types)
     var substitution = Substitution.empty

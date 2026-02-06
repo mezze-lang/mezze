@@ -41,8 +41,10 @@ class PatternValidationTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        assertTrue(exception.message?.contains("Blue") == true)
-        assertTrue(exception.message?.contains("no payload") == true)
+        assertTrue(exception.message?.contains("Blue") == true, "Message should contain 'Blue'. Actual: ${exception.message}")
+        // The error message says "does not have a payload" when trying to destructure a unit variant
+        assertTrue(exception.message?.contains("does not have a payload") == true || exception.message?.contains("no payload") == true,
+            "Message should contain 'does not have a payload' or 'no payload'. Actual: ${exception.message}")
     }
 
     @Test

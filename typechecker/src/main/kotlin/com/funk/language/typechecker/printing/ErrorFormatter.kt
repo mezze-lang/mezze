@@ -80,6 +80,7 @@ object ErrorFormatter {
             is ValidationError.AbilityNotSatisfied -> formatAbilityError(error, sourceCode)
             is ValidationError.EffectNotHandled -> formatEffectError(error, sourceCode)
             is ValidationError.NonExhaustiveMatch -> formatExhaustivenessError(error, sourceCode)
+            is ValidationError.UnreachablePattern -> formatUnreachablePatternError(error, sourceCode)
             is ValidationError.NonExhaustiveRecordPattern -> formatNonExhaustiveRecordPatternError(error, sourceCode)
             is ValidationError.TypeMismatch -> formatTypeMismatchError(error, sourceCode)
             is ValidationError.AnnotationMismatch -> formatAnnotationMismatchError(error, sourceCode)
@@ -93,6 +94,8 @@ object ErrorFormatter {
             is ValidationError.OrphanInstance -> formatOrphanInstanceError(error, sourceCode)
             is ValidationError.OverlappingInstance -> formatOverlappingInstanceError(error, sourceCode)
             is ValidationError.MissingAbilityImplementation -> formatMissingAbilityImplementationError(error, sourceCode)
+            is ValidationError.HandlerTypeMismatch -> formatHandlerTypeMismatchError(error, sourceCode)
+            is ValidationError.UnitVariantPayloadMismatch -> formatUnitVariantPayloadMismatchError(error, sourceCode)
         }
     }
 
@@ -242,6 +245,19 @@ object ErrorFormatter {
             location = error.location(),
             sourceCode = sourceCode,
             suggestion = suggestions.trim()
+        )
+    }
+
+    private fun formatUnreachablePatternError(
+        error: ValidationError.UnreachablePattern,
+        sourceCode: String?
+    ): String {
+        return SourceContext.formatError(
+            errorType = "Type Error [Validation - Unreachable Pattern]",
+            message = error.message(),
+            location = error.location(),
+            sourceCode = sourceCode,
+            suggestion = "Remove the unreachable pattern, or add a guard condition if this case should sometimes match"
         )
     }
 
@@ -526,6 +542,72 @@ object ErrorFormatter {
             additionalInfo = emptyMap(),
             suggestion = "Add an implementation: impl ${error.abilityName} ${error.typeName} where { ... }"
         )
+    }
+
+    private fun formatHandlerTypeMismatchError(
+        error: ValidationError.HandlerTypeMismatch,
+        sourceCode: String?
+    ): String {
+        val typeDiff = TypeDiffPrinter.formatDiff(error.expectedType, error.actualType, "handler type")
+
+        return buildString {
+            appendLine("❌ Type Error [Validation - Handler Type Mismatch]")
+            appendLine("━".repeat(50))
+
+            // Location
+            if (error.location() != null) {
+                val fileInfo = error.location()!!.file ?: "<input>"
+                appendLine("   --> $fileInfo:${error.location()!!.line}:${error.location()!!.column}")
+            }
+
+            // Source code context
+            if (sourceCode != null && error.location() != null) {
+                append(SourceContext.formatCodeSnippet(sourceCode, error.location()!!))
+            }
+
+            // Error message with type diff
+            appendLine()
+            appendLine("Error: ${error.message()}")
+            appendLine()
+            append(typeDiff)
+
+            // Suggestions
+            appendLine()
+            appendLine("💡 Suggestions:")
+            appendLine("   - Use a handler that expects ${TypeDiffPrinter.formatType(error.actualType)}")
+            appendLine("   - Ensure all throw calls throw values of type ${TypeDiffPrinter.formatType(error.expectedType)}")
+        }.trim()
+    }
+
+    private fun formatUnitVariantPayloadMismatchError(
+        error: ValidationError.UnitVariantPayloadMismatch,
+        sourceCode: String?
+    ): String {
+        return buildString {
+            appendLine("❌ Type Error [Validation - Unit Variant Payload Mismatch]")
+            appendLine("━".repeat(50))
+
+            // Location
+            if (error.location() != null) {
+                val fileInfo = error.location()!!.file ?: "<input>"
+                appendLine("   --> $fileInfo:${error.location()!!.line}:${error.location()!!.column}")
+            }
+
+            // Source code context
+            if (sourceCode != null && error.location() != null) {
+                append(SourceContext.formatCodeSnippet(sourceCode, error.location()!!))
+            }
+
+            // Error message
+            appendLine()
+            appendLine("Error: ${error.message()}")
+
+            // Suggestions
+            appendLine()
+            appendLine("💡 Suggestions:")
+            appendLine("   - Remove the payload pattern from the constructor '${error.constructorName}'")
+            appendLine("   - If you need to match a payload, add fields to the variant constructor")
+        }.trim()
     }
 
     // ========================================================================
