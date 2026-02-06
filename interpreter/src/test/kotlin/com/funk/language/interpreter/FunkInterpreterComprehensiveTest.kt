@@ -93,14 +93,14 @@ class FunkInterpreterComprehensiveTest {
 
     @Test
     fun testVariantAndPatternMatching() {
-        // Avoid using 'Result' and 'Error' which may conflict with built-in types
-        // Note: The typechecker infers 'val' as the default field name for variant payloads
+        // Use completely unique constructor names to avoid conflicts with built-in types
+        // (Ok/Err are used by the built-in Result type)
         val source = """
-            type MyResult = | Ok {val: Int}, Err {val: String} |
-            let value: MyResult = Ok {val = 42}
+            type Outcome = | Success {val: Int}, Failure {val: String} |
+            let value: Outcome = Success {val = 42}
             let result = match value is
-              Ok {val} -> val * 2
-              Err {val} -> 0
+              Success {val} -> val * 2
+              Failure {val} -> 0
         """.trimIndent()
 
         val ast = parser.parse(source)
