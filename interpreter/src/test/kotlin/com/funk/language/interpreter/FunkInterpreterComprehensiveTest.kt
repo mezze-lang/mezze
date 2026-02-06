@@ -335,20 +335,21 @@ class FunkInterpreterComprehensiveTest {
 
     @Test
     fun testComplexDataStructures() {
+        // Note: Funk uses 'Bool' not 'Boolean' as the type name
         val source = """
             let alice = {id = 1, name = "Alice", active = true}
             let bob = {id = 2, name = "Bob", active = false}
             let charlie = {id = 3, name = "Charlie", active = true}
-            
-            let findUserById: {user: {id: Int, name: String, active: Boolean}, targetId: Int} -> {id: Int, name: String, active: Boolean} = {user, targetId} -> 
+
+            let findUserById: {user: {id: Int, name: String, active: Bool}, targetId: Int} -> {id: Int, name: String, active: Bool} = {user, targetId} ->
               if user.id == targetId then user else {id = 0, name = "NotFound", active = false}
-            
+
             let result = findUserById {user = bob, targetId = 2}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
-        
+
         assertDoesNotThrow {
             val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
             FunkTestHelper.execute(typedProgram, projectRoot)
