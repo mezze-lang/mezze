@@ -110,7 +110,13 @@ private fun extractTypeVariables(type: FunkType): Set<TypeVar> {
         is FunkType.ArrayType -> {
             result.addAll(extractTypeVariables(type.elementType))
         }
-        else -> { /* Base types don't contain type variables */ }
+        is FunkType.SuspendedType -> {
+            result.addAll(extractTypeVariables(type.valueType))
+        }
+        // Base types don't contain type variables
+        is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
+        is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
+        is FunkType.OrderingType, is FunkType.EffectRow -> { }
     }
     return result
 }

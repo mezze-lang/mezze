@@ -1,6 +1,17 @@
 package com.funk.language.ast
 
 /**
+ * Check if a variant type represents the built-in Bool type.
+ */
+private fun isBoolVariant(type: FunkType.VariantType): Boolean =
+    type.constructors.size == 2 &&
+    type.constructors.containsKey("True") &&
+    type.constructors.containsKey("False") &&
+    type.constructors["True"] == null &&
+    type.constructors["False"] == null &&
+    !type.isOpen
+
+/**
  * Pretty printer for Funk types with proper type variable naming
  */
 fun prettyPrintType(type: FunkType): String {
@@ -103,14 +114,7 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     }
     is FunkType.VariantType -> {
         // Special case: Bool variant prints as "Bool" instead of "| True, False |"
-        val isBoolVariant = type.constructors.size == 2 &&
-                type.constructors.containsKey("True") &&
-                type.constructors.containsKey("False") &&
-                type.constructors["True"] == null &&
-                type.constructors["False"] == null &&
-                !type.isOpen
-
-        if (isBoolVariant) {
+        if (isBoolVariant(type)) {
             "Bool"
         } else {
             // Print as regular variant type (inline variant syntax)
@@ -209,9 +213,7 @@ private fun findTypeDeclarationForVariant(
     typeVarMapping: Map<TypeVar, String>
 ): TypeDeclMatch? {
     for (decl in typeDeclarations) {
-        if (decl.definition !is VariantDefinition) continue
-
-        val variantDef = decl.definition as VariantDefinition
+        val variantDef = decl.definition as? VariantDefinition ?: continue
 
         // Check if constructor names match
         if (variantDef.constructors.map { it.name }.toSet() != variantType.constructors.keys) {
@@ -384,14 +386,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
     }
     is FunkType.VariantType -> {
         // Special case: Bool variant prints as "Bool" instead of "| True, False |"
-        val isBoolVariant = type.constructors.size == 2 &&
-                type.constructors.containsKey("True") &&
-                type.constructors.containsKey("False") &&
-                type.constructors["True"] == null &&
-                type.constructors["False"] == null &&
-                !type.isOpen
-
-        if (isBoolVariant) {
+        if (isBoolVariant(type)) {
             "Bool"
         } else {
             // Special case: Option variant prints as "Option T" instead of "| Some { val: T }, None |"
@@ -448,23 +443,23 @@ private fun prettyPrintTypeWithAliasesRecursive(
             val isProperResult = hasOk && hasErr && type.constructors.size == 2 &&
                     valueType != null && errorVariant != null
 
-            if (isProperResult) {
-            // This is a Result type - print as: Result valueType errorType
-            val valueTypeStr = prettyPrintWithAliasCheck(valueType!!, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
+            if (isProperResult && valueType != null && errorVariant != null) {
+                // This is a Result type - print as: Result valueType errorType
+                val valueTypeStr = prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
 
-            val errorTypeStr = when (errorVariant) {
-                is FunkType.VariantType -> {
-                    val errorConstructors = errorVariant.constructors.entries.map { (name, dataType) ->
-                        if (dataType != null) {
-                            "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
-                        } else {
-                            name
+                val errorTypeStr = when (errorVariant) {
+                    is FunkType.VariantType -> {
+                        val errorConstructors = errorVariant.constructors.entries.map { (name, dataType) ->
+                            if (dataType != null) {
+                                "$name ${prettyPrintWithAliasCheck(dataType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
+                            } else {
+                                name
+                            }
                         }
+                        "| ${errorConstructors.joinToString(", ")} |"
                     }
-                    "| ${errorConstructors.joinToString(", ")} |"
+                    else -> prettyPrintWithAliasCheck(errorVariant, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
                 }
-                else -> prettyPrintWithAliasCheck(errorVariant!!, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
-            }
 
             "Result $valueTypeStr $errorTypeStr"
         } else {
