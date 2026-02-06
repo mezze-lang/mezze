@@ -468,7 +468,9 @@ class ContextBuilder {
                     paramType = convertTypeAnnotationInternal(annotation.paramType),
                     returnType = convertTypeAnnotationInternal(annotation.returnType),
                     effects = annotation.effects?.let { effectRow ->
-                        FunkType.EffectRow(effectRow.effects.toSet())
+                        // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
+                        val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
+                        FunkType.EffectRow(effectRow.effects.toSet(), rowVar)
                     },
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->
                         FunkType.FunctionAbilityConstraint(
