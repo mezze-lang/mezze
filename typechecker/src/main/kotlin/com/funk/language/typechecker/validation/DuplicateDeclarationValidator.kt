@@ -56,7 +56,27 @@ object DuplicateDeclarationValidator {
     }
 
     /**
+     * Built-in variant constructors that cannot be redefined in OTHER types.
+     * These are constructors from built-in types like Option (Some/None) and Result (Ok/Err).
+     *
+     * Users CAN redefine the built-in type itself (e.g., `type Option = | Some, None |`)
+     * but CANNOT use these constructors in a differently-named type
+     * (e.g., `type MyOption = | Some, None |` is NOT allowed).
+     */
+    private val BUILTIN_CONSTRUCTORS = mapOf(
+        // Option type constructors
+        "Some" to "Option",
+        "None" to "Option",
+        // Result type constructors
+        "Ok" to "Result",
+        "Err" to "Result"
+        // Note: True/False are literals, not variant constructors
+    )
+
+    /**
      * Validate no duplicate constructor names across types (OldTypeChecker.kt:1009-1067)
+     * Also validates that user-defined constructors don't conflict with built-in constructors
+     * (unless the user is redefining the built-in type itself).
      */
     private fun validateDuplicateConstructors(program: Program) {
         val constructorToTypeMap = mutableMapOf<String, String>()
@@ -67,8 +87,18 @@ object DuplicateDeclarationValidator {
                 is VariantDefinition -> {
                     for (constructor in definition.constructors) {
                         val constructorName = constructor.name
-                        val existingType = constructorToTypeMap[constructorName]
 
+                        // Check against built-in constructors, but allow redefining the same type
+                        // e.g., `type Option = | Some, None |` is OK, but `type MyOption = | Some, None |` is NOT
+                        val builtinType = BUILTIN_CONSTRUCTORS[constructorName]
+                        if (builtinType != null && typeDecl.name != builtinType) {
+                            throw TypeCheckError(
+                                "Cannot redefine built-in constructor: '$constructorName' is already defined " +
+                                "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name."
+                            )
+                        }
+
+                        val existingType = constructorToTypeMap[constructorName]
                         if (existingType != null) {
                             throw TypeCheckError(
                                 "Duplicate constructor name: constructor '$constructorName' is already defined " +
@@ -80,8 +110,17 @@ object DuplicateDeclarationValidator {
                 }
                 is NewtypeDefinition -> {
                     val constructorName = definition.constructor
-                    val existingType = constructorToTypeMap[constructorName]
 
+                    // Check against built-in constructors
+                    val builtinType = BUILTIN_CONSTRUCTORS[constructorName]
+                    if (builtinType != null && typeDecl.name != builtinType) {
+                        throw TypeCheckError(
+                            "Cannot redefine built-in constructor: '$constructorName' is already defined " +
+                            "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name."
+                        )
+                    }
+
+                    val existingType = constructorToTypeMap[constructorName]
                     if (existingType != null) {
                         throw TypeCheckError(
                             "Duplicate constructor name: constructor '$constructorName' is already defined " +
