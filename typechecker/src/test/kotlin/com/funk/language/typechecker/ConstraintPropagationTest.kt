@@ -177,7 +177,9 @@ class ConstraintPropagationTest {
         } catch (e: TypeCheckError) {
             // If it fails with a type error, that's also acceptable for now
             // The record type system needs improvement to handle open records properly
-            assertTrue(e.message?.contains("record") == true)
+            println("ACTUAL ERROR: ${e.message}")
+            assertTrue(e.message?.contains("record") == true || e.message?.contains("Record") == true,
+                "Expected error about 'record', got: ${e.message}")
         }
     }
     

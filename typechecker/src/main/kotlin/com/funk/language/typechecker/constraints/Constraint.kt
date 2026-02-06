@@ -107,7 +107,9 @@ sealed interface Constraint {
         val fieldName: String,
         val fieldType: FunkType,
         val context: String? = null,
-        override val sourceLocation: SourceLocation? = null
+        override val sourceLocation: SourceLocation? = null,
+        /** If true, disallow field accumulation - field must exist exactly. Used for record literal field access. */
+        val strictFieldCheck: Boolean = false
     ) : Constraint
 
     data class HasConstructor(
@@ -115,7 +117,9 @@ sealed interface Constraint {
         val constructorName: String,
         val payloadType: FunkType?,
         val context: String? = null,
-        override val sourceLocation: SourceLocation? = null
+        override val sourceLocation: SourceLocation? = null,
+        /** True if this constraint came from pattern matching (should create closed variant) */
+        val isPatternContext: Boolean = false
     ) : Constraint
 
     /**

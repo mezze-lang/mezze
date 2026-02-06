@@ -76,6 +76,17 @@ class ConstraintSolver(
     private val mustBeOpenBindings = mutableSetOf<String>()
 
     /**
+     * Track row variables that came from pattern matching contexts.
+     *
+     * These row vars should be CLOSED at the end of constraint solving
+     * (unless they're also in mustBeOpenRowVars due to a wildcard).
+     * This ensures anonymous variants from pattern matching are closed:
+     *   let f = {x} -> match x is Red -> 1 | Blue -> 2
+     * should produce a function that only accepts Red or Blue.
+     */
+    private val patternBasedRowVars = mutableSetOf<RowVar>()
+
+    /**
      * Get the set of type variables that must remain open (have row variables).
      */
     fun getMustBeOpenTypes(): Set<TypeVar> = mustBeOpenTypes.toSet()
@@ -105,7 +116,9 @@ class ConstraintSolver(
             val resolvedAbilityConstraints: Set<Constraint.AbilityRequired> = emptySet(),
             val mustBeOpenTypes: Set<TypeVar> = emptySet(),
             val mustBeOpenRowVars: Set<RowVar> = emptySet(),
-            val mustBeOpenBindings: Set<String> = emptySet()
+            val mustBeOpenBindings: Set<String> = emptySet(),
+            /** Row vars from pattern matching that should be closed (unless also in mustBeOpenRowVars) */
+            val patternBasedRowVars: Set<RowVar> = emptySet()
         ) : SolveResult()
 
         /**
@@ -375,6 +388,9 @@ class ConstraintSolver(
                         )
                     )
                 }
+                is ConstraintResult.Deferred -> {
+                    // Ability constraints shouldn't be deferred, but handle it gracefully
+                }
             }
         }
 
@@ -389,7 +405,89 @@ class ConstraintSolver(
         // - Equality constraints unify case result types with the match result
         // Both need to be solved together for correct type checking.
 
-        val constraintWorklist = nonAbilityConstraints.toMutableList()
+        // PHASE 2a: First solve all HasConstructor constraints to collect variant constructors
+        // This allows pattern matching to accumulate all constructors before we close the variants
+        val hasConstructorConstraints = nonAbilityConstraints.filterIsInstance<Constraint.HasConstructor>()
+        val otherConstraints = nonAbilityConstraints.filter { it !is Constraint.HasConstructor }
+
+        // Solve HasConstructor constraints first
+        val hasConstructorWorklist = hasConstructorConstraints.toMutableList()
+        var hcMadeProgress = true
+        var hcIterationCount = 0
+
+        while (hcMadeProgress && hasConstructorWorklist.isNotEmpty() && hcIterationCount < 50) {
+            hcMadeProgress = false
+            hcIterationCount++
+
+            val iterator = hasConstructorWorklist.iterator()
+            while (iterator.hasNext()) {
+                val constraint = iterator.next()
+                val appliedConstraint = applySubstitutionToConstraint(constraint, substitution) as Constraint.HasConstructor
+
+                val result = solveHasConstructor(appliedConstraint, substitution, constraint)
+
+                when (result) {
+                    is ConstraintResult.Success -> {
+                        val newSubst = result.substitution
+                        if (newSubst.mappings.isNotEmpty()) {
+                            substitution = newSubst.compose(substitution)
+                            hcMadeProgress = true
+                        }
+                        warnings.addAll(result.warnings)
+                        iterator.remove()
+                    }
+                    is ConstraintResult.Failure -> {
+                        // Check if constraint might succeed later
+                        val constraintType = appliedConstraint.variantType
+                        if (constraintType is FunkType.VarType) {
+                            // Still a type variable - might be resolved later
+                        } else {
+                            // Concrete type - this is a real error
+                            errors.add(
+                                ConstraintError(
+                                    message = result.message,
+                                    constraint = appliedConstraint,
+                                    context = appliedConstraint.context
+                                )
+                            )
+                            iterator.remove()
+                        }
+                    }
+                    is ConstraintResult.Deferred -> {
+                        // HasConstructor constraints shouldn't be deferred, but handle gracefully
+                    }
+                }
+            }
+        }
+
+        // PHASE 2b: Resolve MustBeOpen types to their row vars AFTER HasConstructor constraints are solved
+        // This is necessary because MustBeOpen constraints refer to type variables, and the row vars
+        // are only created during HasConstructor constraint solving
+        for (typeVar in mustBeOpenTypes) {
+            val resolved = substitution.apply(FunkType.VarType(typeVar))
+            if (System.getProperty("funk.typecheck.debug") == "true") {
+                println("[DEBUG] MustBeOpen typeVar=$typeVar resolved to $resolved")
+            }
+            if (resolved is FunkType.VariantType && resolved.rowVar != null) {
+                mustBeOpenRowVars.add(resolved.rowVar!!)
+                if (System.getProperty("funk.typecheck.debug") == "true") {
+                    println("[DEBUG] Added rowVar=${resolved.rowVar} to mustBeOpenRowVars")
+                }
+            }
+        }
+
+        if (System.getProperty("funk.typecheck.debug") == "true") {
+            println("[DEBUG] patternBasedRowVars = $patternBasedRowVars")
+            println("[DEBUG] mustBeOpenRowVars = $mustBeOpenRowVars")
+        }
+
+        // PHASE 2c: Close pattern-based variants now that all constructors are collected
+        // Pattern-based row vars should be removed (set to null) to make the variants closed
+        // UNLESS they're in mustBeOpenRowVars (due to wildcard patterns)
+        substitution = closePatternBasedVariants(substitution)
+
+        // PHASE 2c: Solve remaining constraints (Equality, HasField, etc.)
+        val constraintWorklist = (hasConstructorWorklist + otherConstraints).toMutableList()
         val processedInThisPass = mutableSetOf<Constraint>()
         var madeProgress = true
         var iterationCount = 0
@@ -448,10 +546,13 @@ class ConstraintSolver(
                                     val isMatchContext = originalConstraint.context?.contains("Match case") == true
 
                                     // Also allow merging if BOTH variants are open (have row variables)
-                                    // This supports row polymorphism where we accumulate constructors
+                                    // AND neither is a pattern-based variant (which should be closed)
                                     val bothOpen = leftType.rowVar != null && rightType.rowVar != null
+                                    val eitherPatternBased = (leftType.rowVar != null && patternBasedRowVars.contains(leftType.rowVar)) ||
+                                                             (rightType.rowVar != null && patternBasedRowVars.contains(rightType.rowVar))
 
-                                    if (isMatchContext || bothOpen) {
+                                    // Don't merge if either variant is pattern-based - those should be treated as closed
+                                    if (isMatchContext || (bothOpen && !eitherPatternBased)) {
                                         // Merge variants
                                         val mergedConstructors = leftType.constructors.toMutableMap()
                                         for ((name, dataType) in rightType.constructors) {
@@ -519,6 +620,10 @@ class ConstraintSolver(
                             iterator.remove()
                         }
                     }
+                    is ConstraintResult.Deferred -> {
+                        // Constraint needs more information - keep in worklist for later
+                        // Don't count as progress, just leave it for next iteration
+                    }
                 }
             }
         }
@@ -573,7 +678,15 @@ class ConstraintSolver(
 
         // Return result
         return if (errors.isEmpty()) {
-            SolveResult.Success(substitution, warnings, resolvedAbilities, mustBeOpenTypes.toSet(), mustBeOpenRowVars.toSet(), mustBeOpenBindings.toSet())
+            SolveResult.Success(
+                substitution = substitution,
+                warnings = warnings,
+                resolvedAbilityConstraints = resolvedAbilities,
+                mustBeOpenTypes = mustBeOpenTypes.toSet(),
+                mustBeOpenRowVars = mustBeOpenRowVars.toSet(),
+                mustBeOpenBindings = mustBeOpenBindings.toSet(),
+                patternBasedRowVars = patternBasedRowVars.toSet()
+            )
         } else {
             SolveResult.Failure(errors)
         }
@@ -589,6 +702,9 @@ class ConstraintSolver(
         ) : ConstraintResult()
 
         data class Failure(val message: String) : ConstraintResult()
+
+        /** Constraint couldn't be solved yet - put back on worklist */
+        data class Deferred(val reason: String) : ConstraintResult()
     }
 
     /**
@@ -1156,6 +1272,12 @@ class ConstraintSolver(
 
         // If record type is a type variable, we can't check yet
         if (recordType is FunkType.VarType) {
+            // CRITICAL: If strictFieldCheck is true, we need to wait until the type is known
+            // to properly validate field existence. Return Deferred to put back on worklist.
+            if (constraint.strictFieldCheck) {
+                return ConstraintResult.Deferred("Waiting for record type to be resolved for strict field check")
+            }
+
             // Create a record type with just this field
             val recordWithField = FunkType.RecordType(
                 fields = mapOf(fieldName to expectedFieldType),
@@ -1195,8 +1317,9 @@ class ConstraintSolver(
             val actualFieldType = recordType.fields[fieldName]
             if (actualFieldType == null) {
                 // Field doesn't exist - check if record is open (has row variable)
-                if (recordType.rowVar != null) {
-                    // Record is open - we can add the field via row polymorphism
+                if (recordType.rowVar != null && !constraint.strictFieldCheck) {
+                    // Record is open AND this is not a strict field check (record literal context)
+                    // We can add the field via row polymorphism
                     // Create extended record with the new field
                     val extendedFields = recordType.fields + (fieldName to expectedFieldType)
                     val extendedRecord = FunkType.RecordType(
@@ -1218,7 +1341,8 @@ class ConstraintSolver(
                     // This happens when the record came from an annotation, not inference
                     return ConstraintResult.Success(Substitution.empty)
                 } else {
-                    // Record is closed - field must exist
+                    // Record is closed, OR this is a strict field check (record literal context)
+                    // Field must exist
                     return ConstraintResult.Failure(
                         "Record type does not have field '$fieldName'. Available fields: ${recordType.fields.keys.joinToString()}"
                     )
@@ -1285,10 +1409,9 @@ class ConstraintSolver(
             // CRITICAL: Only use declared type for PATTERN matching contexts, not for expression contexts
             // Pattern contexts need the full type for exhaustiveness checking.
             // Expression contexts should create open variants that can unify with annotated types.
-            //
-            // Pattern context: "Constructor pattern Foo"
-            // Expression context: "Variant constructor Foo" or "Variant construction Foo"
-            val isPatternContext = constraint.context?.contains("Constructor pattern") == true
+            // Use the isPatternContext flag from the constraint itself
+            // This is more reliable than parsing the context string
+            val isPatternContext = constraint.isPatternContext
 
             if (isPatternContext) {
                 // SPECIAL CASE: Built-in Bool constructors (True, False)
@@ -1372,13 +1495,21 @@ class ConstraintSolver(
                 )
             }
 
-            // Not a pattern context OR no type declaration found - create an open variant
-            // The open variant can be extended by other HasConstructor constraints and
-            // can be unified with annotated types like `let y: Color = Yellow`
+            // Create an open variant during constraint solving
+            // The variant will be closed later if it came from pattern matching without wildcard
+            val newRowVar = RowVar.fresh()
             val newVariant = FunkType.VariantType(
                 constructors = mapOf(constructorName to expectedPayloadType),
-                rowVar = RowVar.fresh()  // Open so it can be extended
+                rowVar = newRowVar  // Open so additional constructors can be added
             )
+
+            // Track that this row variable came from pattern matching (if applicable)
+            // Pattern-based row vars will be closed at the end of constraint solving
+            // unless there's a wildcard pattern
+            if (isPatternContext) {
+                patternBasedRowVars.add(newRowVar)
+            }
+
             return ConstraintResult.Success(
                 Substitution.single(variantType.variable, newVariant)
             )
@@ -1493,6 +1624,107 @@ class ConstraintSolver(
     }
 
     /**
+     * Close pattern-based variants in the substitution.
+     *
+     * After all HasConstructor constraints from patterns have been solved, we close
+     * the variants by removing their row variables. This ensures that pattern-derived
+     * variants act as closed types during subsequent unification.
+     *
+     * For example:
+     *   let f = {x} -> match x is Red -> 1 | Blue -> 2
+     * After solving HasConstructor constraints, the variant | Red, Blue, ... | is closed
+     * to | Red, Blue |, so calling f { x = Pink } will fail type checking.
+     */
+    private fun closePatternBasedVariants(substitution: Substitution): Substitution {
+        if (patternBasedRowVars.isEmpty()) return substitution
+
+        // Find row vars that should NOT be closed (have wildcard patterns)
+        val rowVarsToKeepOpen = mustBeOpenRowVars.toSet()
+
+        // Row vars to close = pattern-based minus those that must stay open
+        val rowVarsToClose = patternBasedRowVars - rowVarsToKeepOpen
+
+        if (rowVarsToClose.isEmpty()) return substitution
+
+        // Update all variant types in the substitution to close pattern-based row vars
+        val updatedMappings = substitution.mappings.mapValues { (_, type) ->
+            closeRowVarsInType(type, rowVarsToClose)
+        }
+
+        return Substitution(updatedMappings)
+    }
+
+    /**
+     * Recursively close specified row vars in a type.
+     */
+    private fun closeRowVarsInType(type: FunkType, rowVarsToClose: Set<RowVar>): FunkType {
+        return when (type) {
+            is FunkType.VariantType -> {
+                val shouldClose = type.rowVar != null && rowVarsToClose.contains(type.rowVar)
+                FunkType.VariantType(
+                    constructors = type.constructors.mapValues { (_, payloadType) ->
+                        payloadType?.let { closeRowVarsInType(it, rowVarsToClose) }
+                    },
+                    rowVar = if (shouldClose) null else type.rowVar
+                )
+            }
+            is FunkType.RecordType -> {
+                FunkType.RecordType(
+                    fields = type.fields.mapValues { (_, fieldType) ->
+                        closeRowVarsInType(fieldType, rowVarsToClose)
+                    },
+                    rowVar = type.rowVar  // Don't close record row vars here
+                )
+            }
+            is FunkType.FunctionType -> {
+                FunkType.FunctionType(
+                    paramType = closeRowVarsInType(type.paramType, rowVarsToClose),
+                    returnType = closeRowVarsInType(type.returnType, rowVarsToClose),
+                    effects = type.effects,
+                    abilityConstraints = type.abilityConstraints
+                )
+            }
+            is FunkType.ArrayType -> {
+                FunkType.ArrayType(closeRowVarsInType(type.elementType, rowVarsToClose))
+            }
+            is FunkType.ListType -> {
+                FunkType.ListType(closeRowVarsInType(type.elementType, rowVarsToClose))
+            }
+            is FunkType.MapType -> {
+                FunkType.MapType(
+                    keyType = closeRowVarsInType(type.keyType, rowVarsToClose),
+                    valueType = closeRowVarsInType(type.valueType, rowVarsToClose)
+                )
+            }
+            is FunkType.SetType -> {
+                FunkType.SetType(closeRowVarsInType(type.elementType, rowVarsToClose))
+            }
+            is FunkType.TypeApplication -> {
+                FunkType.TypeApplication(
+                    constructor = type.constructor,
+                    args = type.args.map { closeRowVarsInType(it, rowVarsToClose) }
+                )
+            }
+            is FunkType.SuspendedType -> {
+                FunkType.SuspendedType(
+                    valueType = closeRowVarsInType(type.valueType, rowVarsToClose),
+                    effects = type.effects
+                )
+            }
+            // Primitive types and EffectRow don't contain row vars
+            is FunkType.VarType,
+            is FunkType.IntType,
+            is FunkType.FloatType,
+            is FunkType.StringType,
+            is FunkType.BooleanType,
+            is FunkType.NatType,
+            is FunkType.FracType,
+            is FunkType.OrderingType,
+            is FunkType.EffectRow -> type
+        }
+    }
+
+    /**
      * Apply substitution to a constraint.
      *
      * This ensures we always work with the most up-to-date types.
@@ -1528,7 +1760,8 @@ class ConstraintSolver(
                 fieldName = constraint.fieldName,
                 fieldType = substitution.apply(constraint.fieldType),
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation
+                sourceLocation = constraint.sourceLocation,
+                strictFieldCheck = constraint.strictFieldCheck
             )
 
             is Constraint.HasConstructor -> Constraint.HasConstructor(
@@ -1536,7 +1769,8 @@ class ConstraintSolver(
                 constructorName = constraint.constructorName,
                 payloadType = constraint.payloadType?.let { substitution.apply(it) },
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation
+                sourceLocation = constraint.sourceLocation,
+                isPatternContext = constraint.isPatternContext
             )
 
             is Constraint.MustBeOpen -> Constraint.MustBeOpen(

@@ -4,6 +4,7 @@ import com.funk.language.ast.*
 import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.context.TypingContext
 import com.funk.language.typechecker.TypeCheckError
+import com.funk.language.typechecker.SpreadSyntaxError
 import com.funk.language.typechecker.solving.collectFreeTypeVars
 import com.funk.language.typechecker.ErrorType
 
@@ -393,9 +394,16 @@ class ExpressionConstraintGenerator {
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
 
-        // First pass: collect explicit field types (but don't add to fields yet)
+        // Pre-pass: collect ALL explicit field names upfront
+        // This is needed because spread validation needs to know all field names,
+        // even if they appear after the spread in source order
+        val explicitFieldNames = expr.entries
+            .filterIsInstance<RecordFieldEntry>()
+            .map { it.name }
+            .toSet()
+
+        // First pass: collect explicit field types
         val explicitFieldTypes = mutableMapOf<String, FunkType>()
-        val explicitFieldNames = mutableSetOf<String>()
 
         for (entry in expr.entries) {
             when (entry) {
@@ -404,7 +412,6 @@ class ExpressionConstraintGenerator {
                     val fieldResult = generate(fieldValue, context)
 
                     explicitFieldTypes[entry.name] = fieldResult.type
-                    explicitFieldNames.add(entry.name)
                     constraints.addAll(fieldResult.constraints)
                     undefinedVars.addAll(fieldResult.undefinedVariables)
                     abilityConstraints.addAll(fieldResult.abilityConstraints)
@@ -421,6 +428,17 @@ class ExpressionConstraintGenerator {
                     // The spread expression must be a record type (or unify with one via constraints)
                     when (val spreadType = spreadResult.type) {
                         is FunkType.RecordType -> {
+                            // VALIDATION: Check that all explicit fields exist in the spread record
+                            // Funk spread semantics: override only, no field addition
+                            for (fieldName in explicitFieldNames) {
+                                if (fieldName !in spreadType.fields) {
+                                    throw SpreadSyntaxError.FieldAdditionNotAllowed(
+                                        fieldName,
+                                        spreadType.fields.keys.toList()
+                                    )
+                                }
+                            }
+
                             // Add all fields from the spread record in their original order
                             // Explicit fields will override values but we use spread order as base
                             for ((fieldName, fieldType) in spreadType.fields) {
@@ -435,8 +453,8 @@ class ExpressionConstraintGenerator {
                             // For now, we don't add fields (they'll be resolved during constraint solving)
                         }
                         else -> {
-                            // Spread expression is not a record - this will be caught during constraint solving
-                            // For now, just ignore it
+                            // Spread expression is not a record - throw an error
+                            throw SpreadSyntaxError.NonRecordSpread(prettyPrintType(spreadType))
                         }
                     }
                 }
@@ -444,6 +462,8 @@ class ExpressionConstraintGenerator {
         }
 
         // Second pass: add any explicit fields that weren't in a spread (new fields)
+        // Note: if there was a spread, all fields should already be in 'fields' map
+        // and we validated that explicit fields exist in the spread record
         for ((fieldName, fieldType) in explicitFieldTypes) {
             if (fieldName !in fields) {
                 fields[fieldName] = fieldType
@@ -687,13 +707,21 @@ class ExpressionConstraintGenerator {
         val constraints = mutableListOf<Constraint>()
         constraints.addAll(receiverResult.constraints)
 
+        // Determine if this is a strict field check (record literal context)
+        // For strict checks, field accumulation is disallowed - the field must exist exactly
+        // This applies to:
+        // 1. Direct access on a record literal binding: data.x where data = {...}
+        // 2. Nested access on a record literal binding: data.point.z where data = {point = {...}, ...}
+        val isStrictFieldCheck = isRecordLiteralAccess(expr.receiver, context)
+
         // Add HasField constraint
         constraints.add(
             Constraint.HasField(
                 recordType = receiverResult.type,
                 fieldName = expr.member,
                 fieldType = fieldType,
-                context = "Field access ${expr.member}"
+                context = "Field access ${expr.member}",
+                strictFieldCheck = isStrictFieldCheck
             )
         )
 
@@ -2316,6 +2344,24 @@ class ExpressionConstraintGenerator {
             is EffectRowAnnotation -> {
                 FunkType.EffectRow(annotation.effects.toSet())
             }
+        }
+    }
+
+    /**
+     * Check if an expression is an access chain on a record literal binding.
+     *
+     * This recursively checks:
+     * - Direct identifier: `data` where `data` is in recordLiteralBindings
+     * - Nested access: `data.point` where `data` is in recordLiteralBindings
+     * - Deep nested: `data.point.x` etc.
+     *
+     * Used to determine if field access should be strict (no accumulation).
+     */
+    private fun isRecordLiteralAccess(expr: Expression, context: ConstraintContext): Boolean {
+        return when (expr) {
+            is Identifier -> expr.name in context.recordLiteralBindings
+            is MemberAccess -> isRecordLiteralAccess(expr.receiver, context)
+            else -> false
         }
     }
 }

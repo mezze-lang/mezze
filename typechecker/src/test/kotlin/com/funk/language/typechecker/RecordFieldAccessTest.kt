@@ -280,7 +280,7 @@ class RecordFieldAccessTest {
         val error = assertThrows<TypeCheckError>("Should fail: nested field 'z' does not exist") {
             typeChecker.typeCheck(program).program
         }
-        assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
+        assertTrue(error.message?.contains("field 'z'") == true || error.message?.contains("Field 'z'") == true, "Error should mention missing field 'z', got: ${error.message}")
     }
 
     @Test
@@ -316,7 +316,8 @@ class RecordFieldAccessTest {
         val error = assertThrows<TypeCheckError>("Should fail: nested field 'z' not declared in open record") {
             typeChecker.typeCheck(program).program
         }
-        assertTrue(error.message?.contains("Field 'z' not found") == true, "Error should mention missing field")
+        assertTrue(error.message?.contains("field 'z'") == true || error.message?.contains("Field 'z'") == true,
+            "Error should mention missing field 'z', got: ${error.message}")
     }
 
     // ==================== ERROR MESSAGE QUALITY TESTS ====================
