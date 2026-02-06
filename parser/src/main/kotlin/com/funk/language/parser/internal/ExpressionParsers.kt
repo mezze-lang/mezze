@@ -199,7 +199,7 @@ internal val FunkParser.lambdaParameterEntry: Parser<Pair<String, TypeAnnotation
         val ident = identifierParser(stream)
         when (ident) {
             is ParseResult.Success -> {
-                val paramName = (ident as ParseResult.Success).value.text
+                val paramName = ident.value.text
                 val stream1 = ident.remaining
 
                 // Check if there's a colon (type annotation)
@@ -208,11 +208,11 @@ internal val FunkParser.lambdaParameterEntry: Parser<Pair<String, TypeAnnotation
                     val colon = tok(TokenType.COLON)(stream1)
                     when (colon) {
                         is ParseResult.Success -> {
-                            val typeAnnotation = typeAnnotationParser((colon as ParseResult.Success).remaining)
+                            val typeAnnotation = typeAnnotationParser(colon.remaining)
                             when (typeAnnotation) {
                                 is ParseResult.Success -> {
                                     ParseResult.Success(
-                                        Pair(paramName, (typeAnnotation as ParseResult.Success).value),
+                                        Pair(paramName, typeAnnotation.value),
                                         typeAnnotation.remaining
                                     )
                                 }
@@ -237,7 +237,7 @@ internal val FunkParser.typedLambdaParams: Parser<LambdaParameters>
         val entries = Parsers.sepEndBy(lambdaParameterEntry, tok(TokenType.COMMA))(stream)
         when (entries) {
             is ParseResult.Success -> {
-                val entryList = (entries as ParseResult.Success).value
+                val entryList = entries.value
                 if (entryList.isEmpty()) {
                     // No parameters found
                     stream.failure("Expected typed parameters")
@@ -268,7 +268,7 @@ internal val FunkParser.untypedLambdaParams: Parser<LambdaParameters>
         val params = Parsers.sepEndBy(identifierParser, tok(TokenType.COMMA))(stream)
         when (params) {
             is ParseResult.Success -> {
-                val names = (params as ParseResult.Success).value.map { it.text }
+                val names = params.value.map { it.text }
                 val stream1 = params.remaining
 
                 // Check for optional comma before ellipsis (same logic as recordPatternParser)
@@ -303,7 +303,7 @@ internal val FunkParser.recordLiteral: Parser<Expression>
         when (lbrace) {
             is ParseResult.Success -> {
                 val recordLocation = tokenLocation(lbrace.value, currentFile)
-                val stream1 = skipNewlines((lbrace as ParseResult.Success).remaining)
+                val stream1 = skipNewlines(lbrace.remaining)
 
                 // Use custom sepEndBy that skips newlines after commas and allows trailing commas
                 val entries = sepEndByWithNewlines(
@@ -313,7 +313,7 @@ internal val FunkParser.recordLiteral: Parser<Expression>
 
                 when (entries) {
                     is ParseResult.Success -> {
-                        val stream2 = skipNewlines((entries as ParseResult.Success).remaining)
+                        val stream2 = skipNewlines(entries.remaining)
 
                         // Check for trailing ellipsis to mark as open record: {x = 1, ...}
                         // Note: sepEndBy already consumed any trailing comma
@@ -331,7 +331,7 @@ internal val FunkParser.recordLiteral: Parser<Expression>
                         when (rbrace) {
                             is ParseResult.Success -> ParseResult.Success(
                                 RecordLiteral(entries.value, if (isOpen) "..." else null, sourceLocation = recordLocation),
-                                (rbrace as ParseResult.Success).remaining
+                                rbrace.remaining
                             )
                             is ParseResult.Failure -> rbrace
                         }
@@ -353,10 +353,10 @@ internal val FunkParser.recordLiteralEntryParser: Parser<RecordLiteralEntry>
             val ellipsis = tok(TokenType.ELLIPSIS)(stream)
             when (ellipsis) {
                 is ParseResult.Success -> {
-                    val expr = expression((ellipsis as ParseResult.Success).remaining)
+                    val expr = expression(ellipsis.remaining)
                     when (expr) {
                         is ParseResult.Success -> ParseResult.Success(
-                            RecordSpreadEntry((expr as ParseResult.Success).value),
+                            RecordSpreadEntry(expr.value),
                             expr.remaining
                         )
                         is ParseResult.Failure -> expr
@@ -369,17 +369,17 @@ internal val FunkParser.recordLiteralEntryParser: Parser<RecordLiteralEntry>
             val ident = identifierParser(stream)
             when (ident) {
                 is ParseResult.Success -> {
-                    val stream1 = (ident as ParseResult.Success).remaining
+                    val stream1 = ident.remaining
 
                     // Check for ASSIGN
                     val assign = tok(TokenType.ASSIGN)(stream1)
                     when (assign) {
                         is ParseResult.Success -> {
                             // x = value
-                            val expr = expression((assign as ParseResult.Success).remaining)
+                            val expr = expression(assign.remaining)
                             when (expr) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    RecordFieldEntry(ident.value.text, (expr as ParseResult.Success).value),
+                                    RecordFieldEntry(ident.value.text, expr.value),
                                     expr.remaining
                                 )
                                 is ParseResult.Failure -> expr
@@ -967,7 +967,7 @@ internal val FunkParser.logicalOrExpression: Parser<Expression>
         var result: ParseResult<Expression> = logicalAndExpression(stream)
 
         while (result is ParseResult.Success) {
-            val currentStream = (result as ParseResult.Success).remaining
+            val currentStream = result.remaining
             val op = currentStream.current()
 
             if (op?.type == TokenType.OR) {
@@ -998,7 +998,7 @@ internal val FunkParser.logicalAndExpression: Parser<Expression>
         var result: ParseResult<Expression> = pipeExpression(stream)
 
         while (result is ParseResult.Success) {
-            val currentStream = (result as ParseResult.Success).remaining
+            val currentStream = result.remaining
             val op = currentStream.current()
 
             if (op?.type == TokenType.AND) {
@@ -1111,7 +1111,7 @@ internal val FunkParser.pipeExpression: Parser<Expression>
         var result: ParseResult<Expression> = comparisonExpression(stream)
 
         while (result is ParseResult.Success) {
-            val currentStream = (result as ParseResult.Success).remaining
+            val currentStream = result.remaining
             val op = currentStream.current()
 
             if (op?.type == TokenType.PIPE_OP) {
@@ -1140,7 +1140,7 @@ internal val FunkParser.comparisonExpression: Parser<Expression>
         var result: ParseResult<Expression> = additiveExpression(stream)
 
         while (result is ParseResult.Success) {
-            val currentStream = (result as ParseResult.Success).remaining
+            val currentStream = result.remaining
             val op = currentStream.current()
 
             if (op?.type == TokenType.EQ || op?.type == TokenType.NEQ ||
@@ -1173,7 +1173,7 @@ internal val FunkParser.additiveExpression: Parser<Expression>
         var result: ParseResult<Expression> = multiplicativeExpression(stream)
 
         while (result is ParseResult.Success) {
-            val currentStream = (result as ParseResult.Success).remaining
+            val currentStream = result.remaining
             val op = currentStream.current()
 
             if (op?.type == TokenType.PLUS || op?.type == TokenType.MINUS) {
@@ -1204,7 +1204,7 @@ internal val FunkParser.multiplicativeExpression: Parser<Expression>
         var result: ParseResult<Expression> = unaryExpression(stream)
 
         while (result is ParseResult.Success) {
-            val currentStream = (result as ParseResult.Success).remaining
+            val currentStream = result.remaining
             val op = currentStream.current()
 
             if (op?.type == TokenType.STAR || op?.type == TokenType.SLASH || op?.type == TokenType.PERCENT) {
@@ -1314,7 +1314,7 @@ internal val FunkParser.postfixExpression: Parser<Expression>
         var result: ParseResult<Expression> = primaryExpression(stream)
 
         while (result is ParseResult.Success) {
-            val currentStream = (result as ParseResult.Success).remaining
+            val currentStream = result.remaining
             val token = currentStream.current()
 
             when (token?.type) {
@@ -1384,7 +1384,7 @@ internal val FunkParser.postfixExpression: Parser<Expression>
                 TokenType.LPAREN -> {
                     // BUG FIX: Reject () syntax for function calls
                     // Funk uses {} for function calls, not ()
-                    val funcExpr = (result as ParseResult.Success).value
+                    val funcExpr = result.value
                     val funcName = when (funcExpr) {
                         is Identifier -> funcExpr.name
                         is MemberAccess -> {
@@ -1408,7 +1408,7 @@ internal val FunkParser.postfixExpression: Parser<Expression>
                 TokenType.NEWLINE -> {
                     // BUG FIX: Check if there's a { after the newline(s)
                     // Only check if the expression looks like a function call (Identifier or MemberAccess)
-                    val funcExpr = (result as ParseResult.Success).value
+                    val funcExpr = result.value
                     if (funcExpr is Identifier || funcExpr is MemberAccess) {
                         var checkStream = currentStream.advance()  // Skip first newline
                         // Skip any additional newlines
@@ -1454,7 +1454,7 @@ internal val FunkParser.postfixExpression: Parser<Expression>
                     // Only check when the previous expression is a simple identifier (like `my_func x`)
                     // For complex expressions (like `Show.show {val = @}` followed by newline and identifier),
                     // skip this check as the identifier is likely a separate statement
-                    val funcExpr = (result as ParseResult.Success).value
+                    val funcExpr = result.value
                     if (funcExpr is Identifier) {
                         val funcName = funcExpr.name
                         val argName = token.text
@@ -1472,7 +1472,7 @@ internal val FunkParser.postfixExpression: Parser<Expression>
                 }
                 TokenType.STRING, TokenType.INTEGER, TokenType.FLOAT, TokenType.FRACTION, TokenType.BOOLEAN -> {
                     // Function call with literal argument without {} syntax
-                    val funcExpr = (result as ParseResult.Success).value
+                    val funcExpr = result.value
                     if (funcExpr is Identifier || funcExpr is MemberAccess) {
                         val funcName = when (funcExpr) {
                             is Identifier -> funcExpr.name

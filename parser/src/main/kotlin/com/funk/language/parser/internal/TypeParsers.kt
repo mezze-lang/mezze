@@ -87,8 +87,9 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
                 var abilityStream = skipNewlines(streamBeforeWith.advance())
 
                 // Parse ability constraints: AbilityName TypeArg1 TypeArg2...
-                while (abilityStream.current()?.type == TokenType.IDENTIFIER) {
-                    val abilityNameToken = abilityStream.current()!!
+                while (true) {
+                    val abilityNameToken = abilityStream.current() ?: break
+                    if (abilityNameToken.type != TokenType.IDENTIFIER) break
                     val abilityName = abilityNameToken.text
                     abilityStream = skipNewlines(abilityStream.advance())
 
@@ -168,8 +169,10 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
                                     var foundEllipsis = false
 
                                     // Parse comma-separated effect names
-                                    while (current.current()?.type == TokenType.IDENTIFIER) {
-                                        effectNames.add(current.current()!!.text)
+                                    while (true) {
+                                        val effectToken = current.current() ?: break
+                                        if (effectToken.type != TokenType.IDENTIFIER) break
+                                        effectNames.add(effectToken.text)
                                         current = skipNewlines(current.advance())
 
                                         // Check for comma
@@ -208,8 +211,9 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
                             var abilityStreamAfter = skipNewlines(streamBeforeWithAfter.advance())
 
                             // Parse ability constraints: AbilityName TypeArg1 TypeArg2...
-                            while (abilityStreamAfter.current()?.type == TokenType.IDENTIFIER) {
-                                val abilityNameToken = abilityStreamAfter.current()!!
+                            while (true) {
+                                val abilityNameToken = abilityStreamAfter.current() ?: break
+                                if (abilityNameToken.type != TokenType.IDENTIFIER) break
                                 val abilityName = abilityNameToken.text
                                 abilityStreamAfter = skipNewlines(abilityStreamAfter.advance())
 

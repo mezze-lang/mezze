@@ -124,11 +124,11 @@ internal fun FunkParser.parseConstrainedLambda(stream: TokenStream): ParseResult
 
         // Try to parse function type annotation
         val typeAnn = functionTypeAnnotation(stream)
-        if (typeAnn is ParseResult.Failure) {
-            return typeAnn
+        if (typeAnn !is ParseResult.Success) {
+            return stream.failure("Expected function type annotation")
         }
 
-        val stream1 = skipNewlines((typeAnn as ParseResult.Success).remaining)
+        val stream1 = skipNewlines(typeAnn.remaining)
         val typeAnnotation = typeAnn.value
 
         // Check if it's actually a function type
@@ -614,15 +614,19 @@ internal val FunkParser.recordTypeParser: Parser<TypeDefinition> get() = { strea
         val recordType = recordTypeAnnotationParser(stream)
         when (recordType) {
             is ParseResult.Success -> {
-                val recordTypeAnn = recordType.value as RecordTypeAnnotation
-                val fields = recordTypeAnn.entries.map { entry ->
-                    RecordFieldDef(entry.name, entry.type)
+                val value = recordType.value
+                if (value is RecordTypeAnnotation) {
+                    val fields = value.entries.map { entry ->
+                        RecordFieldDef(entry.name, entry.type)
+                    }
+                    val isOpen = value.restField != null
+                    ParseResult.Success(
+                        RecordDefinition(fields, isOpen),
+                        recordType.remaining
+                    )
+                } else {
+                    stream.failure("Expected record type annotation")
                 }
-                val isOpen = recordTypeAnn.restField != null
-                ParseResult.Success(
-                    RecordDefinition(fields, isOpen),
-                    recordType.remaining
-                )
             }
             is ParseResult.Failure -> recordType
         }
@@ -823,7 +827,8 @@ internal val FunkParser.performerOperationParser: Parser<PerformerOperation> get
                                 }
 
                                 val stream3 = skipNewlines(functionType.remaining)
-                                // TODO: Parse optional effect row
+                                // Note: Effect rows for performers are inferred from the effect declaration
+                                // If explicit effect annotation is needed, it would be part of the function type
                                 val assign = tok(TokenType.ASSIGN)(stream3)
 
                                 when (assign) {
