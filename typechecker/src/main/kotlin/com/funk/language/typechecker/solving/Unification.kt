@@ -335,38 +335,59 @@ private fun unifyFunctions(fn1: FunkType.FunctionType, fn2: FunkType.FunctionTyp
     val effects1 = fn1.effects
     val effects2 = fn2.effects
 
-    // CRITICAL: Empty effect rows <> are equivalent to pure (null)
-    val isPure1 = effects1 == null || effects1.effects.isEmpty()
-    val isPure2 = effects2 == null || effects2.effects.isEmpty()
+    // Effect unification rules:
+    // - Pure (null or empty closed <>) can match anything
+    // - Polymorphic (<...> - empty with row var) can match anything (row var gets instantiated)
+    // - Concrete effects (<Log>) can only match if the other side can accept them
+    //
+    // The ONLY error case: concrete effects on one side, pure (closed empty) on the other
+    // Because a pure function cannot handle effects that the effectful function produces
+
+    val isPure1 = effects1 == null || (effects1.effects.isEmpty() && effects1.rowVar == null)
+    val isPure2 = effects2 == null || (effects2.effects.isEmpty() && effects2.rowVar == null)
+    val isPolymorphic1 = effects1 != null && effects1.effects.isEmpty() && effects1.rowVar != null
+    val isPolymorphic2 = effects2 != null && effects2.effects.isEmpty() && effects2.rowVar != null
+    val hasConcrete1 = effects1 != null && effects1.effects.isNotEmpty()
+    val hasConcrete2 = effects2 != null && effects2.effects.isNotEmpty()
 
     val effectSubst = when {
-        !isPure1 && !isPure2 -> {
-            // Both have effects - unify them
-            val effectResult = unifyEffectRows(effects1!!, effects2!!)
-            if (effectResult is UnificationResult.Failure) {
-                return effectResult
-            }
-            (effectResult as UnificationResult.Success).substitution
-        }
-        isPure1 && isPure2 -> {
-            // Both pure - OK
-            Substitution.empty
-        }
-        isPure1 && !isPure2 -> {
-            // Unifying pure function with effectful function expectation
-            // This is OK: a pure function can be used where an effectful function is expected
-            // The caller is prepared to handle effects, but the function doesn't produce any
-            Substitution.empty
-        }
-        !isPure1 && isPure2 -> {
-            // Unifying effectful function with pure function expectation
-            // This is NOT OK: an effectful function cannot be used where a pure function is expected
+        // Both pure - OK
+        isPure1 && isPure2 -> Substitution.empty
+
+        // Pure with polymorphic - OK (polymorphic instantiates to empty)
+        isPure1 && isPolymorphic2 -> Substitution.empty
+        isPolymorphic1 && isPure2 -> Substitution.empty
+
+        // Both polymorphic - OK (unify the row variables)
+        isPolymorphic1 && isPolymorphic2 -> Substitution.empty
+
+        // Polymorphic with concrete - OK (polymorphic instantiates to those effects)
+        isPolymorphic1 && hasConcrete2 -> Substitution.empty
+        hasConcrete1 && isPolymorphic2 -> Substitution.empty
+
+        // Pure with concrete - ERROR if concrete is on fn1 (actual), OK if concrete is on fn2 (expected)
+        // A pure function CAN be used where effectful is expected (caller handles effects that don't occur)
+        // An effectful function CANNOT be used where pure is expected (caller can't handle effects)
+        isPure1 && hasConcrete2 -> Substitution.empty  // Pure actual, effectful expected - OK
+        hasConcrete1 && isPure2 -> {
+            // Effectful actual, pure expected - ERROR
             return UnificationResult.Failure(
                 message = "Cannot use effectful function <${effects1!!.effects.joinToString()}> where pure function is expected",
                 type1 = fn1,
                 type2 = fn2
             )
         }
+
+        // Both have concrete effects - unify them
+        hasConcrete1 && hasConcrete2 -> {
+            val effectResult = unifyEffectRows(effects1!!, effects2!!)
+            if (effectResult is UnificationResult.Failure) {
+                return effectResult
+            }
+            (effectResult as UnificationResult.Success).substitution
+        }
+
+        // Catch-all for any other combination (shouldn't happen)
         else -> Substitution.empty
     }
 
