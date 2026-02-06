@@ -220,15 +220,6 @@ data class PerformerOperation(
     val effects: EffectRowAnnotation? = null  // Optional - can be inferred if not specified
 )
 
-// Keep ImplOperation for backward compatibility during transition
-@Serializable
-data class ImplOperation(
-    val name: String,
-    val paramType: TypeAnnotation,
-    val returnType: TypeAnnotation,
-    val implementation: Expression
-)
-
 // ============================================================================
 // ABILITY DECLARATIONS
 // ============================================================================

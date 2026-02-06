@@ -14,14 +14,8 @@ import kotlinx.serialization.json.JsonClassDiscriminator
  * - RowVar: Row variables for extensible records/variants
  * - SourceLocation: Source code location tracking
  * - SyntaxMetadata: Operator desugaring metadata
- * - ContentHash: Content hashing for AST nodes
  * - Visibility: PUBLIC/PRIVATE visibility modifiers
  * - UsePath: Module system import paths
- *
- * Note: Built-in objects (BuiltinAbilities, BuiltinOperators, etc.) are moved
- * after Type.kt is created since they reference FunkType.
- *
- * Part of the refactored AST module - previously in FunkAST.kt.
  */
 
 // ============================================================================
@@ -214,18 +208,6 @@ object SyntaxMetadata {
         operatorMetadata.remove()
     }
 }
-
-// ============================================================================
-// CONTENT HASHING
-// ============================================================================
-
-/**
- * Content hash for AST nodes.
- *
- * Used for caching and incremental compilation.
- */
-@Serializable
-data class ContentHash(val hash: String)
 
 // ============================================================================
 // MODULE SYSTEM
