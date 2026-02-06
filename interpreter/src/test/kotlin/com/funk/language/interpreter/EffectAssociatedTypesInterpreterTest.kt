@@ -489,18 +489,18 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test effect with two associated types executes correctly`() {
         val code = """
-            effect Result having 'ok, 'err where {
+            effect Outcome having 'ok, 'err where {
                 succeed: {value: 'ok} -> 'ok <Result>
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+            impl Outcome for IntStringResult having 'ok = Int, 'err = String where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
 
-            let successVal = perform IntStringResult in Result.succeed { value = 42 }
-            let failVal = perform IntStringResult in Result.fail { error = "oops" }
+            let successVal = perform IntStringResult in Outcome.succeed { value = 42 }
+            let failVal = perform IntStringResult in Outcome.fail { error = "oops" }
         """.trimIndent()
 
         val context = executeWithContext(code)
@@ -537,19 +537,19 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test multiple associated types in perform block`() {
         val code = """
-            effect Result having 'ok, 'err where {
+            effect Outcome having 'ok, 'err where {
                 succeed: {value: 'ok} -> 'ok <Result>
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Result for BoolFloatResult having 'ok = Bool, 'err = Float where {
+            impl Outcome for BoolFloatResult having 'ok = Bool, 'err = Float where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
 
             let result = perform BoolFloatResult in do
-                let success = Result.succeed { value = true }
-                let failure = Result.fail { error = 3.14 }
+                let success = Outcome.succeed { value = true }
+                let failure = Outcome.fail { error = 3.14 }
                 success
         """.trimIndent()
 
@@ -560,18 +560,18 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test type substitution for each associated type executes correctly`() {
         val code = """
-            effect Result having 'ok, 'err where {
+            effect Outcome having 'ok, 'err where {
                 succeed: {value: 'ok} -> 'ok <Result>
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Result for StringIntResult having 'ok = String, 'err = Int where {
+            impl Outcome for StringIntResult having 'ok = String, 'err = Int where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
 
-            let s = perform StringIntResult in Result.succeed { value = "success" }
-            let e = perform StringIntResult in Result.fail { error = 404 }
+            let s = perform StringIntResult in Outcome.succeed { value = "success" }
+            let e = perform StringIntResult in Outcome.fail { error = 404 }
         """.trimIndent()
 
         val context = executeWithContext(code)
@@ -582,18 +582,18 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test complex types as multiple associated type bindings execute correctly`() {
         val code = """
-            effect Result having 'ok, 'err where {
+            effect Outcome having 'ok, 'err where {
                 succeed: {value: 'ok} -> 'ok <Result>
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Result for ComplexResult having 'ok = Int, 'err = {code: Int, message: String} where {
+            impl Outcome for ComplexResult having 'ok = Int, 'err = {code: Int, message: String} where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
 
-            let num = perform ComplexResult in Result.succeed { value = 42 }
-            let err = perform ComplexResult in Result.fail { error = {code = 500, message = "error"} }
+            let num = perform ComplexResult in Outcome.succeed { value = 42 }
+            let err = perform ComplexResult in Outcome.fail { error = {code = 500, message = "error"} }
         """.trimIndent()
 
         val context = executeWithContext(code)
@@ -608,7 +608,7 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test multiple effects each with multiple associated types execute correctly`() {
         val code = """
-            effect Result having 'ok, 'err where {
+            effect Outcome having 'ok, 'err where {
                 succeed: {value: 'ok} -> 'ok <Result>
                 fail: {error: 'err} -> 'err <Result>
             }
@@ -618,7 +618,7 @@ class EffectAssociatedTypesInterpreterTest {
                 update: {delta: 'change} -> 'state <State>
             }
 
-            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+            impl Outcome for IntStringResult having 'ok = Int, 'err = String where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
@@ -629,7 +629,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let combined = perform IntStringResult, IntFloatState in do
-                let r = Result.succeed { value = 42 }
+                let r = Outcome.succeed { value = 42 }
                 let s = State.get {}
                 let u = State.update { delta = 3.14 }
                 r
@@ -664,18 +664,18 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test nested operations with multiple associated types execute correctly`() {
         val code = """
-            effect Result having 'ok, 'err where {
+            effect Outcome having 'ok, 'err where {
                 succeed: {value: 'ok} -> 'ok <Result>
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Result for IntStringResult having 'ok = Int, 'err = String where {
+            impl Outcome for IntStringResult having 'ok = Int, 'err = String where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
 
             let compute = {x: Int} -> perform IntStringResult in do
-                let y = Result.succeed { value = x + 10 }
+                let y = Outcome.succeed { value = x + 10 }
                 y
 
             let result = compute { x = 32 }
@@ -688,20 +688,20 @@ class EffectAssociatedTypesInterpreterTest {
     @Test
     fun `test multiple associated types in conditional logic execute correctly`() {
         val code = """
-            effect Result having 'ok, 'err where {
+            effect Outcome having 'ok, 'err where {
                 succeed: {value: 'ok} -> 'ok <Result>
                 fail: {error: 'err} -> 'err <Result>
             }
 
-            impl Result for BoolStringResult having 'ok = Bool, 'err = String where {
+            impl Outcome for BoolStringResult having 'ok = Bool, 'err = String where {
                 succeed = {value} -> value
                 fail = {error} -> error
             }
 
             let check = {flag: Bool} -> if flag then
-                perform BoolStringResult in Result.succeed { value = true }
+                perform BoolStringResult in Outcome.succeed { value = true }
             else
-                perform BoolStringResult in Result.succeed { value = false }
+                perform BoolStringResult in Outcome.succeed { value = false }
 
             let result = check { flag = true }
         """.trimIndent()

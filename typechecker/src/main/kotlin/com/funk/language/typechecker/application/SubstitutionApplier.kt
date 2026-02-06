@@ -28,7 +28,8 @@ class SubstitutionApplier(
     private val performerToEffect: Map<String, String> = emptyMap(),
     private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
     private val mustBeOpenBindings: Set<String> = emptySet(),
-    private val mustBeOpenTypes: Set<TypeVar> = emptySet()
+    private val mustBeOpenTypes: Set<TypeVar> = emptySet(),
+    private val abilityImpls: Map<String, com.funk.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap()
 ) {
     // Compute variants that must stay open by resolving type vars with substitution
     // This handles the case where per-binding solving created different row vars than global solving
@@ -582,8 +583,31 @@ class SubstitutionApplier(
             }
         }
 
-        val updatedType = expr.inferredType?.let { substitution.apply(it) }
-        return expr.copy(entries = updatedEntries, inferredType = updatedType)
+        // Compute the record type from its entries if not already set
+        // This is needed for ability resolution where argument types must be known
+        val computedType = if (expr.inferredType != null) {
+            substitution.apply(expr.inferredType!!)
+        } else {
+            // Build record type from entries
+            val fields = mutableMapOf<String, FunkType>()
+            for (entry in updatedEntries) {
+                when (entry) {
+                    is RecordFieldEntry -> {
+                        val entryType = entry.value?.inferredType ?: FunkType.VarType(TypeVar.fresh())
+                        fields[entry.name] = entryType
+                    }
+                    is RecordSpreadEntry -> {
+                        // Spread entries add fields from the spread expression's type
+                        val spreadType = entry.expression.inferredType
+                        if (spreadType is FunkType.RecordType) {
+                            fields.putAll(spreadType.fields)
+                        }
+                    }
+                }
+            }
+            if (fields.isNotEmpty()) FunkType.RecordType(fields) else null
+        }
+        return expr.copy(entries = updatedEntries, inferredType = computedType)
     }
 
     private fun applyToMemberAccess(expr: MemberAccess): MemberAccess {
@@ -703,11 +727,248 @@ class SubstitutionApplier(
         val updatedFunction = applyToExpression(expr.function)
         val updatedArguments = applyToExpression(expr.arguments)
         val updatedType = expr.inferredType?.let { substitution.apply(it) }
+
+        // CRITICAL: Resolve ability constraints for this function call
+        // This matches OldTypeChecker.kt:16483-16581 (resolveAbilitiesForFunctionCall)
+        var resolvedAbilities = resolveAbilitiesForCall(updatedFunction)
+
+        // Also check if this is a direct ability method call (e.g., Show.show {val = 42})
+        // In this case, we need to resolve based on the argument types, not the function type constraints
+        if (resolvedAbilities.isEmpty() && updatedFunction is MemberAccess) {
+            resolvedAbilities = resolveDirectAbilityMethodCall(updatedFunction, updatedArguments)
+        }
+
         return expr.copy(
             function = updatedFunction,
             arguments = updatedArguments,
-            inferredType = updatedType
+            inferredType = updatedType,
+            resolvedAbilities = resolvedAbilities
         )
+    }
+
+    /**
+     * Resolve a direct ability method call like Show.show {val = 42}.
+     * The receiver (Show) is an ability name, and we need to find the implementation
+     * based on the argument types.
+     */
+    private fun resolveDirectAbilityMethodCall(
+        memberAccess: MemberAccess,
+        arguments: Expression
+    ): Map<String, ResolvedAbility> {
+        val resolvedAbilities = mutableMapOf<String, ResolvedAbility>()
+
+        // Get the ability name from the receiver
+        val abilityName = when (val receiver = memberAccess.receiver) {
+            is Identifier -> receiver.name
+            is VariantConstruction -> receiver.constructor
+            else -> return resolvedAbilities
+        }
+
+
+        // Check if this is actually an ability (not a regular variable)
+        // Look for implementations of this ability
+        val hasImpl = abilityImpls.values.any { it.abilityName == abilityName }
+        if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName)) {
+            return resolvedAbilities
+        }
+
+        // Get the argument type to determine which implementation to use
+        val argType = arguments.inferredType
+        if (argType !is FunkType.RecordType) return resolvedAbilities
+
+        // For single-parameter abilities like Show, use the first field's type
+        // For multi-parameter abilities like Convert, we'd need more sophisticated matching
+        val targetTypes = argType.fields.values.map { substitution.apply(it) }
+        if (targetTypes.isEmpty()) return resolvedAbilities
+
+        // Try to find an explicit implementation
+        val primaryType = targetTypes.first()
+
+        // First try exact match (for single-parameter abilities)
+        var impl = findAbilityImplementation(abilityName, listOf(primaryType))
+
+        // If no exact match, try partial match for multi-parameter abilities
+        // e.g., for Convert 'a 'b, find impl where first type matches
+        if (impl == null) {
+            impl = findAbilityImplementationByFirstType(abilityName, primaryType)
+        }
+
+        if (impl != null) {
+            // Found explicit implementation
+            // Reconstruct the full type args from the impl's target types
+            val implTypeArgs = impl.targetTypes.map { typeName ->
+                when (typeName) {
+                    "Int" -> FunkType.IntType
+                    "Float" -> FunkType.FloatType
+                    "String" -> FunkType.StringType
+                    "Bool" -> FunkType.BooleanType
+                    "Nat" -> FunkType.NatType
+                    "Frac" -> FunkType.FracType
+                    else -> FunkType.TypeApplication(typeName, emptyList())
+                }
+            }
+            val key = "${abilityName}<${implTypeArgs.joinToString(", ") { prettyPrintType(it) }}>"
+            val implRef = "${abilityName}\$${impl.targetTypes.joinToString("\$")}"
+            resolvedAbilities[key] = ResolvedAbility(
+                abilityName = abilityName,
+                typeArgs = implTypeArgs,
+                implementationRef = implRef,
+                isBuiltin = false
+            )
+        } else if (BuiltinAbilities.isBuiltin(abilityName)) {
+            // Check for built-in ability with automatic implementation
+            if (BuiltinAbilities.typeHasAutomaticImplementation(primaryType, abilityName)) {
+                val key = "${abilityName}<${prettyPrintType(primaryType)}>"
+                val implRef = "builtin::${abilityName}::${getTypeNameForAbility(primaryType)}"
+                resolvedAbilities[key] = ResolvedAbility(
+                    abilityName = abilityName,
+                    typeArgs = listOf(primaryType),
+                    implementationRef = implRef,
+                    isBuiltin = true
+                )
+            }
+        }
+
+        return resolvedAbilities
+    }
+
+    /**
+     * Resolve ability constraints for a function call.
+     * This is critical for the interpreter to know which ability implementations to use.
+     *
+     * Matches OldTypeChecker.kt:16483-16581
+     */
+    private fun resolveAbilitiesForCall(function: Expression): Map<String, ResolvedAbility> {
+        val resolvedAbilities = mutableMapOf<String, ResolvedAbility>()
+
+        // Get the function's type to access ability constraints
+        val funcType = function.inferredType
+        if (funcType !is FunkType.FunctionType) return resolvedAbilities
+
+        // Process each ability constraint
+        for (constraint in funcType.abilityConstraints) {
+            val abilityName = constraint.abilityName
+            val typeArgs = constraint.typeArgs.map { substitution.apply(it) }
+
+            // Try to find an explicit implementation
+            val impl = findAbilityImplementation(abilityName, typeArgs)
+
+            if (impl != null) {
+                // Found explicit implementation
+                val key = "${abilityName}<${typeArgs.joinToString(", ") { prettyPrintType(it) }}>"
+                val implRef = "${abilityName}\$${impl.targetTypes.joinToString("\$")}"
+                resolvedAbilities[key] = ResolvedAbility(
+                    abilityName = abilityName,
+                    typeArgs = typeArgs,
+                    implementationRef = implRef,
+                    isBuiltin = false
+                )
+            } else if (BuiltinAbilities.isBuiltin(abilityName) && typeArgs.size == 1) {
+                // Check if it's a built-in ability with automatic implementation
+                val targetType = typeArgs[0]
+                if (BuiltinAbilities.typeHasAutomaticImplementation(targetType, abilityName)) {
+                    val key = "${abilityName}<${prettyPrintType(targetType)}>"
+                    val implRef = "builtin::${abilityName}::${getTypeNameForAbility(targetType)}"
+                    resolvedAbilities[key] = ResolvedAbility(
+                        abilityName = abilityName,
+                        typeArgs = typeArgs,
+                        implementationRef = implRef,
+                        isBuiltin = true
+                    )
+                }
+            }
+        }
+
+        return resolvedAbilities
+    }
+
+    /**
+     * Find an ability implementation matching the given ability name and type arguments.
+     */
+    private fun findAbilityImplementation(
+        abilityName: String,
+        typeArgs: List<FunkType>
+    ): com.funk.language.typechecker.context.TypingContext.AbilityImplInfo? {
+        // Look for implementations of this ability
+        for ((_, implInfo) in abilityImpls) {
+            if (implInfo.abilityName != abilityName) continue
+            if (implInfo.targetTypes.size != typeArgs.size) continue
+
+            // Check if types match
+            var matches = true
+            for (i in typeArgs.indices) {
+                val implTypeName = implInfo.targetTypes[i]
+                val argTypeName = getTypeNameForAbility(typeArgs[i])
+                if (implTypeName != argTypeName) {
+                    matches = false
+                    break
+                }
+            }
+            if (matches) return implInfo
+        }
+        return null
+    }
+
+    /**
+     * Find an ability implementation where the first type argument matches.
+     * This is used for multi-parameter abilities like Convert 'a 'b where we only
+     * know the input type from the arguments.
+     */
+    private fun findAbilityImplementationByFirstType(
+        abilityName: String,
+        firstType: FunkType
+    ): com.funk.language.typechecker.context.TypingContext.AbilityImplInfo? {
+        val firstTypeName = getTypeNameForAbility(firstType)
+        val candidates = abilityImpls.values.filter { implInfo ->
+            implInfo.abilityName == abilityName &&
+            implInfo.targetTypes.isNotEmpty() &&
+            implInfo.targetTypes.first() == firstTypeName
+        }
+        // If there's exactly one candidate, use it
+        // If there are multiple, we can't disambiguate without more context
+        return if (candidates.size == 1) candidates.first() else null
+    }
+
+    /**
+     * Get a simple type name for ability resolution.
+     */
+    private fun getTypeNameForAbility(type: FunkType): String {
+        return when (type) {
+            is FunkType.IntType -> "Int"
+            is FunkType.FloatType -> "Float"
+            is FunkType.StringType -> "String"
+            is FunkType.BooleanType -> "Bool"
+            is FunkType.NatType -> "Nat"
+            is FunkType.FracType -> "Frac"
+            is FunkType.TypeApplication -> type.constructor
+            is FunkType.ListType -> "List"
+            is FunkType.ArrayType -> "Array"
+            is FunkType.RecordType -> "Record"
+            is FunkType.VariantType -> "Variant"
+            else -> type.toString()
+        }
+    }
+
+    /**
+     * Pretty print a type for ability constraint keys.
+     */
+    private fun prettyPrintType(type: FunkType): String {
+        return when (type) {
+            is FunkType.IntType -> "Int"
+            is FunkType.FloatType -> "Float"
+            is FunkType.StringType -> "String"
+            is FunkType.BooleanType -> "Bool"
+            is FunkType.NatType -> "Nat"
+            is FunkType.FracType -> "Frac"
+            is FunkType.VarType -> "'${type.variable.name}"
+            is FunkType.TypeApplication -> {
+                if (type.args.isEmpty()) type.constructor
+                else "${type.constructor}<${type.args.joinToString(", ") { prettyPrintType(it) }}>"
+            }
+            is FunkType.ListType -> "List<${prettyPrintType(type.elementType)}>"
+            is FunkType.ArrayType -> "Array<${prettyPrintType(type.elementType)}>"
+            else -> type.toString()
+        }
     }
 
     // ========================================================================

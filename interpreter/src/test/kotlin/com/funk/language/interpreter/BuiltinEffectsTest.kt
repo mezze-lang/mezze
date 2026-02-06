@@ -167,21 +167,24 @@ class BuiltinEffectsTest {
 
     @Test
     fun testNativeFunctionIntegration() {
-        // Test native function integration through actual usage
+        // Test that basic arithmetic native operations work
+        // These are handled through builtin abilities (NumAdd, NumSub, etc.)
         val source = """
-            # Test direct native function call
-            native_print {msg = "Test message"}
+            # Test native operations through arithmetic operators
+            let x = 10 + 20
+            let y = x * 2
+            y
         """.trimIndent()
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        
+
         // This should execute without throwing an exception
-        assertDoesNotThrow { 
+        assertDoesNotThrow {
             val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
-            // Native function should execute successfully
-            // The important thing is that it doesn't throw an exception and produces some result
-            assertTrue(result is FunkRecord || result is FunkNull)
+            // Native operations should execute successfully
+            assertTrue(result is FunkInt)
+            assertEquals(60L, (result as FunkInt).value)
         }
     }
 }

@@ -867,8 +867,10 @@ class ExpressionConstraintGenerator {
         if (operationType == null) {
             // Operation not found
             val availableOperations = effectType.fields.keys.joinToString(", ")
-            throw IllegalStateException(
-                "Operation '$operationName' not found in effect '$effectName'. Available operations: $availableOperations"
+            throw TypeCheckError(
+                message = "Operation '$operationName' not found in effect '$effectName'. Available operations: $availableOperations",
+                expression = expr,
+                errorType = ErrorType.MISSING_FIELD
             )
         }
 
@@ -2104,8 +2106,35 @@ class ExpressionConstraintGenerator {
         val exprResult = generate(expr.expression, contextWithPerform)
 
         // Map each handler name to the effect it handles
-        val handlerEffects = expr.handlers.mapNotNull { handler ->
-            context.performerToEffect[handler.name]?.let { handler.name to it }
+        // VALIDATION: Check that all handlers are defined performers
+        // Note: Performers imported from modules might not be in performerToEffect,
+        // so we check context as a fallback. If not found in either, throw an error.
+        val handlerEffects = mutableListOf<Pair<String, String>>()
+        for (handler in expr.handlers) {
+            val effectName = context.performerToEffect[handler.name]
+            if (effectName != null) {
+                handlerEffects.add(handler.name to effectName)
+            } else {
+                // Handler not in performerToEffect - check if it exists in context
+                // Performers can be imported from modules where they might not be tracked
+                // Check both with and without the _performer suffix
+                val performerKey = "${handler.name}_performer"
+                val handlerLookup = context.typingContext.lookup(handler.name)
+                val performerKeyLookup = context.typingContext.lookup(performerKey)
+
+                if (handlerLookup is TypingContext.LookupResult.Found ||
+                    performerKeyLookup is TypingContext.LookupResult.Found) {
+                    // Performer exists in context (imported), allow it but we can't track effect
+                    // Skip adding to handlerEffects - imported performers are permissive
+                } else {
+                    // Not in performerToEffect and not in context - truly unknown
+                    throw TypeCheckError(
+                        message = "Unknown performer '${handler.name}'. Performer has not been defined with 'impl Effect for ${handler.name}'.",
+                        expression = expr,
+                        errorType = ErrorType.UNDEFINED_VARIABLE
+                    )
+                }
+            }
         }
         val handledEffects = handlerEffects.map { it.second }.toSet()
 

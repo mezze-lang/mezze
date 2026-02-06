@@ -93,7 +93,11 @@ object ListTypes {
 
         val mapFuncTypeVar = com.funk.language.ast.TypeVar("b")
         val mapFuncReturnType = FunkType.VarType(mapFuncTypeVar)
-        val mapFuncType = FunkType.FunctionType(listElemType, mapFuncReturnType)
+        // The interpreter wraps elements in {x: elem}, so callback takes {x: 'a} -> 'b
+        val mapFuncType = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("x" to listElemType)),
+            mapFuncReturnType
+        )
         val mappedListType = FunkType.ListType(mapFuncReturnType)
 
         context["__native_list_map"] = FunkType.FunctionType(
@@ -104,7 +108,11 @@ object ListTypes {
             mappedListType
         )
 
-        val predicateType = FunkType.FunctionType(listElemType, FunkType.BooleanType)
+        // Funk functions always take records, so predicate takes {x: 'a} -> Bool
+        val predicateType = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("x" to listElemType)),
+            FunkType.BooleanType
+        )
 
         context["__native_list_filter"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
@@ -116,10 +124,11 @@ object ListTypes {
 
         val foldTypeVar = com.funk.language.ast.TypeVar("acc")
         val foldAccType = FunkType.VarType(foldTypeVar)
+        // Fold callback takes {acc: 'acc, x: 'a} -> 'acc
         val foldFuncType = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
                 "acc" to foldAccType,
-                "elem" to listElemType
+                "x" to listElemType
             )),
             foldAccType
         )
@@ -142,10 +151,11 @@ object ListTypes {
             foldAccType
         )
 
+        // Reduce callback takes {acc: 'a, x: 'a} -> 'a
         val reduceFuncType = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
                 "acc" to listElemType,
-                "elem" to listElemType
+                "x" to listElemType
             )),
             listElemType
         )

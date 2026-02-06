@@ -27,6 +27,53 @@ import com.funk.language.parser.internal.lib.*
 // ===== LAMBDA VS RECORD DISAMBIGUATION =====
 
 /**
+ * Lookahead function to check if a brace starts a record literal.
+ * A record literal has the pattern: { identifier = expr, ... } or { identifier, ... } (punning)
+ * or empty record: {}
+ *
+ * This helps distinguish between:
+ * - Function call: foo {args}  (should error if on different line)
+ * - Record literal: {x = 1, y = 2}  (valid standalone expression)
+ */
+internal fun FunkParser.lookAheadForRecordLiteral(stream: TokenStream): Boolean {
+    var pos = stream.position
+    val tokens = stream.tokens
+
+    if (pos >= tokens.size || tokens[pos].type != TokenType.LBRACE) return false
+    pos++  // Skip LBRACE
+
+    // Skip newlines after LBRACE
+    while (pos < tokens.size && tokens[pos].type == TokenType.NEWLINE) {
+        pos++
+    }
+
+    // Empty record {} is a record literal
+    if (pos < tokens.size && tokens[pos].type == TokenType.RBRACE) {
+        return true
+    }
+
+    // Check for identifier followed by = (record field) or , or } (punning)
+    if (pos < tokens.size && tokens[pos].type == TokenType.IDENTIFIER) {
+        pos++
+        // Skip newlines
+        while (pos < tokens.size && tokens[pos].type == TokenType.NEWLINE) {
+            pos++
+        }
+        if (pos < tokens.size) {
+            val nextType = tokens[pos].type
+            // { identifier = ... } is a record literal
+            // { identifier, ... } is a record literal with punning
+            // { identifier } is a record literal with punning
+            if (nextType == TokenType.ASSIGN || nextType == TokenType.COMMA || nextType == TokenType.RBRACE) {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+/**
  * Lookahead function to check if there's an arrow after the closing brace.
  * This is the explicit disambiguation mechanism between lambdas and record literals.
  */
@@ -1371,12 +1418,13 @@ internal val FunkParser.postfixExpression: Parser<Expression>
                         // Check if next non-newline token is LBRACE
                         if (checkStream.current()?.type == TokenType.LBRACE) {
                             // IMPORTANT: Only error if the { would be parsed as function arguments
-                            // If it's a lambda (has -> after brace), don't error
-                            // This prevents false positives in match expressions where we have:
-                            //   { pattern } -> body
-                            //   { pattern } -> body
-                            // The body ends with an identifier, then newline, then { starts next pattern
-                            if (!lookAheadForArrowAfterBrace(checkStream)) {
+                            // Don't error if:
+                            // 1. It's a lambda (has -> after brace)
+                            // 2. It's a record literal (has identifier = ... pattern)
+                            // This prevents false positives in match expressions and when returning records
+                            val isLambda = lookAheadForArrowAfterBrace(checkStream)
+                            val isRecordLiteral = lookAheadForRecordLiteral(checkStream)
+                            if (!isLambda && !isRecordLiteral) {
                                 val funcName = when (funcExpr) {
                                     is Identifier -> funcExpr.name
                                     is MemberAccess -> {

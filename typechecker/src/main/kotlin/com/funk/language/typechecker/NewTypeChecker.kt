@@ -7,6 +7,8 @@ import com.funk.language.typechecker.constraints.Constraint
 import com.funk.language.typechecker.constraints.ConstraintGenerator
 import com.funk.language.typechecker.context.ContextBuilder
 import com.funk.language.typechecker.context.TypingContext
+import com.funk.language.typechecker.context.TypeScheme
+import com.funk.language.typechecker.context.collectFreeTypeVars
 import com.funk.language.typechecker.module.*
 import com.funk.language.typechecker.monomorphization.MonomorphizationEngine
 import com.funk.language.typechecker.monomorphization.MonomorphizationResult
@@ -360,7 +362,8 @@ class NewTypeChecker(
                     buildResult.performerToEffect,
                     mustBeOpenRowVars,
                     mustBeOpenBindings,
-                    mustBeOpenTypes
+                    mustBeOpenTypes,
+                    context.getAllAbilityImpls()  // Pass ability implementations for resolving calls
                 )
                 val typedProgram = applier.applyToProgram(program)
 
@@ -717,9 +720,23 @@ class NewTypeChecker(
             NativeFunctionTypes.registerAll(nativeFunctions)
 
             // Convert to immutable typing context
+            // Types with free type variables are registered as polymorphic
+            // so they get instantiated with fresh type variables on each use
             var context = TypingContext.empty
             for ((name, type) in nativeFunctions) {
-                context = context.extendMono(name, type)
+                val freeVars = collectFreeTypeVars(type)
+                if (freeVars.isEmpty()) {
+                    // Monomorphic type - use directly
+                    context = context.extendMono(name, type)
+                } else {
+                    // Polymorphic type - wrap in TypeScheme for fresh instantiation
+                    val scheme = TypeScheme(
+                        quantifiedVars = freeVars.toList(),
+                        constraints = emptyList(),
+                        type = type
+                    )
+                    context = context.extendPoly(name, scheme)
+                }
             }
 
             return context

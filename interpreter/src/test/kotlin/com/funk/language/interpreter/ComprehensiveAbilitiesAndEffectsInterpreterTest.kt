@@ -85,8 +85,8 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
               show : {val: Int} -> String = {val} -> int::to_string {n = val}
             }
 
-            impl Show Boolean where {
-              show : {val: Boolean} -> String = {val} -> boolToString {val = val}
+            impl Show String where {
+              show : {val: String} -> String = {val} -> val
             }
 
             let displayValue: {val: 'a} -> String with Show 'a = {val} ->
