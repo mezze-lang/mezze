@@ -234,7 +234,7 @@ class NewMatchSyntaxTest {
 
         assertNotNull(canVoteType)
         assertTrue(canVoteType is FunkType.FunctionType)
-        assertTrue(canVoteType.returnType is FunkType.VariantType)
+        assertTrue(canVoteType.returnType is FunkType.BooleanType)
     }
 
     @Test
@@ -253,7 +253,7 @@ class NewMatchSyntaxTest {
 
         assertNotNull(isExtremeType)
         assertTrue(isExtremeType is FunkType.FunctionType)
-        assertTrue(isExtremeType.returnType is FunkType.VariantType)
+        assertTrue(isExtremeType.returnType is FunkType.BooleanType)
     }
 
     @Test
@@ -311,6 +311,6 @@ class NewMatchSyntaxTest {
 
         assertNotNull(canAccessType)
         assertTrue(canAccessType is FunkType.FunctionType)
-        assertTrue(canAccessType.returnType is FunkType.VariantType)
+        assertTrue(canAccessType.returnType is FunkType.BooleanType)
     }
 }

@@ -294,12 +294,8 @@ class DoExpressionConstraintTest {
         val testType = getVariableType(typedProgram, "test") as FunkType.FunctionType
         val returnType = testType.returnType as FunkType.RecordType
 
-        // The field 'val' should have Bool type (variant), not a type variable
-        val boolVariant = FunkType.VariantType(
-            constructors = mapOf("True" to null, "False" to null),
-            rowVar = null
-        )
-        assertEquals(boolVariant, returnType.fields["val"])
+        // The field 'val' should have Bool type, not a type variable
+        assertEquals(FunkType.BooleanType, returnType.fields["val"])
     }
 
     @Test

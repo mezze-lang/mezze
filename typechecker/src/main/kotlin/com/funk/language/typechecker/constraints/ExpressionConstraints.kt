@@ -97,16 +97,9 @@ class ExpressionConstraintGenerator {
     }
 
     private fun generateBooleanLiteral(expr: BooleanLiteral, context: ConstraintContext): ConstraintResult {
-        // Boolean literal has type Bool (which is now a variant type: | True, False |)
-        // BooleanLiteral(true) and BooleanLiteral(false) are treated as the Bool variant type
-        val boolVariantType = FunkType.VariantType(
-            constructors = mapOf(
-                "True" to null,
-                "False" to null
-            ),
-            rowVar = null
-        )
-        return ConstraintResult.simple(boolVariantType)
+        // Boolean literal has type Bool (the built-in BooleanType)
+        // This matches OldTypeChecker behavior (line 4649)
+        return ConstraintResult.simple(FunkType.BooleanType)
     }
 
     private fun generateFractionLiteral(expr: FractionLiteral, context: ConstraintContext): ConstraintResult {
