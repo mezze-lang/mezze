@@ -17,6 +17,7 @@ import com.funk.language.typechecker.solving.Substitution
 import com.funk.language.typechecker.validation.TypeValidator
 import com.funk.language.typechecker.validation.ValidationResult
 import com.funk.language.typechecker.printing.ErrorFormatter
+import com.funk.language.typechecker.continuation.ContinuationTransformer
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -99,6 +100,9 @@ import java.nio.file.Paths
 class NewTypeChecker(
     private val parentContext: TypingContext = createInitialContext()
 ) {
+    // Transformer for converting perform blocks into state machines (for continuation support)
+    private val continuationTransformer = ContinuationTransformer()
+
     /**
      * Result of type checking.
      *
@@ -407,9 +411,14 @@ class NewTypeChecker(
                     is ValidationResult.Success -> {
                         warnings.addAll(validationResult.warnings)
 
+                        // PHASE 5.5: Transform continuations
+                        // Convert perform block bodies from DoExpression to StateMachineExpression
+                        // This is required for continuation-based effects like Choice with AllPaths
+                        val programWithContinuations = transformContinuations(typedProgram)
+
                         // PHASE 6: Monomorphization
                         val monomorphizationEngine = MonomorphizationEngine.create()
-                        val monomorphizationResult = monomorphizationEngine.monomorphize(typedProgram)
+                        val monomorphizationResult = monomorphizationEngine.monomorphize(programWithContinuations)
 
                         when (monomorphizationResult) {
                             is MonomorphizationResult.Failure -> {
@@ -822,6 +831,300 @@ class NewTypeChecker(
             is FunkType.VariantType -> "VariantType(constructors=${type.constructors.keys}, rowVar=${type.rowVar})"
             is FunkType.VarType -> "VarType(${type.variable})"
             else -> type::class.simpleName ?: type.toString()
+        }
+    }
+
+    // ====================================================================
+    // CONTINUATION TRANSFORMATION
+    // ====================================================================
+
+    /**
+     * Transform continuation-using code to state machines.
+     *
+     * This pass runs after type checking and transforms perform block bodies
+     * from DoExpression to StateMachineExpression. This is required for
+     * continuation-based effects (like Choice with AllPaths) that need to
+     * capture and resume continuations.
+     */
+    private fun transformContinuations(program: Program): Program {
+        val transformedItems = program.items.map { item ->
+            transformProgramItem(item)
+        }
+        return program.copy(items = transformedItems)
+    }
+
+    private fun transformProgramItem(item: ProgramItem): ProgramItem {
+        return when (item) {
+            is LetBinding -> {
+                val transformedExpr = transformExpression(item.expression)
+                if (transformedExpr !== item.expression) {
+                    item.copy(expression = transformedExpr)
+                } else {
+                    item
+                }
+            }
+            is TopLevelExpression -> {
+                val transformedExpr = transformExpression(item.expression)
+                if (transformedExpr !== item.expression) {
+                    item.copy(expression = transformedExpr)
+                } else {
+                    item
+                }
+            }
+            is ImplDeclaration -> {
+                val transformedOps = item.operations.map { op ->
+                    val transformedImpl = transformExpression(op.implementation)
+                    if (transformedImpl !== op.implementation) {
+                        op.copy(implementation = transformedImpl)
+                    } else {
+                        op
+                    }
+                }
+                if (transformedOps != item.operations) {
+                    item.copy(operations = transformedOps)
+                } else {
+                    item
+                }
+            }
+            is ImplAbilityDeclaration -> {
+                val transformedOps = item.operations.map { op ->
+                    val transformedImpl = transformExpression(op.implementation)
+                    if (transformedImpl !== op.implementation) {
+                        op.copy(implementation = transformedImpl)
+                    } else {
+                        op
+                    }
+                }
+                if (transformedOps != item.operations) {
+                    item.copy(operations = transformedOps)
+                } else {
+                    item
+                }
+            }
+            else -> item
+        }
+    }
+
+    private fun transformExpression(expr: Expression): Expression {
+        return when (expr) {
+            is PerformExpression -> {
+                // ALWAYS transform perform blocks into state machines
+                // Even if we don't detect continuation usage in the code, effect handlers
+                // (like AllPaths) might use continuations internally
+                val transformedInner = when (val inner = expr.expression) {
+                    is DoExpression -> {
+                        // This is the main transformation: DoExpression -> StateMachineExpression
+                        continuationTransformer.transformToStateMachine(inner)
+                    }
+                    else -> transformExpression(inner)
+                }
+                expr.copy(expression = transformedInner)
+            }
+            is DoExpression -> {
+                // Transform statements
+                val transformedStmts = expr.statements.map { stmt ->
+                    transformStatement(stmt)
+                }
+                val transformedResult = transformExpression(expr.result)
+                if (transformedStmts != expr.statements || transformedResult !== expr.result) {
+                    expr.copy(statements = transformedStmts, result = transformedResult)
+                } else {
+                    expr
+                }
+            }
+            is FunctionCall -> {
+                val transformedFunc = transformExpression(expr.function)
+                val transformedArgs = transformExpression(expr.arguments)
+                if (transformedFunc !== expr.function || transformedArgs !== expr.arguments) {
+                    expr.copy(function = transformedFunc, arguments = transformedArgs)
+                } else {
+                    expr
+                }
+            }
+            is LambdaExpression -> {
+                val transformedBody = transformExpression(expr.body)
+                if (transformedBody !== expr.body) {
+                    expr.copy(body = transformedBody)
+                } else {
+                    expr
+                }
+            }
+            is IfExpression -> {
+                val transformedCond = transformExpression(expr.condition)
+                val transformedThen = transformExpression(expr.thenBranch)
+                val transformedElse = transformExpression(expr.elseBranch)
+                if (transformedCond !== expr.condition || transformedThen !== expr.thenBranch || transformedElse !== expr.elseBranch) {
+                    expr.copy(condition = transformedCond, thenBranch = transformedThen, elseBranch = transformedElse)
+                } else {
+                    expr
+                }
+            }
+            is MatchExpression -> {
+                val transformedExpr = transformExpression(expr.expression)
+                val transformedCases = expr.cases.map { case ->
+                    val transformedCaseExpr = transformExpression(case.expression)
+                    val transformedGuard = case.guard?.let { transformExpression(it) }
+                    if (transformedCaseExpr !== case.expression || transformedGuard !== case.guard) {
+                        case.copy(expression = transformedCaseExpr, guard = transformedGuard)
+                    } else {
+                        case
+                    }
+                }
+                if (transformedExpr !== expr.expression || transformedCases != expr.cases) {
+                    expr.copy(expression = transformedExpr, cases = transformedCases)
+                } else {
+                    expr
+                }
+            }
+            is RecordLiteral -> {
+                val transformedEntries = expr.entries.map { entry ->
+                    when (entry) {
+                        is RecordFieldEntry -> {
+                            val transformedValue = entry.value?.let { transformExpression(it) }
+                            if (transformedValue !== entry.value) {
+                                entry.copy(value = transformedValue)
+                            } else {
+                                entry
+                            }
+                        }
+                        is RecordSpreadEntry -> {
+                            val transformedExpr = transformExpression(entry.expression)
+                            if (transformedExpr !== entry.expression) {
+                                entry.copy(expression = transformedExpr)
+                            } else {
+                                entry
+                            }
+                        }
+                    }
+                }
+                if (transformedEntries != expr.entries) {
+                    expr.copy(entries = transformedEntries)
+                } else {
+                    expr
+                }
+            }
+            is MemberAccess -> {
+                val transformedReceiver = transformExpression(expr.receiver)
+                if (transformedReceiver !== expr.receiver) {
+                    expr.copy(receiver = transformedReceiver)
+                } else {
+                    expr
+                }
+            }
+            is VariantConstruction -> {
+                val transformedValue = expr.value?.let { transformExpression(it) }
+                if (transformedValue !== expr.value) {
+                    expr.copy(value = transformedValue)
+                } else {
+                    expr
+                }
+            }
+            is ArrayLiteral -> {
+                val transformedElements = expr.elements.map { transformExpression(it) }
+                if (transformedElements != expr.elements) {
+                    expr.copy(elements = transformedElements)
+                } else {
+                    expr
+                }
+            }
+            is ArrayAccess -> {
+                val transformedArray = transformExpression(expr.array)
+                val transformedIndex = transformExpression(expr.index)
+                if (transformedArray !== expr.array || transformedIndex !== expr.index) {
+                    expr.copy(array = transformedArray, index = transformedIndex)
+                } else {
+                    expr
+                }
+            }
+            is RecordUpdate -> {
+                val transformedRecord = transformExpression(expr.record)
+                val transformedUpdates = expr.updates.map { update ->
+                    val transformedValue = update.value?.let { transformExpression(it) }
+                    if (transformedValue !== update.value) {
+                        update.copy(value = transformedValue)
+                    } else {
+                        update
+                    }
+                }
+                if (transformedRecord !== expr.record || transformedUpdates != expr.updates) {
+                    expr.copy(record = transformedRecord, updates = transformedUpdates)
+                } else {
+                    expr
+                }
+            }
+            is RecordUpdateExpression -> {
+                val transformedBase = transformExpression(expr.baseRecord)
+                val transformedUpdates = expr.updates.map { update ->
+                    val transformedValue = transformExpression(update.value)
+                    if (transformedValue !== update.value) {
+                        update.copy(value = transformedValue)
+                    } else {
+                        update
+                    }
+                }
+                if (transformedBase !== expr.baseRecord || transformedUpdates != expr.updates) {
+                    expr.copy(baseRecord = transformedBase, updates = transformedUpdates)
+                } else {
+                    expr
+                }
+            }
+            is EffectCallExpression -> {
+                val transformedArgs = transformExpression(expr.arguments)
+                if (transformedArgs !== expr.arguments) {
+                    expr.copy(arguments = transformedArgs)
+                } else {
+                    expr
+                }
+            }
+            is StringLiteral -> {
+                val parts = expr.parts
+                if (parts != null) {
+                    val transformedParts = parts.map { part ->
+                        when (part) {
+                            is ExpressionPart -> {
+                                val transformedExpr = transformExpression(part.expression)
+                                if (transformedExpr !== part.expression) {
+                                    ExpressionPart(transformedExpr)
+                                } else {
+                                    part
+                                }
+                            }
+                            else -> part
+                        }
+                    }
+                    if (transformedParts != expr.parts) {
+                        expr.copy(parts = transformedParts)
+                    } else {
+                        expr
+                    }
+                } else {
+                    expr
+                }
+            }
+            // State machines and literals don't need transformation
+            is StateMachineExpression, is IntLiteral, is NatLiteral, is FloatLiteral,
+            is BooleanLiteral, is FractionLiteral, is Identifier, is PlaceholderExpression -> expr
+        }
+    }
+
+    private fun transformStatement(stmt: Statement): Statement {
+        return when (stmt) {
+            is LetStatement -> {
+                val transformedExpr = transformExpression(stmt.expression)
+                if (transformedExpr !== stmt.expression) {
+                    stmt.copy(expression = transformedExpr)
+                } else {
+                    stmt
+                }
+            }
+            is ExpressionStatement -> {
+                val transformedExpr = transformExpression(stmt.expression)
+                if (transformedExpr !== stmt.expression) {
+                    stmt.copy(expression = transformedExpr)
+                } else {
+                    stmt
+                }
+            }
         }
     }
 }
