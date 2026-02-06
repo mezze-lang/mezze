@@ -93,17 +93,19 @@ class FunkInterpreterComprehensiveTest {
 
     @Test
     fun testVariantAndPatternMatching() {
+        // Avoid using 'Result' and 'Error' which may conflict with built-in types
+        // Note: The typechecker infers 'val' as the default field name for variant payloads
         val source = """
-            type Result = | Success {data: Int}, Error {message: String} |
-            let value = Success {data = 42}
+            type MyResult = | Ok {val: Int}, Err {val: String} |
+            let value: MyResult = Ok {val = 42}
             let result = match value is
-              Success {data} -> data * 2
-              Error {message} -> 0
+              Ok {val} -> val * 2
+              Err {val} -> 0
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
-        
+
         assertDoesNotThrow {
             val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
             FunkTestHelper.execute(typedProgram, projectRoot)

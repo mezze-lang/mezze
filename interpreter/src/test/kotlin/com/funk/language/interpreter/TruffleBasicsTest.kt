@@ -160,8 +160,10 @@ class TruffleBasicsTest {
 
     @Test
     fun testSimpleVariantMatch() {
+        // Explicitly declare the variant type so both constructors are known
         val code = """
-            let value = Red
+            type Color = | Red, Blue {val: Int} |
+            let value: Color = Red
             match value is
                 Red -> 1
                 Blue {val} -> 2
@@ -172,8 +174,10 @@ class TruffleBasicsTest {
 
     @Test
     fun testVariantWithValueMatch() {
+        // Explicitly declare the variant type so both constructors are known
         val code = """
-            let value = Blue {val = 42}
+            type Color = | Red, Blue {val: Int} |
+            let value: Color = Blue {val = 42}
             match value is
                 Red -> 0
                 Blue {val} -> val

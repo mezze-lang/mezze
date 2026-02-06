@@ -255,8 +255,10 @@ class TruffleOptimizedFeaturesTest {
 
     @Test
     fun testSimplePatternMatch() {
+        // Explicitly declare the variant type so both constructors are known
         val code = """
-            let value = Red
+            type Color = | Red, Blue {val: Int} |
+            let value: Color = Red
             match value is
                 Red -> 1
                 Blue {val} -> 2
@@ -267,8 +269,10 @@ class TruffleOptimizedFeaturesTest {
 
     @Test
     fun testPatternMatchWithExtraction() {
+        // Explicitly declare the variant type so both constructors are known
         val code = """
-            let value = Blue {val = 42}
+            type Color = | Red, Blue {val: Int} |
+            let value: Color = Blue {val = 42}
             match value is
                 Red -> 0
                 Blue {val} -> val
@@ -279,11 +283,14 @@ class TruffleOptimizedFeaturesTest {
 
     @Test
     fun testNestedPatternMatch() {
+        // Explicitly declare the variant type so both constructors are known
         val code = """
-            let getValue = {x} ->
+            type Color = | Red, Blue {val: Int} |
+            let getValue: {x: Int} -> Color = {x} ->
                 match x is
                     0 -> Red
                     1 -> Blue {val = 100}
+                    _ -> Red
 
             let result = getValue {x = 1}
             match result is
@@ -296,8 +303,10 @@ class TruffleOptimizedFeaturesTest {
 
     @Test
     fun testComplexPatternMatching() {
+        // Explicitly declare the variant type so all constructors are known
         val code = """
-            let processValue = {v} ->
+            type Value = | Red, Blue {val: Int}, Green {x: Int, y: Int} |
+            let processValue: {v: Value} -> Int = {v} ->
                 match v is
                     Red -> 1
                     Blue {val} -> val * 2
