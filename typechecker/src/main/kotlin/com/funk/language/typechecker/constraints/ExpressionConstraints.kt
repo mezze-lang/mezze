@@ -1737,10 +1737,11 @@ class ExpressionConstraintGenerator {
         }
 
         // FULL APPLICATION (or function type not yet known)
-        // Check if the function type has effects
+        // Check if the function type has effects (concrete or polymorphic)
         if (functionType is FunkType.FunctionType) {
             val effectRow = functionType.effects
-            if (effectRow != null && effectRow.effects.isNotEmpty()) {
+            // Handle effects if: has concrete effects OR has a row variable (polymorphic <...>)
+            if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.rowVar != null)) {
                 // Calling an effectful function produces a SuspendedType
                 // The return value is suspended with the function's effects
 
@@ -2158,14 +2159,16 @@ class ExpressionConstraintGenerator {
 
         // Also check for effects in the result TYPE (for function references with effects)
         // e.g., `perform Console in myEffectfulFunc` where myEffectfulFunc has type `{} -> T <Log>`
-        val typeEffects = extractEffectsFromType(exprResult.type)
-        val allEffects = exprResult.effects + typeEffects
+        val extractedEffects = extractEffectsFromType(exprResult.type)
+        val allEffects = exprResult.effects + extractedEffects.effects
+        val hasPolymorphicEffects = extractedEffects.isPolymorphic
 
         // CRITICAL: We validate based on effects, not types
         // If effects are empty, the expression is pure - we can validate
         // If effects are non-empty, we know what effects the expression uses - we can validate
         // We only skip validation for nested performs (which may have complex effect flows)
-        if (!isNestedPerform) {
+        // ALSO skip validation if effects are polymorphic (<...>) - they could match any handler
+        if (!isNestedPerform && !hasPolymorphicEffects) {
             // If the expression has no effects (neither tracked nor in type), providing handlers is meaningless
             if (handlerEffects.isNotEmpty() && allEffects.isEmpty()) {
                 // Expression is pure but handlers provided
@@ -2229,16 +2232,35 @@ class ExpressionConstraintGenerator {
     }
 
     /**
+     * Result of extracting effects from a type.
+     * Contains both concrete effect names and whether effects are polymorphic.
+     */
+    private data class ExtractedEffects(
+        val effects: Set<String>,
+        val isPolymorphic: Boolean  // true if there's a row variable (<...>)
+    )
+
+    /**
      * Extract effects from a type.
      *
      * Returns effects from FunctionType.effects or SuspendedType.effects.
      * Used to detect if a function reference has effects that need handling.
+     * Also returns whether the effect row is open (polymorphic with <...>).
      */
-    private fun extractEffectsFromType(type: FunkType): Set<String> {
+    private fun extractEffectsFromType(type: FunkType): ExtractedEffects {
         return when (type) {
-            is FunkType.FunctionType -> type.effects?.effects ?: emptySet()
-            is FunkType.SuspendedType -> type.effects.effects
-            else -> emptySet()
+            is FunkType.FunctionType -> {
+                val effectRow = type.effects
+                if (effectRow != null) {
+                    ExtractedEffects(effectRow.effects, effectRow.rowVar != null)
+                } else {
+                    ExtractedEffects(emptySet(), false)
+                }
+            }
+            is FunkType.SuspendedType -> {
+                ExtractedEffects(type.effects.effects, type.effects.rowVar != null)
+            }
+            else -> ExtractedEffects(emptySet(), false)
         }
     }
 
