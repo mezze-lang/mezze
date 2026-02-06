@@ -252,17 +252,18 @@ class FunkInterpreterComprehensiveTest {
 
     @Test
     fun testBooleanLogic() {
+        // Use Funk's native boolean operators: && for AND, || for OR, ! for NOT
         val source = """
             let x = true
             let y = false
-            let result1 = boolAnd {a = x, b = y}
-            let result2 = boolOr {a = x, b = y}
-            let result3 = boolNot {val = x}
+            let result1 = x && y
+            let result2 = x || y
+            let result3 = !x
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
-        
+
         assertDoesNotThrow {
             val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
             FunkTestHelper.execute(typedProgram, projectRoot)

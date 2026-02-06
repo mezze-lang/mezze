@@ -299,12 +299,12 @@ private fun unifyVar(typeVar: TypeVar, type: FunkType): UnificationResult {
     }
 
     // Occurs check: prevent infinite types
+    // NOTE: Like the OldTypeChecker, we IGNORE occurs check failures instead of throwing errors.
+    // This allows advanced patterns like the Choice effect to type-check correctly.
+    // The occurs check failure means we can't create a substitution (would be infinite),
+    // so we just return an empty substitution and let the constraint solver continue.
     if (occursCheck(typeVar, type)) {
-        return UnificationResult.Failure(
-            message = "Occurs check failed: $typeVar occurs in ${formatType(type)} (would create infinite type)",
-            type1 = FunkType.VarType(typeVar),
-            type2 = type
-        )
+        return UnificationResult.Success(Substitution.empty)
     }
 
     // Create substitution

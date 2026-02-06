@@ -776,10 +776,18 @@ class ASTToTruffleConverter(
         // PRIORITY 2.5: Fallback for ability calls that weren't resolved
         // This handles cases where modules are type-checked but ability resolution info is lost
         // Detect patterns like NumAdd.add, NumMod.modulo, Eq.eq, etc.
+        // NOTE: Ability names like NumSub are parsed as VariantConstruction (uppercase without payload)
         if (funcCall.function is MemberAccess) {
             val memberAccess = funcCall.function as MemberAccess
-            if (memberAccess.receiver is Identifier) {
-                val receiverName = (memberAccess.receiver as Identifier).name
+            // Get receiver name from either Identifier or VariantConstruction
+            // (VariantConstruction is used for uppercase names without payloads)
+            val receiverName = when (val receiver = memberAccess.receiver) {
+                is Identifier -> receiver.name
+                is VariantConstruction -> receiver.constructor
+                else -> null
+            }
+
+            if (receiverName != null) {
                 val operationName = memberAccess.member
 
                 // Check if this looks like a builtin ability call
@@ -1105,11 +1113,13 @@ class ASTToTruffleConverter(
     }
 
     /**
-     * Create a builtin unary operation node that extracts n from a record argument
+     * Create a builtin unary operation node that extracts n or val from a record argument
+     * - NumSub.neg uses field name 'n' (from unary - operator)
+     * - LogicalNot.not uses field name 'val' (from unary ! operator)
      */
     private fun createBuiltinUnaryOp(operation: String, argsNode: FunkNode): FunkNode {
-        // argsNode evaluates to a record {n = value}
-        // We need to extract n and pass it to the unary op node
+        // argsNode evaluates to a record {n = value} or {val = value}
+        // We need to extract the operand field and pass it to the unary op node
         return object : FunkNode() {
             @field:Child private var argumentsChild = argsNode
 
@@ -1119,7 +1129,9 @@ class ASTToTruffleConverter(
                     throw RuntimeException("Unary operation arguments must be a record, got: ${argsValue::class.simpleName}")
                 }
 
-                val operand = argsValue.fields["n"] ?: throw RuntimeException("Missing 'n' field in unary operation")
+                // Try 'n' first (for negate), then 'val' (for not)
+                val operand = argsValue.fields["n"] ?: argsValue.fields["val"]
+                    ?: throw RuntimeException("Missing 'n' or 'val' field in unary operation (available fields: ${argsValue.fields.keys})")
 
                 return when (operation) {
                     "negate" -> {
