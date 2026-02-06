@@ -15,77 +15,65 @@ object LoomTypes {
 
     /**
      * Register all Loom native function types.
+     *
+     * Each function gets its own fresh type variables for Promise, Thread, and result type.
+     * This is important because these types are registered as polymorphic and get
+     * fresh instantiation on each use. If we shared type variables across functions,
+     * unifying one would affect all others.
      */
     fun registerAll(context: MutableMap<String, FunkType>) {
         // __native_loom_spawn: {computation: {} -> 'a} -> Promise
-        // Spawns a computation on a new virtual thread, returns a Promise
-        // The Promise newtype wraps the result which can be awaited later
+        // Each function gets its own type variables
+        val spawnPromise = FunkType.VarType(com.funk.language.ast.TypeVar("Promise"))
+        val spawnResult = FunkType.VarType(com.funk.language.ast.TypeVar("a"))
         context["__native_loom_spawn"] = FunkType.FunctionType(
-            // Parameter type: {computation: {} -> 'a}
             FunkType.RecordType(mapOf(
                 "computation" to FunkType.FunctionType(
-                    FunkType.RecordType(emptyMap()),  // {} parameter
-                    FunkType.VarType(com.funk.language.ast.TypeVar("a"))  // 'a result
+                    FunkType.RecordType(emptyMap()),
+                    spawnResult
                 )
             )),
-            // Return type: Promise (opaque native promise type)
-            // Note: In practice this is wrapped in a Promise newtype variant
-            FunkType.VarType(com.funk.language.ast.TypeVar("Promise"))
+            spawnPromise
         )
 
         // __native_loom_await: {promise: Promise} -> 'a
-        // Blocks the current virtual thread until the promise completes, returns the result
-        // Uses LockSupport.park() internally for efficient blocking
+        val awaitPromise = FunkType.VarType(com.funk.language.ast.TypeVar("Promise"))
+        val awaitResult = FunkType.VarType(com.funk.language.ast.TypeVar("a"))
         context["__native_loom_await"] = FunkType.FunctionType(
-            // Parameter type: {promise: Promise}
             FunkType.RecordType(mapOf(
-                "promise" to FunkType.VarType(com.funk.language.ast.TypeVar("Promise"))
+                "promise" to awaitPromise
             )),
-            // Return type: 'a (the unwrapped promise value)
-            FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+            awaitResult
         )
 
         // __native_loom_park: {} -> {}
-        // Parks (suspends) the current virtual thread until unparked
-        // Thread will not consume CPU resources while parked
         context["__native_loom_park"] = FunkType.FunctionType(
-            // Parameter type: {}
             FunkType.RecordType(emptyMap()),
-            // Return type: {} (unit)
             FunkType.RecordType(emptyMap())
         )
 
         // __native_loom_unpark: {thread: Thread} -> {}
-        // Unparks the given thread, allowing it to resume execution
-        // If thread is not parked, next park() will return immediately
+        val unparkThread = FunkType.VarType(com.funk.language.ast.TypeVar("Thread"))
         context["__native_loom_unpark"] = FunkType.FunctionType(
-            // Parameter type: {thread: Thread}
             FunkType.RecordType(mapOf(
-                "thread" to FunkType.VarType(com.funk.language.ast.TypeVar("Thread"))
+                "thread" to unparkThread
             )),
-            // Return type: {} (unit)
             FunkType.RecordType(emptyMap())
         )
 
         // __native_loom_current_thread: {} -> Thread
-        // Returns a handle to the current virtual thread
-        // This handle can be passed to other threads for coordination via unpark
+        val currentThread = FunkType.VarType(com.funk.language.ast.TypeVar("Thread"))
         context["__native_loom_current_thread"] = FunkType.FunctionType(
-            // Parameter type: {}
             FunkType.RecordType(emptyMap()),
-            // Return type: Thread (opaque thread handle)
-            // Note: In practice this is wrapped in a Thread newtype variant
-            FunkType.VarType(com.funk.language.ast.TypeVar("Thread"))
+            currentThread
         )
 
         // __native_promise_is_complete: {promise: Promise} -> Bool
-        // Checks if a promise has completed without blocking
+        val isCompletePromise = FunkType.VarType(com.funk.language.ast.TypeVar("Promise"))
         context["__native_promise_is_complete"] = FunkType.FunctionType(
-            // Parameter type: {promise: Promise}
             FunkType.RecordType(mapOf(
-                "promise" to FunkType.VarType(com.funk.language.ast.TypeVar("Promise"))
+                "promise" to isCompletePromise
             )),
-            // Return type: Bool
             FunkType.BooleanType
         )
     }
