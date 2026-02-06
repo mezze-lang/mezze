@@ -1,6 +1,7 @@
 package com.funk.language.interpreter
 
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
 
 /**
@@ -17,6 +18,13 @@ class TruffleAndLoomIntegrationTest {
 
     private val parser = com.funk.language.parser.FunkParser()
     private val typeChecker = com.funk.language.typechecker.TypeChecker()
+
+    @BeforeEach
+    fun setup() {
+        // Clear caches to prevent state pollution between tests
+        com.funk.language.typechecker.ModuleResolver.clearCache()
+        com.funk.language.typechecker.TypeChecker.clearCache()
+    }
 
     private fun eval(source: String): FunkValue {
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))

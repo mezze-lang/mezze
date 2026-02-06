@@ -4,6 +4,8 @@ import com.funk.language.ast.*
 import com.funk.language.typechecker.NewTypeChecker
 import com.funk.language.typechecker.ModuleResolver
 import com.funk.language.typechecker.context.TypingContext
+import com.funk.language.typechecker.context.TypeScheme
+import com.funk.language.typechecker.context.collectFreeTypeVars
 
 /**
  * Module type checker - type-checks modules with caching.
@@ -128,8 +130,22 @@ class ModuleTypeChecker(
         var context = baseContext
 
         // Add imported bindings to context
+        // Types with free type variables are registered as polymorphic
+        // so they get instantiated with fresh type variables on each use
         for ((name, binding) in importContext.importedBindings) {
-            context = context.extendMono(name, binding.type, binding.modulePath)
+            val freeVars = collectFreeTypeVars(binding.type)
+            if (freeVars.isEmpty()) {
+                // Monomorphic type - use directly
+                context = context.extendMono(name, binding.type, binding.modulePath)
+            } else {
+                // Polymorphic type - wrap in TypeScheme for fresh instantiation
+                val scheme = TypeScheme(
+                    quantifiedVars = freeVars.toList(),
+                    constraints = emptyList(),
+                    type = binding.type
+                )
+                context = context.extendPoly(name, scheme, binding.modulePath)
+            }
         }
 
         // TODO: Add imported types, abilities, effects

@@ -1,6 +1,7 @@
 package com.funk.language.interpreter
 
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
 
 /**
@@ -17,6 +18,13 @@ class StructuredConcurrencyTest {
 
     private val parser = com.funk.language.parser.FunkParser()
     private val typeChecker = com.funk.language.typechecker.TypeChecker()
+
+    @BeforeEach
+    fun setup() {
+        // Clear caches to prevent state pollution between tests
+        com.funk.language.typechecker.ModuleResolver.clearCache()
+        com.funk.language.typechecker.TypeChecker.clearCache()
+    }
 
     private fun eval(source: String): FunkValue {
         val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
@@ -133,7 +141,7 @@ class StructuredConcurrencyTest {
         val code = """
             $setupCode
 
-            let parallel_map: {fn: Int -> Int, items: [Int]} -> [Int] = {fn, items} -> do
+            let parallel_map: {fn: {x: Int} -> Int, items: [Int]} -> [Int] = {fn, items} -> do
                 let promises = items |> array::map {xs = @, f = {x} -> spawn {computation = {} -> fn {x = x}}}
                 promises |> array::map {xs = @, f = {x} -> await {promise = x}}
 
@@ -155,7 +163,7 @@ class StructuredConcurrencyTest {
         val code = """
             $setupCode
 
-            let parallel_filter: {pred: Int -> Bool, items: [Int]} -> [Int] = {pred, items} -> do
+            let parallel_filter: {pred: {x: Int} -> Bool, items: [Int]} -> [Int] = {pred, items} -> do
                 let promises = items |> array::map {xs = @, f = {x} -> spawn {computation = {} ->
                     if pred {x = x} then [x] else []
                 }}
