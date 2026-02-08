@@ -1247,50 +1247,49 @@ private fun copyFunkLanguageJars(tempDir: File) {
     val libsDir = File(tempDir, "libs")
     libsDir.mkdirs()
 
-    // Get the Funk project root (where CLI is installed)
-    val projectRootPath = System.getProperty("funk.project.root")
-        ?: detectProjectRoot()?.absolutePath
-        ?: throw IllegalStateException("Cannot detect Funk project root. Please set funk.project.root system property.")
-    val projectRoot = File(projectRootPath)
-    
-    // Copy AST JAR (shared AST definitions)
-    val astJar = File(projectRoot, "ast/build/libs/ast-1.0.0.jar")
-    if (astJar.exists()) {
-        astJar.copyTo(File(libsDir, "funk-ast.jar"), overwrite = true)
-        println("📦 Copied AST JAR")
+    // Find the CLI's lib directory by locating where this class is loaded from
+    val cliLocation = object {}.javaClass.protectionDomain.codeSource.location
+    val cliJarOrClassDir = File(cliLocation.toURI())
+
+    // Navigate to the lib directory
+    // For installed CLI: /path/to/funk/lib/cli-1.0.0.jar -> /path/to/funk/lib/
+    // For development: /path/to/funk/cli/build/classes/kotlin/main/ -> /path/to/funk/cli/build/install/funk/lib/
+    val cliLibDir = if (cliJarOrClassDir.isFile) {
+        // Running from JAR - lib directory is parent
+        cliJarOrClassDir.parentFile
     } else {
-        throw IllegalStateException("AST JAR not found: ${astJar.absolutePath}. Please run 'gradle build' first.")
+        // Running from classes directory (development) - need to find install/funk/lib
+        var current = cliJarOrClassDir
+        while (current != null && !File(current, "lib").exists()) {
+            current = current.parentFile
+        }
+        File(current, "lib")
     }
-    
-    // Copy interpreter JAR (needed for full Truffle execution)
-    val interpreterJar = File(projectRoot, "interpreter/build/libs/interpreter-1.0.0.jar")
-    if (interpreterJar.exists()) {
-        interpreterJar.copyTo(File(libsDir, "funk-interpreter.jar"), overwrite = true)
-        println("📦 Copied interpreter JAR")
-    } else {
-        throw IllegalStateException("Interpreter JAR not found: ${interpreterJar.absolutePath}. Please run 'gradle build' first.")
+
+    if (!cliLibDir.exists() || !cliLibDir.isDirectory) {
+        throw IllegalStateException("Cannot find CLI lib directory at: ${cliLibDir.absolutePath}")
     }
-    
-    // Copy parser JAR (needed for module resolution)
-    val parserJar = File(projectRoot, "parser/build/libs/parser-1.0.0.jar")
-    if (parserJar.exists()) {
-        parserJar.copyTo(File(libsDir, "funk-parser.jar"), overwrite = true)
-        println("📦 Copied parser JAR")
-    } else {
-        throw IllegalStateException("Parser JAR not found: ${parserJar.absolutePath}. Please run 'gradle build' first.")
+
+    // Copy Funk component JARs from CLI's lib directory
+    val jarsToCP = mapOf(
+        "ast-1.0.0.jar" to "funk-ast.jar",
+        "interpreter-1.0.0.jar" to "funk-interpreter.jar",
+        "parser-1.0.0.jar" to "funk-parser.jar",
+        "typechecker-1.0.0.jar" to "funk-typechecker.jar"
+    )
+
+    for ((sourceJarName, destJarName) in jarsToCP) {
+        val sourceJar = File(cliLibDir, sourceJarName)
+        if (sourceJar.exists()) {
+            sourceJar.copyTo(File(libsDir, destJarName), overwrite = true)
+            println("📦 Copied $sourceJarName")
+        } else {
+            throw IllegalStateException("Required JAR not found in CLI lib: ${sourceJar.absolutePath}")
+        }
     }
-    
-    // Copy typechecker JAR (needed for module resolution)
-    val typecheckerJar = File(projectRoot, "typechecker/build/libs/typechecker-1.0.0.jar")
-    if (typecheckerJar.exists()) {
-        typecheckerJar.copyTo(File(libsDir, "funk-typechecker.jar"), overwrite = true)
-        println("📦 Copied typechecker JAR")
-    } else {
-        throw IllegalStateException("Typechecker JAR not found: ${typecheckerJar.absolutePath}. Please run 'gradle build' first.")
-    }
-    
+
     // Copy Truffle compiler JAR for JIT optimization
-    val truffleCompilerJar = File(System.getenv("JAVA_HOME"), "lib/truffle/truffle-compiler.jar")
+    val truffleCompilerJar = File(System.getenv("JAVA_HOME") ?: "/", "lib/truffle/truffle-compiler.jar")
     if (truffleCompilerJar.exists()) {
         truffleCompilerJar.copyTo(File(libsDir, "truffle-compiler.jar"), overwrite = true)
         println("📦 Copied Truffle JIT compiler")
@@ -1300,20 +1299,67 @@ private fun copyFunkLanguageJars(tempDir: File) {
 }
 
 private fun copyStdlib(tempDir: File) {
-    // Get the Funk project root (where CLI is installed)
-    val projectRootPath = System.getProperty("funk.project.root")
-        ?: detectProjectRoot()?.absolutePath
-        ?: throw IllegalStateException("Cannot detect Funk project root. Please set funk.project.root system property.")
-    val projectRoot = File(projectRootPath)
+    val stdlibDest = File(tempDir, "stdlib")
+    stdlibDest.mkdirs()
 
-    val stdlibSource = File(projectRoot, "stdlib")
-    if (!stdlibSource.exists()) {
-        throw IllegalStateException("Stdlib directory not found: ${stdlibSource.absolutePath}")
+    // Try to extract stdlib from embedded resources first (works anywhere)
+    try {
+        // Use the Main class's classLoader to ensure we get resources from the CLI JAR
+        val classLoader = Thread.currentThread().contextClassLoader ?: object {}.javaClass.classLoader
+
+        // We need to explicitly list them since we can't list resources in a JAR
+        val knownStdlibPaths = listOf(
+            "std/bool.funk", "std/result.funk", "std/frac.funk", "std/nat.funk", "std/option.funk",
+            "std/async.funk", "std/async/thread.funk", "std/async/async.funk", "std/async/structured.funk",
+            "std/math/core.funk", "std/math/random.funk", "std/math/trig.funk",
+            "std/collections/list.funk", "std/collections/array.funk", "std/collections/map.funk",
+            "std/collections/set.funk", "std/effects/log.funk", "std/effects/choice.funk",
+            "std/effects/async.funk", "std/effects/concurrency.funk", "std/effects/early_return.funk",
+            "std/effects/exception.funk", "std/effects/environment.funk", "std/effects/compile_time.funk",
+            "std/effects/composite_logger.funk", "std/codec/json.funk"
+        )
+
+        var copiedCount = 0
+        for (path in knownStdlibPaths) {
+            val resourcePath = "stdlib/$path"
+            val inputStream = classLoader.getResourceAsStream(resourcePath)
+            if (inputStream != null) {
+                val destFile = File(stdlibDest, path)
+                destFile.parentFile?.mkdirs()
+                destFile.outputStream().use { output ->
+                    inputStream.copyTo(output)
+                }
+                copiedCount++
+            }
+        }
+
+        if (copiedCount > 0) {
+            println("📦 Copied stdlib files from embedded resources ($copiedCount files)")
+            return
+        }
+
+        // If we got 0 files, print debug info
+        println("⚠️ Could not find stdlib resources in JAR, trying filesystem...")
+    } catch (e: Exception) {
+        // Fall back to filesystem if resource extraction fails
+        println("⚠️ Exception while extracting stdlib: ${e.message}, trying filesystem...")
     }
 
-    val stdlibDest = File(tempDir, "stdlib")
-    stdlibSource.copyRecursively(stdlibDest, overwrite = true)
-    println("📦 Copied stdlib files")
+    // Fallback: Try to copy from filesystem (for development)
+    val projectRootPath = System.getProperty("funk.project.root")
+        ?: detectProjectRoot()?.absolutePath
+
+    if (projectRootPath != null) {
+        val projectRoot = File(projectRootPath)
+        val stdlibSource = File(projectRoot, "stdlib")
+        if (stdlibSource.exists()) {
+            stdlibSource.copyRecursively(stdlibDest, overwrite = true)
+            println("📦 Copied stdlib files from filesystem")
+            return
+        }
+    }
+
+    throw IllegalStateException("Cannot find stdlib: not in embedded resources and not on filesystem")
 }
 
 
