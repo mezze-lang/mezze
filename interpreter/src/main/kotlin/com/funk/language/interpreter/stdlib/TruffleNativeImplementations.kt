@@ -18,6 +18,8 @@ import com.funk.language.interpreter.stdlib.collections.TruffleSetImplementation
 import com.funk.language.interpreter.stdlib.collections.TruffleDequeImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleBytesImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleByteBufferImplementations
+import com.funk.language.interpreter.stdlib.collections.TruffleSortedMapImplementations
+import com.funk.language.interpreter.stdlib.collections.TruffleSortedSetImplementations
 import com.funk.language.interpreter.stdlib.effects.LogImplementations
 import com.funk.language.interpreter.stdlib.effects.InspectImplementations
 import com.funk.language.interpreter.stdlib.effects.FilesystemImplementations
@@ -53,13 +55,14 @@ object TruffleNativeImplementations {
      * Register minimal native implementations in the interpreter context
      */
     fun registerAll(context: MutableMap<String, FunkValue>) {
-        // Register basic type implementations (int, float, nat, bool, string, frac)
+        // Register basic type implementations (int, float, nat, bool, string, frac, char)
         IntImplementations.registerAll(context)
         FloatImplementations.registerAll(context)
         NatImplementations.registerAll(context)
         BoolImplementations.registerAll(context)
         StringImplementations.registerAll(context)
         FracImplementations.registerAll(context)
+        TruffleCharImplementations.registerAll(context)
 
         // Register math implementations (core, trig, random)
         MathCoreImplementations.registerAll(context)
@@ -75,6 +78,8 @@ object TruffleNativeImplementations {
         TruffleDequeImplementations.registerAll(context)
         TruffleBytesImplementations.registerAll(context)
         TruffleByteBufferImplementations.registerAll(context)
+        TruffleSortedMapImplementations.registerAll(context)
+        TruffleSortedSetImplementations.registerAll(context)
 
         // Register effects implementations (log, inspect, filesystem, time, environment, continuation, loom)
         LogImplementations.registerAll(context)

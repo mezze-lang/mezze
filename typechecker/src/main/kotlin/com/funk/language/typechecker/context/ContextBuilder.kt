@@ -568,6 +568,11 @@ class ContextBuilder {
             is FunkType.ArrayType -> collectTypeVarsFromType(type.elementType, typeVars)
             is FunkType.ListType -> collectTypeVarsFromType(type.elementType, typeVars)
             is FunkType.SetType -> collectTypeVarsFromType(type.elementType, typeVars)
+            is FunkType.SortedMapType -> {
+                collectTypeVarsFromType(type.keyType, typeVars)
+                collectTypeVarsFromType(type.valueType, typeVars)
+            }
+            is FunkType.SortedSetType -> collectTypeVarsFromType(type.elementType, typeVars)
             is FunkType.MapType -> {
                 collectTypeVarsFromType(type.keyType, typeVars)
                 collectTypeVarsFromType(type.valueType, typeVars)
@@ -576,7 +581,8 @@ class ContextBuilder {
             // Primitive types have no type variables
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> {}
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+            is FunkType.CharType, is FunkType.EffectRow -> {}
         }
     }
 

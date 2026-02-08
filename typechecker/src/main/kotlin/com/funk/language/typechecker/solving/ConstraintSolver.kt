@@ -916,7 +916,8 @@ class ConstraintSolver(
      * Check if this is a built-in ability with built-in implementation.
      *
      * Built-in abilities have implicit implementations for certain types:
-     * - NumAdd, NumSub, NumMul, NumDiv, NumMod, NumNeg: Int, Float, Nat, Frac
+     * - NumAdd, NumMul, NumDiv, NumMod: Int, Float, Nat, Frac
+     * - NumSub, NumNeg: Int, Float, Frac (NOT Nat - subtraction can go negative)
      * - Eq: Int, Float, String, Bool, Nat, Frac, Ordering
      * - Ord: Int, Float, String, Nat, Frac
      * - Inspect: All primitive types
@@ -926,11 +927,17 @@ class ConstraintSolver(
         val unwrappedType = if (type is FunkType.SuspendedType) type.valueType else type
 
         return when (abilityName) {
-            // Numeric abilities - implemented for Int, Float, Nat, Frac
-            "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "NumNeg" -> {
+            // Numeric abilities that work with Nat
+            "NumAdd", "NumMul", "NumDiv", "NumMod" -> {
                 unwrappedType is FunkType.IntType ||
                 unwrappedType is FunkType.FloatType ||
                 unwrappedType is FunkType.NatType ||
+                unwrappedType is FunkType.FracType
+            }
+            // NumSub and NumNeg don't work with Nat (result can be negative)
+            "NumSub", "NumNeg" -> {
+                unwrappedType is FunkType.IntType ||
+                unwrappedType is FunkType.FloatType ||
                 unwrappedType is FunkType.FracType
             }
 
@@ -1070,6 +1077,8 @@ class ConstraintSolver(
             is FunkType.ArrayType -> "Array_${getTypeName(type.elementType)}"
             is FunkType.ListType -> "List_${getTypeName(type.elementType)}"
             is FunkType.SetType -> "Set_${getTypeName(type.elementType)}"
+            is FunkType.SortedMapType -> "SortedMap_${getTypeName(type.keyType)}_${getTypeName(type.valueType)}"
+            is FunkType.SortedSetType -> "SortedSet_${getTypeName(type.elementType)}"
             is FunkType.MapType -> "Map_${getTypeName(type.keyType)}_${getTypeName(type.valueType)}"
             is FunkType.VariantType -> {
                 // Check if this is the Bool type (True | False)
@@ -1863,6 +1872,15 @@ class ConstraintSolver(
             is FunkType.SetType -> {
                 FunkType.SetType(closeRowVarsInType(type.elementType, rowVarsToClose))
             }
+            is FunkType.SortedMapType -> {
+                FunkType.SortedMapType(
+                    keyType = closeRowVarsInType(type.keyType, rowVarsToClose),
+                    valueType = closeRowVarsInType(type.valueType, rowVarsToClose)
+                )
+            }
+            is FunkType.SortedSetType -> {
+                FunkType.SortedSetType(closeRowVarsInType(type.elementType, rowVarsToClose))
+            }
             is FunkType.TypeApplication -> {
                 FunkType.TypeApplication(
                     constructor = type.constructor,
@@ -1886,6 +1904,7 @@ class ConstraintSolver(
             is FunkType.OrderingType,
             is FunkType.BytesType,
             is FunkType.ByteBufferType,
+            is FunkType.CharType,
             is FunkType.EffectRow -> type
         }
     }
@@ -1978,6 +1997,7 @@ class ConstraintSolver(
             is FunkType.OrderingType -> "Ordering"
             is FunkType.BytesType -> "Bytes"
             is FunkType.ByteBufferType -> "ByteBuffer"
+            is FunkType.CharType -> "Char"
             is FunkType.FunctionType -> "{...} -> ..."
             is FunkType.RecordType -> "{${type.fields.keys.take(3).joinToString()}}"
             is FunkType.VariantType -> {
@@ -1992,6 +2012,8 @@ class ConstraintSolver(
             is FunkType.ArrayType -> "Array ${formatType(type.elementType)}"
             is FunkType.ListType -> "List ${formatType(type.elementType)}"
             is FunkType.SetType -> "Set ${formatType(type.elementType)}"
+            is FunkType.SortedMapType -> "SortedMap ${formatType(type.keyType)} ${formatType(type.valueType)}"
+            is FunkType.SortedSetType -> "SortedSet ${formatType(type.elementType)}"
             is FunkType.MapType -> "Map ${formatType(type.keyType)} ${formatType(type.valueType)}"
             is FunkType.SuspendedType -> "Suspended<${formatType(type.valueType)}>"
             is FunkType.EffectRow -> "<${type.effects.take(3).joinToString()}>"
@@ -2043,12 +2065,15 @@ class ConstraintSolver(
             is FunkType.ArrayType -> collectTypeVars(type.elementType)
             is FunkType.ListType -> collectTypeVars(type.elementType)
             is FunkType.SetType -> collectTypeVars(type.elementType)
+            is FunkType.SortedMapType -> collectTypeVars(type.keyType) + collectTypeVars(type.valueType)
+            is FunkType.SortedSetType -> collectTypeVars(type.elementType)
             is FunkType.MapType -> collectTypeVars(type.keyType) + collectTypeVars(type.valueType)
             is FunkType.SuspendedType -> collectTypeVars(type.valueType)
             // Primitives have no type variables
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> emptySet()
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+            is FunkType.CharType, is FunkType.EffectRow -> emptySet()
         }
     }
 
@@ -2092,6 +2117,13 @@ class ConstraintSolver(
             is FunkType.SetType -> FunkType.SetType(
                 elementType = applyVarSubstitution(type.elementType, substitution)
             )
+            is FunkType.SortedMapType -> FunkType.SortedMapType(
+                keyType = applyVarSubstitution(type.keyType, substitution),
+                valueType = applyVarSubstitution(type.valueType, substitution)
+            )
+            is FunkType.SortedSetType -> FunkType.SortedSetType(
+                elementType = applyVarSubstitution(type.elementType, substitution)
+            )
             is FunkType.MapType -> FunkType.MapType(
                 keyType = applyVarSubstitution(type.keyType, substitution),
                 valueType = applyVarSubstitution(type.valueType, substitution)
@@ -2103,7 +2135,8 @@ class ConstraintSolver(
             // Primitives unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+            is FunkType.CharType, is FunkType.EffectRow -> type
         }
     }
 

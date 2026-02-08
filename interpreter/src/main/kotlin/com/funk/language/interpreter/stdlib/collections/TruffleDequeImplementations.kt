@@ -279,5 +279,19 @@ object TruffleDequeImplementations {
             val combined = d1.toList() + d2.toList()
             FunkDeque(combined, emptyList())
         }
+
+        // Equality check
+        context["__native_deque_equals"] = NativeFunkFunction("__native_deque_equals") { args ->
+            val record = args[0] as FunkRecord
+            val d1 = record.fields["d1"] as? FunkDeque
+                ?: throw NativeFunctionException("__native_deque_equals", "expects 'd1' as Deque")
+            val d2 = record.fields["d2"] as? FunkDeque
+                ?: throw NativeFunctionException("__native_deque_equals", "expects 'd2' as Deque")
+
+            // Two deques are equal if they have the same elements in the same order
+            val list1 = d1.toList()
+            val list2 = d2.toList()
+            FunkBool(list1 == list2)
+        }
     }
 }

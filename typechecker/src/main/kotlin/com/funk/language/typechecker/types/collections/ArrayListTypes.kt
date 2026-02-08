@@ -289,5 +289,18 @@ object ArrayListTypes {
                 arrayType
             )
         }
+
+        // __native_arraylist_equals: {l: ['a], r: ['a]} -> Bool
+        run {
+            val elemType = FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+            val arrayType = FunkType.ArrayType(elemType)
+            context["__native_arraylist_equals"] = FunkType.FunctionType(
+                FunkType.RecordType(mapOf(
+                    "l" to arrayType,
+                    "r" to arrayType
+                )),
+                FunkType.BooleanType
+            )
+        }
     }
 }

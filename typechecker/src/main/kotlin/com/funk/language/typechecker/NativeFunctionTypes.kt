@@ -2,6 +2,7 @@ package com.funk.language.typechecker
 
 import com.funk.language.ast.FunkType
 import com.funk.language.typechecker.types.BasicTypes
+import com.funk.language.typechecker.types.CharTypes
 import com.funk.language.typechecker.types.collections.ArrayListTypes
 import com.funk.language.typechecker.types.collections.ListTypes
 import com.funk.language.typechecker.types.collections.MapTypes
@@ -10,6 +11,8 @@ import com.funk.language.typechecker.types.collections.NonEmptyListTypes
 import com.funk.language.typechecker.types.collections.DequeTypes
 import com.funk.language.typechecker.types.collections.BytesTypes
 import com.funk.language.typechecker.types.collections.ByteBufferTypes
+import com.funk.language.typechecker.types.collections.SortedMapTypes
+import com.funk.language.typechecker.types.collections.SortedSetTypes
 import com.funk.language.typechecker.types.math.MathCoreTypes
 import com.funk.language.typechecker.types.math.MathTrigTypes
 import com.funk.language.typechecker.types.math.MathRandomTypes
@@ -43,6 +46,7 @@ object NativeFunctionTypes {
 
     fun registerAll(context: MutableMap<String, FunkType>) {
         BasicTypes.registerAll(context)
+        CharTypes.registerAll(context)
 
         ArrayListTypes.registerAll(context)
         ListTypes.registerAll(context)
@@ -52,6 +56,8 @@ object NativeFunctionTypes {
         DequeTypes.registerAll(context)
         BytesTypes.registerAll(context)
         ByteBufferTypes.registerAll(context)
+        SortedMapTypes.registerAll(context)
+        SortedSetTypes.registerAll(context)
 
         MathCoreTypes.registerAll(context)
         MathTrigTypes.registerAll(context)

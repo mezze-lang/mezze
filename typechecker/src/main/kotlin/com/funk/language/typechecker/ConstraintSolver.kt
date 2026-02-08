@@ -280,6 +280,15 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
             is FunkType.SetType -> {
                 FunkType.SetType(elementType = applyWithVisited(type.elementType, visited))
             }
+            is FunkType.SortedMapType -> {
+                FunkType.SortedMapType(
+                    keyType = applyWithVisited(type.keyType, visited),
+                    valueType = applyWithVisited(type.valueType, visited)
+                )
+            }
+            is FunkType.SortedSetType -> {
+                FunkType.SortedSetType(elementType = applyWithVisited(type.elementType, visited))
+            }
             is FunkType.SuspendedType -> {
                 FunkType.SuspendedType(
                     valueType = applyWithVisited(type.valueType, visited),
@@ -291,7 +300,7 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.FracType, is FunkType.NatType,
             is FunkType.OrderingType, is FunkType.BytesType,
-            is FunkType.ByteBufferType -> type
+            is FunkType.ByteBufferType, is FunkType.CharType -> type
 
             is FunkType.EffectRow -> applyToEffectRow(type)
         }
@@ -1050,6 +1059,21 @@ class ConstraintSolver(
 
             // Set types
             expandedType1 is FunkType.SetType && expandedType2 is FunkType.SetType -> {
+                unify(expandedType1.elementType, expandedType2.elementType)
+            }
+
+            // SortedMap types
+            expandedType1 is FunkType.SortedMapType && expandedType2 is FunkType.SortedMapType -> {
+                val keyUnifier = unify(expandedType1.keyType, expandedType2.keyType)
+                val valueUnifier = unify(
+                    keyUnifier.apply(expandedType1.valueType),
+                    keyUnifier.apply(expandedType2.valueType)
+                )
+                keyUnifier.compose(valueUnifier)
+            }
+
+            // SortedSet types
+            expandedType1 is FunkType.SortedSetType && expandedType2 is FunkType.SortedSetType -> {
                 unify(expandedType1.elementType, expandedType2.elementType)
             }
 

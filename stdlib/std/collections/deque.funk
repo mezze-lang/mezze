@@ -125,3 +125,10 @@ pub let push: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
 # Pop (remove from front)
 pub let pop: { d: Deque 'a } -> Option { head: 'a, tail: Deque 'a } = { d } ->
     pop_front { d = d }
+
+# ============================================
+# Equality
+# ============================================
+
+pub let equals: { d1: Deque 'a, d2: Deque 'a } -> Bool = { d1, d2 } ->
+    __native_deque_equals { d1 = d1, d2 = d2 }

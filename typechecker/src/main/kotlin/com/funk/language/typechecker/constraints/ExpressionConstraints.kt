@@ -1094,6 +1094,13 @@ class ExpressionConstraintGenerator {
             is FunkType.SetType -> FunkType.SetType(
                 elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
             )
+            is FunkType.SortedMapType -> FunkType.SortedMapType(
+                keyType = substituteAssociatedTypesInType(type.keyType, associatedTypeBindings),
+                valueType = substituteAssociatedTypesInType(type.valueType, associatedTypeBindings)
+            )
+            is FunkType.SortedSetType -> FunkType.SortedSetType(
+                elementType = substituteAssociatedTypesInType(type.elementType, associatedTypeBindings)
+            )
             is FunkType.MapType -> FunkType.MapType(
                 keyType = substituteAssociatedTypesInType(type.keyType, associatedTypeBindings),
                 valueType = substituteAssociatedTypesInType(type.valueType, associatedTypeBindings)
@@ -1105,7 +1112,8 @@ class ExpressionConstraintGenerator {
             // Primitive types and VarType unchanged
             is FunkType.VarType, is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+            is FunkType.CharType, is FunkType.EffectRow -> type
         }
     }
 
@@ -1152,13 +1160,16 @@ class ExpressionConstraintGenerator {
             is FunkType.ArrayType -> getFreeTypeVariables(type.elementType)
             is FunkType.ListType -> getFreeTypeVariables(type.elementType)
             is FunkType.SetType -> getFreeTypeVariables(type.elementType)
+            is FunkType.SortedMapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
+            is FunkType.SortedSetType -> getFreeTypeVariables(type.elementType)
             is FunkType.MapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
             is FunkType.SuspendedType -> getFreeTypeVariables(type.valueType)
             is FunkType.TypeApplication -> type.args.flatMap { getFreeTypeVariables(it) }.toSet()
             // Primitive types have no variables
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> emptySet()
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+            is FunkType.CharType, is FunkType.EffectRow -> emptySet()
         }
     }
 
@@ -1198,6 +1209,13 @@ class ExpressionConstraintGenerator {
             is FunkType.SetType -> FunkType.SetType(
                 elementType = applyTypeVarSubstitution(type.elementType, substitution)
             )
+            is FunkType.SortedMapType -> FunkType.SortedMapType(
+                keyType = applyTypeVarSubstitution(type.keyType, substitution),
+                valueType = applyTypeVarSubstitution(type.valueType, substitution)
+            )
+            is FunkType.SortedSetType -> FunkType.SortedSetType(
+                elementType = applyTypeVarSubstitution(type.elementType, substitution)
+            )
             is FunkType.MapType -> FunkType.MapType(
                 keyType = applyTypeVarSubstitution(type.keyType, substitution),
                 valueType = applyTypeVarSubstitution(type.valueType, substitution)
@@ -1213,7 +1231,8 @@ class ExpressionConstraintGenerator {
             // Primitive types unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+            is FunkType.CharType, is FunkType.EffectRow -> type
         }
     }
 
@@ -1237,6 +1256,8 @@ class ExpressionConstraintGenerator {
             is FunkType.ArrayType -> extractTypeVariables(type.elementType)
             is FunkType.ListType -> extractTypeVariables(type.elementType)
             is FunkType.SetType -> extractTypeVariables(type.elementType)
+            is FunkType.SortedMapType -> extractTypeVariables(type.keyType) + extractTypeVariables(type.valueType)
+            is FunkType.SortedSetType -> extractTypeVariables(type.elementType)
             is FunkType.MapType -> extractTypeVariables(type.keyType) + extractTypeVariables(type.valueType)
             is FunkType.SuspendedType -> extractTypeVariables(type.valueType)
             is FunkType.TypeApplication -> type.args.flatMap { extractTypeVariables(it) }

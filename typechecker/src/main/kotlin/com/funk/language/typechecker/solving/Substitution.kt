@@ -103,6 +103,15 @@ data class Substitution(
                 elementType = applyWithVisited(type.elementType, visitedVars)
             )
 
+            is FunkType.SortedMapType -> FunkType.SortedMapType(
+                keyType = applyWithVisited(type.keyType, visitedVars),
+                valueType = applyWithVisited(type.valueType, visitedVars)
+            )
+
+            is FunkType.SortedSetType -> FunkType.SortedSetType(
+                elementType = applyWithVisited(type.elementType, visitedVars)
+            )
+
             is FunkType.MapType -> FunkType.MapType(
                 keyType = applyWithVisited(type.keyType, visitedVars),
                 valueType = applyWithVisited(type.valueType, visitedVars)
@@ -124,7 +133,8 @@ data class Substitution(
             is FunkType.FracType,
             is FunkType.OrderingType,
             is FunkType.BytesType,
-            is FunkType.ByteBufferType -> type
+            is FunkType.ByteBufferType,
+            is FunkType.CharType -> type
         }
     }
 
@@ -258,6 +268,11 @@ fun occursCheck(typeVar: TypeVar, type: FunkType): Boolean {
         is FunkType.ArrayType -> occursCheck(typeVar, type.elementType)
         is FunkType.ListType -> occursCheck(typeVar, type.elementType)
         is FunkType.SetType -> occursCheck(typeVar, type.elementType)
+        is FunkType.SortedSetType -> occursCheck(typeVar, type.elementType)
+
+        is FunkType.SortedMapType ->
+            occursCheck(typeVar, type.keyType) ||
+            occursCheck(typeVar, type.valueType)
 
         is FunkType.MapType ->
             occursCheck(typeVar, type.keyType) ||
@@ -276,7 +291,8 @@ fun occursCheck(typeVar: TypeVar, type: FunkType): Boolean {
         is FunkType.FracType,
         is FunkType.OrderingType,
         is FunkType.BytesType,
-        is FunkType.ByteBufferType -> false
+        is FunkType.ByteBufferType,
+        is FunkType.CharType -> false
     }
 }
 
@@ -313,6 +329,10 @@ fun collectFreeTypeVars(type: FunkType): Set<TypeVar> {
         is FunkType.ArrayType -> collectFreeTypeVars(type.elementType)
         is FunkType.ListType -> collectFreeTypeVars(type.elementType)
         is FunkType.SetType -> collectFreeTypeVars(type.elementType)
+        is FunkType.SortedSetType -> collectFreeTypeVars(type.elementType)
+
+        is FunkType.SortedMapType ->
+            collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
 
         is FunkType.MapType ->
             collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
@@ -330,6 +350,7 @@ fun collectFreeTypeVars(type: FunkType): Set<TypeVar> {
         is FunkType.FracType,
         is FunkType.OrderingType,
         is FunkType.BytesType,
-        is FunkType.ByteBufferType -> emptySet()
+        is FunkType.ByteBufferType,
+        is FunkType.CharType -> emptySet()
     }
 }

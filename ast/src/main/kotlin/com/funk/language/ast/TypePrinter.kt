@@ -172,6 +172,7 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     is FunkType.BooleanType -> "Bool"
     is FunkType.NatType -> "Nat"
     is FunkType.FracType -> "Frac"
+    is FunkType.CharType -> "Char"
     is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
@@ -211,6 +212,8 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     is FunkType.ListType -> "List ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is FunkType.MapType -> "Map ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
     is FunkType.SetType -> "Set ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
+    is FunkType.SortedMapType -> "SortedMap ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
+    is FunkType.SortedSetType -> "SortedSet ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is FunkType.SuspendedType -> {
         // Suspended types print as: valueType <effects>
         val valueTypeStr = prettyPrintTypeWithMapping(type.valueType, typeVarMapping)
@@ -428,6 +431,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is FunkType.BooleanType -> "Bool"
     is FunkType.NatType -> "Nat"
     is FunkType.FracType -> "Frac"
+    is FunkType.CharType -> "Char"
     is FunkType.VarType -> typeVarMapping[type.variable] ?: type.variable.name
     is FunkType.RecordType -> {
         val fields = type.fields.entries.joinToString(", ") { (name, fieldType) ->
@@ -450,6 +454,8 @@ private fun prettyPrintTypeWithAliasesRecursive(
     is FunkType.ListType -> "List ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
     is FunkType.MapType -> "Map ${prettyPrintWithAliasCheck(type.keyType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
     is FunkType.SetType -> "Set ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
+    is FunkType.SortedMapType -> "SortedMap ${prettyPrintWithAliasCheck(type.keyType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)} ${prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
+    is FunkType.SortedSetType -> "SortedSet ${prettyPrintWithAliasCheck(type.elementType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)}"
     is FunkType.FunctionType -> {
         // Build parameter type string - add parentheses if parameter is also a function type
         val paramTypeStr = if (type.paramType is FunkType.FunctionType) {
@@ -771,10 +777,12 @@ fun isBuiltinType(type: FunkType): Boolean {
         // Primitive built-in types
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType -> true
+        is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+        is FunkType.CharType -> true
 
         // Core built-in types
-        is FunkType.ListType, is FunkType.MapType, is FunkType.SetType -> true
+        is FunkType.ListType, is FunkType.MapType, is FunkType.SetType,
+        is FunkType.SortedMapType, is FunkType.SortedSetType -> true
 
         // Function types are built-in constructs
         is FunkType.FunctionType -> true

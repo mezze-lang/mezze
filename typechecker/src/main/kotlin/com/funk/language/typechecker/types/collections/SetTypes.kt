@@ -89,11 +89,11 @@ object SetTypes {
 
         context["__native_set_to_list"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("s" to setType)),
-            FunkType.ListType(FunkType.VarType(setElemTypeVar))
+            FunkType.ArrayType(FunkType.VarType(setElemTypeVar))
         )
 
         context["__native_set_from_list"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("xs" to FunkType.ListType(FunkType.VarType(setElemTypeVar)))),
+            FunkType.RecordType(mapOf("xs" to FunkType.ArrayType(FunkType.VarType(setElemTypeVar)))),
             setType
         )
 
@@ -126,7 +126,7 @@ object SetTypes {
                 "f" to FunkType.FunctionType(
                     FunkType.RecordType(mapOf(
                         "acc" to FunkType.VarType(setAccTypeVar),
-                        "elem" to FunkType.VarType(setElemTypeVar)
+                        "x" to FunkType.VarType(setElemTypeVar)
                     )),
                     FunkType.VarType(setAccTypeVar)
                 )
@@ -137,7 +137,7 @@ object SetTypes {
         context["__native_set_insert_all"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
                 "s" to setType,
-                "xs" to FunkType.ListType(FunkType.VarType(setElemTypeVar))
+                "xs" to FunkType.ArrayType(FunkType.VarType(setElemTypeVar))
             )),
             setType
         )
@@ -145,9 +145,18 @@ object SetTypes {
         context["__native_set_remove_all"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
                 "s" to setType,
-                "xs" to FunkType.ListType(FunkType.VarType(setElemTypeVar))
+                "xs" to FunkType.ArrayType(FunkType.VarType(setElemTypeVar))
             )),
             setType
+        )
+
+        // __native_set_equals: {s1: Set 'a, s2: Set 'a} -> Bool
+        context["__native_set_equals"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "s1" to setType,
+                "s2" to setType
+            )),
+            FunkType.BooleanType
         )
     }
 }

@@ -77,7 +77,7 @@ fun containsConcreteTypes(type: FunkType): Boolean {
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
         is FunkType.OrderingType, is FunkType.BytesType,
-        is FunkType.ByteBufferType -> true
+        is FunkType.ByteBufferType, is FunkType.CharType -> true
 
         // Type variables are not concrete
         is FunkType.VarType -> false
@@ -96,6 +96,10 @@ fun containsConcreteTypes(type: FunkType): Boolean {
         is FunkType.MapType ->
             containsConcreteTypes(type.keyType) || containsConcreteTypes(type.valueType)
         is FunkType.SetType ->
+            containsConcreteTypes(type.elementType)
+        is FunkType.SortedMapType ->
+            containsConcreteTypes(type.keyType) || containsConcreteTypes(type.valueType)
+        is FunkType.SortedSetType ->
             containsConcreteTypes(type.elementType)
         is FunkType.TypeApplication ->
             type.args.any { containsConcreteTypes(it) }
@@ -271,6 +275,10 @@ fun isTypeVariable(type: FunkType): Boolean {
         is FunkType.MapType ->
             isTypeVariable(type.keyType) || isTypeVariable(type.valueType)
         is FunkType.SetType ->
+            isTypeVariable(type.elementType)
+        is FunkType.SortedMapType ->
+            isTypeVariable(type.keyType) || isTypeVariable(type.valueType)
+        is FunkType.SortedSetType ->
             isTypeVariable(type.elementType)
         is FunkType.ListType ->
             isTypeVariable(type.elementType)

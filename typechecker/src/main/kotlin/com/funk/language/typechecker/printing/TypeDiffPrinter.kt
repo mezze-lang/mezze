@@ -71,6 +71,7 @@ object TypeDiffPrinter {
             is FunkType.OrderingType -> "Ordering"
             is FunkType.BytesType -> "Bytes"
             is FunkType.ByteBufferType -> "ByteBuffer"
+            is FunkType.CharType -> "Char"
             is FunkType.FunctionType -> formatFunctionType(type, indent)
             is FunkType.RecordType -> formatRecordType(type, indent)
             is FunkType.VariantType -> formatVariantType(type, indent)
@@ -78,6 +79,8 @@ object TypeDiffPrinter {
             is FunkType.ArrayType -> "Array ${formatType(type.elementType, indent)}"
             is FunkType.ListType -> "List ${formatType(type.elementType, indent)}"
             is FunkType.SetType -> "Set ${formatType(type.elementType, indent)}"
+            is FunkType.SortedMapType -> "SortedMap ${formatType(type.keyType, indent)} ${formatType(type.valueType, indent)}"
+            is FunkType.SortedSetType -> "SortedSet ${formatType(type.elementType, indent)}"
             is FunkType.MapType -> "Map ${formatType(type.keyType, indent)} ${formatType(type.valueType, indent)}"
             is FunkType.SuspendedType -> "Suspended<${formatType(type.valueType, indent)}>"
             is FunkType.EffectRow -> formatEffectRow(type)

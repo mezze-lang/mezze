@@ -277,5 +277,18 @@ object DequeTypes {
                 dequeType
             )
         }
+
+        // __native_deque_equals: {d1: Deque 'a, d2: Deque 'a} -> Bool
+        run {
+            val elemType = FunkType.VarType(TypeVar("a"))
+            val dequeType = FunkType.TypeApplication("Deque", listOf(elemType))
+            context["__native_deque_equals"] = FunkType.FunctionType(
+                FunkType.RecordType(mapOf(
+                    "d1" to dequeType,
+                    "d2" to dequeType
+                )),
+                FunkType.BooleanType
+            )
+        }
     }
 }

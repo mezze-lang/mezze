@@ -199,6 +199,17 @@ private fun applySubstitutionToType(
                 elementType = applySubstitutionToType(type.elementType, substitution)
             )
         }
+        is FunkType.SortedMapType -> {
+            FunkType.SortedMapType(
+                keyType = applySubstitutionToType(type.keyType, substitution),
+                valueType = applySubstitutionToType(type.valueType, substitution)
+            )
+        }
+        is FunkType.SortedSetType -> {
+            FunkType.SortedSetType(
+                elementType = applySubstitutionToType(type.elementType, substitution)
+            )
+        }
         is FunkType.MapType -> {
             FunkType.MapType(
                 keyType = applySubstitutionToType(type.keyType, substitution),
@@ -224,7 +235,8 @@ private fun applySubstitutionToType(
         is FunkType.FracType,
         is FunkType.OrderingType,
         is FunkType.BytesType,
-        is FunkType.ByteBufferType -> type
+        is FunkType.ByteBufferType,
+        is FunkType.CharType -> type
     }
 }
 
@@ -263,6 +275,12 @@ fun collectFreeTypeVars(type: FunkType): Set<TypeVar> {
         is FunkType.SetType -> {
             collectFreeTypeVars(type.elementType)
         }
+        is FunkType.SortedMapType -> {
+            collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
+        }
+        is FunkType.SortedSetType -> {
+            collectFreeTypeVars(type.elementType)
+        }
         is FunkType.MapType -> {
             collectFreeTypeVars(type.keyType) + collectFreeTypeVars(type.valueType)
         }
@@ -282,6 +300,7 @@ fun collectFreeTypeVars(type: FunkType): Set<TypeVar> {
         is FunkType.FracType,
         is FunkType.OrderingType,
         is FunkType.BytesType,
-        is FunkType.ByteBufferType -> emptySet()
+        is FunkType.ByteBufferType,
+        is FunkType.CharType -> emptySet()
     }
 }

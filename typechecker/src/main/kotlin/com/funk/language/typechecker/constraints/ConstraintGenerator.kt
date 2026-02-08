@@ -668,6 +668,11 @@ class ConstraintGenerator(
                 is FunkType.ListType -> collectTypeVars(t.elementType)
                 is FunkType.ArrayType -> collectTypeVars(t.elementType)
                 is FunkType.SetType -> collectTypeVars(t.elementType)
+                is FunkType.SortedMapType -> {
+                    collectTypeVars(t.keyType)
+                    collectTypeVars(t.valueType)
+                }
+                is FunkType.SortedSetType -> collectTypeVars(t.elementType)
                 is FunkType.MapType -> {
                     collectTypeVars(t.keyType)
                     collectTypeVars(t.valueType)
@@ -1180,6 +1185,13 @@ class ConstraintGenerator(
             is FunkType.SetType -> FunkType.SetType(
                 elementType = substituteTypeParams(type.elementType, substitution)
             )
+            is FunkType.SortedMapType -> FunkType.SortedMapType(
+                keyType = substituteTypeParams(type.keyType, substitution),
+                valueType = substituteTypeParams(type.valueType, substitution)
+            )
+            is FunkType.SortedSetType -> FunkType.SortedSetType(
+                elementType = substituteTypeParams(type.elementType, substitution)
+            )
             is FunkType.MapType -> FunkType.MapType(
                 keyType = substituteTypeParams(type.keyType, substitution),
                 valueType = substituteTypeParams(type.valueType, substitution)
@@ -1343,6 +1355,11 @@ class ConstraintGenerator(
             is FunkType.ArrayType -> collectTypeVarsRecursive(type.elementType, result)
             is FunkType.ListType -> collectTypeVarsRecursive(type.elementType, result)
             is FunkType.SetType -> collectTypeVarsRecursive(type.elementType, result)
+            is FunkType.SortedMapType -> {
+                collectTypeVarsRecursive(type.keyType, result)
+                collectTypeVarsRecursive(type.valueType, result)
+            }
+            is FunkType.SortedSetType -> collectTypeVarsRecursive(type.elementType, result)
             is FunkType.MapType -> {
                 collectTypeVarsRecursive(type.keyType, result)
                 collectTypeVarsRecursive(type.valueType, result)
@@ -1356,7 +1373,8 @@ class ConstraintGenerator(
             is FunkType.FracType,
             is FunkType.OrderingType,
             is FunkType.BytesType,
-            is FunkType.ByteBufferType -> { /* No type variables */ }
+            is FunkType.ByteBufferType,
+            is FunkType.CharType -> { /* No type variables */ }
             // Effect and suspended types - check inner types
             is FunkType.EffectRow -> { /* Effect names, no type variables to collect */ }
             is FunkType.SuspendedType -> collectTypeVarsRecursive(type.valueType, result)
@@ -1392,6 +1410,10 @@ class ConstraintGenerator(
             is FunkType.ListType ->
                 containsConcreteTypes(type.elementType)
             is FunkType.SetType ->
+                containsConcreteTypes(type.elementType)
+            is FunkType.SortedMapType ->
+                containsConcreteTypes(type.keyType) || containsConcreteTypes(type.valueType)
+            is FunkType.SortedSetType ->
                 containsConcreteTypes(type.elementType)
             is FunkType.MapType ->
                 containsConcreteTypes(type.keyType) || containsConcreteTypes(type.valueType)

@@ -331,6 +331,24 @@ object TruffleArrayListImplementations {
             FunkArrayList(xs.toList().sortedWith(compareBy { it.toString() }))
         }
 
+        // Equality check
+        context["__native_arraylist_equals"] = NativeFunkFunction("__native_arraylist_equals") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_arraylist_equals", "expects FunkRecord")
+            val l = record.fields["l"] as? FunkArrayList
+                ?: throw NativeFunctionException("__native_arraylist_equals", "expects 'l' as ArrayList")
+            val r = record.fields["r"] as? FunkArrayList
+                ?: throw NativeFunctionException("__native_arraylist_equals", "expects 'r' as ArrayList")
+
+            if (l.size() != r.size()) {
+                FunkBool(false)
+            } else {
+                val lList = l.toList()
+                val rList = r.toList()
+                FunkBool(lList.indices.all { i -> compareValuesDeep(lList[i], rList[i]) })
+            }
+        }
+
         context["__native_arraylist_sort_by"] = NativeFunkFunction("__native_arraylist_sort_by") { args ->
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_arraylist_sort_by", "expects FunkRecord")
@@ -382,6 +400,41 @@ object TruffleArrayListImplementations {
             } else {
                 xs.slice(safeStart, safeEnd)
             }
+        }
+    }
+
+    /**
+     * Compare two FunkValues for deep equality
+     */
+    private fun compareValuesDeep(a: FunkValue, b: FunkValue): Boolean {
+        return when {
+            a is FunkInt && b is FunkInt -> a.value == b.value
+            a is FunkFloat && b is FunkFloat -> a.value == b.value
+            a is FunkString && b is FunkString -> a.value == b.value
+            a is FunkBool && b is FunkBool -> a.value == b.value
+            a is FunkChar && b is FunkChar -> a.value == b.value
+            a is FunkNull && b is FunkNull -> true
+            a is FunkNil && b is FunkNil -> true
+            a is FunkCons && b is FunkCons ->
+                compareValuesDeep(a.head, b.head) && compareValuesDeep(a.tail, b.tail)
+            a is FunkArrayList && b is FunkArrayList -> {
+                if (a.size() != b.size()) false
+                else {
+                    val aList = a.toList()
+                    val bList = b.toList()
+                    aList.indices.all { i -> compareValuesDeep(aList[i], bList[i]) }
+                }
+            }
+            a is FunkRecord && b is FunkRecord -> {
+                a.fields.keys == b.fields.keys &&
+                    a.fields.all { (k, v) -> compareValuesDeep(v, b.fields[k]!!) }
+            }
+            a is FunkVariant && b is FunkVariant -> {
+                a.constructor == b.constructor &&
+                    ((a.value == null && b.value == null) ||
+                        (a.value != null && b.value != null && compareValuesDeep(a.value, b.value)))
+            }
+            else -> a == b
         }
     }
 }

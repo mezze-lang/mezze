@@ -30,6 +30,9 @@ pub let less_than = { l, r } -> __native_frac_less_than { l = l, r = r }
 # Check if left fraction is greater than right
 pub let greater_than = { l, r } -> __native_frac_greater_than { l = l, r = r }
 
+# Compare two fractions, returns Ordering (LT, EQ, GT)
+pub let compare = { l, r } -> __native_frac_compare { l = l, r = r }
+
 # === CONVERSION OPERATIONS ===
 
 # Convert fraction to float

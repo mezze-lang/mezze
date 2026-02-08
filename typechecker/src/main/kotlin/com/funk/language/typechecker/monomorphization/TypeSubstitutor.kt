@@ -139,6 +139,11 @@ class TypeSubstitutor(
             is FunkType.ListType -> FunkType.ListType(applyToType(type.elementType))
             is FunkType.ArrayType -> FunkType.ArrayType(applyToType(type.elementType))
             is FunkType.SetType -> FunkType.SetType(applyToType(type.elementType))
+            is FunkType.SortedMapType -> FunkType.SortedMapType(
+                keyType = applyToType(type.keyType),
+                valueType = applyToType(type.valueType)
+            )
+            is FunkType.SortedSetType -> FunkType.SortedSetType(applyToType(type.elementType))
             is FunkType.MapType -> FunkType.MapType(
                 keyType = applyToType(type.keyType),
                 valueType = applyToType(type.valueType)
@@ -159,6 +164,7 @@ class TypeSubstitutor(
             is FunkType.OrderingType,
             is FunkType.BytesType,
             is FunkType.ByteBufferType,
+            is FunkType.CharType,
             is FunkType.EffectRow -> type
         }
     }
@@ -389,6 +395,7 @@ class TypeSubstitutor(
             is FunkType.OrderingType -> IdentifierTypeAnnotation("Ordering")
             is FunkType.BytesType -> IdentifierTypeAnnotation("Bytes")
             is FunkType.ByteBufferType -> IdentifierTypeAnnotation("ByteBuffer")
+            is FunkType.CharType -> IdentifierTypeAnnotation("Char")
             is FunkType.VarType -> IdentifierTypeAnnotation(type.variable.name)
             is FunkType.RecordType -> RecordTypeAnnotation(
                 entries = type.fields.map { (name, fieldType) ->
@@ -422,6 +429,17 @@ class TypeSubstitutor(
             )
             is FunkType.SetType -> TypeApplicationAnnotation(
                 constructor = "Set",
+                args = listOf(convertFunkTypeToAnnotation(type.elementType))
+            )
+            is FunkType.SortedMapType -> TypeApplicationAnnotation(
+                constructor = "SortedMap",
+                args = listOf(
+                    convertFunkTypeToAnnotation(type.keyType),
+                    convertFunkTypeToAnnotation(type.valueType)
+                )
+            )
+            is FunkType.SortedSetType -> TypeApplicationAnnotation(
+                constructor = "SortedSet",
                 args = listOf(convertFunkTypeToAnnotation(type.elementType))
             )
             is FunkType.MapType -> TypeApplicationAnnotation(
@@ -463,6 +481,11 @@ fun collectTypeVarsFromExpression(expr: Expression): Set<TypeVar> {
             is FunkType.ListType -> collectFromType(type.elementType)
             is FunkType.ArrayType -> collectFromType(type.elementType)
             is FunkType.SetType -> collectFromType(type.elementType)
+            is FunkType.SortedMapType -> {
+                collectFromType(type.keyType)
+                collectFromType(type.valueType)
+            }
+            is FunkType.SortedSetType -> collectFromType(type.elementType)
             is FunkType.MapType -> {
                 collectFromType(type.keyType)
                 collectFromType(type.valueType)

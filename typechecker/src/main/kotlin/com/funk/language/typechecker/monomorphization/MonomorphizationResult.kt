@@ -78,6 +78,8 @@ data class InstanceRequest(
             is FunkType.ListType -> "List${formatTypeForName(type.elementType)}"
             is FunkType.ArrayType -> "Array${formatTypeForName(type.elementType)}"
             is FunkType.SetType -> "Set${formatTypeForName(type.elementType)}"
+            is FunkType.SortedMapType -> "SortedMap${formatTypeForName(type.keyType)}${formatTypeForName(type.valueType)}"
+            is FunkType.SortedSetType -> "SortedSet${formatTypeForName(type.elementType)}"
             is FunkType.MapType -> "Map${formatTypeForName(type.keyType)}${formatTypeForName(type.valueType)}"
             is FunkType.TypeApplication -> "${type.constructor}${type.args.joinToString("") { formatTypeForName(it) }}"
             is FunkType.RecordType -> "Record" // Simplified for now

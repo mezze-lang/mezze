@@ -95,10 +95,10 @@ object TruffleMapImplementations {
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_entries", "expects 'm' as Map")
 
-            // Return list of {key, value} records
-            val entries = m.toKotlinMap().map { (k, v) ->
-                FunkRecord(mapOf("key" to k, "value" to v))
-            }
+            // Return list of {key, value} records - iterate Vavr directly without toKotlinMap()
+            val entries = m.entries.map { tuple ->
+                FunkRecord(mapOf("key" to tuple._1, "value" to tuple._2))
+            }.toJavaList()
             FunkList.fromKotlinList(entries)
         }
 
@@ -108,17 +108,17 @@ object TruffleMapImplementations {
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_map_values", "expects 'm' as Map")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_map_map_values", "expects 'f' function")
 
-            val newEntries = m.toKotlinMap().map { (k, v) ->
+            // Use Vavr's mapValues directly - applies function to each value
+            val newMap = m.entries.mapValues { v ->
                 val arg = if (v is FunkRecord) v else FunkRecord(mapOf("val" to v))
-                val result = when (f) {
+                when (f) {
                     is NativeFunkFunction -> f.call(listOf(v))
                     is FunkTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
                     else -> throw NativeFunctionException("__native_map_map_values", "unsupported function type: ${f::class.simpleName}")
                 }
-                k to result
-            }.toMap()
+            }
 
-            FunkMap(newEntries)
+            FunkMap(newMap)
         }
 
         // Filter
@@ -127,17 +127,18 @@ object TruffleMapImplementations {
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_filter", "expects 'm' as Map")
             val p = record.fields["p"] ?: throw NativeFunctionException("__native_map_filter", "expects 'p' predicate")
 
-            val filteredEntries = m.toKotlinMap().filter { (k, v) ->
-                val entry = FunkRecord(mapOf("key" to k, "value" to v))
+            // Use Vavr's filter directly - no copy needed
+            val filteredMap = m.entries.filter { tuple ->
+                val entry = FunkRecord(mapOf("k" to tuple._1, "v" to tuple._2))
                 val result = when (p) {
                     is NativeFunkFunction -> p.call(listOf(entry))
                     is FunkTruffleFunction -> p.callTarget.call(entry, p.closureVariables, p.lexicalScope, p.lexicalScopeSlotMap) as FunkValue
                     else -> throw NativeFunctionException("__native_map_filter", "unsupported function type: ${p::class.simpleName}")
                 }
                 (result as FunkBool).value
-            }.toMap()
+            }
 
-            FunkMap(filteredEntries)
+            FunkMap(filteredMap)
         }
 
         // Fold
@@ -147,18 +148,15 @@ object TruffleMapImplementations {
             val init = record.fields["init"] ?: throw NativeFunctionException("__native_map_fold", "expects 'init' value")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_map_fold", "expects 'f' function")
 
-            var accumulator = init
-            for ((k, v) in m.toKotlinMap()) {
-                val entry = FunkRecord(mapOf("key" to k, "value" to v))
-                val callArg = FunkRecord(mapOf("acc" to accumulator, "entry" to entry))
-                accumulator = when (f) {
+            // Use Vavr's foldLeft directly - no copy needed
+            m.entries.foldLeft(init) { accumulator, tuple ->
+                val callArg = FunkRecord(mapOf("acc" to accumulator, "k" to tuple._1, "v" to tuple._2))
+                when (f) {
                     is NativeFunkFunction -> f.call(listOf(callArg))
                     is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
                     else -> throw NativeFunctionException("__native_map_fold", "unsupported function type: ${f::class.simpleName}")
                 }
             }
-
-            accumulator
         }
 
         // From keys
@@ -196,9 +194,9 @@ object TruffleMapImplementations {
             val m2 = record.fields["m2"] as? FunkMap ?: throw NativeFunctionException("__native_map_merge_with", "expects 'm2' as Map")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_map_merge_with", "expects 'f' function")
 
-            // Merge with conflict resolution
+            // Merge with conflict resolution - use field names that match stdlib
             val merged = m1.entries.merge(m2.entries) { v1, v2 ->
-                val callArg = FunkRecord(mapOf("v1" to v1, "v2" to v2))
+                val callArg = FunkRecord(mapOf("l" to v1, "r" to v2))
                 when (f) {
                     is NativeFunkFunction -> f.call(listOf(callArg))
                     is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
@@ -221,6 +219,25 @@ object TruffleMapImplementations {
             }
 
             FunkMap(result)
+        }
+
+        // Equality check
+        context["__native_map_equals"] = NativeFunkFunction("__native_map_equals") { args ->
+            val record = args[0] as FunkRecord
+            val m1 = record.fields["m1"] as? FunkMap ?: throw NativeFunctionException("__native_map_equals", "expects 'm1' as Map")
+            val m2 = record.fields["m2"] as? FunkMap ?: throw NativeFunctionException("__native_map_equals", "expects 'm2' as Map")
+
+            // Two maps are equal if they have the same size and all key-value pairs match
+            // Use Vavr's forAll directly - no copy needed
+            if (m1.size() != m2.size()) {
+                FunkBool(false)
+            } else {
+                val allMatch = m1.entries.forAll { tuple ->
+                    val v2 = m2.get(tuple._1)
+                    v2 != null && tuple._2 == v2
+                }
+                FunkBool(allMatch)
+            }
         }
     }
 }

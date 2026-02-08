@@ -63,12 +63,16 @@ pub let get_or_default: { m: (Map 'k 'v), k: 'k, def: 'v } -> 'v= {m, k, def} ->
         None -> def
 
 # Update operations
-pub let update: { m: (Map 'k 'v), k: 'k, f: (Option 'v) -> (Option 'v) } -> (Map 'k 'v)= {m, k, f} -> do
+pub let update: { m: (Map 'k 'v), k: 'k, f: { x: (Option 'v) } -> (Option 'v) } -> (Map 'k 'v)= {m, k, f} -> do
     let current = get { m = m, k = k }
-    let new_val = f { current }
+    let new_val = f { x = current }
     match new_val is
         Some { val } -> insert { m = m, k = k, v = val }
         None -> remove { m = m, k = k }
 
 pub let remove_all: { m: (Map 'k 'v), ks: ['k] } -> (Map 'k 'v)= {m, ks} ->
     __native_map_remove_all { m = m, ks = ks }
+
+# Equality
+pub let equals: { m1: (Map 'k 'v), m2: (Map 'k 'v) } -> Bool = {m1, m2} ->
+    __native_map_equals { m1 = m1, m2 = m2 }

@@ -1333,6 +1333,11 @@ class SubstitutionApplier(
             is FunkType.ArrayType -> FunkType.ArrayType(closeGeneratedRowVars(type.elementType, bindingName))
             is FunkType.ListType -> FunkType.ListType(closeGeneratedRowVars(type.elementType, bindingName))
             is FunkType.SetType -> FunkType.SetType(closeGeneratedRowVars(type.elementType, bindingName))
+            is FunkType.SortedMapType -> FunkType.SortedMapType(
+                keyType = closeGeneratedRowVars(type.keyType, bindingName),
+                valueType = closeGeneratedRowVars(type.valueType, bindingName)
+            )
+            is FunkType.SortedSetType -> FunkType.SortedSetType(closeGeneratedRowVars(type.elementType, bindingName))
             is FunkType.MapType -> FunkType.MapType(
                 keyType = closeGeneratedRowVars(type.keyType, bindingName),
                 valueType = closeGeneratedRowVars(type.valueType, bindingName)
@@ -1356,6 +1361,7 @@ class SubstitutionApplier(
             is FunkType.OrderingType,
             is FunkType.BytesType,
             is FunkType.ByteBufferType,
+            is FunkType.CharType,
             is FunkType.EffectRow -> type
         }
     }

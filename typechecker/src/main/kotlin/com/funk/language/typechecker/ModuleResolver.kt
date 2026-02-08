@@ -189,6 +189,8 @@ class ModuleResolver(
     
     // Core modules that define built-in types - these should be skipped
     // since built-in types are now available directly in the typechecker
+    // NOTE: Only skip modules where ALL functionality is built-in and there's no stdlib wrapper file.
+    // Do NOT skip collection modules with stdlib wrappers (map.funk, set.funk) - they provide wrapper functions
     private val coreTypeModules = setOf(
         "std::core::primitives",     // Primitive type implementations
         "std::core::abilities",      // Core ability definitions (NumAdd, Eq, etc.)
@@ -201,9 +203,8 @@ class ModuleResolver(
         "std::types::boolean",       // Boolean type operations (now built-in)
         "std::types::nat",           // Natural number operations (now built-in)
         "std::types::frac",          // Fraction operations (now built-in)
-        "std::collections::arraylist", // ArrayList operations (now built-in as List)
-        "std::collections::map",     // Map operations (now built-in)
-        "std::collections::set"      // Set operations (now built-in)
+        "std::collections::arraylist" // ArrayList operations (no stdlib file, fully built-in as array.funk)
+        // NOTE: std::collections::map and std::collections::set are NOT skipped - they have stdlib wrapper files
     )
     
     /**

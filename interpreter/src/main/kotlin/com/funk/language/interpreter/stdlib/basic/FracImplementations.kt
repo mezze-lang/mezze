@@ -198,6 +198,23 @@ object FracImplementations {
             FunkBool(l.numerator * r.denominator > r.numerator * l.denominator)
         }
 
+        // Compare: returns Ordering (LT, EQ, GT)
+        context["__native_frac_compare"] = NativeFunkFunction("__native_frac_compare") { args ->
+            val record = args[0] as FunkRecord
+            val l = record.fields["l"] as? FunkFrac ?: throw NativeFunctionException("__native_frac_compare", "expects 'l' as Frac")
+            val r = record.fields["r"] as? FunkFrac ?: throw NativeFunctionException("__native_frac_compare", "expects 'r' as Frac")
+
+            // Cross multiply: a*d vs b*c
+            val leftProduct = l.numerator * r.denominator
+            val rightProduct = r.numerator * l.denominator
+
+            when {
+                leftProduct < rightProduct -> FunkVariant("LT", null)
+                leftProduct > rightProduct -> FunkVariant("GT", null)
+                else -> FunkVariant("EQ", null)
+            }
+        }
+
         context["__native_frac_to_float"] = NativeFunkFunction("__native_frac_to_float") { args ->
             val record = args[0] as FunkRecord
             val n = record.fields["n"] as? FunkFrac ?: throw NativeFunctionException("__native_frac_to_float", "expects 'frac' as Frac")

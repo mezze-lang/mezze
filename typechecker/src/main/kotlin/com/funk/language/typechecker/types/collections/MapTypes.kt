@@ -74,17 +74,17 @@ object MapTypes {
 
         context["__native_map_keys"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("m" to mapType)),
-            FunkType.ListType(FunkType.VarType(mapKeyTypeVar))
+            FunkType.ArrayType(FunkType.VarType(mapKeyTypeVar))
         )
 
         context["__native_map_values"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("m" to mapType)),
-            FunkType.ListType(FunkType.VarType(mapValTypeVar))
+            FunkType.ArrayType(FunkType.VarType(mapValTypeVar))
         )
 
         context["__native_map_entries"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("m" to mapType)),
-            FunkType.ListType(FunkType.RecordType(mapOf(
+            FunkType.ArrayType(FunkType.RecordType(mapOf(
                 "key" to FunkType.VarType(mapKeyTypeVar),
                 "value" to FunkType.VarType(mapValTypeVar)
             )))
@@ -106,8 +106,8 @@ object MapTypes {
                 "m" to mapType,
                 "p" to FunkType.FunctionType(
                     FunkType.RecordType(mapOf(
-                        "key" to FunkType.VarType(mapKeyTypeVar),
-                        "value" to FunkType.VarType(mapValTypeVar)
+                        "k" to FunkType.VarType(mapKeyTypeVar),
+                        "v" to FunkType.VarType(mapValTypeVar)
                     )),
                     FunkType.BooleanType
                 )
@@ -122,10 +122,8 @@ object MapTypes {
                 "f" to FunkType.FunctionType(
                     FunkType.RecordType(mapOf(
                         "acc" to FunkType.VarType(mapAccTypeVar),
-                        "entry" to FunkType.RecordType(mapOf(
-                            "key" to FunkType.VarType(mapKeyTypeVar),
-                            "value" to FunkType.VarType(mapValTypeVar)
-                        ))
+                        "k" to FunkType.VarType(mapKeyTypeVar),
+                        "v" to FunkType.VarType(mapValTypeVar)
                     )),
                     FunkType.VarType(mapAccTypeVar)
                 )
@@ -135,7 +133,7 @@ object MapTypes {
 
         context["__native_map_from_keys"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "ks" to FunkType.ListType(FunkType.VarType(mapKeyTypeVar)),
+                "ks" to FunkType.ArrayType(FunkType.VarType(mapKeyTypeVar)),
                 "f" to FunkType.FunctionType(
                     FunkType.VarType(mapKeyTypeVar),
                     FunkType.VarType(mapValTypeVar)
@@ -158,8 +156,8 @@ object MapTypes {
                 "m2" to mapType,
                 "f" to FunkType.FunctionType(
                     FunkType.RecordType(mapOf(
-                        "v1" to FunkType.VarType(mapValTypeVar),
-                        "v2" to FunkType.VarType(mapValTypeVar)
+                        "l" to FunkType.VarType(mapValTypeVar),
+                        "r" to FunkType.VarType(mapValTypeVar)
                     )),
                     FunkType.VarType(mapValTypeVar)
                 )
@@ -170,9 +168,18 @@ object MapTypes {
         context["__native_map_remove_all"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
                 "m" to mapType,
-                "ks" to FunkType.ListType(FunkType.VarType(mapKeyTypeVar))
+                "ks" to FunkType.ArrayType(FunkType.VarType(mapKeyTypeVar))
             )),
             mapType
+        )
+
+        // __native_map_equals: {m1: Map 'k 'v, m2: Map 'k 'v} -> Bool
+        context["__native_map_equals"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "m1" to mapType,
+                "m2" to mapType
+            )),
+            FunkType.BooleanType
         )
     }
 }

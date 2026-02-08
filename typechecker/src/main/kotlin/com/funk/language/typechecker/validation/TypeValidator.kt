@@ -528,6 +528,7 @@ class TypeValidator(
             is FunkType.OrderingType -> "Ordering"
             is FunkType.BytesType -> "Bytes"
             is FunkType.ByteBufferType -> "ByteBuffer"
+            is FunkType.CharType -> "Char"
 
             is FunkType.VarType -> type.variable.name  // Still polymorphic
 
@@ -557,6 +558,8 @@ class TypeValidator(
             is FunkType.ArrayType -> "Array_${getTypeNameForAbility(type.elementType)}"
             is FunkType.ListType -> "List_${getTypeNameForAbility(type.elementType)}"
             is FunkType.SetType -> "Set_${getTypeNameForAbility(type.elementType)}"
+            is FunkType.SortedMapType -> "SortedMap_${getTypeNameForAbility(type.keyType)}_${getTypeNameForAbility(type.valueType)}"
+            is FunkType.SortedSetType -> "SortedSet_${getTypeNameForAbility(type.elementType)}"
             is FunkType.MapType -> "Map_${getTypeNameForAbility(type.keyType)}_${getTypeNameForAbility(type.valueType)}"
 
             is FunkType.SuspendedType -> getTypeNameForAbility(type.valueType)
@@ -739,6 +742,17 @@ class TypeValidator(
 
             // Both are set types
             type1 is FunkType.SetType && type2 is FunkType.SetType -> {
+                alphaEquivalent(type1.elementType, type2.elementType, mapping)
+            }
+
+            // Both are sorted map types
+            type1 is FunkType.SortedMapType && type2 is FunkType.SortedMapType -> {
+                alphaEquivalent(type1.keyType, type2.keyType, mapping) &&
+                alphaEquivalent(type1.valueType, type2.valueType, mapping)
+            }
+
+            // Both are sorted set types
+            type1 is FunkType.SortedSetType && type2 is FunkType.SortedSetType -> {
                 alphaEquivalent(type1.elementType, type2.elementType, mapping)
             }
 

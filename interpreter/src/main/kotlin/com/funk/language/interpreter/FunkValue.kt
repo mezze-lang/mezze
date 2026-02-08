@@ -196,12 +196,71 @@ data class FunkFloat(val value: Double) : FunkValue() {
 @ExportLibrary(InteropLibrary::class)
 data class FunkString(val value: String) : FunkValue() {
     override fun getDisplayString(): String = "\"$value\""
-    
+
     @ExportMessage
     fun isString(): Boolean = true
-    
+
     @ExportMessage
     fun asString(): String = value
+}
+
+/**
+ * Character value
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkChar(val value: Char) : FunkValue() {
+    override fun getDisplayString(): String = "'$value'"
+
+    @ExportMessage
+    fun isString(): Boolean = true
+
+    @ExportMessage
+    fun asString(): String = value.toString()
+
+    @ExportMessage
+    fun isNumber(): Boolean = true
+
+    @ExportMessage
+    fun fitsInInt(): Boolean = true
+
+    @ExportMessage
+    fun asInt(): Int = value.code
+
+    @ExportMessage
+    fun fitsInLong(): Boolean = true
+
+    @ExportMessage
+    fun asLong(): Long = value.code.toLong()
+
+    @ExportMessage
+    fun fitsInByte(): Boolean = value.code in Byte.MIN_VALUE..Byte.MAX_VALUE
+
+    @ExportMessage
+    fun asByte(): Byte = value.code.toByte()
+
+    @ExportMessage
+    fun fitsInShort(): Boolean = value.code in Short.MIN_VALUE..Short.MAX_VALUE
+
+    @ExportMessage
+    fun asShort(): Short = value.code.toShort()
+
+    @ExportMessage
+    fun fitsInFloat(): Boolean = true
+
+    @ExportMessage
+    fun asFloat(): Float = value.code.toFloat()
+
+    @ExportMessage
+    fun fitsInDouble(): Boolean = true
+
+    @ExportMessage
+    fun asDouble(): Double = value.code.toDouble()
+
+    @ExportMessage
+    fun fitsInBigInteger(): Boolean = true
+
+    @ExportMessage
+    fun asBigInteger(): java.math.BigInteger = java.math.BigInteger.valueOf(value.code.toLong())
 }
 
 /**
@@ -718,6 +777,256 @@ data class FunkSet(val elements: io.vavr.collection.HashSet<FunkValue>) : FunkVa
         /** Create a singleton set */
         fun of(element: FunkValue): FunkSet =
             FunkSet(io.vavr.collection.HashSet.of(element))
+    }
+}
+
+/**
+ * Funk SortedMap - an immutable sorted map backed by Vavr TreeMap.
+ *
+ * Keys are maintained in sorted order based on their natural comparison.
+ * Uses FunkValueComparator for consistent ordering across all FunkValue types.
+ *
+ * Performance characteristics:
+ * - get, put, remove: O(log n)
+ * - min, max: O(log n)
+ * - size: O(1)
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkSortedMap(val entries: io.vavr.collection.TreeMap<FunkValue, FunkValue>) : FunkValue() {
+
+    fun size(): Int = entries.size()
+    fun isEmpty(): Boolean = entries.isEmpty
+
+    fun get(key: FunkValue): FunkValue? = entries.get(key).orNull
+
+    fun put(key: FunkValue, value: FunkValue): FunkSortedMap =
+        FunkSortedMap(entries.put(key, value))
+
+    fun remove(key: FunkValue): FunkSortedMap =
+        FunkSortedMap(entries.remove(key))
+
+    fun containsKey(key: FunkValue): Boolean = entries.containsKey(key)
+
+    fun keys(): List<FunkValue> = entries.keySet().toJavaList()
+
+    fun values(): List<FunkValue> = entries.values().toJavaList()
+
+    fun minKey(): FunkValue? = if (entries.isEmpty) null else entries.head()._1
+
+    fun maxKey(): FunkValue? = if (entries.isEmpty) null else entries.last()._1
+
+    fun minEntry(): Pair<FunkValue, FunkValue>? =
+        if (entries.isEmpty) null else entries.head().let { it._1 to it._2 }
+
+    fun maxEntry(): Pair<FunkValue, FunkValue>? =
+        if (entries.isEmpty) null else entries.last().let { it._1 to it._2 }
+
+    fun toKotlinMap(): Map<FunkValue, FunkValue> = entries.toJavaMap()
+
+    override fun getDisplayString(): String {
+        val entriesStr = entries.toJavaMap().entries.joinToString(", ") { (k, v) ->
+            "${k.getDisplayString()} = ${v.getDisplayString()}"
+        }
+        return "SortedMap { $entriesStr }"
+    }
+
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(listOf("size", "keys", "values", "isEmpty"))
+    }
+
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean {
+        return member in setOf("size", "keys", "values", "isEmpty")
+    }
+
+    @ExportMessage
+    fun readMember(member: String): Any {
+        return when (member) {
+            "size" -> FunkInt(entries.size().toLong())
+            "keys" -> FunkList.fromKotlinList(keys())
+            "values" -> FunkList.fromKotlinList(values())
+            "isEmpty" -> FunkBool(entries.isEmpty)
+            else -> throw FunkException("Property '$member' not found in SortedMap")
+        }
+    }
+
+    companion object {
+        private val comparator: Comparator<FunkValue> = FunkValueComparator()
+
+        /** Create an empty sorted map */
+        fun empty(): FunkSortedMap = FunkSortedMap(io.vavr.collection.TreeMap.empty(comparator))
+
+        /** Create a sorted map from a single entry */
+        fun of(key: FunkValue, value: FunkValue): FunkSortedMap =
+            FunkSortedMap(io.vavr.collection.TreeMap.of(comparator, key, value))
+
+        /** Create a sorted map from a Kotlin map */
+        fun fromMap(map: Map<FunkValue, FunkValue>): FunkSortedMap {
+            var result = empty()
+            for ((k, v) in map) {
+                result = result.put(k, v)
+            }
+            return result
+        }
+    }
+}
+
+/**
+ * Funk SortedSet - an immutable sorted set backed by Vavr TreeSet.
+ *
+ * Elements are maintained in sorted order based on their natural comparison.
+ * Uses FunkValueComparator for consistent ordering across all FunkValue types.
+ *
+ * Performance characteristics:
+ * - add, remove, contains: O(log n)
+ * - min, max: O(log n)
+ * - size: O(1)
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkSortedSet(val elements: io.vavr.collection.TreeSet<FunkValue>) : FunkValue() {
+
+    fun size(): Int = elements.size()
+    fun isEmpty(): Boolean = elements.isEmpty
+
+    fun contains(element: FunkValue): Boolean = elements.contains(element)
+
+    fun add(element: FunkValue): FunkSortedSet =
+        FunkSortedSet(elements.add(element))
+
+    fun remove(element: FunkValue): FunkSortedSet =
+        FunkSortedSet(elements.remove(element))
+
+    fun union(other: FunkSortedSet): FunkSortedSet =
+        FunkSortedSet(elements.addAll(other.elements))
+
+    fun intersect(other: FunkSortedSet): FunkSortedSet =
+        FunkSortedSet(elements.filter { other.elements.contains(it) })
+
+    fun difference(other: FunkSortedSet): FunkSortedSet =
+        FunkSortedSet(elements.removeAll(other.elements))
+
+    fun min(): FunkValue? = if (elements.isEmpty) null else elements.head()
+
+    fun max(): FunkValue? = if (elements.isEmpty) null else elements.last()
+
+    fun toKotlinSet(): Set<FunkValue> = elements.toJavaSet()
+
+    fun toList(): List<FunkValue> = elements.toJavaList()
+
+    override fun getDisplayString(): String = "SortedSet {${elements.toJavaList().joinToString(", ") { it.getDisplayString() }}}"
+
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(listOf("size", "isEmpty"))
+    }
+
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean {
+        return member in setOf("size", "isEmpty")
+    }
+
+    @ExportMessage
+    fun readMember(member: String): Any {
+        return when (member) {
+            "size" -> FunkInt(elements.size().toLong())
+            "isEmpty" -> FunkBool(elements.isEmpty)
+            else -> throw FunkException("Property '$member' not found in SortedSet")
+        }
+    }
+
+    companion object {
+        private val comparator: Comparator<FunkValue> = FunkValueComparator()
+
+        /** Create an empty sorted set */
+        fun empty(): FunkSortedSet = FunkSortedSet(io.vavr.collection.TreeSet.empty(comparator))
+
+        /** Create a singleton sorted set */
+        fun of(element: FunkValue): FunkSortedSet =
+            FunkSortedSet(io.vavr.collection.TreeSet.of(comparator, element))
+
+        /** Create a sorted set from a list */
+        fun fromList(list: List<FunkValue>): FunkSortedSet {
+            var result = empty()
+            for (e in list) {
+                result = result.add(e)
+            }
+            return result
+        }
+    }
+}
+
+/**
+ * Comparator for FunkValue types to enable sorted collections.
+ * Provides a consistent total ordering across all value types.
+ */
+class FunkValueComparator : Comparator<FunkValue> {
+    override fun compare(a: FunkValue, b: FunkValue): Int {
+        // First compare by type
+        val typeOrder = getTypeOrder(a) - getTypeOrder(b)
+        if (typeOrder != 0) return typeOrder
+
+        // Then compare by value within the same type
+        return when (a) {
+            is FunkInt -> (a.value).compareTo((b as FunkInt).value)
+            is FunkFloat -> (a.value).compareTo((b as FunkFloat).value)
+            is FunkString -> (a.value).compareTo((b as FunkString).value)
+            is FunkChar -> (a.value).compareTo((b as FunkChar).value)
+            is FunkBool -> (a.value).compareTo((b as FunkBool).value)
+            is FunkNat -> (a.value).compareTo((b as FunkNat).value)
+            is FunkFrac -> {
+                val bFrac = b as FunkFrac
+                // Compare fractions: a/b vs c/d => ad vs bc
+                val left = a.numerator * bFrac.denominator
+                val right = bFrac.numerator * a.denominator
+                left.compareTo(right)
+            }
+            is FunkRecord -> {
+                // Compare records by their string representation
+                a.getDisplayString().compareTo((b as FunkRecord).getDisplayString())
+            }
+            is FunkVariant -> {
+                val bVariant = b as FunkVariant
+                val constructorCmp = a.constructor.compareTo(bVariant.constructor)
+                if (constructorCmp != 0) constructorCmp
+                else {
+                    // Compare values if both have them
+                    when {
+                        a.value == null && bVariant.value == null -> 0
+                        a.value == null -> -1
+                        bVariant.value == null -> 1
+                        else -> compare(a.value, bVariant.value)
+                    }
+                }
+            }
+            else -> a.getDisplayString().compareTo(b.getDisplayString())
+        }
+    }
+
+    private fun getTypeOrder(value: FunkValue): Int = when (value) {
+        is FunkNull -> 0
+        is FunkBool -> 1
+        is FunkInt -> 2
+        is FunkNat -> 3
+        is FunkFloat -> 4
+        is FunkFrac -> 5
+        is FunkChar -> 6
+        is FunkString -> 7
+        is FunkRecord -> 8
+        is FunkVariant -> 9
+        is FunkList, is FunkCons -> 10
+        is FunkArrayList -> 11
+        is FunkMap -> 12
+        is FunkSet -> 13
+        is FunkSortedMap -> 14
+        is FunkSortedSet -> 15
+        else -> 99
     }
 }
 

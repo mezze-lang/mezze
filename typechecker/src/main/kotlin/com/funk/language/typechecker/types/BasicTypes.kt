@@ -680,6 +680,21 @@ object BasicTypes {
             FunkType.BooleanType
         )
 
+        // Ordering comparison type
+        val orderingType = FunkType.VariantType(mapOf(
+            "LT" to null,
+            "EQ" to null,
+            "GT" to null
+        ))
+
+        context["__native_frac_compare"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "l" to FunkType.FracType,
+                "r" to FunkType.FracType
+            )),
+            orderingType
+        )
+
         context["__native_frac_to_float"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FloatType

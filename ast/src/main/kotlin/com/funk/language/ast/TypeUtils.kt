@@ -124,12 +124,18 @@ private fun collectTypeVarsRecursive(type: FunkType, collector: MutableList<Type
             collectTypeVarsRecursive(type.valueType, collector, sortFields)
         }
         is FunkType.SetType -> collectTypeVarsRecursive(type.elementType, collector, sortFields)
+        is FunkType.SortedMapType -> {
+            collectTypeVarsRecursive(type.keyType, collector, sortFields)
+            collectTypeVarsRecursive(type.valueType, collector, sortFields)
+        }
+        is FunkType.SortedSetType -> collectTypeVarsRecursive(type.elementType, collector, sortFields)
         is FunkType.ArrayType -> collectTypeVarsRecursive(type.elementType, collector, sortFields)
         is FunkType.SuspendedType -> collectTypeVarsRecursive(type.valueType, collector, sortFields)
         // Base types don't contain type variables
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> { }
+        is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+        is FunkType.CharType, is FunkType.EffectRow -> { }
     }
 }
 
@@ -282,6 +288,15 @@ fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVar>): Fun
             val newElementType = substituteTypeVariables(type.elementType, mapping)
             FunkType.SetType(newElementType)
         }
+        is FunkType.SortedMapType -> {
+            val newKeyType = substituteTypeVariables(type.keyType, mapping)
+            val newValueType = substituteTypeVariables(type.valueType, mapping)
+            FunkType.SortedMapType(newKeyType, newValueType)
+        }
+        is FunkType.SortedSetType -> {
+            val newElementType = substituteTypeVariables(type.elementType, mapping)
+            FunkType.SortedSetType(newElementType)
+        }
         is FunkType.ArrayType -> {
             val newElementType = substituteTypeVariables(type.elementType, mapping)
             FunkType.ArrayType(newElementType)
@@ -293,7 +308,8 @@ fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVar>): Fun
         // Base types and effect rows remain unchanged
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> type
+        is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+        is FunkType.CharType, is FunkType.EffectRow -> type
     }
 }
 

@@ -81,6 +81,10 @@ sealed interface FunkType {
     @Serializable
     object FracType : FunkType
 
+    // Character type
+    @Serializable
+    object CharType : FunkType
+
     // Binary data type
     @Serializable
     object BytesType : FunkType
@@ -139,6 +143,12 @@ sealed interface FunkType {
 
     @Serializable
     data class SetType(val elementType: FunkType) : FunkType
+
+    @Serializable
+    data class SortedMapType(val keyType: FunkType, val valueType: FunkType) : FunkType
+
+    @Serializable
+    data class SortedSetType(val elementType: FunkType) : FunkType
 
     // Generic type application (e.g., Option Int, Result String Error, MyType 'a 'b)
     // This represents applying type arguments to a type constructor
@@ -312,6 +322,13 @@ data class TypeScheme(
             is FunkType.SetType -> FunkType.SetType(
                 applySubstitutionToType(type.elementType, substitution)
             )
+            is FunkType.SortedMapType -> FunkType.SortedMapType(
+                applySubstitutionToType(type.keyType, substitution),
+                applySubstitutionToType(type.valueType, substitution)
+            )
+            is FunkType.SortedSetType -> FunkType.SortedSetType(
+                applySubstitutionToType(type.elementType, substitution)
+            )
             is FunkType.ArrayType -> FunkType.ArrayType(
                 applySubstitutionToType(type.elementType, substitution)
             )
@@ -322,7 +339,8 @@ data class TypeScheme(
             // Concrete types remain unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType,
+            is FunkType.CharType -> type
             is FunkType.EffectRow -> type // Effects don't contain type variables for now
         }
     }

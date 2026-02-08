@@ -117,7 +117,8 @@ object TruffleSetImplementations {
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_filter", "expects 's' as Set")
             val p = record.fields["p"] ?: throw NativeFunctionException("__native_set_filter", "expects 'p' predicate")
 
-            val filtered = s.toList().filter { element ->
+            // Use Vavr's filter directly - no toList() copy needed
+            val filtered = s.elements.filter { element ->
                 val arg = if (element is FunkRecord) element else FunkRecord(mapOf("val" to element))
                 val result = when (p) {
                     is NativeFunkFunction -> p.call(listOf(element))
@@ -136,7 +137,8 @@ object TruffleSetImplementations {
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_map", "expects 's' as Set")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_set_map", "expects 'f' function")
 
-            val mapped = s.toList().map { element ->
+            // Use Vavr's map directly - no toList() copy needed
+            val mapped = s.elements.map { element ->
                 val arg = if (element is FunkRecord) element else FunkRecord(mapOf("val" to element))
                 when (f) {
                     is NativeFunkFunction -> f.call(listOf(element))
@@ -145,7 +147,7 @@ object TruffleSetImplementations {
                 }
             }
 
-            FunkSet(mapped)
+            FunkSet(io.vavr.collection.HashSet.ofAll(mapped))
         }
 
         // Fold
@@ -155,17 +157,15 @@ object TruffleSetImplementations {
             val init = record.fields["init"] ?: throw NativeFunctionException("__native_set_fold", "expects 'init' value")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_set_fold", "expects 'f' function")
 
-            var accumulator = init
-            for (element in s.toList()) {
-                val callArg = FunkRecord(mapOf("acc" to accumulator, "elem" to element))
-                accumulator = when (f) {
+            // Use Vavr's foldLeft directly - no toList() copy needed
+            s.elements.foldLeft(init) { accumulator, element ->
+                val callArg = FunkRecord(mapOf("acc" to accumulator, "x" to element))
+                when (f) {
                     is NativeFunkFunction -> f.call(listOf(callArg))
                     is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
                     else -> throw NativeFunctionException("__native_set_fold", "unsupported function type: ${f::class.simpleName}")
                 }
             }
-
-            accumulator
         }
 
         // Insert all
@@ -184,6 +184,18 @@ object TruffleSetImplementations {
             val xs = record.fields["xs"] as? FunkList ?: throw NativeFunctionException("__native_set_remove_all", "expects 'xs' as List")
 
             FunkSet(s.elements.removeAll(xs.toKotlinList()))
+        }
+
+        // Equality check
+        context["__native_set_equals"] = NativeFunkFunction("__native_set_equals") { args ->
+            val record = args[0] as FunkRecord
+            val s1 = record.fields["s1"] as? FunkSet ?: throw NativeFunctionException("__native_set_equals", "expects 's1' as Set")
+            val s2 = record.fields["s2"] as? FunkSet ?: throw NativeFunctionException("__native_set_equals", "expects 's2' as Set")
+
+            // Two sets are equal if they have the same size and s1 is a subset of s2
+            val sameSize = s1.size() == s2.size()
+            val isSubset = s1.elements.forAll { s2.elements.contains(it) }
+            FunkBool(sameSize && isSubset)
         }
     }
 }

@@ -77,3 +77,7 @@ pub let head = {xs} ->
 
 pub let tail = {xs} ->
     drop { xs = xs, n = 1 }
+
+# Equality
+pub let equals = {l, r} ->
+    __native_arraylist_equals { l = l, r = r }

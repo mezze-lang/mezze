@@ -53,6 +53,7 @@ object InspectImplementations {
             is FunkNat -> "${value.value}n"  // Add 'n' suffix for natural numbers
             is FunkFrac -> "${value.numerator}/${value.denominator}"
             is FunkBytes -> value.getDisplayString()  // Use the built-in display representation
+            is FunkChar -> "'${value.value}'"
 
             // Unit/Null
             is FunkUnit -> "()"
@@ -111,6 +112,40 @@ object InspectImplementations {
                     val elementStrings = value.toList().map { valueToString(it) }
                     "{${elementStrings.joinToString(", ")}}"
                 }
+            }
+
+            // Arrays (ArrayList)
+            is FunkArrayList -> {
+                val elementStrings = value.toList().map { valueToString(it) }
+                "[|${elementStrings.joinToString(", ")}|]"
+            }
+
+            // Sorted Sets
+            is FunkSortedSet -> {
+                if (value.isEmpty()) {
+                    "SortedSet{}"
+                } else {
+                    val elementStrings = value.toList().map { valueToString(it) }
+                    "SortedSet{${elementStrings.joinToString(", ")}}"
+                }
+            }
+
+            // Sorted Maps
+            is FunkSortedMap -> {
+                if (value.isEmpty()) {
+                    "SortedMap{}"
+                } else {
+                    val entryStrings = value.toKotlinMap().map { (k, v) ->
+                        "${valueToString(k)} = ${valueToString(v)}"
+                    }
+                    "SortedMap{ ${entryStrings.joinToString(", ")} }"
+                }
+            }
+
+            // Deques
+            is FunkDeque -> {
+                val elementStrings = value.toList().map { valueToString(it) }
+                "Deque[${elementStrings.joinToString(", ")}]"
             }
 
             // Tuples

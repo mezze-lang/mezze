@@ -123,6 +123,13 @@ class UnificationEngine(
             is FunkType.SetType -> {
                 trackAbilityConstraintForType(type.elementType, abilityName, sourceExpression)
             }
+            is FunkType.SortedMapType -> {
+                trackAbilityConstraintForType(type.keyType, abilityName, sourceExpression)
+                trackAbilityConstraintForType(type.valueType, abilityName, sourceExpression)
+            }
+            is FunkType.SortedSetType -> {
+                trackAbilityConstraintForType(type.elementType, abilityName, sourceExpression)
+            }
             is FunkType.MapType -> {
                 trackAbilityConstraintForType(type.keyType, abilityName, sourceExpression)
                 trackAbilityConstraintForType(type.valueType, abilityName, sourceExpression)
@@ -390,6 +397,15 @@ class UnificationEngine(
                 unifyTypesWithSubstitution(t1.elementType, t2.elementType, substitutions)
             }
 
+            t1 is FunkType.SortedMapType && t2 is FunkType.SortedMapType -> {
+                unifyTypesWithSubstitution(t1.keyType, t2.keyType, substitutions)
+                unifyTypesWithSubstitution(t1.valueType, t2.valueType, substitutions)
+            }
+
+            t1 is FunkType.SortedSetType && t2 is FunkType.SortedSetType -> {
+                unifyTypesWithSubstitution(t1.elementType, t2.elementType, substitutions)
+            }
+
             t1 is FunkType.MapType && t2 is FunkType.MapType -> {
                 unifyTypesWithSubstitution(t1.keyType, t2.keyType, substitutions)
                 unifyTypesWithSubstitution(t1.valueType, t2.valueType, substitutions)
@@ -480,6 +496,15 @@ class UnificationEngine(
             is FunkType.SetType -> {
                 FunkType.SetType(applySubstitution(type.elementType, substitutions))
             }
+            is FunkType.SortedMapType -> {
+                FunkType.SortedMapType(
+                    applySubstitution(type.keyType, substitutions),
+                    applySubstitution(type.valueType, substitutions)
+                )
+            }
+            is FunkType.SortedSetType -> {
+                FunkType.SortedSetType(applySubstitution(type.elementType, substitutions))
+            }
             is FunkType.MapType -> {
                 FunkType.MapType(
                     applySubstitution(type.keyType, substitutions),
@@ -565,6 +590,11 @@ class UnificationEngine(
             is FunkType.ArrayType ->
                 occursCheck(typeVar, substitutedType.elementType, substitutions)
             is FunkType.SetType ->
+                occursCheck(typeVar, substitutedType.elementType, substitutions)
+            is FunkType.SortedMapType ->
+                occursCheck(typeVar, substitutedType.keyType, substitutions) ||
+                occursCheck(typeVar, substitutedType.valueType, substitutions)
+            is FunkType.SortedSetType ->
                 occursCheck(typeVar, substitutedType.elementType, substitutions)
             is FunkType.MapType ->
                 occursCheck(typeVar, substitutedType.keyType, substitutions) ||
@@ -676,13 +706,15 @@ class UnificationEngine(
             is FunkType.StringType, is FunkType.BooleanType,
             is FunkType.NatType, is FunkType.FracType,
             is FunkType.OrderingType, is FunkType.BytesType,
-            is FunkType.ByteBufferType -> emptySet()
+            is FunkType.ByteBufferType, is FunkType.CharType -> emptySet()
             is FunkType.EffectRow -> emptySet()
             is FunkType.ArrayType -> getFreeTypeVariables(type.elementType)
             is FunkType.ListType -> getFreeTypeVariables(type.elementType)
             is FunkType.MapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
             is FunkType.TypeApplication -> type.args.flatMap { getFreeTypeVariables(it) }.toSet()
             is FunkType.SetType -> getFreeTypeVariables(type.elementType)
+            is FunkType.SortedMapType -> getFreeTypeVariables(type.keyType) + getFreeTypeVariables(type.valueType)
+            is FunkType.SortedSetType -> getFreeTypeVariables(type.elementType)
             is FunkType.SuspendedType -> getFreeTypeVariables(type.valueType)
         }
     }
@@ -746,6 +778,15 @@ class UnificationEngine(
 
             // Set types
             type1 is FunkType.SetType && type2 is FunkType.SetType ->
+                areTypesStructurallyEqual(type1.elementType, type2.elementType)
+
+            // SortedMap types
+            type1 is FunkType.SortedMapType && type2 is FunkType.SortedMapType ->
+                areTypesStructurallyEqual(type1.keyType, type2.keyType) &&
+                areTypesStructurallyEqual(type1.valueType, type2.valueType)
+
+            // SortedSet types
+            type1 is FunkType.SortedSetType && type2 is FunkType.SortedSetType ->
                 areTypesStructurallyEqual(type1.elementType, type2.elementType)
 
             // Map types
@@ -873,6 +914,15 @@ class UnificationEngine(
 
             // Set types
             inferredType is FunkType.SetType && annotatedType is FunkType.SetType ->
+                typesAreCompatibleForAnnotation(inferredType.elementType, annotatedType.elementType, varMapping)
+
+            // SortedMap types
+            inferredType is FunkType.SortedMapType && annotatedType is FunkType.SortedMapType ->
+                typesAreCompatibleForAnnotation(inferredType.keyType, annotatedType.keyType, varMapping) &&
+                typesAreCompatibleForAnnotation(inferredType.valueType, annotatedType.valueType, varMapping)
+
+            // SortedSet types
+            inferredType is FunkType.SortedSetType && annotatedType is FunkType.SortedSetType ->
                 typesAreCompatibleForAnnotation(inferredType.elementType, annotatedType.elementType, varMapping)
 
             // Map types

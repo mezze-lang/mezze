@@ -7,7 +7,7 @@
 pub let empty: {} -> Set 'a = {} ->
     __native_set_empty {}
 
-pub let insert: { s: Set 'a, x: 'a } = { s, x } ->
+pub let insert: { s: Set 'a, x: 'a } -> Set 'a = { s, x } ->
     __native_set_insert { s = s, x = x }
 
 pub let remove: { s: Set 'a, x: 'a } -> Set 'a= { s, x } ->
@@ -68,3 +68,7 @@ pub let insert_all: { s: Set 'a, xs: ['a] } -> Set 'a= {s, xs} ->
 
 pub let remove_all: { s: Set 'a, xs: ['a] } -> Set 'a= {s, xs} ->
     __native_set_remove_all { s = s, xs = xs }
+
+# Equality
+pub let equals: { s1: Set 'a, s2: Set 'a } -> Bool = {s1, s2} ->
+    __native_set_equals { s1 = s1, s2 = s2 }

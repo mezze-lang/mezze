@@ -1,0 +1,91 @@
+# std/collections/sorted_map.funk - Immutable sorted map operations
+#
+# SortedMap is a persistent sorted map backed by a balanced tree.
+# Keys are maintained in sorted order for efficient min/max operations.
+#
+# Performance characteristics:
+# - get, insert, remove: O(log n)
+# - min, max: O(log n)
+# - size, is_empty: O(1)
+#
+# All operations are immutable and return new maps.
+
+# === Construction ===
+
+# Create an empty sorted map
+pub let empty = {} ->
+    __native_sorted_map_empty {}
+
+# === Basic Operations ===
+
+# Insert a key-value pair, returns new map
+pub let insert = { m, k, v } ->
+    __native_sorted_map_insert { m = m, k = k, v = v }
+
+# Get value by key, returns Option
+pub let get = { m, k } ->
+    __native_sorted_map_get { m = m, k = k }
+
+# Remove a key, returns new map
+pub let remove = { m, k } ->
+    __native_sorted_map_remove { m = m, k = k }
+
+# Check if key exists
+pub let contains_key = { m, k } ->
+    __native_sorted_map_contains_key { m = m, k = k }
+
+# === Query ===
+
+# Get number of entries
+pub let size = { m } ->
+    __native_sorted_map_size { m = m }
+
+# Check if map is empty
+pub let is_empty = { m } ->
+    __native_sorted_map_is_empty { m = m }
+
+# Get all keys in sorted order
+pub let keys = { m } ->
+    __native_sorted_map_keys { m = m }
+
+# Get all values in key-sorted order
+pub let values = { m } ->
+    __native_sorted_map_values { m = m }
+
+# Get all entries as list of {key, value} records in sorted order
+pub let entries = { m } ->
+    __native_sorted_map_entries { m = m }
+
+# === Min/Max Operations ===
+
+# Get minimum key, returns Option
+pub let min_key = { m } ->
+    __native_sorted_map_min_key { m = m }
+
+# Get maximum key, returns Option
+pub let max_key = { m } ->
+    __native_sorted_map_max_key { m = m }
+
+# Get minimum entry {key, value}, returns Option
+pub let min_entry = { m } ->
+    __native_sorted_map_min_entry { m = m }
+
+# Get maximum entry {key, value}, returns Option
+pub let max_entry = { m } ->
+    __native_sorted_map_max_entry { m = m }
+
+# === Conversions ===
+
+# Convert from regular Map to SortedMap
+pub let from_map = { m } ->
+    __native_sorted_map_from_map { m = m }
+
+# Convert SortedMap to regular Map
+pub let to_map = { m } ->
+    __native_sorted_map_to_map { m = m }
+
+# === Equality ===
+
+# Check if two sorted maps are equal
+pub let equals = { m1, m2 } ->
+    __native_sorted_map_equals { m1 = m1, m2 = m2 }

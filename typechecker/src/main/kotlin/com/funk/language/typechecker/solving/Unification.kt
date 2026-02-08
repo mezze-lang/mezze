@@ -253,6 +253,48 @@ fun unify(type1: FunkType, type2: FunkType, typeDeclarations: Map<String, TypeDe
         type1 is FunkType.TypeApplication && type1.constructor == "Set" && type1.args.size == 1 && type2 is FunkType.SetType ->
             unify(type1.args[0], type2.elementType, typeDeclarations)
 
+        // CASE 9b: SortedMap type unification
+        type1 is FunkType.SortedMapType && type2 is FunkType.SortedMapType ->
+            unifySortedMaps(type1, type2, typeDeclarations)
+
+        // CASE 9c: Cross-unification between SortedMapType and TypeApplication("SortedMap", ...)
+        type1 is FunkType.SortedMapType && type2 is FunkType.TypeApplication && type2.constructor == "SortedMap" && type2.args.size == 2 -> {
+            val keyResult = unify(type1.keyType, type2.args[0], typeDeclarations)
+            when (keyResult) {
+                is UnificationResult.Success -> {
+                    val valueResult = unify(keyResult.substitution.apply(type1.valueType), keyResult.substitution.apply(type2.args[1]), typeDeclarations)
+                    when (valueResult) {
+                        is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
+                        is UnificationResult.Failure -> valueResult
+                    }
+                }
+                is UnificationResult.Failure -> keyResult
+            }
+        }
+        type1 is FunkType.TypeApplication && type1.constructor == "SortedMap" && type1.args.size == 2 && type2 is FunkType.SortedMapType -> {
+            val keyResult = unify(type1.args[0], type2.keyType, typeDeclarations)
+            when (keyResult) {
+                is UnificationResult.Success -> {
+                    val valueResult = unify(keyResult.substitution.apply(type1.args[1]), keyResult.substitution.apply(type2.valueType), typeDeclarations)
+                    when (valueResult) {
+                        is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
+                        is UnificationResult.Failure -> valueResult
+                    }
+                }
+                is UnificationResult.Failure -> keyResult
+            }
+        }
+
+        // CASE 9d: SortedSet type unification
+        type1 is FunkType.SortedSetType && type2 is FunkType.SortedSetType ->
+            unify(type1.elementType, type2.elementType, typeDeclarations)
+
+        // CASE 9e: Cross-unification between SortedSetType and TypeApplication("SortedSet", ...)
+        type1 is FunkType.SortedSetType && type2 is FunkType.TypeApplication && type2.constructor == "SortedSet" && type2.args.size == 1 ->
+            unify(type1.elementType, type2.args[0], typeDeclarations)
+        type1 is FunkType.TypeApplication && type1.constructor == "SortedSet" && type1.args.size == 1 && type2 is FunkType.SortedSetType ->
+            unify(type1.args[0], type2.elementType, typeDeclarations)
+
         // CASE 10: Map type unification
         type1 is FunkType.MapType && type2 is FunkType.MapType ->
             unifyMaps(type1, type2, typeDeclarations)
@@ -757,6 +799,29 @@ private fun unifyMaps(map1: FunkType.MapType, map2: FunkType.MapType, typeDeclar
 }
 
 /**
+ * Unify two sorted map types.
+ */
+private fun unifySortedMaps(map1: FunkType.SortedMapType, map2: FunkType.SortedMapType, typeDeclarations: Map<String, TypeDeclaration> = emptyMap()): UnificationResult {
+    // Unify key types
+    val keyResult = unify(map1.keyType, map2.keyType, typeDeclarations)
+    if (keyResult is UnificationResult.Failure) {
+        return keyResult
+    }
+    val keySubst = (keyResult as UnificationResult.Success).substitution
+
+    // Apply key substitution and unify value types
+    val value1 = keySubst.apply(map1.valueType)
+    val value2 = keySubst.apply(map2.valueType)
+    val valueResult = unify(value1, value2, typeDeclarations)
+    if (valueResult is UnificationResult.Failure) {
+        return valueResult
+    }
+    val valueSubst = (valueResult as UnificationResult.Success).substitution
+
+    return UnificationResult.Success(valueSubst.compose(keySubst))
+}
+
+/**
  * Unify two suspended types.
  *
  * Effect unification uses UNION semantics: when unifying Suspended<T, <E1>> with
@@ -805,6 +870,7 @@ private fun formatType(type: FunkType): String {
         is FunkType.OrderingType -> "Ordering"
         is FunkType.BytesType -> "Bytes"
         is FunkType.ByteBufferType -> "ByteBuffer"
+        is FunkType.CharType -> "Char"
         is FunkType.FunctionType -> "{...} -> ..."
         is FunkType.RecordType -> "{${type.fields.keys.take(3).joinToString()}${if (type.fields.size > 3) ", ..." else ""}}"
         is FunkType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}${if (type.constructors.size > 3) ", ..." else ""}]"
@@ -812,6 +878,8 @@ private fun formatType(type: FunkType): String {
         is FunkType.ArrayType -> "Array ${formatType(type.elementType)}"
         is FunkType.ListType -> "List ${formatType(type.elementType)}"
         is FunkType.SetType -> "Set ${formatType(type.elementType)}"
+        is FunkType.SortedMapType -> "SortedMap ${formatType(type.keyType)} ${formatType(type.valueType)}"
+        is FunkType.SortedSetType -> "SortedSet ${formatType(type.elementType)}"
         is FunkType.MapType -> "Map ${formatType(type.keyType)} ${formatType(type.valueType)}"
         is FunkType.SuspendedType -> "Suspended<${formatType(type.valueType)}>"
         is FunkType.EffectRow -> "<${type.effects.take(3).joinToString()}${if (type.effects.size > 3) ", ..." else ""}>"
@@ -883,6 +951,15 @@ internal fun expandTypeApplicationToRecord(typeApp: FunkType.TypeApplication, ty
             }
             is FunkType.SetType -> {
                 FunkType.SetType(substituteTypeParams(type.elementType))
+            }
+            is FunkType.SortedMapType -> {
+                FunkType.SortedMapType(
+                    keyType = substituteTypeParams(type.keyType),
+                    valueType = substituteTypeParams(type.valueType)
+                )
+            }
+            is FunkType.SortedSetType -> {
+                FunkType.SortedSetType(substituteTypeParams(type.elementType))
             }
             is FunkType.MapType -> {
                 FunkType.MapType(
@@ -1010,6 +1087,15 @@ internal fun expandTypeApplicationToVariant(typeApp: FunkType.TypeApplication, t
             }
             is FunkType.SetType -> {
                 FunkType.SetType(substituteTypeParams(type.elementType))
+            }
+            is FunkType.SortedMapType -> {
+                FunkType.SortedMapType(
+                    keyType = substituteTypeParams(type.keyType),
+                    valueType = substituteTypeParams(type.valueType)
+                )
+            }
+            is FunkType.SortedSetType -> {
+                FunkType.SortedSetType(substituteTypeParams(type.elementType))
             }
             is FunkType.MapType -> {
                 FunkType.MapType(
