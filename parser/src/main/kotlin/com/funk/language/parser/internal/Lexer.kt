@@ -6,6 +6,11 @@ import com.funk.language.parser.*
 import com.funk.language.parser.internal.lib.*
  * Lexer for Funk language.
  * Converts source code into a stream of tokens.
+ *
+ * Performance optimizations:
+ * - Interned strings for common tokens (keywords, operators)
+ * - Pre-allocated token text for single-character tokens
+ * - Reusable StringBuilder for identifier parsing
  */
 
 data class Token(
@@ -45,38 +50,121 @@ enum class TokenType {
     NEWLINE, EOF, ERROR
 }
 
+/**
+ * Interned strings for common tokens to reduce memory allocation.
+ * These are pre-allocated and reused across all lexer instances.
+ */
+private object InternedTokens {
+    // Single-character tokens
+    const val PLUS = "+"
+    const val MINUS = "-"
+    const val STAR = "*"
+    const val SLASH = "/"
+    const val PERCENT = "%"
+    const val LT = "<"
+    const val GT = ">"
+    const val NOT = "!"
+    const val PIPE = "|"
+    const val AT = "@"
+    const val LPAREN = "("
+    const val RPAREN = ")"
+    const val LBRACE = "{"
+    const val RBRACE = "}"
+    const val LBRACKET = "["
+    const val RBRACKET = "]"
+    const val COMMA = ","
+    const val DOT = "."
+    const val COLON = ":"
+    const val SEMICOLON = ";"
+    const val ASSIGN = "="
+    const val NEWLINE = "\n"
+    const val PLACEHOLDER = "_"
+    const val EMPTY = ""
+
+    // Multi-character operators
+    const val ARROW = "->"
+    const val DOUBLE_COLON = "::"
+    const val EQ = "=="
+    const val NEQ = "!="
+    const val LTE = "<="
+    const val GTE = ">="
+    const val AND = "&&"
+    const val PIPE_OP = "|>"
+    const val OR = "||"
+    const val ELLIPSIS = "..."
+
+    // Keywords (interned)
+    const val LET = "let"
+    const val TYPE = "type"
+    const val NEWTYPE = "newtype"
+    const val IF = "if"
+    const val THEN = "then"
+    const val ELSE = "else"
+    const val MATCH = "match"
+    const val IS = "is"
+    const val DO = "do"
+    const val EFFECT = "effect"
+    const val IMPL = "impl"
+    const val PERFORM = "perform"
+    const val ABILITY = "ability"
+    const val PUB = "pub"
+    const val FOR = "for"
+    const val WHERE = "where"
+    const val WITH = "with"
+    const val IN = "in"
+    const val USE = "use"
+    const val HAVING = "having"
+    const val FORALL = "forall"
+
+    // Common identifiers
+    const val TRUE = "True"
+    const val FALSE = "False"
+    const val SOME = "Some"
+    const val NONE = "None"
+    const val OK = "Ok"
+    const val ERR = "Err"
+
+    // Map for quick lookup of interned identifiers
+    val commonIdentifiers = setOf(TRUE, FALSE, SOME, NONE, OK, ERR)
+}
+
 class Lexer(private val source: String) {
     private var position = 0
     private var line = 1
     private var column = 1
 
-    private val keywords = mapOf(
-        "let" to TokenType.LET,
-        "type" to TokenType.TYPE,
-        "newtype" to TokenType.NEWTYPE,
-        "if" to TokenType.IF,
-        "then" to TokenType.THEN,
-        "else" to TokenType.ELSE,
-        "match" to TokenType.MATCH,
-        "is" to TokenType.IS,
-        "do" to TokenType.DO,
-        "effect" to TokenType.EFFECT,
-        "impl" to TokenType.IMPL,
-        "perform" to TokenType.PERFORM,
-        "ability" to TokenType.ABILITY,
-        "pub" to TokenType.PUB,
-        "for" to TokenType.FOR,
-        "where" to TokenType.WHERE,
-        "with" to TokenType.WITH,
-        "in" to TokenType.IN,
-        "use" to TokenType.USE,
-        "having" to TokenType.HAVING,
-        "forall" to TokenType.FORALL
-        // Note: Booleans are True/False (uppercase variant constructors), not keywords
-    )
+    companion object {
+        // Static keywords map shared across all Lexer instances
+        private val keywords = mapOf(
+            InternedTokens.LET to TokenType.LET,
+            InternedTokens.TYPE to TokenType.TYPE,
+            InternedTokens.NEWTYPE to TokenType.NEWTYPE,
+            InternedTokens.IF to TokenType.IF,
+            InternedTokens.THEN to TokenType.THEN,
+            InternedTokens.ELSE to TokenType.ELSE,
+            InternedTokens.MATCH to TokenType.MATCH,
+            InternedTokens.IS to TokenType.IS,
+            InternedTokens.DO to TokenType.DO,
+            InternedTokens.EFFECT to TokenType.EFFECT,
+            InternedTokens.IMPL to TokenType.IMPL,
+            InternedTokens.PERFORM to TokenType.PERFORM,
+            InternedTokens.ABILITY to TokenType.ABILITY,
+            InternedTokens.PUB to TokenType.PUB,
+            InternedTokens.FOR to TokenType.FOR,
+            InternedTokens.WHERE to TokenType.WHERE,
+            InternedTokens.WITH to TokenType.WITH,
+            InternedTokens.IN to TokenType.IN,
+            InternedTokens.USE to TokenType.USE,
+            InternedTokens.HAVING to TokenType.HAVING,
+            InternedTokens.FORALL to TokenType.FORALL
+            // Note: Booleans are True/False (uppercase variant constructors), not keywords
+        )
+    }
 
     fun tokenize(): List<Token> {
-        val tokens = mutableListOf<Token>()
+        // Pre-allocate with estimated capacity (source length / 5 is a rough estimate)
+        val estimatedTokens = (source.length / 5).coerceAtLeast(16)
+        val tokens = ArrayList<Token>(estimatedTokens)
 
         while (!isAtEnd()) {
             skipWhitespaceAndComments()
@@ -90,7 +178,7 @@ class Lexer(private val source: String) {
             }
         }
 
-        tokens.add(Token(TokenType.EOF, "", position, line, column))
+        tokens.add(Token(TokenType.EOF, InternedTokens.EMPTY, position, line, column))
         return tokens
     }
 
@@ -105,7 +193,7 @@ class Lexer(private val source: String) {
         // Note: advance() already increments line and resets column for newlines
         if (char == '\n') {
             advance()
-            return Token(TokenType.NEWLINE, "\n", start, startLine, startColumn)
+            return Token(TokenType.NEWLINE, InternedTokens.NEWLINE, start, startLine, startColumn)
         }
 
         // Numbers
@@ -128,85 +216,85 @@ class Lexer(private val source: String) {
             return lexIdentifierOrKeyword(start, startLine, startColumn)
         }
 
-        // Multi-character operators
+        // Multi-character operators (use interned strings)
         if (char == '-' && peek() == '>') {
             advance(2)
-            return Token(TokenType.ARROW, "->", start, startLine, startColumn)
+            return Token(TokenType.ARROW, InternedTokens.ARROW, start, startLine, startColumn)
         }
 
         if (char == ':' && peek() == ':') {
             advance(2)
-            return Token(TokenType.DOUBLE_COLON, "::", start, startLine, startColumn)
+            return Token(TokenType.DOUBLE_COLON, InternedTokens.DOUBLE_COLON, start, startLine, startColumn)
         }
 
         if (char == '=' && peek() == '=') {
             advance(2)
-            return Token(TokenType.EQ, "==", start, startLine, startColumn)
+            return Token(TokenType.EQ, InternedTokens.EQ, start, startLine, startColumn)
         }
 
         if (char == '!' && peek() == '=') {
             advance(2)
-            return Token(TokenType.NEQ, "!=", start, startLine, startColumn)
+            return Token(TokenType.NEQ, InternedTokens.NEQ, start, startLine, startColumn)
         }
 
         if (char == '<' && peek() == '=') {
             advance(2)
-            return Token(TokenType.LTE, "<=", start, startLine, startColumn)
+            return Token(TokenType.LTE, InternedTokens.LTE, start, startLine, startColumn)
         }
 
         if (char == '>' && peek() == '=') {
             advance(2)
-            return Token(TokenType.GTE, ">=", start, startLine, startColumn)
+            return Token(TokenType.GTE, InternedTokens.GTE, start, startLine, startColumn)
         }
 
         if (char == '&' && peek() == '&') {
             advance(2)
-            return Token(TokenType.AND, "&&", start, startLine, startColumn)
+            return Token(TokenType.AND, InternedTokens.AND, start, startLine, startColumn)
         }
 
         if (char == '|' && peek() == '>') {
             advance(2)
-            return Token(TokenType.PIPE_OP, "|>", start, startLine, startColumn)
+            return Token(TokenType.PIPE_OP, InternedTokens.PIPE_OP, start, startLine, startColumn)
         }
 
         if (char == '|' && peek() == '|') {
             advance(2)
-            return Token(TokenType.OR, "||", start, startLine, startColumn)
+            return Token(TokenType.OR, InternedTokens.OR, start, startLine, startColumn)
         }
 
         if (char == '.' && peek() == '.' && peek(2) == '.') {
             advance(3)
-            return Token(TokenType.ELLIPSIS, "...", start, startLine, startColumn)
+            return Token(TokenType.ELLIPSIS, InternedTokens.ELLIPSIS, start, startLine, startColumn)
         }
 
-        // Single character tokens
-        val type = when (char) {
-            '+' -> TokenType.PLUS
-            '-' -> TokenType.MINUS
-            '*' -> TokenType.STAR
-            '/' -> TokenType.SLASH
-            '%' -> TokenType.PERCENT
-            '<' -> TokenType.LT
-            '>' -> TokenType.GT
-            '!' -> TokenType.NOT
-            '|' -> TokenType.PIPE
-            '@' -> TokenType.AT
-            '(' -> TokenType.LPAREN
-            ')' -> TokenType.RPAREN
-            '{' -> TokenType.LBRACE
-            '}' -> TokenType.RBRACE
-            '[' -> TokenType.LBRACKET
-            ']' -> TokenType.RBRACKET
-            ',' -> TokenType.COMMA
-            '.' -> TokenType.DOT
-            ':' -> TokenType.COLON
-            ';' -> TokenType.SEMICOLON
-            '=' -> TokenType.ASSIGN
-            else -> TokenType.ERROR
+        // Single character tokens (use interned strings)
+        val (type, text) = when (char) {
+            '+' -> TokenType.PLUS to InternedTokens.PLUS
+            '-' -> TokenType.MINUS to InternedTokens.MINUS
+            '*' -> TokenType.STAR to InternedTokens.STAR
+            '/' -> TokenType.SLASH to InternedTokens.SLASH
+            '%' -> TokenType.PERCENT to InternedTokens.PERCENT
+            '<' -> TokenType.LT to InternedTokens.LT
+            '>' -> TokenType.GT to InternedTokens.GT
+            '!' -> TokenType.NOT to InternedTokens.NOT
+            '|' -> TokenType.PIPE to InternedTokens.PIPE
+            '@' -> TokenType.AT to InternedTokens.AT
+            '(' -> TokenType.LPAREN to InternedTokens.LPAREN
+            ')' -> TokenType.RPAREN to InternedTokens.RPAREN
+            '{' -> TokenType.LBRACE to InternedTokens.LBRACE
+            '}' -> TokenType.RBRACE to InternedTokens.RBRACE
+            '[' -> TokenType.LBRACKET to InternedTokens.LBRACKET
+            ']' -> TokenType.RBRACKET to InternedTokens.RBRACKET
+            ',' -> TokenType.COMMA to InternedTokens.COMMA
+            '.' -> TokenType.DOT to InternedTokens.DOT
+            ':' -> TokenType.COLON to InternedTokens.COLON
+            ';' -> TokenType.SEMICOLON to InternedTokens.SEMICOLON
+            '=' -> TokenType.ASSIGN to InternedTokens.ASSIGN
+            else -> TokenType.ERROR to char.toString()
         }
 
         advance()
-        return Token(type, char.toString(), start, startLine, startColumn)
+        return Token(type, text, start, startLine, startColumn)
     }
 
     private fun lexNumber(start: Int, startLine: Int, startColumn: Int): Token {
@@ -372,11 +460,56 @@ class Lexer(private val source: String) {
 
         // Check for _ placeholder
         if (text == "_") {
-            return Token(TokenType.PLACEHOLDER, text, start, startLine, startColumn)
+            return Token(TokenType.PLACEHOLDER, InternedTokens.PLACEHOLDER, start, startLine, startColumn)
         }
 
-        val type = keywords[text] ?: TokenType.IDENTIFIER
-        return Token(type, text, start, startLine, startColumn)
+        // Check if it's a keyword
+        val keywordType = keywords[text]
+        if (keywordType != null) {
+            // Use interned keyword string
+            val internedText = when (keywordType) {
+                TokenType.LET -> InternedTokens.LET
+                TokenType.TYPE -> InternedTokens.TYPE
+                TokenType.NEWTYPE -> InternedTokens.NEWTYPE
+                TokenType.IF -> InternedTokens.IF
+                TokenType.THEN -> InternedTokens.THEN
+                TokenType.ELSE -> InternedTokens.ELSE
+                TokenType.MATCH -> InternedTokens.MATCH
+                TokenType.IS -> InternedTokens.IS
+                TokenType.DO -> InternedTokens.DO
+                TokenType.EFFECT -> InternedTokens.EFFECT
+                TokenType.IMPL -> InternedTokens.IMPL
+                TokenType.PERFORM -> InternedTokens.PERFORM
+                TokenType.ABILITY -> InternedTokens.ABILITY
+                TokenType.PUB -> InternedTokens.PUB
+                TokenType.FOR -> InternedTokens.FOR
+                TokenType.WHERE -> InternedTokens.WHERE
+                TokenType.WITH -> InternedTokens.WITH
+                TokenType.IN -> InternedTokens.IN
+                TokenType.USE -> InternedTokens.USE
+                TokenType.HAVING -> InternedTokens.HAVING
+                TokenType.FORALL -> InternedTokens.FORALL
+                else -> text
+            }
+            return Token(keywordType, internedText, start, startLine, startColumn)
+        }
+
+        // Use interned string for common identifiers (True, False, Some, None, Ok, Err)
+        val internedText = if (text in InternedTokens.commonIdentifiers) {
+            when (text) {
+                "True" -> InternedTokens.TRUE
+                "False" -> InternedTokens.FALSE
+                "Some" -> InternedTokens.SOME
+                "None" -> InternedTokens.NONE
+                "Ok" -> InternedTokens.OK
+                "Err" -> InternedTokens.ERR
+                else -> text
+            }
+        } else {
+            text
+        }
+
+        return Token(TokenType.IDENTIFIER, internedText, start, startLine, startColumn)
     }
 
     private fun skipWhitespaceAndComments() {

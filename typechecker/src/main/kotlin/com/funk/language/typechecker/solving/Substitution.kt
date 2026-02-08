@@ -29,9 +29,84 @@ data class Substitution(
      *   subst = {α -> Int, β -> String}
      *   apply(List α) = List Int
      *   apply({x: α, y: β}) = {x: Int, y: String}
+     *
+     * Optimization: Short-circuits for empty substitutions and concrete types.
      */
     fun apply(type: FunkType): FunkType {
+        // Short-circuit 1: Empty substitution - nothing to apply
+        if (mappings.isEmpty()) {
+            return type
+        }
+
+        // Short-circuit 2: Concrete primitive types have no type variables
+        if (isConcreteType(type)) {
+            return type
+        }
+
         return applyWithVisited(type, emptySet())
+    }
+
+    /**
+     * Check if a type is a concrete primitive type (no type variables possible).
+     */
+    private fun isConcreteType(type: FunkType): Boolean = when (type) {
+        is FunkType.IntType,
+        is FunkType.FloatType,
+        is FunkType.StringType,
+        is FunkType.BooleanType,
+        is FunkType.NatType,
+        is FunkType.FracType,
+        is FunkType.OrderingType,
+        is FunkType.BytesType,
+        is FunkType.ByteBufferType,
+        is FunkType.CharType -> true
+        else -> false
+    }
+
+    /**
+     * Check if a type needs substitution applied.
+     * Returns true if the type contains any type variable that is in our mapping.
+     * This is a quick check to avoid unnecessary recursion.
+     */
+    private fun needsSubstitution(type: FunkType): Boolean {
+        return when (type) {
+            is FunkType.VarType -> type.variable in mappings
+
+            is FunkType.FunctionType ->
+                needsSubstitution(type.paramType) ||
+                needsSubstitution(type.returnType) ||
+                type.abilityConstraints.any { c -> c.typeArgs.any { needsSubstitution(it) } }
+
+            is FunkType.RecordType ->
+                type.fields.values.any { needsSubstitution(it) }
+
+            is FunkType.VariantType ->
+                type.constructors.values.any { it != null && needsSubstitution(it) }
+
+            is FunkType.TypeApplication ->
+                type.args.any { needsSubstitution(it) }
+
+            is FunkType.ArrayType -> needsSubstitution(type.elementType)
+            is FunkType.ListType -> needsSubstitution(type.elementType)
+            is FunkType.SetType -> needsSubstitution(type.elementType)
+            is FunkType.SortedSetType -> needsSubstitution(type.elementType)
+            is FunkType.SortedMapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
+            is FunkType.MapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
+            is FunkType.SuspendedType -> needsSubstitution(type.valueType)
+
+            // Concrete types and effect rows don't need substitution
+            is FunkType.EffectRow,
+            is FunkType.IntType,
+            is FunkType.FloatType,
+            is FunkType.StringType,
+            is FunkType.BooleanType,
+            is FunkType.NatType,
+            is FunkType.FracType,
+            is FunkType.OrderingType,
+            is FunkType.BytesType,
+            is FunkType.ByteBufferType,
+            is FunkType.CharType -> false
+        }
     }
 
     /**
@@ -39,6 +114,12 @@ data class Substitution(
      * Tracks visited type variables to prevent infinite recursion from cyclic substitutions.
      */
     private fun applyWithVisited(type: FunkType, visitedVars: Set<TypeVar>): FunkType {
+        // Short-circuit: if this type doesn't need substitution, return as-is
+        // Only do this check at the top level (empty visitedVars) to avoid repeated checks
+        if (visitedVars.isEmpty() && !needsSubstitution(type)) {
+            return type
+        }
+
         return when (type) {
             is FunkType.VarType -> {
                 // Cycle detection: if we've seen this variable before, stop recursion

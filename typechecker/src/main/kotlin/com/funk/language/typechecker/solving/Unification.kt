@@ -1,6 +1,7 @@
 package com.funk.language.typechecker.solving
 
 import com.funk.language.ast.*
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Unification algorithm - the heart of type inference.
@@ -18,7 +19,32 @@ import com.funk.language.ast.*
  * - Returns sealed UnificationResult (no nulls!)
  * - Exhaustive pattern matching on all FunkType cases
  * - Structural unification for records/variants
+ *
+ * Performance optimization:
+ * - Memoization cache for repeated unification of the same type pairs
+ * - Cache is thread-local to avoid concurrency issues
+ * - Call clearUnificationCache() between type-checking invocations
  */
+
+/**
+ * Thread-local memoization cache for unification results.
+ * Maps (type1, type2) pairs to their unification results.
+ *
+ * Note: We use a ConcurrentHashMap for safety, but each thread should
+ * primarily access its own entries. The cache is keyed by (type1, type2)
+ * pairs where order matters (symmetric calls are cached separately).
+ */
+private val unificationCache = ThreadLocal.withInitial {
+    ConcurrentHashMap<Pair<FunkType, FunkType>, UnificationResult>()
+}
+
+/**
+ * Clear the unification cache.
+ * Should be called between type-checking invocations to prevent stale results.
+ */
+fun clearUnificationCache() {
+    unificationCache.get().clear()
+}
 
 /**
  * Result of unification.
@@ -55,6 +81,29 @@ fun unify(type1: FunkType, type2: FunkType, typeDeclarations: Map<String, TypeDe
         return UnificationResult.Success(Substitution.empty)
     }
 
+    // Check memoization cache (only for calls without type declarations to avoid stale results)
+    // We skip caching when typeDeclarations is non-empty because the result may depend on
+    // type expansions that could differ between invocations.
+    val cacheKey = if (typeDeclarations.isEmpty()) Pair(type1, type2) else null
+    if (cacheKey != null) {
+        val cachedResult = unificationCache.get()[cacheKey]
+        if (cachedResult != null) {
+            return cachedResult
+        }
+    }
+
+    // Perform unification and cache the result
+    val result = unifyImpl(type1, type2, typeDeclarations)
+    if (cacheKey != null) {
+        unificationCache.get()[cacheKey] = result
+    }
+    return result
+}
+
+/**
+ * Internal implementation of unification (without caching).
+ */
+private fun unifyImpl(type1: FunkType, type2: FunkType, typeDeclarations: Map<String, TypeDeclaration>): UnificationResult {
     // SPECIAL CASE: Bool primitive unifies with Bool variant
     // BooleanType (primitive) can unify with VariantType([True, False])
     // This allows pattern matching on True/False while keeping Bool as a primitive

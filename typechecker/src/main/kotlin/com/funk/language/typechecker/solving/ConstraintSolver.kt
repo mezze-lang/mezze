@@ -487,7 +487,19 @@ class ConstraintSolver(
         substitution = closePatternBasedVariants(substitution)
 
         // PHASE 2c: Solve remaining constraints (Equality, HasField, etc.)
-        val constraintWorklist = (hasConstructorWorklist + otherConstraints).toMutableList()
+        // OPTIMIZATION: Sort constraints so Equality constraints come first.
+        // Equality constraints are simpler and faster to solve, and they bind type variables
+        // that other constraints depend on. Processing them first reduces iterations.
+        val sortedConstraints = (hasConstructorWorklist + otherConstraints).sortedBy { constraint ->
+            when (constraint) {
+                is Constraint.Equality -> 0  // Highest priority
+                is Constraint.HasField -> 1
+                is Constraint.HasConstructor -> 2
+                is Constraint.AbilityRequired -> 3
+                else -> 4
+            }
+        }
+        val constraintWorklist = sortedConstraints.toMutableList()
         val processedInThisPass = mutableSetOf<Constraint>()
         var madeProgress = true
         var iterationCount = 0

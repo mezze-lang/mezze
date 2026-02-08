@@ -711,6 +711,9 @@ class NewTypeChecker(
         // Reset type variable counter for consistent naming (old behavior)
         com.funk.language.ast.TypeVar.resetCounter()
 
+        // Clear unification cache for fresh type checking
+        com.funk.language.typechecker.solving.clearUnificationCache()
+
         val result = checkProgram(program, currentPath)
 
         return when (result) {
