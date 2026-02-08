@@ -1012,6 +1012,87 @@ data class FunkBytes(
 }
 
 /**
+ * ByteBuffer - mutable byte buffer for efficient streaming/building.
+ *
+ * Backed by ByteArrayOutputStream for O(1) amortized appends.
+ * Presents a functional API but mutates internally for efficiency.
+ *
+ * Use cases:
+ * - Streaming JSON/CSV serialization
+ * - Building large byte sequences incrementally
+ * - Avoiding 2x memory peak of collect-then-concat
+ *
+ * Note: This is intentionally mutable under the hood. The functional API
+ * (returning the buffer from each operation) is for chaining convenience,
+ * but the same buffer instance is mutated. For true immutability, use Bytes.
+ */
+@ExportLibrary(InteropLibrary::class)
+class FunkByteBuffer(
+    val stream: java.io.ByteArrayOutputStream
+) : FunkValue() {
+
+    companion object {
+        fun withCapacity(capacity: Int): FunkByteBuffer =
+            FunkByteBuffer(java.io.ByteArrayOutputStream(capacity))
+
+        fun empty(): FunkByteBuffer = withCapacity(256)
+    }
+
+    /** O(1) amortized - appends bytes to internal buffer */
+    fun write(bytes: FunkBytes): FunkByteBuffer {
+        stream.write(bytes.bytes)
+        return this
+    }
+
+    /** O(1) - appends single byte (0-255) */
+    fun writeByte(b: Int): FunkByteBuffer {
+        stream.write(b and 0xFF)
+        return this
+    }
+
+    /** O(n) where n = str.length - appends UTF-8 encoded string */
+    fun writeString(s: String): FunkByteBuffer {
+        stream.write(s.toByteArray(Charsets.UTF_8))
+        return this
+    }
+
+    /** O(n) - copies buffer contents to new immutable Bytes */
+    fun toBytes(): FunkBytes = FunkBytes(stream.toByteArray())
+
+    /** O(1) - current size in bytes */
+    fun size(): Int = stream.size()
+
+    /** O(1) - resets buffer to empty (reuses internal array) */
+    fun clear(): FunkByteBuffer {
+        stream.reset()
+        return this
+    }
+
+    override fun getDisplayString(): String = "<ByteBuffer size=${stream.size()}>"
+
+    // Truffle interop - expose size as readable property
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any =
+        FunkArrayList(listOf(FunkString("size")))
+
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean = member == "size"
+
+    @ExportMessage
+    fun readMember(member: String): Any = when (member) {
+        "size" -> FunkInt(stream.size().toLong())
+        else -> throw FunkException("Unknown member: $member")
+    }
+
+    // Note: equals/hashCode based on identity since this is mutable
+    override fun equals(other: Any?): Boolean = this === other
+    override fun hashCode(): Int = System.identityHashCode(this)
+}
+
+/**
  * Function value for Truffle-based execution with closure support
  */
 @ExportLibrary(InteropLibrary::class)

@@ -69,6 +69,7 @@ class AbilityResolver(
             is FunkType.FracType -> checkNumericAbility(type, abilityName)
 
             is FunkType.BytesType -> checkBytesAbility(abilityName)
+            is FunkType.ByteBufferType -> checkByteBufferAbility(abilityName)
 
             is FunkType.StringType -> checkStringAbility(abilityName)
             is FunkType.BooleanType -> checkBooleanAbility(abilityName)
@@ -176,6 +177,18 @@ class AbilityResolver(
             "Show", "Inspect" -> AbilityCheckResult.Satisfied("Built-in displayable")
 
             else -> checkUserDefinedAbilityImpl(FunkType.BytesType, abilityName)
+        }
+    }
+
+    /**
+     * Check ByteBuffer type abilities.
+     * ByteBuffer is a mutable type so it has limited abilities.
+     */
+    private fun checkByteBufferAbility(abilityName: String): AbilityCheckResult {
+        return when (abilityName) {
+            "Show", "Inspect" -> AbilityCheckResult.Satisfied("Built-in displayable")
+
+            else -> checkUserDefinedAbilityImpl(FunkType.ByteBufferType, abilityName)
         }
     }
 
@@ -347,6 +360,7 @@ class AbilityResolver(
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
             is FunkType.BytesType -> "Bytes"
+            is FunkType.ByteBufferType -> "ByteBuffer"
 
             is FunkType.VarType -> type.variable.name.removePrefix("'")
 
@@ -396,6 +410,7 @@ class AbilityResolver(
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
             is FunkType.BytesType -> "Bytes"
+            is FunkType.ByteBufferType -> "ByteBuffer"
             else -> type.toString()
         }
     }

@@ -65,6 +65,10 @@ pub let drop = { b, n } ->
 pub let concat = { b1, b2 } ->
     __native_bytes_concat { b1 = b1, b2 = b2 }
 
+# Concatenate multiple byte sequences efficiently (single allocation)
+pub let concat_all = { bs } ->
+    __native_bytes_concat_all { bs = bs }
+
 # Repeat bytes n times
 pub let repeat = { b, n } ->
     __native_bytes_repeat { b = b, n = n }

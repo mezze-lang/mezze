@@ -987,11 +987,11 @@ private fun createStandaloneJar(inputFile: File, outputFile: File, source: Strin
     println("🔍 Build directory: ${tempDir.absolutePath}")
     
     try {
-        // 1. Create a Kotlin main class that runs the embedded program
-        createKotlinMainClass(tempDir, inputFile, source)
+        // 1. Create a Java main class that runs the embedded program
+        createJavaMainClass(tempDir, inputFile, source)
 
-        // 2. Build the JAR using Gradle task (which will compile Kotlin)
-        buildJarWithGradle(tempDir, outputFile, inputFile.nameWithoutExtension)
+        // 2. Build the JAR using javac + jar (only GraalVM/Java needed!)
+        buildJarWithJavac(tempDir, outputFile, inputFile.nameWithoutExtension)
 
         // Clean up temp directory on success
         tempDir.deleteRecursively()
@@ -1002,7 +1002,7 @@ private fun createStandaloneJar(inputFile: File, outputFile: File, source: Strin
     }
 }
 
-private fun createKotlinMainClass(tempDir: File, inputFile: File, source: String) {
+private fun createJavaMainClass(tempDir: File, inputFile: File, source: String) {
     // Parse and type-check at compile time to get enhanced AST
     val parser = FunkParser()
     val typeChecker = TypeChecker()
@@ -1027,22 +1027,24 @@ private fun createKotlinMainClass(tempDir: File, inputFile: File, source: String
     )
 
     println("📦 Bundling ${loadedModules.size} pre-parsed modules (stdlib, imports, packages)")
-    val mainClassDir = File(tempDir, "src/main/kotlin/com/funk/standalone")
-    mainClassDir.mkdirs()
-    
-    val mainClassContent = """
-package com.funk.standalone
 
-import com.funk.language.ast.Program
-import com.funk.language.interpreter.FunkInterpreter
-import com.funk.language.typechecker.TypeChecker
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.builtins.MapSerializer
-import kotlinx.serialization.builtins.serializer
-import org.graalvm.polyglot.Context
-import org.graalvm.polyglot.Engine
-import org.graalvm.polyglot.Source
-import java.nio.file.Paths
+    // Save serialized data as resource files
+    val resourcesDir = File(tempDir, "src/main/resources/com/funk/standalone")
+    resourcesDir.mkdirs()
+    File(resourcesDir, "ast.json").writeText(serializedAST)
+    File(resourcesDir, "modules.json").writeText(serializedModules)
+
+    val mainClassDir = File(tempDir, "src/main/java/com/funk/standalone")
+    mainClassDir.mkdirs()
+
+    val mainClassContent = """
+package com.funk.standalone;
+
+import com.funk.language.cli.standalone.StandaloneHelper;
+import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.util.stream.Collectors;
 
 /**
  * Standalone executable for ${inputFile.name}
@@ -1051,100 +1053,61 @@ import java.nio.file.Paths
  * This JAR contains the pre-parsed and type-checked AST, so no parser is needed at runtime.
  * Uses full Truffle execution with JIT compilation for maximum performance.
  */
-object Main {
-    private val ENHANCED_AST_JSON = ${escapeForKotlin(serializedAST)}
-    private val CACHED_MODULES_JSON = ${escapeForKotlin(serializedModules)}
-    private const val PROGRAM_NAME = "${inputFile.name}"
-    private const val PROJECT_ROOT = "${projectRoot.toAbsolutePath()}"
+public class Main {
+    private static final String PROGRAM_NAME = "${inputFile.name}";
 
-    @JvmStatic
-    fun main(args: Array<String>) {
+    public static void main(String[] args) {
         try {
-            // Note: New type checker handles module caching internally
-            val json = Json { ignoreUnknownKeys = true }
+            // Load serialized AST and modules from resources
+            String astJson = loadResource("/com/funk/standalone/ast.json");
+            String modulesJson = loadResource("/com/funk/standalone/modules.json");
 
-            // Deserialize pre-parsed modules and preload them into the cache
-            // This avoids runtime parsing of stdlib and imported modules (25x faster startup!)
-            val cachedModules = json.decodeFromString<Map<String, Program>>(
-                MapSerializer(String.serializer(), Program.serializer()),
-                CACHED_MODULES_JSON
-            )
-            TypeChecker.preloadModules(cachedModules)
+            // Delegate to pre-compiled Kotlin helper (already in CLI JAR)
+            StandaloneHelper.executeFromJson(astJson, modulesJson);
 
-            // Deserialize the enhanced AST (no parsing needed!)
-            val enhancedProgram = json.decodeFromString<Program>(ENHANCED_AST_JSON)
-
-            // Add a call to main() at the end of the program
-            val mainCall = com.funk.language.ast.FunctionCall(
-                function = com.funk.language.ast.Identifier("main", null, null),
-                arguments = com.funk.language.ast.RecordLiteral(emptyList(), null, null),
-                inferredType = null,
-                sourceLocation = null
-            )
-            val programWithMainCall = enhancedProgram.copy(
-                items = enhancedProgram.items + listOf(com.funk.language.ast.TopLevelExpression(mainCall))
-            )
-
-            // Execute using full Truffle with JIT optimization
-            val result = executeTruffleProgram(programWithMainCall)
-
-            // Don't print the result since main returns {} which is not meaningful output
-
-        } catch (e: Exception) {
-            System.err.println("Error executing ${'$'}PROGRAM_NAME: ${'$'}{e.message}")
-            if (args.isNotEmpty() && args[0] == "--debug") {
-                e.printStackTrace()
+        } catch (Exception e) {
+            System.err.println("Error executing " + PROGRAM_NAME + ": " + e.getMessage());
+            if (args.length > 0 && args[0].equals("--debug")) {
+                e.printStackTrace();
             }
-            kotlin.system.exitProcess(1)
+            System.exit(1);
         }
     }
-    
-    /**
-     * Execute program using full Truffle with JIT optimization
-     */
-    private fun executeTruffleProgram(program: Program): Any? {
-        // Create engine with JIT compilation enabled
-        val engine = Engine.newBuilder()
-            .allowExperimentalOptions(true)
-            .build()
 
-        // Create context for Funk language with JIT optimization
-        val context = Context.newBuilder("funk")
-            .engine(engine)
-            .allowAllAccess(true)
-            .allowExperimentalOptions(true)
-            .build()
-
-        return try {
-            // Execute the program using Funk interpreter
-            // Parser setup is needed to resolve stdlib modules from JAR resources
-            val interpreter = com.funk.language.interpreter.FunkInterpreter(skipParserSetup = false)
-            // Use current directory as project root - stdlib will be loaded from JAR resources
-            val projectRoot = java.nio.file.Paths.get(".")
-            // Pass empty monomorphic instances map for now
-            val monomorphicInstances = emptyMap<String, com.funk.language.ast.LetBinding>()
-            val result = interpreter.execute(program, projectRoot, monomorphicInstances)
-            
-            // Convert FunkValue to appropriate return type for output
-            when (result) {
-                is com.funk.language.interpreter.FunkInt -> result.value
-                is com.funk.language.interpreter.FunkFloat -> result.value
-                is com.funk.language.interpreter.FunkString -> result.value
-                is com.funk.language.interpreter.FunkBool -> result.value
-                is com.funk.language.interpreter.FunkNull -> null
-                else -> result.getDisplayString()
-            }
-        } finally {
-            context.close()
-            engine.close()
+    private static String loadResource(String path) throws Exception {
+        InputStream is = Main.class.getResourceAsStream(path);
+        if (is == null) {
+            throw new IllegalStateException("Cannot find resource: " + path);
+        }
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
+            return reader.lines().collect(Collectors.joining("\n"));
         }
     }
 }
     """.trimIndent()
-    
-    File(mainClassDir, "Main.kt").writeText(mainClassContent)
-    
-    // Also create a simple build.gradle.kts for this standalone project
+
+    File(mainClassDir, "Main.java").writeText(mainClassContent)
+    println("✅ Created Java wrapper (using pre-compiled helper)")
+}
+
+private fun escapeForJava(source: String): String {
+    // Escape for Java string literal
+    val escaped = source
+        .replace("\\", "\\\\")     // Backslash must be first
+        .replace("\"", "\\\"")      // Escape quotes
+        .replace("\n", "\\n")       // Escape newlines
+        .replace("\r", "\\r")       // Escape carriage returns
+        .replace("\t", "\\t")       // Escape tabs
+    return "\"$escaped\""
+}
+
+private fun createKotlinMainClass(tempDir: File, inputFile: File, source: String) {
+    // Old Kotlin-based implementation (kept for reference/fallback)
+    // Now using Java-based approach instead
+    throw UnsupportedOperationException("Use createJavaMainClass instead")
+}
+
+private fun oldCreateKotlinMainClass_UNUSED(tempDir: File, inputFile: File, source: String) {
     val buildGradleContent = """
 plugins {
     kotlin("jvm") version "2.2.0"
@@ -1363,39 +1326,204 @@ private fun copyStdlib(tempDir: File) {
 }
 
 
+/**
+ * Build JAR using javac + jar (zero external dependencies!)
+ * Only requires GraalVM/Java which is already needed to run the JAR
+ */
+private fun buildJarWithJavac(tempDir: File, outputFile: File, programName: String) {
+    println("🔧 Building standalone JAR with zero external dependencies...")
+
+    // Find CLI's lib directory to use as classpath
+    val cliLocation = object {}.javaClass.protectionDomain.codeSource.location
+    val cliJarOrClassDir = File(cliLocation.toURI())
+    val cliLibDir = if (cliJarOrClassDir.isFile) {
+        cliJarOrClassDir.parentFile
+    } else {
+        var current = cliJarOrClassDir
+        while (current != null && !File(current, "lib").exists()) {
+            current = current.parentFile
+        }
+        File(current, "lib")
+    }
+
+    // Build classpath from all JARs in CLI's lib directory
+    val libJars = cliLibDir.listFiles()?.filter { it.extension == "jar" } ?: emptyList()
+    val funkJarsDir = File(tempDir, "libs")
+    val funkJars = funkJarsDir.listFiles()?.filter { it.extension == "jar" } ?: emptyList()
+
+    val classpath = (libJars + funkJars).joinToString(File.pathSeparator) { it.absolutePath }
+
+    // 1. Compile Java source with javac (comes with GraalVM)
+    println("📝 Compiling Java source...")
+    val classesDir = File(tempDir, "classes")
+    classesDir.mkdirs()
+
+    val javacCmd = listOf(
+        "javac",
+        "-cp", classpath,
+        "-d", classesDir.absolutePath,
+        "--release", "24",
+        File(tempDir, "src/main/java/com/funk/standalone/Main.java").absolutePath
+    )
+
+    val javacProcess = try {
+        ProcessBuilder(javacCmd)
+            .directory(tempDir)
+            .redirectErrorStream(true)
+            .start()
+    } catch (e: java.io.IOException) {
+        throw RuntimeException("""
+            ❌ Cannot find 'javac' command!
+
+            The Funk CLI needs javac (Java compiler) to build standalone JARs.
+
+            Solutions:
+            1. Install GraalVM or OpenJDK (which include javac)
+            2. Ensure JAVA_HOME is set and includes javac
+            3. Check that javac is in your PATH
+
+            Current JAVA_HOME: ${System.getenv("JAVA_HOME") ?: "(not set)"}
+            Current PATH: ${System.getenv("PATH")}
+
+            For GraalVM installation: https://www.graalvm.org/downloads/
+        """.trimIndent())
+    }
+
+    val javacOutput = javacProcess.inputStream.bufferedReader().readText()
+    val javacExitCode = javacProcess.waitFor()
+
+    if (javacExitCode != 0) {
+        throw RuntimeException("Failed to compile Java source:\n$javacOutput")
+    }
+
+    println("✅ Compiled Java source")
+
+    // 2. Create shadow JAR by extracting all dependencies
+    println("📦 Creating shadow JAR...")
+    val shadowDir = File(tempDir, "shadow")
+    shadowDir.mkdirs()
+
+    // Extract all dependency JARs to shadow directory
+    println("📂 Extracting dependencies...")
+    for (jar in libJars + funkJars) {
+        val jarCmd = listOf(
+            "jar", "xf", jar.absolutePath
+        )
+        val jarProcess = ProcessBuilder(jarCmd)
+            .directory(shadowDir)
+            .redirectErrorStream(true)
+            .start()
+        jarProcess.waitFor()
+    }
+
+    // Copy compiled classes
+    println("📋 Copying compiled classes...")
+    classesDir.copyRecursively(shadowDir, overwrite = true)
+
+    // Copy AST/modules resources
+    println("📋 Copying AST resources...")
+    val resourcesSource = File(tempDir, "src/main/resources")
+    if (resourcesSource.exists()) {
+        resourcesSource.copyRecursively(shadowDir, overwrite = true)
+    }
+
+    // Copy stdlib resources
+    println("📚 Copying stdlib resources...")
+    val stdlibSource = File(tempDir, "stdlib")
+    if (stdlibSource.exists()) {
+        val stdlibDest = File(shadowDir, "stdlib")
+        stdlibSource.copyRecursively(stdlibDest, overwrite = true)
+    }
+
+    // 3. Create MANIFEST.MF
+    println("📄 Creating manifest...")
+    val metaInfDir = File(shadowDir, "META-INF")
+    metaInfDir.mkdirs()
+
+    val manifestContent = """
+Manifest-Version: 1.0
+Main-Class: com.funk.standalone.Main
+Add-Opens: java.base/jdk.internal.misc=ALL-UNNAMED java.base/sun.nio.ch=ALL-UNNAMED
+Enable-Native-Access: ALL-UNNAMED
+
+""".trimIndent()
+
+    File(metaInfDir, "MANIFEST.MF").writeText(manifestContent)
+
+    // 4. Package everything into final JAR
+    println("🗜️  Packaging JAR...")
+    val manifestFile = File(shadowDir, "META-INF/MANIFEST.MF")
+    val jarCreateCmd = listOf(
+        "jar", "cfm", outputFile.absolutePath,
+        manifestFile.absolutePath,
+        "-C", shadowDir.absolutePath, "."
+    )
+
+    val jarCreateProcess = try {
+        ProcessBuilder(jarCreateCmd)
+            .directory(tempDir)
+            .redirectErrorStream(true)
+            .start()
+    } catch (e: java.io.IOException) {
+        throw RuntimeException("""
+            ❌ Cannot find 'jar' command!
+
+            The Funk CLI needs the jar tool to package standalone JARs.
+
+            Solutions:
+            1. Install GraalVM or OpenJDK (which include jar tool)
+            2. Ensure JAVA_HOME is set and includes jar
+            3. Check that jar is in your PATH
+
+            Current JAVA_HOME: ${System.getenv("JAVA_HOME") ?: "(not set)"}
+
+            For GraalVM installation: https://www.graalvm.org/downloads/
+        """.trimIndent())
+    }
+
+    val jarCreateOutput = jarCreateProcess.inputStream.bufferedReader().readText()
+    val jarCreateExitCode = jarCreateProcess.waitFor()
+
+    if (jarCreateExitCode != 0) {
+        throw RuntimeException("Failed to create JAR:\n$jarCreateOutput")
+    }
+
+    println("✅ Built standalone JAR with Truffle runtime (zero external dependencies!)")
+}
+
 private fun buildJarWithGradle(tempDir: File, outputFile: File, programName: String) {
     println("🔧 Building standalone JAR...")
-    
+
     // Build the standalone Kotlin project
     val gradleCmd = listOf(
-        "gradle", 
+        "gradle",
         "shadowJar",
         "--no-daemon"
     )
-    
+
     val process = ProcessBuilder(gradleCmd)
         .directory(tempDir)
         .redirectErrorStream(true)
         .start()
-    
+
     val output = process.inputStream.bufferedReader().readText()
     val exitCode = process.waitFor()
-    
+
     if (exitCode != 0) {
         throw RuntimeException("Failed to build standalone JAR:\n$output")
     }
-    
+
     // Find the generated JAR and copy it to the output location
     val buildLibsDir = File(tempDir, "build/libs")
     val generatedJars = buildLibsDir.listFiles()?.filter { it.name.endsWith(".jar") }
-    
+
     if (generatedJars.isNullOrEmpty()) {
         throw RuntimeException("No JAR file was generated in ${buildLibsDir.absolutePath}")
     }
-    
+
     val sourceJar = generatedJars.first()
     sourceJar.copyTo(outputFile, overwrite = true)
-    
+
     println("✅ Built standalone JAR with Truffle runtime")
 }
 

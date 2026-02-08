@@ -1355,7 +1355,8 @@ class ConstraintGenerator(
             is FunkType.NatType,
             is FunkType.FracType,
             is FunkType.OrderingType,
-            is FunkType.BytesType -> { /* No type variables */ }
+            is FunkType.BytesType,
+            is FunkType.ByteBufferType -> { /* No type variables */ }
             // Effect and suspended types - check inner types
             is FunkType.EffectRow -> { /* Effect names, no type variables to collect */ }
             is FunkType.SuspendedType -> collectTypeVarsRecursive(type.valueType, result)

@@ -1105,7 +1105,7 @@ class ExpressionConstraintGenerator {
             // Primitive types and VarType unchanged
             is FunkType.VarType, is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> type
         }
     }
 
@@ -1158,7 +1158,7 @@ class ExpressionConstraintGenerator {
             // Primitive types have no variables
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> emptySet()
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> emptySet()
         }
     }
 
@@ -1213,7 +1213,7 @@ class ExpressionConstraintGenerator {
             // Primitive types unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> type
         }
     }
 
@@ -1297,6 +1297,7 @@ class ExpressionConstraintGenerator {
                     is FunkType.FracType -> implTypeName == "Frac"
                     is FunkType.OrderingType -> implTypeName == "Ordering"
                     is FunkType.BytesType -> implTypeName == "Bytes"
+                    is FunkType.ByteBufferType -> implTypeName == "ByteBuffer"
                     is FunkType.TypeApplication -> {
                         // For type constructors, match by name
                         // TODO: Handle type arguments

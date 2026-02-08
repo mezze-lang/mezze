@@ -576,7 +576,7 @@ class ContextBuilder {
             // Primitive types have no type variables
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> {}
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> {}
         }
     }
 

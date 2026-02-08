@@ -113,6 +113,7 @@ object BytesTypes {
         )
 
         // __native_bytes_concat_all: {bs: [Bytes]} -> Bytes
+        // Efficient bulk concatenation with single allocation
         context["__native_bytes_concat_all"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("bs" to FunkType.ArrayType(FunkType.BytesType))),
             FunkType.BytesType

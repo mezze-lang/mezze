@@ -123,7 +123,8 @@ data class Substitution(
             is FunkType.NatType,
             is FunkType.FracType,
             is FunkType.OrderingType,
-            is FunkType.BytesType -> type
+            is FunkType.BytesType,
+            is FunkType.ByteBufferType -> type
         }
     }
 
@@ -274,7 +275,8 @@ fun occursCheck(typeVar: TypeVar, type: FunkType): Boolean {
         is FunkType.NatType,
         is FunkType.FracType,
         is FunkType.OrderingType,
-        is FunkType.BytesType -> false
+        is FunkType.BytesType,
+        is FunkType.ByteBufferType -> false
     }
 }
 
@@ -327,6 +329,7 @@ fun collectFreeTypeVars(type: FunkType): Set<TypeVar> {
         is FunkType.NatType,
         is FunkType.FracType,
         is FunkType.OrderingType,
-        is FunkType.BytesType -> emptySet()
+        is FunkType.BytesType,
+        is FunkType.ByteBufferType -> emptySet()
     }
 }

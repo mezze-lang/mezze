@@ -17,6 +17,7 @@ import com.funk.language.interpreter.stdlib.collections.TruffleMapImplementation
 import com.funk.language.interpreter.stdlib.collections.TruffleSetImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleDequeImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleBytesImplementations
+import com.funk.language.interpreter.stdlib.collections.TruffleByteBufferImplementations
 import com.funk.language.interpreter.stdlib.effects.LogImplementations
 import com.funk.language.interpreter.stdlib.effects.InspectImplementations
 import com.funk.language.interpreter.stdlib.effects.FilesystemImplementations
@@ -65,7 +66,7 @@ object TruffleNativeImplementations {
         MathTrigImplementations.registerAll(context)
         MathRandomImplementations.registerAll(context)
 
-        // Register collection implementations (List, NonEmptyList, ArrayList, Map, Set, Deque, Bytes)
+        // Register collection implementations (List, NonEmptyList, ArrayList, Map, Set, Deque, Bytes, ByteBuffer)
         TruffleListImplementations.registerAll(context)
         TruffleNonEmptyListImplementations.registerAll(context)
         TruffleArrayListImplementations.registerAll(context)
@@ -73,6 +74,7 @@ object TruffleNativeImplementations {
         TruffleSetImplementations.registerAll(context)
         TruffleDequeImplementations.registerAll(context)
         TruffleBytesImplementations.registerAll(context)
+        TruffleByteBufferImplementations.registerAll(context)
 
         // Register effects implementations (log, inspect, filesystem, time, environment, continuation, loom)
         LogImplementations.registerAll(context)

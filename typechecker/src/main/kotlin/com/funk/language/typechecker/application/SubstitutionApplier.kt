@@ -1355,6 +1355,7 @@ class SubstitutionApplier(
             is FunkType.FracType,
             is FunkType.OrderingType,
             is FunkType.BytesType,
+            is FunkType.ByteBufferType,
             is FunkType.EffectRow -> type
         }
     }

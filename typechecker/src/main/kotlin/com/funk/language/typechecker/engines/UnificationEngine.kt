@@ -675,7 +675,8 @@ class UnificationEngine(
             is FunkType.IntType, is FunkType.FloatType,
             is FunkType.StringType, is FunkType.BooleanType,
             is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType -> emptySet()
+            is FunkType.OrderingType, is FunkType.BytesType,
+            is FunkType.ByteBufferType -> emptySet()
             is FunkType.EffectRow -> emptySet()
             is FunkType.ArrayType -> getFreeTypeVariables(type.elementType)
             is FunkType.ListType -> getFreeTypeVariables(type.elementType)

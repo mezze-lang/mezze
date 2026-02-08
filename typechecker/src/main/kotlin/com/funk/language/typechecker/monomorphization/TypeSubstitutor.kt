@@ -158,6 +158,7 @@ class TypeSubstitutor(
             is FunkType.FracType,
             is FunkType.OrderingType,
             is FunkType.BytesType,
+            is FunkType.ByteBufferType,
             is FunkType.EffectRow -> type
         }
     }
@@ -387,6 +388,7 @@ class TypeSubstitutor(
             is FunkType.FracType -> IdentifierTypeAnnotation("Frac")
             is FunkType.OrderingType -> IdentifierTypeAnnotation("Ordering")
             is FunkType.BytesType -> IdentifierTypeAnnotation("Bytes")
+            is FunkType.ByteBufferType -> IdentifierTypeAnnotation("ByteBuffer")
             is FunkType.VarType -> IdentifierTypeAnnotation(type.variable.name)
             is FunkType.RecordType -> RecordTypeAnnotation(
                 entries = type.fields.map { (name, fieldType) ->

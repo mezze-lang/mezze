@@ -9,6 +9,7 @@ import com.funk.language.typechecker.types.collections.SetTypes
 import com.funk.language.typechecker.types.collections.NonEmptyListTypes
 import com.funk.language.typechecker.types.collections.DequeTypes
 import com.funk.language.typechecker.types.collections.BytesTypes
+import com.funk.language.typechecker.types.collections.ByteBufferTypes
 import com.funk.language.typechecker.types.math.MathCoreTypes
 import com.funk.language.typechecker.types.math.MathTrigTypes
 import com.funk.language.typechecker.types.math.MathRandomTypes
@@ -50,6 +51,7 @@ object NativeFunctionTypes {
         NonEmptyListTypes.registerAll(context)
         DequeTypes.registerAll(context)
         BytesTypes.registerAll(context)
+        ByteBufferTypes.registerAll(context)
 
         MathCoreTypes.registerAll(context)
         MathTrigTypes.registerAll(context)

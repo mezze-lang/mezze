@@ -462,6 +462,7 @@ class TypeValidator(
                 unwrappedType is FunkType.FracType ||
                 unwrappedType is FunkType.OrderingType ||
                 unwrappedType is FunkType.BytesType ||
+                unwrappedType is FunkType.ByteBufferType ||
                 isBoolVariant(unwrappedType) ||
                 // Derive Eq for records if all fields have Eq
                 (unwrappedType is FunkType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Eq", it) }) ||
@@ -526,6 +527,7 @@ class TypeValidator(
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
             is FunkType.BytesType -> "Bytes"
+            is FunkType.ByteBufferType -> "ByteBuffer"
 
             is FunkType.VarType -> type.variable.name  // Still polymorphic
 

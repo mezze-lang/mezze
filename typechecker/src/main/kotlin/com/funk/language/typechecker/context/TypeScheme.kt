@@ -223,7 +223,8 @@ private fun applySubstitutionToType(
         is FunkType.NatType,
         is FunkType.FracType,
         is FunkType.OrderingType,
-        is FunkType.BytesType -> type
+        is FunkType.BytesType,
+        is FunkType.ByteBufferType -> type
     }
 }
 
@@ -280,6 +281,7 @@ fun collectFreeTypeVars(type: FunkType): Set<TypeVar> {
         is FunkType.NatType,
         is FunkType.FracType,
         is FunkType.OrderingType,
-        is FunkType.BytesType -> emptySet()
+        is FunkType.BytesType,
+        is FunkType.ByteBufferType -> emptySet()
     }
 }

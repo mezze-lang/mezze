@@ -272,6 +272,7 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     }
     is FunkType.OrderingType -> "Ordering"
     is FunkType.BytesType -> "Bytes"
+    is FunkType.ByteBufferType -> "ByteBuffer"
     is FunkType.EffectRow -> {
         val effectList = type.effects.sorted().joinToString(", ")
         if (type.isOpen) "<$effectList, ...>" else "<$effectList>"
@@ -512,6 +513,7 @@ private fun prettyPrintTypeWithAliasesRecursive(
     }
     is FunkType.OrderingType -> "Ordering"
     is FunkType.BytesType -> "Bytes"
+    is FunkType.ByteBufferType -> "ByteBuffer"
     is FunkType.EffectRow -> {
         val effectList = type.effects.sorted().joinToString(", ")
         if (type.isOpen) "<$effectList, ...>" else "<$effectList>"
@@ -769,7 +771,7 @@ fun isBuiltinType(type: FunkType): Boolean {
         // Primitive built-in types
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType, is FunkType.BytesType -> true
+        is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType -> true
 
         // Core built-in types
         is FunkType.ListType, is FunkType.MapType, is FunkType.SetType -> true

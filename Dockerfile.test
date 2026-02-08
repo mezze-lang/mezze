@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GraalVM 24.0.2 to match local environment
+# This includes java, javac, and jar - everything we need for funk build!
 RUN mkdir -p /opt/graalvm && \
     cd /opt/graalvm && \
     wget -q https://download.oracle.com/graalvm/24/archive/graalvm-jdk-24.0.2_linux-aarch64_bin.tar.gz && \
@@ -19,13 +20,7 @@ RUN mkdir -p /opt/graalvm && \
 ENV JAVA_HOME=/opt/graalvm/current
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
-# Install Gradle (required for funk build command)
-RUN wget -q https://services.gradle.org/distributions/gradle-8.14.3-bin.zip && \
-    unzip -q gradle-8.14.3-bin.zip && \
-    mv gradle-8.14.3 /opt/gradle && \
-    rm gradle-8.14.3-bin.zip
-
-ENV PATH="/opt/gradle/bin:${PATH}"
+# No additional dependencies needed! funk build uses only javac + jar (included in GraalVM)
 
 # Create a test user (not root)
 RUN useradd -m -s /bin/bash funkuser

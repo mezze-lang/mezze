@@ -302,6 +302,7 @@ fun unify(type1: FunkType, type2: FunkType, typeDeclarations: Map<String, TypeDe
         type1 is FunkType.FracType && type2 is FunkType.FracType -> UnificationResult.Success(Substitution.empty)
         type1 is FunkType.OrderingType && type2 is FunkType.OrderingType -> UnificationResult.Success(Substitution.empty)
         type1 is FunkType.BytesType && type2 is FunkType.BytesType -> UnificationResult.Success(Substitution.empty)
+        type1 is FunkType.ByteBufferType && type2 is FunkType.ByteBufferType -> UnificationResult.Success(Substitution.empty)
 
         // CASE 14: Type mismatch
         else -> {
@@ -803,6 +804,7 @@ private fun formatType(type: FunkType): String {
         is FunkType.FracType -> "Frac"
         is FunkType.OrderingType -> "Ordering"
         is FunkType.BytesType -> "Bytes"
+        is FunkType.ByteBufferType -> "ByteBuffer"
         is FunkType.FunctionType -> "{...} -> ..."
         is FunkType.RecordType -> "{${type.fields.keys.take(3).joinToString()}${if (type.fields.size > 3) ", ..." else ""}}"
         is FunkType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}${if (type.constructors.size > 3) ", ..." else ""}]"

@@ -944,6 +944,7 @@ class ConstraintSolver(
                 unwrappedType is FunkType.FracType ||
                 unwrappedType is FunkType.OrderingType ||
                 unwrappedType is FunkType.BytesType ||
+                unwrappedType is FunkType.ByteBufferType ||
                 isBoolVariant(unwrappedType) ||
                 // Derive Eq for records if all fields have Eq
                 (unwrappedType is FunkType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Eq", it) }) ||
@@ -1031,7 +1032,8 @@ class ConstraintSolver(
         return when (type) {
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType -> true
+            is FunkType.OrderingType, is FunkType.BytesType,
+            is FunkType.ByteBufferType -> true
             is FunkType.VariantType -> true
             is FunkType.RecordType -> type.rowVar == null && type.fields.values.all { isConcrete(it) }
             is FunkType.FunctionType -> true
@@ -1054,6 +1056,7 @@ class ConstraintSolver(
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
             is FunkType.BytesType -> "Bytes"
+            is FunkType.ByteBufferType -> "ByteBuffer"
             is FunkType.TypeApplication -> {
                 // For "List Int" -> "List"
                 // The full type would need all args: "List_Int"
@@ -1882,6 +1885,7 @@ class ConstraintSolver(
             is FunkType.FracType,
             is FunkType.OrderingType,
             is FunkType.BytesType,
+            is FunkType.ByteBufferType,
             is FunkType.EffectRow -> type
         }
     }
@@ -1973,6 +1977,7 @@ class ConstraintSolver(
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
             is FunkType.BytesType -> "Bytes"
+            is FunkType.ByteBufferType -> "ByteBuffer"
             is FunkType.FunctionType -> "{...} -> ..."
             is FunkType.RecordType -> "{${type.fields.keys.take(3).joinToString()}}"
             is FunkType.VariantType -> {
@@ -2043,7 +2048,7 @@ class ConstraintSolver(
             // Primitives have no type variables
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> emptySet()
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> emptySet()
         }
     }
 
@@ -2098,7 +2103,7 @@ class ConstraintSolver(
             // Primitives unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType, is FunkType.EffectRow -> type
         }
     }
 

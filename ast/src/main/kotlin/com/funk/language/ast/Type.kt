@@ -85,6 +85,10 @@ sealed interface FunkType {
     @Serializable
     object BytesType : FunkType
 
+    // Mutable byte buffer for streaming/building (internal mutation, functional API)
+    @Serializable
+    object ByteBufferType : FunkType
+
     // Type variables (for inference)
     @Serializable
     data class VarType(val variable: TypeVar) : FunkType
@@ -318,7 +322,7 @@ data class TypeScheme(
             // Concrete types remain unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.BytesType -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.ByteBufferType -> type
             is FunkType.EffectRow -> type // Effects don't contain type variables for now
         }
     }
