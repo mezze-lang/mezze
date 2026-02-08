@@ -15,6 +15,8 @@ import com.funk.language.interpreter.FunkRecord
 import com.funk.language.interpreter.FunkNull
 import com.funk.language.interpreter.FunkArrayList
 import com.funk.language.interpreter.FunkList
+import com.funk.language.interpreter.FunkCons
+import com.funk.language.interpreter.FunkNil
 
 /**
  * Pattern matching node with manual type-specific optimizations
@@ -277,14 +279,75 @@ class ConstructorPatternNode(
 
     override fun matchesInt(frame: VirtualFrame, value: FunkInt): Boolean = false
     override fun matchesString(frame: VirtualFrame, value: FunkString): Boolean = false
-    override fun matchesBoolean(frame: VirtualFrame, value: FunkBool): Boolean = false
+
+    /**
+     * Match True/False constructor patterns against FunkBool values.
+     * This enables pattern matching like: match flag is True -> ... | False -> ...
+     */
+    override fun matchesBoolean(frame: VirtualFrame, value: FunkBool): Boolean {
+        return when (constructorName) {
+            "True" -> value.value == true
+            "False" -> value.value == false
+            else -> false
+        }
+    }
+
     override fun matchesRecord(frame: VirtualFrame, value: FunkRecord): Boolean = false
     override fun matchesGeneric(frame: VirtualFrame, value: FunkValue): Boolean {
-        return if (value is FunkVariant) {
-            matchesVariant(frame, value)
-        } else {
-            false
+        return when (value) {
+            is FunkVariant -> matchesVariant(frame, value)
+            // Handle specialized variants (Bool -> FunkBool, List -> FunkCons/FunkNil)
+            is FunkBool -> matchesBoolean(frame, value)
+            is FunkCons -> matchesCons(frame, value)
+            is FunkNil -> matchesNil(frame)
+            else -> false
         }
+    }
+
+    /**
+     * Match against FunkNil (specialized List Nil constructor)
+     */
+    private fun matchesNil(frame: VirtualFrame): Boolean {
+        // Nil pattern must match Nil constructor with no record pattern
+        return constructorName == "Nil" && recordPattern == null
+    }
+
+    /**
+     * Match against FunkCons (specialized List Cons constructor)
+     * Pattern: Cons { head, tail } or Cons { head = x, tail = xs }
+     */
+    private fun matchesCons(frame: VirtualFrame, value: FunkCons): Boolean {
+        // Must be matching against Cons constructor
+        if (constructorName != "Cons") {
+            return false
+        }
+
+        // Must have a record pattern to extract head/tail
+        if (recordPattern == null) {
+            return true  // Just matching constructor without binding
+        }
+
+        // Extract bindings from the pattern
+        val bindings = collectRecordPatternBindings(recordPattern)
+        for ((fieldPath, varName) in bindings) {
+            // For Cons, we only support direct field access (head, tail)
+            if (fieldPath.size != 1) {
+                return false  // Nested patterns not supported for Cons
+            }
+
+            val fieldName = fieldPath[0]
+            val fieldValue: FunkValue = when (fieldName) {
+                "head" -> value.head
+                "tail" -> value.tail
+                else -> return false  // Unknown field
+            }
+
+            // Bind the value to the variable slot
+            val slot = variableSlots[varName] ?: return false
+            frame.setObject(slot, fieldValue)
+        }
+
+        return true
     }
 
     override fun matchesVariant(frame: VirtualFrame, value: FunkVariant): Boolean {
@@ -391,8 +454,8 @@ class ArrayPatternNode(
     override fun matchesGeneric(frame: VirtualFrame, value: FunkValue): Boolean {
         // Check if value is an array or list
         val arrayElements = when (value) {
-            is FunkArrayList -> value.elements.toList()
-            is FunkList -> value.elements
+            is FunkArrayList -> value.toList()
+            is FunkList -> value.toKotlinList()
             else -> return false
         }
 
@@ -436,8 +499,8 @@ class ArrayPatternNode(
             // Create the same type of collection as the input
             val restValue = when (value) {
                 is FunkArrayList -> FunkArrayList(restElements)
-                is FunkList -> FunkList(restElements)
-                else -> FunkList(restElements)  // Fallback
+                is FunkList -> FunkList.fromKotlinList(restElements)
+                else -> FunkList.fromKotlinList(restElements)  // Fallback
             }
             frame.setObject(restSlot, restValue)
         }

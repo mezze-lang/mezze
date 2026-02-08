@@ -91,19 +91,8 @@ class ContextBuilder {
             ctx = addTypeConstructors(ctx, typeDecl)
         }
 
-        // Add primitive boolean bindings
-        // These provide lowercase convenience names that map to Bool constructors
-        // let true = True
-        // let false = False
-        val boolVariantType = FunkType.VariantType(
-            constructors = mapOf(
-                "True" to null,
-                "False" to null
-            ),
-            rowVar = null
-        )
-        ctx = ctx.extendMono("true", boolVariantType)
-        ctx = ctx.extendMono("false", boolVariantType)
+        // Note: lowercase 'true' and 'false' are handled by the lexer as BOOLEAN tokens,
+        // which get parsed as BooleanLiteral AST nodes. No context bindings needed.
 
         // Add ability methods to context
         for (abilityDecl in abilityDecls.values) {
@@ -497,10 +486,48 @@ class ContextBuilder {
                 )
             }
             is TypeApplicationAnnotation -> {
-                FunkType.TypeApplication(
-                    constructor = annotation.constructor,
-                    args = annotation.args.map { convertTypeAnnotationInternal(it) }
-                )
+                // Special handling for built-in collection types
+                // These have dedicated FunkType representations for optimization
+                when (annotation.constructor) {
+                    "List" -> {
+                        if (annotation.args.size == 1) {
+                            FunkType.ListType(convertTypeAnnotationInternal(annotation.args[0]))
+                        } else {
+                            FunkType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
+                        }
+                    }
+                    "Array" -> {
+                        if (annotation.args.size == 1) {
+                            FunkType.ArrayType(convertTypeAnnotationInternal(annotation.args[0]))
+                        } else {
+                            FunkType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
+                        }
+                    }
+                    "Set" -> {
+                        if (annotation.args.size == 1) {
+                            FunkType.SetType(convertTypeAnnotationInternal(annotation.args[0]))
+                        } else {
+                            FunkType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
+                        }
+                    }
+                    "Map" -> {
+                        if (annotation.args.size == 2) {
+                            FunkType.MapType(
+                                keyType = convertTypeAnnotationInternal(annotation.args[0]),
+                                valueType = convertTypeAnnotationInternal(annotation.args[1])
+                            )
+                        } else {
+                            FunkType.TypeApplication(annotation.constructor, annotation.args.map { convertTypeAnnotationInternal(it) })
+                        }
+                    }
+                    // Note: Deque support will be added when DequeType is defined in FunkType
+                    else -> {
+                        FunkType.TypeApplication(
+                            constructor = annotation.constructor,
+                            args = annotation.args.map { convertTypeAnnotationInternal(it) }
+                        )
+                    }
+                }
             }
             is ArrayTypeAnnotation -> {
                 FunkType.ArrayType(
@@ -549,7 +576,7 @@ class ContextBuilder {
             // Primitive types have no type variables
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.EffectRow -> {}
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> {}
         }
     }
 
@@ -617,5 +644,13 @@ class ContextBuilder {
                 definition = resultDef
             )
         }
+
+        // Register List type if not already defined
+        // Note: Built-in List type is NOT added here.
+        // Instead, Cons/Nil constructors are handled specially in the constraint solver
+        // when no user-defined type declaration exists for them.
+        // This allows:
+        // 1. stdlib's list module to use the optimized ListType/FunkCons/FunkNil
+        // 2. Users to define their own List variant type if desired
     }
 }

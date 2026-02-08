@@ -1,0 +1,63 @@
+# std/concurrent/channel.funk - Channels for concurrent communication
+#
+# Provides typed channels for communication between virtual threads.
+# Channels are thread-safe and block on send/recv when necessary.
+#
+# Usage:
+#   use std::concurrent::channel::{Chan, BlockingChan}
+#
+#   perform BlockingChan in do
+#       let ch = Chan.make {}
+#       # In one thread:
+#       Chan.send { ch = ch, value = 42 }
+#       # In another thread:
+#       let received = Chan.recv { ch = ch }
+
+# Channel effect - typed channel communication
+pub effect Chan where {
+    # Create a new channel
+    make: {} -> Channel 'a <Chan>,
+
+    # Send a value to a channel (blocks if buffer full)
+    send: { ch: Channel 'a, value: 'a } -> {} <Chan>,
+
+    # Receive a value from a channel (blocks if empty)
+    recv: { ch: Channel 'a } -> 'a <Chan>,
+
+    # Try to send without blocking, returns true if sent
+    try_send: { ch: Channel 'a, value: 'a } -> Bool <Chan>,
+
+    # Try to receive without blocking, returns Option
+    try_recv: { ch: Channel 'a } -> (Option 'a) <Chan>,
+
+    # Close a channel
+    close: { ch: Channel 'a } -> {} <Chan>
+}
+
+# Opaque channel type
+newtype Channel = Channel __NativeChannel
+
+# BlockingChan impl - uses Java's LinkedBlockingQueue
+pub impl Chan for BlockingChan where {
+    make = {} ->
+        __native_channel_make {},
+
+    send = { ch, value } ->
+        __native_channel_send { ch = ch, value = value },
+
+    recv = { ch } ->
+        __native_channel_recv { ch = ch },
+
+    try_send = { ch, value } ->
+        __native_channel_try_send { ch = ch, value = value },
+
+    try_recv = { ch } ->
+        __native_channel_try_recv { ch = ch },
+
+    close = { ch } ->
+        __native_channel_close { ch = ch }
+}
+
+# Helper: create a buffered channel with capacity
+pub let make_buffered: { capacity: Int } -> Channel 'a <Chan> = { capacity } ->
+    __native_channel_make_buffered { capacity = capacity }

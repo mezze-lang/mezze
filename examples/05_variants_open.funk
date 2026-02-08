@@ -24,8 +24,8 @@ type Status = | Active, Inactive, ... |
 
 let is_active = { status: Status } ->
     match status is
-      Active -> true
-      _ -> false
+      Active -> True
+      _ -> False
 
 let active = Active
 let inactive = Inactive

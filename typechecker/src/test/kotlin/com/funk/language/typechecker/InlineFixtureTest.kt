@@ -26,7 +26,7 @@ class InlineFixtureTest {
 let x = 42        # expected: x : Int
 let y = 3.14      # expected: y : Float
 let name = "Alice" # expected: name : String
-let flag = true   # expected: flag : Boolean
+let flag = True   # expected: flag : Boolean
 
 x + 10
         """.trimIndent()
@@ -287,9 +287,9 @@ let nestedRecord = {user = {name = "Carol", age = 28}, department = "Engineering
 
 let nestedUpdated = {...nestedRecord, department = "Marketing"}
 
-let configRecord = {timeout = 30, retries = 3, debug = false}
+let configRecord = {timeout = 30, retries = 3, debug = False}
 
-let updatedConfig = {...configRecord, timeout = 60, debug = true}
+let updatedConfig = {...configRecord, timeout = 60, debug = True}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -359,7 +359,7 @@ let doMultiple = {x, y, z} -> do
   product
 
 let intResult = complex { x = 21, y = 42, z = "test" } # expected: intResult : Int
-let floatResult = complex { x = 21.5, y = 42.5, z = true } # expected: floatResult : Float
+let floatResult = complex { x = 21.5, y = 42.5, z = True } # expected: floatResult : Float
 let doResult = doMultiple { x = 1, y = 2, z = 3 } # expected: doResult : Int
         """.trimIndent()
 

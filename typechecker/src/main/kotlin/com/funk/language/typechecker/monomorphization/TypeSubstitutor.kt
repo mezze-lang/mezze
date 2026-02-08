@@ -157,6 +157,7 @@ class TypeSubstitutor(
             is FunkType.NatType,
             is FunkType.FracType,
             is FunkType.OrderingType,
+            is FunkType.BytesType,
             is FunkType.EffectRow -> type
         }
     }
@@ -176,7 +177,12 @@ class TypeSubstitutor(
     }
 
     private fun applyToArrayLiteral(expr: ArrayLiteral, substitutedType: FunkType?): ArrayLiteral {
-        val updatedElements = expr.elements.map { apply(it) }
+        val updatedElements = expr.elements.map { element ->
+            when (element) {
+                is ArrayRegularElement -> ArrayRegularElement(apply(element.expression))
+                is ArraySpreadElement -> ArraySpreadElement(apply(element.expression))
+            }
+        }
         return expr.copy(elements = updatedElements, inferredType = substitutedType)
     }
 
@@ -380,6 +386,7 @@ class TypeSubstitutor(
             is FunkType.NatType -> IdentifierTypeAnnotation("Nat")
             is FunkType.FracType -> IdentifierTypeAnnotation("Frac")
             is FunkType.OrderingType -> IdentifierTypeAnnotation("Ordering")
+            is FunkType.BytesType -> IdentifierTypeAnnotation("Bytes")
             is FunkType.VarType -> IdentifierTypeAnnotation(type.variable.name)
             is FunkType.RecordType -> RecordTypeAnnotation(
                 entries = type.fields.map { (name, fieldType) ->
@@ -512,7 +519,12 @@ fun collectTypeVarsFromExpression(expr: Expression): Set<TypeVar> {
                 collect(e.baseRecord)
                 e.updates.forEach { collect(it.value) }
             }
-            is ArrayLiteral -> e.elements.forEach { collect(it) }
+            is ArrayLiteral -> e.elements.forEach { element ->
+                when (element) {
+                    is ArrayRegularElement -> collect(element.expression)
+                    is ArraySpreadElement -> collect(element.expression)
+                }
+            }
             is ArrayAccess -> {
                 collect(e.array)
                 collect(e.index)

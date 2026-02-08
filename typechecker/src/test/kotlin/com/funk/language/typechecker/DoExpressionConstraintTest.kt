@@ -284,7 +284,7 @@ class DoExpressionConstraintTest {
         // Test that record shorthand {val} correctly looks up val's concrete type from context
         val source = """
             let test = {x} -> do
-              let val = true
+              let val = True
               {val}
         """.trimIndent()
 
@@ -294,8 +294,13 @@ class DoExpressionConstraintTest {
         val testType = getVariableType(typedProgram, "test") as FunkType.FunctionType
         val returnType = testType.returnType as FunkType.RecordType
 
-        // The field 'val' should have Bool type, not a type variable
-        assertEquals(FunkType.BooleanType, returnType.fields["val"])
+        // The field 'val' should have Bool type (either BooleanType or VariantType with True/False), not a type variable
+        val valType = returnType.fields["val"]
+        assertTrue(
+            valType is FunkType.BooleanType ||
+            (valType is FunkType.VariantType && valType.constructors.keys == setOf("True", "False")),
+            "Expected Bool type but got: $valType"
+        )
     }
 
     @Test
@@ -336,7 +341,7 @@ class DoExpressionConstraintTest {
         // Inspect is a built-in ability that works for all types, so this should succeed
         val source = """
             let test = {x} -> do
-              let val = true
+              let val = True
               Inspect.to_str {val}
         """.trimIndent()
 

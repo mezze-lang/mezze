@@ -1,9 +1,11 @@
 package com.funk.language.parser
 
+import com.funk.language.ast.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 /**
  * Test compatibility with v1 parser functionality
@@ -145,13 +147,32 @@ class V1CompatibilityTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Array spread syntax not yet implemented")
     fun `array spread should parse`() {
-        val source = "let combined = [1, ...rest, 5]"
+        // Valid syntax: spread first, then append elements
+        val source = "let combined = [...rest, 4, 5]"
 
         val result = parser.parse(source)
         assertNotNull(result)
         assertEquals(1, result.items.size)
+
+        // Verify the array has spread elements
+        val letBinding = result.items.first() as LetBinding
+        val arrayLiteral = letBinding.expression as ArrayLiteral
+        assertEquals(3, arrayLiteral.elements.size)
+        assertTrue(arrayLiteral.elements[0] is ArraySpreadElement)
+        assertTrue(arrayLiteral.elements[1] is ArrayRegularElement)
+        assertTrue(arrayLiteral.elements[2] is ArrayRegularElement)
+    }
+
+    @Test
+    fun `array spread with prepend should fail`() {
+        // Invalid syntax: elements before spread
+        val source = "let combined = [1, ...rest, 5]"
+
+        val exception = assertThrows<ParseException> {
+            parser.parse(source)
+        }
+        assertTrue(exception.message?.contains("spread must come before") == true)
     }
 
     @Test

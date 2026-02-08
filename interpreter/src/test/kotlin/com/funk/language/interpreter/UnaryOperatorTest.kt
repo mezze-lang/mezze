@@ -129,7 +129,7 @@ class UnaryOperatorTest {
     fun `test negative in conditionals`() {
         val source = """
             let x = -5
-            let isNegative = if x < 0 then true else false
+            let isNegative = if x < 0 then True else False
             let absValue = if x < 0 then -x else x
         """.trimIndent()
 

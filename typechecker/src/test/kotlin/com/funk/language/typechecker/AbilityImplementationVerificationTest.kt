@@ -50,7 +50,7 @@ class AbilityImplementationVerificationTest {
             }
 
             impl Show Bool where {
-                show: {val: Bool} -> String = {val} -> if val then "true" else "false"
+                show: {val: Bool} -> String = {val} -> if val then "True" else "False"
             }
 
             let add = {x, y} -> Show.show {val = ((x + y) > (x - y))}
@@ -142,7 +142,7 @@ class AbilityImplementationVerificationTest {
                 show: {val: String} -> String = {val} -> "\"$(val)\""
             }
 
-            let test = Show.show {val = Show.show {val = true}}
+            let test = Show.show {val = Show.show {val = True}}
 
             test
         """.trimIndent()

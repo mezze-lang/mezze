@@ -97,8 +97,8 @@ class TypeApplicationExpansionTest {
 
             let is_ok = {result} ->
                 match result is
-                  Ok { val } -> true
-                  Err { error } -> false
+                  Ok { val } -> True
+                  Err { error } -> False
 
             let example: Result Int String = Ok { val = 42 }
             let result = is_ok { result = example }
@@ -147,8 +147,8 @@ class TypeApplicationExpansionTest {
             let size = {tree} -> fold {tree, acc = 0, f = {acc, val} -> acc + 1}
             let max_value = {tree} -> fold {tree, acc = 0, f = {acc, val} ->
                 match acc > val is
-                  true -> acc
-                  false -> val
+                  True -> acc
+                  False -> val
             }
 
             let example = Node {
@@ -175,8 +175,8 @@ class TypeApplicationExpansionTest {
             let find_value = {tree, target} -> match tree is
               Leaf -> None
               Node {value, left, right} -> match value == target is
-                true -> Some { val = value }
-                false -> match find_value {tree = left, target} is
+                True -> Some { val = value }
+                False -> match find_value {tree = left, target} is
                   Some { val } -> Some { val }
                   None -> find_value {tree = right, target}
 
@@ -223,8 +223,8 @@ class TypeApplicationExpansionTest {
             let tree_filter = {tree, pred} -> match tree is
               Leaf -> None
               Node {value, left, right} -> match pred {x = value} is
-                true -> Some { val = value }
-                false -> match tree_filter {tree = left, pred} is
+                True -> Some { val = value }
+                False -> match tree_filter {tree = left, pred} is
                   Some { val } -> Some { val }
                   None -> tree_filter {tree = right, pred}
 
@@ -270,8 +270,8 @@ class TypeApplicationExpansionTest {
             let conditional_sum = {tree, threshold} ->
                 fold {tree, acc = 0, f = {acc, val} ->
                     match val > threshold is
-                      true -> acc + val
-                      false -> acc
+                      True -> acc + val
+                      False -> acc
                 }
 
             let example = Node {
@@ -357,8 +357,8 @@ class TypeApplicationExpansionTest {
             type Option 'a = | None, Some { val: 'a } |
 
             let is_none = {opt} -> match opt is
-              None -> true
-              Some { val } -> false
+              None -> True
+              Some { val } -> False
 
             let example: Option Int = None
             let result = is_none {opt = example}
@@ -449,8 +449,8 @@ class TypeApplicationExpansionTest {
             type Either 'left 'right = | Left { val: 'left }, Right { val: 'right } |
 
             let is_left = {either} -> match either is
-              Left { val } -> true
-              Right { val } -> false
+              Left { val } -> True
+              Right { val } -> False
 
             let example: Either Int String = Left { val = 42 }
             let result = is_left {either = example}

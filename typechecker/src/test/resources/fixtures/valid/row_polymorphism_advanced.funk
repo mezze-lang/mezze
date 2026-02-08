@@ -22,7 +22,7 @@ let processList = {items} -> match items is
   Cons {head, tail} -> match head is
     Some -> 1
     _ -> 0
-  _ -> 0                                                        # expected: processList : { items: | Cons { head: Option 'a, tail: 'b }, ... | } -> Int
+  _ -> 0                                                        # expected: processList : { items: List Option 'a } -> Int
 
 # Row extension with return polymorphism
 let returnVariant = {v} -> match v is

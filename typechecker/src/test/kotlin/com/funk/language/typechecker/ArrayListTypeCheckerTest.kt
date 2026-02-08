@@ -58,15 +58,19 @@ class ArrayListTypeCheckerTest {
     
     @Test
     fun `test boolean ArrayList type inference`() {
-        val source = "let flags = [true, false, true]"
+        val source = "let flags = [True, False, True]"
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
+
         val letBinding = typedProgram.items[0] as LetBinding
         val inferredType = letBinding.inferredType as FunkType.ArrayType
-        
-        // Should infer [Bool]
-        assertTrue(inferredType.elementType is FunkType.BooleanType)
+
+        // Should infer [Bool] - either BooleanType or VariantType with True/False
+        val elemType = inferredType.elementType
+        assertTrue(
+            elemType is FunkType.BooleanType ||
+            (elemType is FunkType.VariantType && elemType.constructors.keys == setOf("True", "False"))
+        )
     }
     
     @Test
@@ -122,7 +126,7 @@ class ArrayListTypeCheckerTest {
     
     @Test
     fun `test ArrayList type mismatch error`() {
-        val source = """let mixed = [1, "hello", true]"""
+        val source = """let mixed = [1, "hello", True]"""
         val program = parser.parse(source)
 
         // Arrays must have homogeneous element types - this should fail

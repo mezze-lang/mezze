@@ -6,20 +6,25 @@ import com.funk.language.interpreter.*
  * Truffle-optimized implementations for ArrayList operations.
  *
  * Phase 3 of Truffle migration: Collection operations optimized for JIT performance.
- * ArrayList is a mutable array-based collection backed by Java ArrayList.
+ * ArrayList is backed by Vavr Vector for O(1) persistent operations with structural sharing.
  *
- * Optimizations:
- * - Inline Kotlin collection operations for JIT compilation
- * - Direct element access patterns
- * - Proper Truffle function calling with all 4 required arguments
- * - Immutable operations (create new lists instead of mutating)
+ * Performance characteristics (via Vavr Vector's bit-mapped trie):
+ * - get: O(1) effectively constant (log32 n)
+ * - set: O(1) effectively constant (log32 n), returns new array
+ * - append: O(1) effectively constant (log32 n), returns new array
+ * - prepend: O(1) effectively constant (log32 n), returns new array
+ * - remove: O(1) effectively constant (log32 n), returns new array
+ * - slice: O(n) where n is slice size
+ * - concat: O(m) where m is size of second array
+ *
+ * All operations are immutable and return new arrays with structural sharing.
  */
 object TruffleArrayListImplementations {
 
     fun registerAll(context: MutableMap<String, FunkValue>) {
         // Basic ArrayList operations
         context["__native_arraylist_empty"] = NativeFunkFunction("__native_arraylist_empty") { args ->
-            FunkArrayList()
+            FunkArrayList.empty()
         }
 
         context["__native_arraylist_length"] = NativeFunkFunction("__native_arraylist_length") { args ->
@@ -60,10 +65,8 @@ object TruffleArrayListImplementations {
             if (i < 0 || i >= xs.size()) {
                 FunkVariant("None", null)
             } else {
-                // Create a new ArrayList with the updated element (immutable)
-                val newElements = xs.elements.toMutableList()
-                newElements[i] = x
-                FunkVariant("Some", FunkRecord(mapOf("val" to FunkArrayList(newElements))))
+                // O(1) update via Vavr Vector - returns new array with structural sharing
+                FunkVariant("Some", FunkRecord(mapOf("val" to xs.set(i, x))))
             }
         }
 
@@ -74,10 +77,8 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_add", "expects 'xs' as ArrayList")
             val x = record.fields["x"]
                 ?: throw NativeFunctionException("__native_arraylist_add", "expects 'x' field")
-            // Create a new ArrayList with the added element (immutable)
-            val newElements = xs.elements.toMutableList()
-            newElements.add(x)
-            FunkArrayList(newElements)
+            // O(1) append via Vavr Vector - returns new array with structural sharing
+            xs.add(x)
         }
 
         context["__native_arraylist_remove"] = NativeFunkFunction("__native_arraylist_remove") { args ->
@@ -92,10 +93,8 @@ object TruffleArrayListImplementations {
             if (i < 0 || i >= xs.size()) {
                 FunkVariant("None", null)
             } else {
-                // Create a new ArrayList without the element (immutable)
-                val newElements = xs.elements.toMutableList()
-                newElements.removeAt(i)
-                FunkVariant("Some", FunkRecord(mapOf("val" to FunkArrayList(newElements))))
+                // O(1) remove via Vavr Vector - returns new array with structural sharing
+                FunkVariant("Some", FunkRecord(mapOf("val" to xs.removeAt(i))))
             }
         }
 
@@ -106,7 +105,8 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_concat", "expects 'xs' as ArrayList")
             val ys = record.fields["ys"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_arraylist_concat", "expects 'ys' as ArrayList")
-            FunkArrayList(xs.elements + ys.elements)
+            // O(m) concat via Vavr Vector where m is size of ys
+            xs.concat(ys)
         }
 
         context["__native_arraylist_is_empty"] = NativeFunkFunction("__native_arraylist_is_empty") { args ->
@@ -126,7 +126,7 @@ object TruffleArrayListImplementations {
             val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_arraylist_map", "expects 'f' as Function")
 
-            val mapped = xs.elements.map { element ->
+            xs.map { element ->
                 val argRecord = FunkRecord(mapOf("x" to element))
                 when (f) {
                     is FunkTruffleFunction -> {
@@ -149,7 +149,6 @@ object TruffleArrayListImplementations {
                     )
                 }
             }
-            FunkArrayList(mapped)
         }
 
         context["__native_arraylist_filter"] = NativeFunkFunction("__native_arraylist_filter") { args ->
@@ -160,7 +159,7 @@ object TruffleArrayListImplementations {
             val p = record.fields["p"]
                 ?: throw NativeFunctionException("__native_arraylist_filter", "expects 'p' as Function")
 
-            val filtered = xs.elements.filter { element ->
+            xs.filter { element ->
                 val argRecord = FunkRecord(mapOf("x" to element))
                 val result = when (p) {
                     is FunkTruffleFunction -> {
@@ -182,7 +181,6 @@ object TruffleArrayListImplementations {
                 }
                 (result as? FunkBool)?.value ?: false
             }
-            FunkArrayList(filtered)
         }
 
         context["__native_arraylist_fold"] = NativeFunkFunction("__native_arraylist_fold") { args ->
@@ -195,7 +193,7 @@ object TruffleArrayListImplementations {
             val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_arraylist_fold", "expects 'f' as Function")
 
-            xs.elements.fold(init) { acc, element ->
+            xs.fold(init) { acc, element ->
                 val argRecord = FunkRecord(mapOf("acc" to acc, "x" to element))
                 when (f) {
                     is FunkTruffleFunction -> {
@@ -228,7 +226,7 @@ object TruffleArrayListImplementations {
             val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'f' as Function")
 
-            xs.elements.fold(init) { acc, element ->
+            xs.fold(init) { acc, element ->
                 val argRecord = FunkRecord(mapOf("a" to acc, "b" to element))
                 when (f) {
                     is FunkTruffleFunction -> {
@@ -260,7 +258,7 @@ object TruffleArrayListImplementations {
             val p = record.fields["p"]
                 ?: throw NativeFunctionException("__native_arraylist_find", "expects 'p' as Function")
 
-            val found = xs.elements.find { element ->
+            val found = xs.find { element ->
                 val argRecord = FunkRecord(mapOf("x" to element))
                 val result = when (p) {
                     is FunkTruffleFunction -> {
@@ -297,7 +295,7 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_contains", "expects 'xs' as ArrayList")
             val x = record.fields["x"]
                 ?: throw NativeFunctionException("__native_arraylist_contains", "expects 'x' field")
-            FunkBool(xs.elements.contains(x))
+            FunkBool(xs.contains(x))
         }
 
         context["__native_arraylist_index_of"] = NativeFunkFunction("__native_arraylist_index_of") { args ->
@@ -307,7 +305,7 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_index_of", "expects 'xs' as ArrayList")
             val x = record.fields["x"]
                 ?: throw NativeFunctionException("__native_arraylist_index_of", "expects 'x' field")
-            val index = xs.elements.indexOf(x)
+            val index = xs.indexOf(x)
             if (index >= 0) {
                 FunkVariant("Some", FunkInt(index.toLong()))
             } else {
@@ -320,7 +318,7 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_reverse", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_arraylist_reverse", "expects 'xs' as ArrayList")
-            FunkArrayList(xs.elements.reversed())
+            xs.reverse()
         }
 
         context["__native_arraylist_sort"] = NativeFunkFunction("__native_arraylist_sort") { args ->
@@ -329,7 +327,8 @@ object TruffleArrayListImplementations {
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_arraylist_sort", "expects 'xs' as ArrayList")
             // Note: This assumes elements are comparable (Int, Float, String, etc.)
-            FunkArrayList(xs.elements.sortedWith(compareBy { it.toString() }))
+            // Convert to list, sort, convert back to Vavr Vector
+            FunkArrayList(xs.toList().sortedWith(compareBy { it.toString() }))
         }
 
         context["__native_arraylist_sort_by"] = NativeFunkFunction("__native_arraylist_sort_by") { args ->
@@ -340,7 +339,7 @@ object TruffleArrayListImplementations {
             val cmp = record.fields["cmp"]
                 ?: throw NativeFunctionException("__native_arraylist_sort_by", "expects 'cmp' as Function")
 
-            val sorted = xs.elements.sortedWith { a, b ->
+            val sorted = xs.toList().sortedWith { a, b ->
                 val argRecord = FunkRecord(mapOf("l" to a, "r" to b))
                 val result = when (cmp) {
                     is FunkTruffleFunction -> {
@@ -379,9 +378,9 @@ object TruffleArrayListImplementations {
             val safeEnd = maxOf(0, minOf(end, xs.size()))
 
             if (safeStart > safeEnd) {
-                FunkArrayList(emptyList())
+                FunkArrayList.empty()
             } else {
-                FunkArrayList(xs.elements.subList(safeStart, safeEnd))
+                xs.slice(safeStart, safeEnd)
             }
         }
     }

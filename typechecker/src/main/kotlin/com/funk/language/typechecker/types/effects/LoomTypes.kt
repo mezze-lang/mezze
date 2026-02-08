@@ -22,28 +22,87 @@ object LoomTypes {
      * unifying one would affect all others.
      */
     fun registerAll(context: MutableMap<String, FunkType>) {
-        // __native_loom_spawn: {computation: {} -> 'a} -> Promise
-        // Each function gets its own type variables
-        val spawnPromise = FunkType.VarType(com.funk.language.ast.TypeVar("Promise"))
-        val spawnResult = FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+        val promiseType = FunkType.TypeApplication("Promise", listOf(FunkType.VarType(com.funk.language.ast.TypeVar("a"))))
+
+        // __native_loom_spawn: {f: {} -> 'a} -> Promise 'a
         context["__native_loom_spawn"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "computation" to FunkType.FunctionType(
+                "f" to FunkType.FunctionType(
                     FunkType.RecordType(emptyMap()),
-                    spawnResult
+                    FunkType.VarType(com.funk.language.ast.TypeVar("a"))
                 )
             )),
-            spawnPromise
+            promiseType
         )
 
-        // __native_loom_await: {promise: Promise} -> 'a
-        val awaitPromise = FunkType.VarType(com.funk.language.ast.TypeVar("Promise"))
-        val awaitResult = FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+        // __native_loom_await: {p: Promise 'a} -> 'a
         context["__native_loom_await"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "promise" to awaitPromise
+                "p" to promiseType
             )),
-            awaitResult
+            FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+        )
+
+        // __native_loom_race: {ps: [Promise 'a]} -> 'a
+        context["__native_loom_race"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "ps" to FunkType.ArrayType(promiseType)
+            )),
+            FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+        )
+
+        // __native_loom_all: {ps: [Promise 'a]} -> ['a]
+        context["__native_loom_all"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "ps" to FunkType.ArrayType(promiseType)
+            )),
+            FunkType.ArrayType(FunkType.VarType(com.funk.language.ast.TypeVar("a")))
+        )
+
+        // __native_loom_timeout: {ms: Int, p: Promise 'a} -> Option 'a
+        val optionType = FunkType.TypeApplication("Option", listOf(FunkType.VarType(com.funk.language.ast.TypeVar("a"))))
+        context["__native_loom_timeout"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "ms" to FunkType.IntType,
+                "p" to promiseType
+            )),
+            optionType
+        )
+
+        // __native_loom_cancel: {p: Promise 'a} -> {}
+        context["__native_loom_cancel"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "p" to promiseType
+            )),
+            FunkType.RecordType(emptyMap())
+        )
+
+        // __native_loom_sleep: {ms: Int} -> {}
+        context["__native_loom_sleep"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "ms" to FunkType.IntType
+            )),
+            FunkType.RecordType(emptyMap())
+        )
+
+        // __native_loom_is_done: {p: Promise 'a} -> Bool
+        context["__native_loom_is_done"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "p" to promiseType
+            )),
+            FunkType.BooleanType
+        )
+
+        // __native_loom_is_cancelled: {} -> Bool
+        context["__native_loom_is_cancelled"] = FunkType.FunctionType(
+            FunkType.RecordType(emptyMap()),
+            FunkType.BooleanType
+        )
+
+        // __native_loom_check: {} -> {}
+        context["__native_loom_check"] = FunkType.FunctionType(
+            FunkType.RecordType(emptyMap()),
+            FunkType.RecordType(emptyMap())
         )
 
         // __native_loom_park: {} -> {}
@@ -68,11 +127,10 @@ object LoomTypes {
             currentThread
         )
 
-        // __native_promise_is_complete: {promise: Promise} -> Bool
-        val isCompletePromise = FunkType.VarType(com.funk.language.ast.TypeVar("Promise"))
+        // __native_promise_is_complete: {p: Promise} -> Bool
         context["__native_promise_is_complete"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
-                "promise" to isCompletePromise
+                "p" to promiseType
             )),
             FunkType.BooleanType
         )

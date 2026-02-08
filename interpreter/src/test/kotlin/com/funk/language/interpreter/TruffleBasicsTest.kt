@@ -135,7 +135,7 @@ class TruffleBasicsTest {
         val code = """
             let data = {
                 user = {name = "Bob", id = 123},
-                active = true
+                active = True
             }
             data.user.id
         """

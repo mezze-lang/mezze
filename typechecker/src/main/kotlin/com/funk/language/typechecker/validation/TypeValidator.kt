@@ -461,6 +461,7 @@ class TypeValidator(
                 unwrappedType is FunkType.NatType ||
                 unwrappedType is FunkType.FracType ||
                 unwrappedType is FunkType.OrderingType ||
+                unwrappedType is FunkType.BytesType ||
                 isBoolVariant(unwrappedType) ||
                 // Derive Eq for records if all fields have Eq
                 (unwrappedType is FunkType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Eq", it) }) ||
@@ -524,6 +525,7 @@ class TypeValidator(
             is FunkType.NatType -> "Nat"
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
+            is FunkType.BytesType -> "Bytes"
 
             is FunkType.VarType -> type.variable.name  // Still polymorphic
 
@@ -1139,13 +1141,23 @@ class TypeValidator(
         //
         // We detect Bool matches either by:
         // 1. scrutineeType is BooleanType (explicit annotation)
-        // 2. The patterns include boolean literals (true/false) - indicates inferred Bool type
+        // 2. scrutineeType is a VariantType with exactly True and False constructors
+        // 3. The patterns include boolean literals (true/false) - indicates inferred Bool type
+        // 4. The patterns include True/False constructor patterns - indicates Bool variant type
         val hasBoolLiteralPatterns = matchExpr.cases.any { case ->
             case.patterns.any { pattern ->
                 pattern is LiteralPattern && pattern.value is BooleanLiteralValue
             }
         }
-        val isBoolMatch = scrutineeType is FunkType.BooleanType || hasBoolLiteralPatterns
+        val hasBoolConstructorPatterns = matchExpr.cases.any { case ->
+            case.patterns.any { pattern ->
+                pattern is ConstructorPattern && (pattern.constructor == "True" || pattern.constructor == "False")
+            }
+        }
+        val isBoolVariant = scrutineeType is FunkType.VariantType &&
+            scrutineeType.constructors.keys == setOf("True", "False")
+        val isBoolMatch = scrutineeType is FunkType.BooleanType || isBoolVariant ||
+            hasBoolLiteralPatterns || hasBoolConstructorPatterns
         if (isBoolMatch && hasWildcard && uncoveredConstructors.isEmpty()) {
             // Find the wildcard pattern to report its location
             for (case in matchExpr.cases) {
@@ -1578,7 +1590,11 @@ class TypeValidator(
 
             is ArrayLiteral -> {
                 for (element in expr.elements) {
-                    val elemErrors = validatePatternsInExpression(element, substitution)
+                    val elementExpr = when (element) {
+                        is ArrayRegularElement -> element.expression
+                        is ArraySpreadElement -> element.expression
+                    }
+                    val elemErrors = validatePatternsInExpression(elementExpr, substitution)
                     errors.addAll(elemErrors)
                 }
             }
@@ -1881,7 +1897,11 @@ class TypeValidator(
 
             is ArrayLiteral -> {
                 for (element in expr.elements) {
-                    errors.addAll(validatePerformExpressionsInExpression(element, implDeclarations, effectDeclarations, functionDefinitions))
+                    val elementExpr = when (element) {
+                        is ArrayRegularElement -> element.expression
+                        is ArraySpreadElement -> element.expression
+                    }
+                    errors.addAll(validatePerformExpressionsInExpression(elementExpr, implDeclarations, effectDeclarations, functionDefinitions))
                 }
             }
 
@@ -2108,7 +2128,12 @@ class TypeValidator(
                     traverse(e.array)
                     traverse(e.index)
                 }
-                is ArrayLiteral -> e.elements.forEach { traverse(it) }
+                is ArrayLiteral -> e.elements.forEach { element ->
+                    when (element) {
+                        is ArrayRegularElement -> traverse(element.expression)
+                        is ArraySpreadElement -> traverse(element.expression)
+                    }
+                }
                 is RecordUpdate -> {
                     traverse(e.record)
                     for (update in e.updates) {

@@ -1,0 +1,169 @@
+# std/async.funk - Unified Async Effect
+#
+# Provides asynchronous computation with multiple implementations:
+# - LoomAsync: Virtual threads (default, scales to millions, async I/O benefit)
+# - OSThreadAsync: Platform threads (true parallelism, thread-locals work, limited scale)
+# - CoopAsync: Continuations (single-threaded, cooperative, for testing/JS target)
+#
+# All implementations share the same interface. Pick based on your needs:
+# - LoomAsync: 99% use case - DB connections, file I/O, network calls
+# - OSThreadAsync: When you specifically need OS threads (JNI, thread-locals)
+# - CoopAsync: Single-threaded environments, testing, future JS compile target
+#
+# Usage:
+#   use std::async::{Async, LoomAsync, Promise}
+#
+#   perform LoomAsync in do
+#       let p = Async.spawn {f = {} -> expensive_computation {}}
+#       let result = Async.await {p = p}
+#       result
+
+use std::control::continuation
+use std::control::continuation::{Continuation}
+
+# Promise type - opaque wrapper around native promise/future
+pub newtype Promise 'a = Promise __NativePromise
+
+# Async effect - unified async operations
+pub effect Async where {
+    # Spawn a computation, returns immediately with Promise
+    spawn: {f: {} -> 'a} -> Promise 'a <Async>,
+
+    # Await Promise to complete, returns result
+    await: {p: Promise 'a} -> 'a <Async>,
+
+    # Wait for first Promise to complete (others continue running)
+    race: {ps: [Promise 'a]} -> 'a <Async>,
+
+    # Wait for all Promises to complete
+    all: {ps: [Promise 'a]} -> ['a] <Async>,
+
+    # Wait with timeout, returns None if timeout expires
+    timeout: {ms: Int, p: Promise 'a} -> Option 'a <Async>,
+
+    # Cancel a Promise (request cancellation, may not be immediate)
+    cancel: {p: Promise 'a} -> {} <Async>,
+
+    # Sleep for specified milliseconds
+    sleep: {ms: Int} -> {} <Async>,
+
+    # Check if Promise is complete (non-blocking)
+    is_done: {p: Promise 'a} -> Bool <Async>,
+
+    # Check if current computation was cancelled
+    is_cancelled: {} -> Bool <Async>,
+
+    # Cancellation checkpoint - throws if cancelled
+    check: {} -> {} <Async>
+}
+
+# =============================================================================
+# LoomAsync Implementation - Virtual Threads (Default)
+# =============================================================================
+#
+# Uses Project Loom virtual threads (Java 21+).
+# - Scales to millions of concurrent tasks
+# - Blocking I/O becomes async automatically
+# - Best for I/O-bound workloads (DB, files, network)
+#
+# Example:
+#   perform LoomAsync in do
+#       let p1 = Async.spawn {f = {} -> fetch_url {url = "http://a.com"}}
+#       let p2 = Async.spawn {f = {} -> fetch_url {url = "http://b.com"}}
+#       let results = Async.all {ps = [p1, p2]}
+#       results
+
+pub impl Async for LoomAsync where {
+    spawn = {f} -> __native_loom_spawn {f = f},
+    await = {p} -> __native_loom_await {p = p},
+    race = {ps} -> __native_loom_race {ps = ps},
+    all = {ps} -> __native_loom_all {ps = ps},
+    timeout = {ms, p} -> __native_loom_timeout {ms = ms, p = p},
+    cancel = {p} -> __native_loom_cancel {p = p},
+    sleep = {ms} -> __native_loom_sleep {ms = ms},
+    is_done = {p} -> __native_loom_is_done {p = p},
+    is_cancelled = {} -> __native_loom_is_cancelled {},
+    check = {} -> __native_loom_check {}
+}
+
+# =============================================================================
+# OSThreadAsync Implementation - Platform Threads
+# =============================================================================
+#
+# Uses OS-level platform threads.
+# - True parallelism for CPU-bound work
+# - Thread-locals work correctly
+# - Limited scale (thousands, not millions)
+# - Higher memory per thread
+#
+# Example:
+#   perform OSThreadAsync in do
+#       let p = Async.spawn {f = {} -> cpu_intensive_work {}}
+#       Async.await {p = p}
+
+pub impl Async for OSThreadAsync where {
+    spawn = {f} -> __native_os_spawn {f = f},
+    await = {p} -> __native_os_await {p = p},
+    race = {ps} -> __native_os_race {ps = ps},
+    all = {ps} -> __native_os_all {ps = ps},
+    timeout = {ms, p} -> __native_os_timeout {ms = ms, p = p},
+    cancel = {p} -> __native_os_cancel {p = p},
+    sleep = {ms} -> __native_os_sleep {ms = ms},
+    is_done = {p} -> __native_os_is_done {p = p},
+    is_cancelled = {} -> __native_os_is_cancelled {},
+    check = {} -> __native_os_check {}
+}
+
+# =============================================================================
+# CoopAsync Implementation - Continuation-Based Cooperative Multitasking
+# =============================================================================
+#
+# Uses native scheduler for proper integration with continuation system.
+# Provides the same API as LoomAsync but uses cooperative scheduling internally.
+#
+# - Single-threaded, no true parallelism
+# - Tasks interleave at await points
+# - Good for testing, JS compile target, workflow orchestration
+# - Deterministic execution order
+# - Supports serialization/checkpointing via continuation
+#
+# Usage:
+#   perform CoopAsync {cont = continuation::new {}} in do
+#       let p = Async.spawn {f = {} -> 42}
+#       Async.await {p = p}
+
+pub impl Async for CoopAsync { cont: Continuation } where {
+    spawn = {f} -> __native_coop_spawn { f = f, cont = cont },
+    await = {p} -> __native_coop_await { p = p, cont = cont },
+    race = {ps} -> __native_coop_race { ps = ps, cont = cont },
+    all = {ps} -> __native_coop_all { ps = ps, cont = cont },
+    timeout = {ms, p} -> __native_coop_timeout { ms = ms, p = p, cont = cont },
+    cancel = {p} -> {},
+    sleep = {ms} -> __native_coop_sleep { ms = ms, cont = cont },
+    is_done = {p} -> __native_coop_is_done { p = p },
+    is_cancelled = {} -> false,
+    check = {} -> {}
+}
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+# Short alias for spawn + wait (run synchronously)
+pub let run: {f: {} -> 'a} -> 'a <Async> = {f} -> do
+    let p = Async.spawn {f = f}
+    Async.await {p = p}
+
+# Spawn and immediately detach (fire and forget)
+pub let go: {f: {} -> 'a} -> {} <Async> = {f} -> do
+    let _ = Async.spawn {f = f}
+    {}
+
+# =============================================================================
+# Convenience Wrappers
+# =============================================================================
+
+# Run computation with CoopAsync handler (cooperative scheduling)
+# Equivalent to: perform CoopAsync {cont = continuation::new {}} in computation {}
+pub let run_coop: {computation: {} -> 'a <Async>} -> 'a = {computation} ->
+    perform CoopAsync {cont = continuation::new {}} in computation {}

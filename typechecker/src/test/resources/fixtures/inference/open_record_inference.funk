@@ -19,7 +19,7 @@ let testOpen = {name = "test", value = 123, ...}
 # let mixedResult = mixedFunc {closed = closedInput, open = openInput}
 
 # Simple nested inference
-let simpleNested = {data = {count = 5, active = false}, meta = {version = 1, timestamp = 0}, ...}
+let simpleNested = {data = {count = 5, active = False}, meta = {version = 1, timestamp = 0}, ...}
 # expected: simpleNested : { data: { count: Int, active: Bool }, meta: { version: Int, timestamp: Int }, ... }
 
 simpleNested

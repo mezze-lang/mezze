@@ -51,7 +51,7 @@ pub let new: {} -> Continuation = {} -> do
         resume = { cont, value } -> __native_continuation_resume { delim = delim_handle, cont = cont, value = value },
         fork = { cont, values } -> __native_continuation_fork { delim = delim_handle, cont = cont, values = values },
         abort = {} -> __native_continuation_abort { delim = delim_handle },
-        is_suspended = { value } -> false,  # TODO: implement
+        is_suspended = { value } -> False,  # TODO: implement
         extract_suspended = { suspended } -> __native_continuation_extract_suspended { delim = delim_handle, suspended = suspended }
     }
 

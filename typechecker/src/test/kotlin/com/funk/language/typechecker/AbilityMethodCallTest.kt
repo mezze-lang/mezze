@@ -26,10 +26,10 @@ class AbilityMethodCallTest {
             }
 
             impl Show Bool where {
-                show: {val: Bool} -> String = {val} -> if val then "true" else "false"
+                show: {val: Bool} -> String = {val} -> if val then "True" else "False"
             }
 
-            let test = Show.show {val = true}
+            let test = Show.show {val = True}
 
             test
         """.trimIndent()
@@ -101,7 +101,7 @@ class AbilityMethodCallTest {
             }
 
             impl Show Bool where {
-                show: {val: Bool} -> String = {val} -> if val then "true" else "false"
+                show: {val: Bool} -> String = {val} -> if val then "True" else "False"
             }
 
             let showResult = {x} -> Show.show {val = x}
@@ -132,14 +132,14 @@ class AbilityMethodCallTest {
             }
 
             impl Show Bool where {
-                show: {val: Bool} -> String = {val} -> if val then "true" else "false"
+                show: {val: Bool} -> String = {val} -> if val then "True" else "False"
             }
 
             impl Show Int where {
                 show: {val: Int} -> String = {val} -> int::to_string {n = val}
             }
 
-            let test1 = Show.show {val = true}
+            let test1 = Show.show {val = True}
             let test2 = Show.show {val = 42}
 
             test2
@@ -235,14 +235,14 @@ class AbilityMethodCallTest {
             }
 
             impl Show Bool where {
-                show: {val: Bool} -> String = {val} -> if val then "true" else "false"
+                show: {val: Bool} -> String = {val} -> if val then "True" else "False"
             }
 
             impl Show String where {
                 show: {val: String} -> String = {val} -> "\"$(val)\""
             }
 
-            let test = Show.show {val = Show.show {val = true}}
+            let test = Show.show {val = Show.show {val = True}}
 
             test
         """.trimIndent()
@@ -263,10 +263,10 @@ class AbilityMethodCallTest {
             }
 
             impl Show Bool where {
-                show: {val: Bool} -> String = {val} -> if val then "true" else "false"
+                show: {val: Bool} -> String = {val} -> if val then "True" else "False"
             }
 
-            let test = {result = Show.show {val = true}}
+            let test = {result = Show.show {val = True}}
 
             test
         """.trimIndent()
@@ -290,10 +290,10 @@ class AbilityMethodCallTest {
             }
 
             impl Show Bool where {
-                show: {val: Bool} -> String = {val} -> if val then "true" else "false"
+                show: {val: Bool} -> String = {val} -> if val then "True" else "False"
             }
 
-            let test = Show.show {val = true}
+            let test = Show.show {val = True}
 
             test
         """.trimIndent()
@@ -320,7 +320,7 @@ class AbilityMethodCallTest {
             }
 
             impl Show Bool where {
-                show: {val: Bool} -> String = {val} -> if val then "true" else "false"
+                show: {val: Bool} -> String = {val} -> if val then "True" else "False"
             }
 
             impl MyEq Bool where {

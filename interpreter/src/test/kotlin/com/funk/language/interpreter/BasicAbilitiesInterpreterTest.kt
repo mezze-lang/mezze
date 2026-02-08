@@ -143,7 +143,7 @@ class BasicAbilitiesInterpreterTest {
     @Test
     fun testSimpleIfExpression() {
         val source = """
-            if true then "yes" else "no"
+            if True then "yes" else "no"
         """.trimIndent()
 
         val program = parser.parse(source)

@@ -118,7 +118,7 @@ class OperatorErrorMessageTest {
     @Test
     fun `test explicit LogicalAnd call error`() {
         val source = """
-            let x: String = LogicalAnd.and {l = true, r = false}
+            let x: String = LogicalAnd.and {l = True, r = False}
             x
         """.trimIndent()
 

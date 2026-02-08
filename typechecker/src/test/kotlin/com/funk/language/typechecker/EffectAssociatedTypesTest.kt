@@ -234,7 +234,7 @@ class EffectAssociatedTypesTest {
             }
 
             impl State for BoolState having 'state = Bool where {
-                get = {} -> true
+                get = {} -> True
             }
 
             let result = perform BoolState in State.get {}
@@ -420,8 +420,8 @@ class EffectAssociatedTypesTest {
         val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
         println("[TEST LIST] Actual type: ${binding.inferredType}")
         println("[TEST LIST] Type class: ${binding.inferredType?.javaClass?.simpleName}")
-        // List T is a variant type (not TypeApplication)
-        assertTrue(binding.inferredType is FunkType.VariantType || binding.inferredType is FunkType.TypeApplication)
+        // List T can be VariantType, TypeApplication, or ListType (when using built-in Cons/Nil)
+        assertTrue(binding.inferredType is FunkType.VariantType || binding.inferredType is FunkType.TypeApplication || binding.inferredType is FunkType.ListType)
     }
 
     @Test
@@ -505,7 +505,7 @@ class EffectAssociatedTypesTest {
             impl Triple for IntStringBoolTriple having 'a = Int, 'b = String, 'c = Bool where {
                 getFirst = {} -> 42
                 getSecond = {} -> "hello"
-                getThird = {} -> true
+                getThird = {} -> True
             }
         """.trimIndent()
 
@@ -552,7 +552,7 @@ class EffectAssociatedTypesTest {
                 fail = {error} -> error
             }
 
-            let successResult = perform BoolFloatOperation in Operation.succeed { value = true }
+            let successResult = perform BoolFloatOperation in Operation.succeed { value = True }
             let failResult = perform BoolFloatOperation in Operation.fail { error = 3.14 }
         """.trimIndent()
 
@@ -600,7 +600,7 @@ class EffectAssociatedTypesTest {
             impl Triple for PartialTriple having 'a = Int where {
                 getFirst = {} -> 42
                 getSecond = {} -> "oops"
-                getThird = {} -> true
+                getThird = {} -> True
             }
         """.trimIndent()
 

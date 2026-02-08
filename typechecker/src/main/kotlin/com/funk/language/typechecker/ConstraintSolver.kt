@@ -290,7 +290,7 @@ data class Substitution(val mapping: Map<TypeVar, FunkType> = emptyMap()) {
             // Base types remain unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.FracType, is FunkType.NatType,
-            is FunkType.OrderingType -> type
+            is FunkType.OrderingType, is FunkType.BytesType -> type
 
             is FunkType.EffectRow -> applyToEffectRow(type)
         }

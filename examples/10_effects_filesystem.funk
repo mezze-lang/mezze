@@ -18,7 +18,7 @@ let file_operations = {} -> do
     # Check if file exists
     let exists = FileSystem.file_exists { path = "test.txt" }
 
-    { content = content, exists = exists }
+    { content, exists }
 
 # Main function for execution
 let main = {} ->

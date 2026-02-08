@@ -76,7 +76,7 @@ fun containsConcreteTypes(type: FunkType): Boolean {
         // Base concrete types
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType -> true
+        is FunkType.OrderingType, is FunkType.BytesType -> true
 
         // Type variables are not concrete
         is FunkType.VarType -> false

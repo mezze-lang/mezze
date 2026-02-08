@@ -495,7 +495,7 @@ class AbilityImplementationBodyValidationTest {
             let idBool = {x} -> Identity.identity {val = x}
             let idStr = {s} -> Identity.identity {val = s}
 
-            idBool {x = true}
+            idBool {x = True}
         """.trimIndent()
 
         val program = parser.parse(source)

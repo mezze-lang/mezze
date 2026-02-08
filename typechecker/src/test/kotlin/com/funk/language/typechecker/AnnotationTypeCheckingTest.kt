@@ -68,7 +68,7 @@ class AnnotationTypeCheckingTest {
     fun `test simple Bool annotation matches inferred type`() {
         assertTypeChecks(
             """
-            let b: Bool = true
+            let b: Bool = True
             b
             """.trimIndent(),
             "b",
@@ -462,7 +462,7 @@ class AnnotationTypeCheckingTest {
     fun `test if expression with annotation on branches`() {
         assertTypeChecks(
             """
-            let x: Int = if true then 1 else 2
+            let x: Int = if True then 1 else 2
             x
             """.trimIndent(),
             "x",
@@ -474,7 +474,7 @@ class AnnotationTypeCheckingTest {
     fun `test if expression branch type mismatch with annotation fails`() {
         assertTypeCheckFails(
             """
-            let x: Int = if true then 1 else "hello"
+            let x: Int = if True then 1 else "hello"
             x
             """.trimIndent()
         )
@@ -528,9 +528,9 @@ class AnnotationTypeCheckingTest {
         assertTypeChecks(
             """
             let isEven: { n: Int } -> Bool = {n} ->
-              if n == 0 then true else isOdd {n = n - 1}
+              if n == 0 then True else isOdd {n = n - 1}
             let isOdd: { n: Int } -> Bool = {n} ->
-              if n == 0 then false else isEven {n = n - 1}
+              if n == 0 then False else isEven {n = n - 1}
             isEven {n = 4}
             """.trimIndent(),
             "isEven",
@@ -546,7 +546,7 @@ class AnnotationTypeCheckingTest {
             """
             let x: Int = 42
             let y: String = "hello"
-            let z: Bool = true
+            let z: Bool = True
             z
             """.trimIndent()
         )
@@ -766,7 +766,7 @@ class AnnotationTypeCheckingTest {
         // But implementation returns different type
         assertTypeCheckFails(
             """
-            let bad: { x: 'a, y: 'a } -> 'a = {x, y} -> if true then x else 0
+            let bad: { x: 'a, y: 'a } -> 'a = {x, y} -> if True then x else 0
             bad {x = 1, y = 2}
             """.trimIndent()
         )

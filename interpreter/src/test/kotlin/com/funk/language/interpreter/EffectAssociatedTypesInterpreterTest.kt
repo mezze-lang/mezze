@@ -136,10 +136,10 @@ class EffectAssociatedTypesInterpreterTest {
         val context = executeWithContext(code)
         assertTrue(context["result"] is FunkArrayList)
         val list = context["result"] as FunkArrayList
-        assertEquals(3, list.elements.size)
-        assertEquals(1L, (list.elements[0] as FunkInt).value)
-        assertEquals(2L, (list.elements[1] as FunkInt).value)
-        assertEquals(3L, (list.elements[2] as FunkInt).value)
+        assertEquals(3, list.size())
+        assertEquals(1L, (list.get(0) as FunkInt).value)
+        assertEquals(2L, (list.get(1) as FunkInt).value)
+        assertEquals(3L, (list.get(2) as FunkInt).value)
     }
 
     @Test
@@ -243,13 +243,13 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             impl State for BoolState having 'state = Bool where {
-                get = {} -> true
+                get = {} -> True
                 put = {value} -> {}
             }
 
             let result = perform BoolState in do
                 let flag = State.get {}
-                State.put { value = false }
+                State.put { value = False }
                 flag
         """.trimIndent()
 
@@ -363,10 +363,10 @@ class EffectAssociatedTypesInterpreterTest {
         val context = executeWithContext(code)
         assertTrue(context["result"] is FunkArrayList)
         val list = context["result"] as FunkArrayList
-        assertEquals(3, list.elements.size)
-        assertEquals(10L, (list.elements[0] as FunkInt).value)
-        assertEquals(20L, (list.elements[1] as FunkInt).value)
-        assertEquals(30L, (list.elements[2] as FunkInt).value)
+        assertEquals(3, list.size())
+        assertEquals(10L, (list.get(0) as FunkInt).value)
+        assertEquals(20L, (list.get(1) as FunkInt).value)
+        assertEquals(30L, (list.get(2) as FunkInt).value)
     }
 
     @Test
@@ -467,7 +467,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             impl State for BoolState having 'state = Bool where {
-                get = {} -> true
+                get = {} -> True
             }
 
             impl Reader for IntReader having 'env = Int where {
@@ -520,7 +520,7 @@ class EffectAssociatedTypesInterpreterTest {
             impl Triple for IntStringBoolTriple having 'a = Int, 'b = String, 'c = Bool where {
                 getFirst = {} -> 100
                 getSecond = {} -> "hello"
-                getThird = {} -> true
+                getThird = {} -> True
             }
 
             let a = perform IntStringBoolTriple in Triple.getFirst {}
@@ -548,7 +548,7 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let result = perform BoolFloatResult in do
-                let success = Outcome.succeed { value = true }
+                let success = Outcome.succeed { value = True }
                 let failure = Outcome.fail { error = 3.14 }
                 success
         """.trimIndent()
@@ -699,11 +699,11 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let check = {flag: Bool} -> if flag then
-                perform BoolStringResult in Outcome.succeed { value = true }
+                perform BoolStringResult in Outcome.succeed { value = True }
             else
-                perform BoolStringResult in Outcome.succeed { value = false }
+                perform BoolStringResult in Outcome.succeed { value = False }
 
-            let result = check { flag = true }
+            let result = check { flag = True }
         """.trimIndent()
 
         val context = executeWithContext(code)

@@ -90,6 +90,20 @@ object ListTypes {
             )
         }
 
+        // __native_list_uncons: {xs: List 'a} -> Option {head: 'a, tail: List 'a}
+        run {
+            val elemType = FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+            val listType = FunkType.ListType(elemType)
+            val resultRecordType = FunkType.RecordType(mapOf(
+                "head" to elemType,
+                "tail" to listType
+            ))
+            context["__native_list_uncons"] = FunkType.FunctionType(
+                FunkType.RecordType(mapOf("xs" to listType)),
+                optionType(resultRecordType)
+            )
+        }
+
         // __native_list_append: {xs: List 'a, ys: List 'a} -> List 'a
         run {
             val elemType = FunkType.VarType(com.funk.language.ast.TypeVar("a"))

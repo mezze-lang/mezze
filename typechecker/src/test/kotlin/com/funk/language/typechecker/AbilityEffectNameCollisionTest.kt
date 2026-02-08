@@ -279,11 +279,11 @@ class AbilityEffectNameCollisionTest {
             }
 
             impl Eq Bool where {
-                eq: {l: Bool, r: Bool} -> Bool = {l, r} -> if l then r else if r then false else true,
-                neq: {l: Bool, r: Bool} -> Bool = {l, r} -> if l then if r then false else true else r
+                eq: {l: Bool, r: Bool} -> Bool = {l, r} -> if l then r else if r then False else True,
+                neq: {l: Bool, r: Bool} -> Bool = {l, r} -> if l then if r then False else True else r
             }
 
-            let test = Eq.eq {l = true, r = false}
+            let test = Eq.eq {l = True, r = False}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

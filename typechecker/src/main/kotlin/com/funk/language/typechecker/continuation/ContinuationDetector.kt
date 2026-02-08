@@ -83,7 +83,12 @@ class ContinuationDetector {
                 expr.value?.let { usesContinuations(it) } ?: false
             }
             is ArrayLiteral -> {
-                expr.elements.any { usesContinuations(it) }
+                expr.elements.any { element ->
+                    when (element) {
+                        is ArrayRegularElement -> usesContinuations(element.expression)
+                        is ArraySpreadElement -> usesContinuations(element.expression)
+                    }
+                }
             }
             is ArrayAccess -> {
                 usesContinuations(expr.array) || usesContinuations(expr.index)

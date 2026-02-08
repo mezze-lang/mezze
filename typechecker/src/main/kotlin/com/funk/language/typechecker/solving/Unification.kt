@@ -237,13 +237,53 @@ fun unify(type1: FunkType, type2: FunkType, typeDeclarations: Map<String, TypeDe
         type1 is FunkType.ListType && type2 is FunkType.ListType ->
             unify(type1.elementType, type2.elementType, typeDeclarations)
 
+        // CASE 8a: Cross-unification between ListType and TypeApplication("List", ...)
+        type1 is FunkType.ListType && type2 is FunkType.TypeApplication && type2.constructor == "List" && type2.args.size == 1 ->
+            unify(type1.elementType, type2.args[0], typeDeclarations)
+        type1 is FunkType.TypeApplication && type1.constructor == "List" && type1.args.size == 1 && type2 is FunkType.ListType ->
+            unify(type1.args[0], type2.elementType, typeDeclarations)
+
         // CASE 9: Set type unification
         type1 is FunkType.SetType && type2 is FunkType.SetType ->
             unify(type1.elementType, type2.elementType, typeDeclarations)
 
+        // CASE 9a: Cross-unification between SetType and TypeApplication("Set", ...)
+        type1 is FunkType.SetType && type2 is FunkType.TypeApplication && type2.constructor == "Set" && type2.args.size == 1 ->
+            unify(type1.elementType, type2.args[0], typeDeclarations)
+        type1 is FunkType.TypeApplication && type1.constructor == "Set" && type1.args.size == 1 && type2 is FunkType.SetType ->
+            unify(type1.args[0], type2.elementType, typeDeclarations)
+
         // CASE 10: Map type unification
         type1 is FunkType.MapType && type2 is FunkType.MapType ->
             unifyMaps(type1, type2, typeDeclarations)
+
+        // CASE 10a: Cross-unification between MapType and TypeApplication("Map", ...)
+        type1 is FunkType.MapType && type2 is FunkType.TypeApplication && type2.constructor == "Map" && type2.args.size == 2 -> {
+            val keyResult = unify(type1.keyType, type2.args[0], typeDeclarations)
+            when (keyResult) {
+                is UnificationResult.Success -> {
+                    val valueResult = unify(keyResult.substitution.apply(type1.valueType), keyResult.substitution.apply(type2.args[1]), typeDeclarations)
+                    when (valueResult) {
+                        is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
+                        is UnificationResult.Failure -> valueResult
+                    }
+                }
+                is UnificationResult.Failure -> keyResult
+            }
+        }
+        type1 is FunkType.TypeApplication && type1.constructor == "Map" && type1.args.size == 2 && type2 is FunkType.MapType -> {
+            val keyResult = unify(type1.args[0], type2.keyType, typeDeclarations)
+            when (keyResult) {
+                is UnificationResult.Success -> {
+                    val valueResult = unify(keyResult.substitution.apply(type1.args[1]), keyResult.substitution.apply(type2.valueType), typeDeclarations)
+                    when (valueResult) {
+                        is UnificationResult.Success -> UnificationResult.Success(keyResult.substitution.compose(valueResult.substitution))
+                        is UnificationResult.Failure -> valueResult
+                    }
+                }
+                is UnificationResult.Failure -> keyResult
+            }
+        }
 
         // CASE 11: Suspended type unification (both suspended)
         type1 is FunkType.SuspendedType && type2 is FunkType.SuspendedType ->
@@ -261,6 +301,7 @@ fun unify(type1: FunkType, type2: FunkType, typeDeclarations: Map<String, TypeDe
         type1 is FunkType.NatType && type2 is FunkType.NatType -> UnificationResult.Success(Substitution.empty)
         type1 is FunkType.FracType && type2 is FunkType.FracType -> UnificationResult.Success(Substitution.empty)
         type1 is FunkType.OrderingType && type2 is FunkType.OrderingType -> UnificationResult.Success(Substitution.empty)
+        type1 is FunkType.BytesType && type2 is FunkType.BytesType -> UnificationResult.Success(Substitution.empty)
 
         // CASE 14: Type mismatch
         else -> {
@@ -761,6 +802,7 @@ private fun formatType(type: FunkType): String {
         is FunkType.NatType -> "Nat"
         is FunkType.FracType -> "Frac"
         is FunkType.OrderingType -> "Ordering"
+        is FunkType.BytesType -> "Bytes"
         is FunkType.FunctionType -> "{...} -> ..."
         is FunkType.RecordType -> "{${type.fields.keys.take(3).joinToString()}${if (type.fields.size > 3) ", ..." else ""}}"
         is FunkType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}${if (type.constructors.size > 3) ", ..." else ""}]"

@@ -168,7 +168,7 @@ class PolymorphicEffectsInterpreterTest {
             let conditional_apply: { pred: Bool, f: {} -> Int <...>, g: {} -> Int <...> } -> Int <...> =
                 { pred, f, g } -> if pred then f {} else g {}
 
-            let result = conditional_apply { pred = true, f = {} -> 100, g = {} -> 200 }
+            let result = conditional_apply { pred = True, f = {} -> 100, g = {} -> 200 }
         """.trimIndent()
 
         val context = executeWithContext(code)

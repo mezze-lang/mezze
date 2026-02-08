@@ -15,6 +15,8 @@ import com.funk.language.interpreter.stdlib.collections.TruffleNonEmptyListImple
 import com.funk.language.interpreter.stdlib.collections.TruffleArrayListImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleMapImplementations
 import com.funk.language.interpreter.stdlib.collections.TruffleSetImplementations
+import com.funk.language.interpreter.stdlib.collections.TruffleDequeImplementations
+import com.funk.language.interpreter.stdlib.collections.TruffleBytesImplementations
 import com.funk.language.interpreter.stdlib.effects.LogImplementations
 import com.funk.language.interpreter.stdlib.effects.InspectImplementations
 import com.funk.language.interpreter.stdlib.effects.FilesystemImplementations
@@ -22,6 +24,8 @@ import com.funk.language.interpreter.stdlib.effects.TimeImplementations
 import com.funk.language.interpreter.stdlib.effects.EnvironmentImplementations
 import com.funk.language.interpreter.stdlib.effects.ContinuationImplementations
 import com.funk.language.interpreter.stdlib.effects.LoomImplementations
+import com.funk.language.interpreter.stdlib.effects.OSThreadImplementations
+import com.funk.language.interpreter.stdlib.effects.CoopImplementations
 import com.funk.language.interpreter.stdlib.conversion.TruffleConversionImplementations
 import com.funk.language.interpreter.stdlib.io.TruffleIOImplementations
 import com.funk.language.interpreter.stdlib.system.TruffleSystemImplementations
@@ -61,12 +65,14 @@ object TruffleNativeImplementations {
         MathTrigImplementations.registerAll(context)
         MathRandomImplementations.registerAll(context)
 
-        // Register collection implementations (List, NonEmptyList, ArrayList, Map, Set)
+        // Register collection implementations (List, NonEmptyList, ArrayList, Map, Set, Deque, Bytes)
         TruffleListImplementations.registerAll(context)
         TruffleNonEmptyListImplementations.registerAll(context)
         TruffleArrayListImplementations.registerAll(context)
         TruffleMapImplementations.registerAll(context)
         TruffleSetImplementations.registerAll(context)
+        TruffleDequeImplementations.registerAll(context)
+        TruffleBytesImplementations.registerAll(context)
 
         // Register effects implementations (log, inspect, filesystem, time, environment, continuation, loom)
         LogImplementations.registerAll(context)
@@ -76,6 +82,8 @@ object TruffleNativeImplementations {
         EnvironmentImplementations.registerAll(context)
         ContinuationImplementations.registerAll(context, null)  // interpreter will be set up later
         LoomImplementations.registerAll(context)  // Project Loom virtual threads
+        OSThreadImplementations.registerAll(context)  // OS platform threads
+        CoopImplementations.registerAll(context)  // Cooperative async (single-threaded)
 
         // Register logic implementations (boolean operations, comparisons)
         TruffleLogicImplementations.registerAll(context)

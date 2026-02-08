@@ -6,68 +6,64 @@ import com.funk.language.interpreter.*
  * Truffle-optimized implementations for Map operations.
  *
  * Phase 3 of Truffle migration: Collection operations optimized for JIT performance.
- * Map is an immutable key-value collection backed by Kotlin's Map.
+ * Map is backed by Vavr HashMap for O(1) persistent operations with structural sharing.
  *
- * Optimizations:
- * - Inline Kotlin collection operations for JIT compilation
- * - Direct map operations (insert, get, remove, merge)
- * - Proper Truffle function calling with all 4 required arguments
- * - Immutable operations (create new maps instead of mutating)
+ * Performance characteristics (via Vavr HashMap's HAMT):
+ * - get: O(1) effectively constant
+ * - put: O(1) effectively constant, returns new map
+ * - remove: O(1) effectively constant, returns new map
+ * - containsKey: O(1) effectively constant
+ *
+ * All operations are immutable and return new maps with structural sharing.
  */
 object TruffleMapImplementations {
 
     fun registerAll(context: MutableMap<String, FunkValue>) {
-        // OLD INTERPRETER CODE REMOVED:
-        // val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
-        // No longer needed - functions are called via Truffle, not old interpreter
-
         // Create empty map
         context["__native_map_empty"] = NativeFunkFunction("__native_map_empty") { args ->
-            FunkMap(emptyMap())
+            FunkMap.empty()
         }
 
-        // Insert key-value pair
+        // Insert key-value pair - O(1)
         context["__native_map_insert"] = NativeFunkFunction("__native_map_insert") { args ->
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_insert", "expects 'm' as Map")
             val k = record.fields["k"] ?: throw NativeFunctionException("__native_map_insert", "expects 'k' field")
             val v = record.fields["v"] ?: throw NativeFunctionException("__native_map_insert", "expects 'v' field")
 
-            FunkMap(m.entries + (k to v))
+            m.put(k, v)
         }
 
-        // Get value by key (returns Option)
+        // Get value by key (returns Option) - O(1)
         context["__native_map_get"] = NativeFunkFunction("__native_map_get") { args ->
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_get", "expects 'm' as Map")
             val k = record.fields["k"] ?: throw NativeFunctionException("__native_map_get", "expects 'k' field")
 
-            val value = m.entries[k]
+            val value = m.get(k)
             if (value != null) {
-                // Some { val = value }
                 FunkVariant("Some", FunkRecord(mapOf("val" to value)))
             } else {
-                // None
                 FunkVariant("None", null)
             }
         }
 
-        // Remove key
+        // Remove key - O(1)
         context["__native_map_remove"] = NativeFunkFunction("__native_map_remove") { args ->
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_remove", "expects 'm' as Map")
             val k = record.fields["k"] ?: throw NativeFunctionException("__native_map_remove", "expects 'k' field")
 
-            FunkMap(m.entries - k)
+            m.remove(k)
         }
 
-        // Check if key exists
+        // Check if key exists - O(1)
         context["__native_map_contains_key"] = NativeFunkFunction("__native_map_contains_key") { args ->
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_contains_key", "expects 'm' as Map")
             val k = record.fields["k"] ?: throw NativeFunctionException("__native_map_contains_key", "expects 'k' field")
 
-            FunkBool(m.entries.containsKey(k))
+            FunkBool(m.containsKey(k))
         }
 
         // Get size
@@ -75,7 +71,7 @@ object TruffleMapImplementations {
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_size", "expects 'm' as Map")
 
-            FunkInt(m.entries.size.toLong())
+            FunkInt(m.size().toLong())
         }
 
         // Get all keys
@@ -83,7 +79,7 @@ object TruffleMapImplementations {
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_keys", "expects 'm' as Map")
 
-            FunkList(m.entries.keys.toList())
+            FunkList.fromKotlinList(m.keys())
         }
 
         // Get all values
@@ -91,19 +87,19 @@ object TruffleMapImplementations {
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_values", "expects 'm' as Map")
 
-            FunkList(m.entries.values.toList())
+            FunkList.fromKotlinList(m.values())
         }
 
-        // Get all entries (commented out in stdlib)
+        // Get all entries
         context["__native_map_entries"] = NativeFunkFunction("__native_map_entries") { args ->
             val record = args[0] as FunkRecord
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_entries", "expects 'm' as Map")
 
             // Return list of {key, value} records
-            val entries = m.entries.map { (k, v) ->
+            val entries = m.toKotlinMap().map { (k, v) ->
                 FunkRecord(mapOf("key" to k, "value" to v))
             }
-            FunkList(entries)
+            FunkList.fromKotlinList(entries)
         }
 
         // Map values
@@ -112,9 +108,8 @@ object TruffleMapImplementations {
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_map_values", "expects 'm' as Map")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_map_map_values", "expects 'f' function")
 
-            val newEntries = m.entries.map { (k, v) ->
+            val newEntries = m.toKotlinMap().map { (k, v) ->
                 val arg = if (v is FunkRecord) v else FunkRecord(mapOf("val" to v))
-                // Call function via Truffle (not old interpreter)
                 val result = when (f) {
                     is NativeFunkFunction -> f.call(listOf(v))
                     is FunkTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
@@ -132,9 +127,8 @@ object TruffleMapImplementations {
             val m = record.fields["m"] as? FunkMap ?: throw NativeFunctionException("__native_map_filter", "expects 'm' as Map")
             val p = record.fields["p"] ?: throw NativeFunctionException("__native_map_filter", "expects 'p' predicate")
 
-            val filteredEntries = m.entries.filter { (k, v) ->
+            val filteredEntries = m.toKotlinMap().filter { (k, v) ->
                 val entry = FunkRecord(mapOf("key" to k, "value" to v))
-                // Call function via Truffle (not old interpreter)
                 val result = when (p) {
                     is NativeFunkFunction -> p.call(listOf(entry))
                     is FunkTruffleFunction -> p.callTarget.call(entry, p.closureVariables, p.lexicalScope, p.lexicalScopeSlotMap) as FunkValue
@@ -154,10 +148,9 @@ object TruffleMapImplementations {
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_map_fold", "expects 'f' function")
 
             var accumulator = init
-            for ((k, v) in m.entries) {
+            for ((k, v) in m.toKotlinMap()) {
                 val entry = FunkRecord(mapOf("key" to k, "value" to v))
                 val callArg = FunkRecord(mapOf("acc" to accumulator, "entry" to entry))
-                // Call function via Truffle (not old interpreter)
                 accumulator = when (f) {
                     is NativeFunkFunction -> f.call(listOf(callArg))
                     is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
@@ -174,9 +167,8 @@ object TruffleMapImplementations {
             val ks = record.fields["ks"] as? FunkList ?: throw NativeFunctionException("__native_map_from_keys", "expects 'ks' as List")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_map_from_keys", "expects 'f' function")
 
-            val entries = ks.elements.associateWith { k ->
+            val entries = ks.toKotlinList().associateWith { k ->
                 val arg = if (k is FunkRecord) k else FunkRecord(mapOf("val" to k))
-                // Call function via Truffle (not old interpreter)
                 when (f) {
                     is NativeFunkFunction -> f.call(listOf(k))
                     is FunkTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
@@ -187,13 +179,14 @@ object TruffleMapImplementations {
             FunkMap(entries)
         }
 
-        // Merge (right overwrites left)
+        // Merge (right overwrites left) - uses Vavr merge
         context["__native_map_merge"] = NativeFunkFunction("__native_map_merge") { args ->
             val record = args[0] as FunkRecord
             val m1 = record.fields["m1"] as? FunkMap ?: throw NativeFunctionException("__native_map_merge", "expects 'm1' as Map")
             val m2 = record.fields["m2"] as? FunkMap ?: throw NativeFunctionException("__native_map_merge", "expects 'm2' as Map")
 
-            FunkMap(m1.entries + m2.entries)
+            // Vavr merge - right overwrites left
+            FunkMap(m1.entries.merge(m2.entries))
         }
 
         // Merge with function
@@ -203,23 +196,17 @@ object TruffleMapImplementations {
             val m2 = record.fields["m2"] as? FunkMap ?: throw NativeFunctionException("__native_map_merge_with", "expects 'm2' as Map")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_map_merge_with", "expects 'f' function")
 
-            val result = m1.entries.toMutableMap()
-            for ((k, v2) in m2.entries) {
-                if (k in result) {
-                    val v1 = result[k]!!
-                    val callArg = FunkRecord(mapOf("v1" to v1, "v2" to v2))
-                    // Call function via Truffle (not old interpreter)
-                    result[k] = when (f) {
-                        is NativeFunkFunction -> f.call(listOf(callArg))
-                        is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
-                        else -> throw NativeFunctionException("__native_map_merge_with", "unsupported function type: ${f::class.simpleName}")
-                    }
-                } else {
-                    result[k] = v2
+            // Merge with conflict resolution
+            val merged = m1.entries.merge(m2.entries) { v1, v2 ->
+                val callArg = FunkRecord(mapOf("v1" to v1, "v2" to v2))
+                when (f) {
+                    is NativeFunkFunction -> f.call(listOf(callArg))
+                    is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
+                    else -> throw NativeFunctionException("__native_map_merge_with", "unsupported function type: ${f::class.simpleName}")
                 }
             }
 
-            FunkMap(result.toMap())
+            FunkMap(merged)
         }
 
         // Remove all keys
@@ -229,8 +216,8 @@ object TruffleMapImplementations {
             val ks = record.fields["ks"] as? FunkList ?: throw NativeFunctionException("__native_map_remove_all", "expects 'ks' as List")
 
             var result = m.entries
-            for (k in ks.elements) {
-                result = result - k
+            for (k in ks.toKotlinList()) {
+                result = result.remove(k)
             }
 
             FunkMap(result)

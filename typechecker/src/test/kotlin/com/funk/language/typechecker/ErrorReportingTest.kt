@@ -264,7 +264,7 @@ class ErrorReportingTest {
     fun testMultipleErrorsReporting() {
         val source = """
             let x = 42 + "hello"
-            let y = true * false
+            let y = True * False
         """.trimIndent()
 
         val program = parser.parse(source)

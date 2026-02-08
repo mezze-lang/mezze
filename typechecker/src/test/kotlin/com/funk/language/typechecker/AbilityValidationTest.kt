@@ -273,7 +273,7 @@ class AbilityValidationTest {
             }
 
             impl Eq String where {
-              eq: {l: String, r: Int} -> Bool = {l, r} -> false
+              eq: {l: String, r: Int} -> Bool = {l, r} -> False
             }
 
             let areEqual = {x, y} -> Eq.eq {l = x, r = y}

@@ -256,8 +256,8 @@ class FunkInterpreterComprehensiveTest {
     fun testBooleanLogic() {
         // Use Funk's native boolean operators: && for AND, || for OR, ! for NOT
         val source = """
-            let x = true
-            let y = false
+            let x = True
+            let y = False
             let result1 = x && y
             let result2 = x || y
             let result3 = !x
@@ -339,12 +339,12 @@ class FunkInterpreterComprehensiveTest {
     fun testComplexDataStructures() {
         // Note: Funk uses 'Bool' not 'Boolean' as the type name
         val source = """
-            let alice = {id = 1, name = "Alice", active = true}
-            let bob = {id = 2, name = "Bob", active = false}
-            let charlie = {id = 3, name = "Charlie", active = true}
+            let alice = {id = 1, name = "Alice", active = True}
+            let bob = {id = 2, name = "Bob", active = False}
+            let charlie = {id = 3, name = "Charlie", active = True}
 
             let findUserById: {user: {id: Int, name: String, active: Bool}, targetId: Int} -> {id: Int, name: String, active: Bool} = {user, targetId} ->
-              if user.id == targetId then user else {id = 0, name = "NotFound", active = false}
+              if user.id == targetId then user else {id = 0, name = "NotFound", active = False}
 
             let result = findUserById {user = bob, targetId = 2}
         """.trimIndent()

@@ -71,9 +71,8 @@ class Lexer(private val source: String) {
         "in" to TokenType.IN,
         "use" to TokenType.USE,
         "having" to TokenType.HAVING,
-        "forall" to TokenType.FORALL,
-        "true" to TokenType.BOOLEAN,
-        "false" to TokenType.BOOLEAN
+        "forall" to TokenType.FORALL
+        // Note: Booleans are True/False (uppercase variant constructors), not keywords
     )
 
     fun tokenize(): List<Token> {

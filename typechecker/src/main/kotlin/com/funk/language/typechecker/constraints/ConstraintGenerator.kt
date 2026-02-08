@@ -152,7 +152,11 @@ class ConstraintGenerator(
                     results[getBindingName(item)] = resultWithDuplicates
 
                     // ALGORITHM W: Solve constraints for THIS binding immediately
-                    val solveResult = solver.solve(result.constraints)
+                    // CRITICAL: Include ability constraints so they get validated with the proper substitution!
+                    // Without this, ability constraints like NumAdd 'a are only validated in global solving,
+                    // but by then the type variable chain has changed and 'a doesn't resolve to the concrete type.
+                    val allBindingConstraints = result.constraints + result.abilityConstraints
+                    val solveResult = solver.solve(allBindingConstraints)
                     when (solveResult) {
                         is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
                             // Solving failed - collect the errors for propagation
@@ -1350,7 +1354,8 @@ class ConstraintGenerator(
             is FunkType.BooleanType,
             is FunkType.NatType,
             is FunkType.FracType,
-            is FunkType.OrderingType -> { /* No type variables */ }
+            is FunkType.OrderingType,
+            is FunkType.BytesType -> { /* No type variables */ }
             // Effect and suspended types - check inner types
             is FunkType.EffectRow -> { /* Effect names, no type variables to collect */ }
             is FunkType.SuspendedType -> collectTypeVarsRecursive(type.valueType, result)
@@ -1639,7 +1644,12 @@ class ConstraintGenerator(
                 containsFunctionCalls(expr.expression) ||
                 expr.cases.any { containsFunctionCalls(it.expression) }
             }
-            is ArrayLiteral -> expr.elements.any { containsFunctionCalls(it) }
+            is ArrayLiteral -> expr.elements.any { element ->
+                when (element) {
+                    is ArrayRegularElement -> containsFunctionCalls(element.expression)
+                    is ArraySpreadElement -> containsFunctionCalls(element.expression)
+                }
+            }
             is RecordLiteral -> expr.entries.any { entry ->
                 when (entry) {
                     is RecordFieldEntry -> entry.value?.let { containsFunctionCalls(it) } ?: false

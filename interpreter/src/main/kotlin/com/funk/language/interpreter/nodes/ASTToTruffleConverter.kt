@@ -1339,11 +1339,13 @@ class ASTToTruffleConverter(
 
             // Lists - check length and all elements structurally
             left is com.funk.language.interpreter.FunkList && right is com.funk.language.interpreter.FunkList -> {
-                if (left.elements.size != right.elements.size) {
+                val leftList = left.toKotlinList()
+                val rightList = right.toKotlinList()
+                if (leftList.size != rightList.size) {
                     false // Different lengths
                 } else {
                     // Check each element recursively
-                    left.elements.zip(right.elements).all { (leftElem, rightElem) ->
+                    leftList.zip(rightList).all { (leftElem: FunkValue, rightElem: FunkValue) ->
                         structuralEquals(leftElem, rightElem)
                     }
                 }
@@ -1573,7 +1575,12 @@ class ASTToTruffleConverter(
                     Unit
                 }
                 is ArrayLiteral -> {
-                    e.elements.forEach { visit(it) }
+                    e.elements.forEach { element ->
+                        when (element) {
+                            is ArrayRegularElement -> visit(element.expression)
+                            is ArraySpreadElement -> visit(element.expression)
+                        }
+                    }
                     Unit
                 }
                 is ArrayAccess -> {
@@ -1699,10 +1706,36 @@ class ASTToTruffleConverter(
     
     /**
      * Convert an Array literal to an Array construction node
+     * Handles both regular arrays and arrays with spread elements.
+     *
+     * Spread elements must come before regular elements: [...xs, a, b, c]
+     * This is enforced at parse time.
      */
     private fun convertArrayLiteral(arrayLit: ArrayLiteral): FunkNode {
-        val elementNodes = arrayLit.elements.map { convertExpression(it) }.toTypedArray()
-        return ArrayLiteralNode(elementNodes)
+        if (arrayLit.hasSpreadElements()) {
+            // Array has spread elements - use ArraySpreadNode
+            // Spreads come first, then regular elements (enforced by parser)
+            val spreadArrays = mutableListOf<FunkNode>()
+            val appendElements = mutableListOf<FunkNode>()
+
+            for (element in arrayLit.elements) {
+                when (element) {
+                    is ArraySpreadElement -> spreadArrays.add(convertExpression(element.expression))
+                    is ArrayRegularElement -> appendElements.add(convertExpression(element.expression))
+                }
+            }
+
+            return ArraySpreadNode(
+                spreadArrays.toTypedArray(),
+                appendElements.toTypedArray()
+            )
+        } else {
+            // Simple array without spread - use ArrayLiteralNode
+            val elementNodes = arrayLit.elements.map { (it as ArrayRegularElement).expression }
+                .map { convertExpression(it) }
+                .toTypedArray()
+            return ArrayLiteralNode(elementNodes)
+        }
     }
     
     /**

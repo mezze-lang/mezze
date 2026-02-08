@@ -73,7 +73,7 @@ class ConstraintPropagationTest {
     fun `test constraint propagation failure`() {
         val code = """
             let add = {x, y} -> x + y
-            let result = add {x = true, y = false}
+            let result = add {x = True, y = False}
         """.trimIndent()
         
         // Enable strict mode to ensure errors are thrown

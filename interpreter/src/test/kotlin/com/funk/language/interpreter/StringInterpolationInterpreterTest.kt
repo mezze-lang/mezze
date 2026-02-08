@@ -199,7 +199,7 @@ Line 2: $(b)"
     @Test
     fun `test interpolation with if expression`() {
         val source = """
-            let result = "$(if true then "yes" else "no")"
+            let result = "$(if True then "yes" else "no")"
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
@@ -211,7 +211,7 @@ Line 2: $(b)"
     fun `test interpolation with conditional expression`() {
         // Test conditional logic in interpolation context
         val source = """
-            let flag = true
+            let flag = True
             let label = if flag then "enabled" else "disabled"
             let result = "Status: $(label)"
         """.trimIndent()
@@ -236,7 +236,7 @@ Line 2: $(b)"
     @Test
     fun `test boolean interpolation fails at typecheck`() {
         val source = """
-            let flag = true
+            let flag = True
             let msg = "Flag: $(flag)"
         """.trimIndent()
 

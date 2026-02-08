@@ -35,10 +35,10 @@ class ArrayAccessNode(
         }
         
         val indexInt = indexValue.value.toInt()
-        if (indexInt < 0 || indexInt >= arrayValue.elements.size) {
-            throw RuntimeException("Array index out of bounds: $indexInt (array size: ${arrayValue.elements.size})")
+        if (indexInt < 0 || indexInt >= arrayValue.size()) {
+            throw RuntimeException("Array index out of bounds: $indexInt (array size: ${arrayValue.size()})")
         }
-        
-        return arrayValue.elements[indexInt]
+
+        return arrayValue.get(indexInt)
     }
 }

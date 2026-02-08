@@ -77,7 +77,7 @@ class GeneratorMinimalTest {
         println("Recursive result class: ${result::class.simpleName}")
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        println("List size: ${list.elements.size}")
-        println("List elements: ${list.elements}")
+        println("List size: ${list.size()}")
+        println("List elements: ${list.toList()}")
     }
 }

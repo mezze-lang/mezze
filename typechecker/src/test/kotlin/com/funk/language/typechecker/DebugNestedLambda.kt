@@ -7,11 +7,11 @@ class DebugNestedLambda {
     @Test
     fun testNestedLambdaDebug() {
         val code = """
-            newtype Promise = Promise __NativePromise
+            newtype Promise 'a = Promise __NativePromise
 
-            let spawn: {computation: {} -> 'a} -> Promise = {computation} -> __native_loom_spawn {computation = computation}
+            let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
 
-            let f = {x} -> spawn {computation = {} -> x * 2}
+            let f = {x} -> spawn {f = {} -> x * 2}
         """.trimIndent()
 
         val parser = FunkParser()

@@ -23,8 +23,8 @@ class BasicLanguageFeaturesTest {
             let intValue = 42
             let floatValue = 3.14
             let stringValue = "Hello World"
-            let boolTrue = true
-            let boolFalse = false
+            let boolTrue = True
+            let boolFalse = False
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
@@ -117,10 +117,10 @@ class BasicLanguageFeaturesTest {
     @Test
     fun `test boolean values`() {
         val source = """
-            let t = true
-            let f = false
-            let condition1 = if t then true else false
-            let condition2 = if f then true else false
+            let t = True
+            let f = False
+            let condition1 = if t then True else False
+            let condition2 = if f then True else False
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
@@ -135,7 +135,7 @@ class BasicLanguageFeaturesTest {
     fun `test basic records`() {
         val source = """
             let emptyRecord = {}
-            let person = {name = "Alice", age = 30, active = true}
+            let person = {name = "Alice", age = 30, active = True}
             let nested = {user = {id = 123, name = "Bob"}, department = "Engineering"}
         """.trimIndent()
 
@@ -202,7 +202,7 @@ class BasicLanguageFeaturesTest {
             let complex1 = (a + b) * c
             let complex2 = a + (b * c)
             let complex3 = (a * b) + (c / a)
-            let boolComplex = if a < b then (if b < c then true else false) else false
+            let boolComplex = if a < b then (if b < c then True else False) else False
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)

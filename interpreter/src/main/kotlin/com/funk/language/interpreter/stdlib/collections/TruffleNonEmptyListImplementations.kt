@@ -55,7 +55,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_from_head_tail", "expects 'head' field")
             val tail = record.fields["tail"] as? FunkList
                 ?: throw NativeFunctionException("__native_nel_from_head_tail", "expects 'tail' as List")
-            FunkNonEmptyList(listOf(head) + tail.elements)
+            FunkNonEmptyList(listOf(head) + tail.toKotlinList())
         }
 
         context["__native_nel_head"] = NativeFunkFunction("__native_nel_head") { args ->
@@ -71,7 +71,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_tail", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkNonEmptyList
                 ?: throw NativeFunctionException("__native_nel_tail", "expects 'xs' as NonEmptyList")
-            FunkList(xs.elements.drop(1))
+            FunkList.fromKotlinList(xs.elements.drop(1))
         }
 
         context["__native_nel_length"] = NativeFunkFunction("__native_nel_length") { args ->
@@ -110,7 +110,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_prepend_list", "expects 'xs' as List")
             val y = record.fields["y"]
                 ?: throw NativeFunctionException("__native_nel_prepend_list", "expects 'y' value")
-            FunkNonEmptyList(xs.elements + listOf(y))
+            FunkNonEmptyList(xs.toKotlinList() + listOf(y))
         }
 
         context["__native_nel_append_list"] = NativeFunkFunction("__native_nel_append_list") { args ->
@@ -120,7 +120,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_append_list", "expects 'xs' as NonEmptyList")
             val ys = record.fields["ys"] as? FunkList
                 ?: throw NativeFunctionException("__native_nel_append_list", "expects 'ys' as List")
-            FunkNonEmptyList(xs.elements + ys.elements)
+            FunkNonEmptyList(xs.elements + ys.toKotlinList())
         }
 
         // Access
@@ -322,7 +322,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_to_list", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkNonEmptyList
                 ?: throw NativeFunctionException("__native_nel_to_list", "expects 'xs' as NonEmptyList")
-            FunkList(xs.elements)
+            FunkList.fromKotlinList(xs.elements)
         }
 
         context["__native_nel_from_list"] = NativeFunkFunction("__native_nel_from_list") { args ->
@@ -331,10 +331,11 @@ object TruffleNonEmptyListImplementations {
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_nel_from_list", "expects 'xs' as List")
 
-            if (xs.elements.isEmpty()) {
+            val kotlinList = xs.toKotlinList()
+            if (kotlinList.isEmpty()) {
                 throw NativeFunctionException("__native_nel_from_list", "cannot create NonEmptyList from empty list")
             }
-            FunkNonEmptyList(xs.elements)
+            FunkNonEmptyList(kotlinList)
         }
 
         context["__native_nel_to_array"] = NativeFunkFunction("__native_nel_to_array") { args ->
@@ -342,7 +343,7 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_to_array", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkNonEmptyList
                 ?: throw NativeFunctionException("__native_nel_to_array", "expects 'xs' as NonEmptyList")
-            FunkArrayList(xs.elements.toMutableList())
+            FunkArrayList(xs.elements)
         }
 
         context["__native_nel_from_array"] = NativeFunkFunction("__native_nel_from_array") { args ->
@@ -351,10 +352,10 @@ object TruffleNonEmptyListImplementations {
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_nel_from_array", "expects 'xs' as Array")
 
-            if (xs.elements.isEmpty()) {
+            if (xs.isEmpty()) {
                 throw NativeFunctionException("__native_nel_from_array", "cannot create NonEmptyList from empty array")
             }
-            FunkNonEmptyList(xs.elements.toList())
+            FunkNonEmptyList(xs.toList())
         }
 
         // Sorting

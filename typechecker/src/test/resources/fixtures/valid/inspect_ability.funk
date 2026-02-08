@@ -51,6 +51,6 @@ let multiInspect = {a, b, c} ->
 # Inspect with list elements - Inspect is implicit
 let inspectListHead = {lst} -> match lst is
   Cons {head, tail} -> Inspect.to_str {val = head}
-  Nil -> "empty"                                                        # expected: inspectListHead : { lst: | Cons { head: 'a, tail: 'b }, Nil | } -> String
+  Nil -> "empty"                                                        # expected: inspectListHead : { lst: List 'a } -> String
 
 inspectInt {x = 42}

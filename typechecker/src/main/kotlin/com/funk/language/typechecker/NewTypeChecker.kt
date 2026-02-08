@@ -820,6 +820,56 @@ class NewTypeChecker(
         fun restoreModuleCache(modules: Map<String, Any>) {
             // No-op: new system handles caching internally
         }
+
+        /**
+         * Preload modules into the cache (for compiled JARs).
+         *
+         * This is used by compiled JARs to preload stdlib and imported modules
+         * to avoid parsing them at runtime. Modules are deserialized from JSON
+         * and loaded into the ModuleResolver's cache.
+         *
+         * @param modules Map of module paths to typed Programs
+         */
+        @JvmStatic
+        fun preloadModules(modules: Map<String, Program>) {
+            val resolver = ModuleResolver.create()
+
+            for ((modulePath, program) in modules) {
+                // Build type context from the program for exports
+                val typeContext = mutableMapOf<String, FunkType>()
+
+                for (item in program.items) {
+                    when (item) {
+                        is LetBinding -> {
+                            item.inferredType?.let { type ->
+                                typeContext[item.variableName] = type
+                            }
+                        }
+                        is TypeDeclaration -> {
+                            item.inferredType?.let { type ->
+                                typeContext[item.name] = type
+                            }
+                        }
+                        is EffectDeclaration -> {
+                            item.inferredType?.let { type ->
+                                typeContext[item.name] = type
+                            }
+                        }
+                        is ImplDeclaration -> {
+                            item.inferredType?.let { type ->
+                                typeContext[item.performerName] = type
+                            }
+                        }
+                        else -> {
+                            // Other items don't contribute to type context
+                        }
+                    }
+                }
+
+                // Update ModuleResolver's cache with the preloaded module
+                resolver.updateModuleExports(modulePath, program, typeContext)
+            }
+        }
     }
 
     private fun debugTypeNTC(type: FunkType?, depth: Int = 0): String {
@@ -1020,7 +1070,12 @@ class NewTypeChecker(
                 }
             }
             is ArrayLiteral -> {
-                val transformedElements = expr.elements.map { transformExpression(it) }
+                val transformedElements = expr.elements.map { element ->
+                    when (element) {
+                        is ArrayRegularElement -> ArrayRegularElement(transformExpression(element.expression))
+                        is ArraySpreadElement -> ArraySpreadElement(transformExpression(element.expression))
+                    }
+                }
                 if (transformedElements != expr.elements) {
                     expr.copy(elements = transformedElements)
                 } else {

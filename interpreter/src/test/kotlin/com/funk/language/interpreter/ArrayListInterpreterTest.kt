@@ -155,36 +155,34 @@ class ArrayListInterpreterTest {
     @Test
     fun `test FunkArrayList operations`() {
         val arrayList = FunkArrayList()
-        
+
         // Test isEmpty
         assertTrue(arrayList.isEmpty())
         assertEquals(0, arrayList.size())
-        
-        // Test add
-        arrayList.add(FunkInt(1))
-        arrayList.add(FunkInt(2))
-        assertEquals(2, arrayList.size())
-        assertFalse(arrayList.isEmpty())
-        
+
+        // Test add (immutable - returns new array)
+        val list1 = arrayList.add(FunkInt(1))
+        val list2 = list1.add(FunkInt(2))
+        assertEquals(2, list2.size())
+        assertFalse(list2.isEmpty())
+
         // Test get
-        assertEquals(FunkInt(1), arrayList.get(0))
-        assertEquals(FunkInt(2), arrayList.get(1))
-        
-        // Test set
-        val oldValue = arrayList.set(0, FunkInt(10))
-        assertEquals(FunkInt(1), oldValue)
-        assertEquals(FunkInt(10), arrayList.get(0))
-        
-        // Test removeAt
-        val removedValue = arrayList.removeAt(0)
-        assertEquals(FunkInt(10), removedValue)
-        assertEquals(1, arrayList.size())
-        assertEquals(FunkInt(2), arrayList.get(0))
-        
-        // Test clear
-        arrayList.clear()
-        assertTrue(arrayList.isEmpty())
-        assertEquals(0, arrayList.size())
+        assertEquals(FunkInt(1), list2.get(0))
+        assertEquals(FunkInt(2), list2.get(1))
+
+        // Test set (immutable - returns new array)
+        val list3 = list2.set(0, FunkInt(10))
+        assertEquals(FunkInt(10), list3.get(0))
+        // Original unchanged
+        assertEquals(FunkInt(1), list2.get(0))
+
+        // Test removeAt (immutable - returns new array)
+        val list4 = list3.removeAt(0)
+        assertEquals(1, list4.size())
+        assertEquals(FunkInt(2), list4.get(0))
+
+        // Original still has both elements
+        assertEquals(2, list3.size())
     }
     
     @Test
@@ -219,7 +217,62 @@ class ArrayListInterpreterTest {
         // Test with mixed nested structure (though type system wouldn't allow this)
         val innerArray = FunkArrayList(listOf(FunkInt(1), FunkInt(2)))
         val outerArray = FunkArrayList(listOf(innerArray, FunkString("test")))
-        
+
         assertEquals("""[[1, 2], "test"]""", outerArray.getDisplayString())
+    }
+
+    @Test
+    fun `test array spread with append`() {
+        // Valid: spread first, then append elements
+        val code = """
+            let rest = [1, 2, 3]
+            let combined = [...rest, 4, 5]
+            combined
+        """.trimIndent()
+
+        val result = interpreter.run(code)
+        assertTrue(result is FunkArrayList)
+        assertEquals("[1, 2, 3, 4, 5]", (result as FunkArrayList).getDisplayString())
+    }
+
+    @Test
+    fun `test array spread with multiple spreads`() {
+        val code = """
+            let a = [1, 2]
+            let b = [3, 4]
+            let combined = [...a, ...b]
+            combined
+        """.trimIndent()
+
+        val result = interpreter.run(code)
+        assertTrue(result is FunkArrayList)
+        assertEquals("[1, 2, 3, 4]", (result as FunkArrayList).getDisplayString())
+    }
+
+    @Test
+    fun `test array spread with spread only`() {
+        val code = """
+            let arr = [1, 2, 3]
+            let copy = [...arr]
+            copy
+        """.trimIndent()
+
+        val result = interpreter.run(code)
+        assertTrue(result is FunkArrayList)
+        assertEquals("[1, 2, 3]", (result as FunkArrayList).getDisplayString())
+    }
+
+    @Test
+    fun `test array spread with multiple spreads and append`() {
+        val code = """
+            let a = [1, 2]
+            let b = [3, 4]
+            let combined = [...a, ...b, 5, 6]
+            combined
+        """.trimIndent()
+
+        val result = interpreter.run(code)
+        assertTrue(result is FunkArrayList)
+        assertEquals("[1, 2, 3, 4, 5, 6]", (result as FunkArrayList).getDisplayString())
     }
 }

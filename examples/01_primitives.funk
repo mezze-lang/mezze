@@ -22,7 +22,7 @@ let name = "Funk"
 let message = "$(greeting), $(name)!"
 
 # Bool operations
-let is_valid = true
+let is_valid = True
 let can_proceed = is_valid && is_adult
 
 # Main function for execution

@@ -6,51 +6,48 @@ import com.funk.language.interpreter.*
  * Truffle-optimized implementations for Set operations.
  *
  * Phase 3 of Truffle migration: Collection operations optimized for JIT performance.
- * Set is an immutable collection of unique elements backed by Kotlin's Set.
+ * Set is backed by Vavr HashSet for O(1) persistent operations with structural sharing.
  *
- * Optimizations:
- * - Inline Kotlin set operations (union, intersection, difference)
- * - Direct element access patterns
- * - Proper Truffle function calling with all 4 required arguments
- * - Immutable operations (create new sets instead of mutating)
+ * Performance characteristics (via Vavr HashSet's HAMT):
+ * - add: O(1) effectively constant, returns new set
+ * - remove: O(1) effectively constant, returns new set
+ * - contains: O(1) effectively constant
+ *
+ * All operations are immutable and return new sets with structural sharing.
  */
 object TruffleSetImplementations {
 
     fun registerAll(context: MutableMap<String, FunkValue>) {
-        // OLD INTERPRETER CODE REMOVED:
-        // val interpreter = (context["__interpreter_instance"] as? InterpreterReference)?.interpreter
-        // No longer needed - functions are called via Truffle, not old interpreter
-
         // Create empty set
         context["__native_set_empty"] = NativeFunkFunction("__native_set_empty") { args ->
-            FunkSet(emptySet())
+            FunkSet.empty()
         }
 
-        // Insert element
+        // Insert element - O(1)
         context["__native_set_insert"] = NativeFunkFunction("__native_set_insert") { args ->
             val record = args[0] as FunkRecord
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_insert", "expects 's' as Set")
             val x = record.fields["x"] ?: throw NativeFunctionException("__native_set_insert", "expects 'x' element")
 
-            FunkSet(s.elements + x)
+            s.add(x)
         }
 
-        // Remove element
+        // Remove element - O(1)
         context["__native_set_remove"] = NativeFunkFunction("__native_set_remove") { args ->
             val record = args[0] as FunkRecord
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_remove", "expects 's' as Set")
             val x = record.fields["x"] ?: throw NativeFunctionException("__native_set_remove", "expects 'x' element")
 
-            FunkSet(s.elements - x)
+            s.remove(x)
         }
 
-        // Check if element exists
+        // Check if element exists - O(1)
         context["__native_set_contains"] = NativeFunkFunction("__native_set_contains") { args ->
             val record = args[0] as FunkRecord
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_contains", "expects 's' as Set")
             val x = record.fields["x"] ?: throw NativeFunctionException("__native_set_contains", "expects 'x' element")
 
-            FunkBool(s.elements.contains(x))
+            FunkBool(s.contains(x))
         }
 
         // Get size
@@ -58,7 +55,7 @@ object TruffleSetImplementations {
             val record = args[0] as FunkRecord
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_size", "expects 's' as Set")
 
-            FunkInt(s.elements.size.toLong())
+            FunkInt(s.size().toLong())
         }
 
         // Union
@@ -67,7 +64,7 @@ object TruffleSetImplementations {
             val s1 = record.fields["s1"] as? FunkSet ?: throw NativeFunctionException("__native_set_union", "expects 's1' as Set")
             val s2 = record.fields["s2"] as? FunkSet ?: throw NativeFunctionException("__native_set_union", "expects 's2' as Set")
 
-            FunkSet(s1.elements + s2.elements)
+            s1.union(s2)
         }
 
         // Intersection
@@ -76,7 +73,7 @@ object TruffleSetImplementations {
             val s1 = record.fields["s1"] as? FunkSet ?: throw NativeFunctionException("__native_set_intersection", "expects 's1' as Set")
             val s2 = record.fields["s2"] as? FunkSet ?: throw NativeFunctionException("__native_set_intersection", "expects 's2' as Set")
 
-            FunkSet(s1.elements.intersect(s2.elements))
+            s1.intersect(s2)
         }
 
         // Difference
@@ -85,7 +82,7 @@ object TruffleSetImplementations {
             val s1 = record.fields["s1"] as? FunkSet ?: throw NativeFunctionException("__native_set_difference", "expects 's1' as Set")
             val s2 = record.fields["s2"] as? FunkSet ?: throw NativeFunctionException("__native_set_difference", "expects 's2' as Set")
 
-            FunkSet(s1.elements - s2.elements)
+            s1.difference(s2)
         }
 
         // Is subset
@@ -94,7 +91,8 @@ object TruffleSetImplementations {
             val s1 = record.fields["s1"] as? FunkSet ?: throw NativeFunctionException("__native_set_is_subset", "expects 's1' as Set")
             val s2 = record.fields["s2"] as? FunkSet ?: throw NativeFunctionException("__native_set_is_subset", "expects 's2' as Set")
 
-            FunkBool(s2.elements.containsAll(s1.elements))
+            // s1 is subset of s2 if all elements of s1 are in s2
+            FunkBool(s1.elements.forAll { s2.elements.contains(it) })
         }
 
         // Convert to list
@@ -102,7 +100,7 @@ object TruffleSetImplementations {
             val record = args[0] as FunkRecord
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_to_list", "expects 's' as Set")
 
-            FunkList(s.elements.toList())
+            FunkList.fromKotlinList(s.toList())
         }
 
         // Convert from list
@@ -110,7 +108,7 @@ object TruffleSetImplementations {
             val record = args[0] as FunkRecord
             val xs = record.fields["xs"] as? FunkList ?: throw NativeFunctionException("__native_set_from_list", "expects 'xs' as List")
 
-            FunkSet(xs.elements.toSet())
+            FunkSet(xs.toKotlinList())
         }
 
         // Filter
@@ -119,16 +117,15 @@ object TruffleSetImplementations {
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_filter", "expects 's' as Set")
             val p = record.fields["p"] ?: throw NativeFunctionException("__native_set_filter", "expects 'p' predicate")
 
-            val filtered = s.elements.filter { element ->
+            val filtered = s.toList().filter { element ->
                 val arg = if (element is FunkRecord) element else FunkRecord(mapOf("val" to element))
-                // Call function via Truffle (not old interpreter)
                 val result = when (p) {
                     is NativeFunkFunction -> p.call(listOf(element))
                     is FunkTruffleFunction -> p.callTarget.call(arg, p.closureVariables, p.lexicalScope, p.lexicalScopeSlotMap) as FunkValue
                     else -> throw NativeFunctionException("__native_set_filter", "unsupported function type: ${p::class.simpleName}")
                 }
                 (result as FunkBool).value
-            }.toSet()
+            }
 
             FunkSet(filtered)
         }
@@ -139,15 +136,14 @@ object TruffleSetImplementations {
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_map", "expects 's' as Set")
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_set_map", "expects 'f' function")
 
-            val mapped = s.elements.map { element ->
+            val mapped = s.toList().map { element ->
                 val arg = if (element is FunkRecord) element else FunkRecord(mapOf("val" to element))
-                // Call function via Truffle (not old interpreter)
                 when (f) {
                     is NativeFunkFunction -> f.call(listOf(element))
                     is FunkTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
                     else -> throw NativeFunctionException("__native_set_map", "unsupported function type: ${f::class.simpleName}")
                 }
-            }.toSet()
+            }
 
             FunkSet(mapped)
         }
@@ -160,9 +156,8 @@ object TruffleSetImplementations {
             val f = record.fields["f"] ?: throw NativeFunctionException("__native_set_fold", "expects 'f' function")
 
             var accumulator = init
-            for (element in s.elements) {
+            for (element in s.toList()) {
                 val callArg = FunkRecord(mapOf("acc" to accumulator, "elem" to element))
-                // Call function via Truffle (not old interpreter)
                 accumulator = when (f) {
                     is NativeFunkFunction -> f.call(listOf(callArg))
                     is FunkTruffleFunction -> f.callTarget.call(callArg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as FunkValue
@@ -179,7 +174,7 @@ object TruffleSetImplementations {
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_insert_all", "expects 's' as Set")
             val xs = record.fields["xs"] as? FunkList ?: throw NativeFunctionException("__native_set_insert_all", "expects 'xs' as List")
 
-            FunkSet(s.elements + xs.elements.toSet())
+            FunkSet(s.elements.addAll(xs.toKotlinList()))
         }
 
         // Remove all
@@ -188,7 +183,7 @@ object TruffleSetImplementations {
             val s = record.fields["s"] as? FunkSet ?: throw NativeFunctionException("__native_set_remove_all", "expects 's' as Set")
             val xs = record.fields["xs"] as? FunkList ?: throw NativeFunctionException("__native_set_remove_all", "expects 'xs' as List")
 
-            FunkSet(s.elements - xs.elements.toSet())
+            FunkSet(s.elements.removeAll(xs.toKotlinList()))
         }
     }
 }

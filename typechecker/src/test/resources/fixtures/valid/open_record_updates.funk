@@ -29,8 +29,8 @@ let nestedUpdated = {...nestedRecord, department = "Marketing"}
 # expected: nestedUpdated : { user: { name: String, age: Int }, department: String }
 
 # Complex record spread
-let configRecord = {timeout = 30, retries = 3, debug = false}
+let configRecord = {timeout = 30, retries = 3, debug = False}
 # expected: configRecord : { timeout: Int, retries: Int, debug: Bool }
 
-let updatedConfig = {...configRecord, timeout = 60, debug = true}
+let updatedConfig = {...configRecord, timeout = 60, debug = True}
 # expected: updatedConfig : { timeout: Int, retries: Int, debug: Bool }

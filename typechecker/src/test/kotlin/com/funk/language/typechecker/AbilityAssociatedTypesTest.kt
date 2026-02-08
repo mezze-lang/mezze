@@ -432,7 +432,7 @@ class AbilityAssociatedTypesTest {
 
             impl Convert String having 'to = Int, 'error = Bool where {
                 convert = {value} -> 42
-                getError = {} -> true
+                getError = {} -> True
             }
         """.trimIndent()
 
@@ -552,7 +552,7 @@ class AbilityAssociatedTypesTest {
             }
 
             impl Parser String having 'output = Bool, 'state = Float where {
-                parse = {input} -> true
+                parse = {input} -> True
                 getState = {input} -> 3.14
             }
         """.trimIndent()

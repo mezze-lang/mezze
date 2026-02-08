@@ -129,7 +129,7 @@ private fun collectTypeVarsRecursive(type: FunkType, collector: MutableList<Type
         // Base types don't contain type variables
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType, is FunkType.EffectRow -> { }
+        is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> { }
     }
 }
 
@@ -293,7 +293,7 @@ fun substituteTypeVariables(type: FunkType, mapping: Map<TypeVar, TypeVar>): Fun
         // Base types and effect rows remain unchanged
         is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
         is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-        is FunkType.OrderingType, is FunkType.EffectRow -> type
+        is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> type
     }
 }
 

@@ -22,14 +22,14 @@ pub let get_or_else: { result: (Result 'a 'e), def: 'a } -> 'a = { result, def }
 # Check if Result is successful
 pub let is_ok: { result: (Result 'a 'e) } -> Bool = { result } ->
     match result is
-        Ok { val } -> true
-        Err { error } -> false
+        Ok { val } -> True
+        Err { error } -> False
 
 # Check if Result is an error
 pub let is_err: { result: (Result 'a 'e) } -> Bool = { result } ->
     match result is
-        Ok { val } -> false
-        Err { error } -> true
+        Ok { val } -> False
+        Err { error } -> True
 
 # Chain operations that return Results
 pub let flat_map: { result: (Result 'a 'e), f: {val: 'a} -> (Result 'b 'e) } -> (Result 'b 'e) = { result, f } ->

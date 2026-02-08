@@ -30,4 +30,4 @@ pub let is_even = { n: Nat } ->
     (n % 2n) == 0n
 
 pub let is_odd = { n: Nat } ->
-    if is_even { n = n } then false else true
+    if is_even { n = n } then False else True

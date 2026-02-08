@@ -149,10 +149,53 @@ data class FractionLiteral(
 
 @Serializable
 data class ArrayLiteral(
-    val elements: List<Expression>,
+    val elements: List<ArrayElement>,
     override val inferredType: FunkType? = null,
     override val sourceLocation: SourceLocation? = null
-) : Expression
+) : Expression {
+    /**
+     * Check if this array literal contains any spread elements
+     */
+    fun hasSpreadElements(): Boolean = elements.any { it is ArraySpreadElement }
+
+    /**
+     * Get all regular (non-spread) elements
+     */
+    fun getRegularElements(): List<ArrayRegularElement> = elements.filterIsInstance<ArrayRegularElement>()
+
+    /**
+     * Get all spread elements
+     */
+    fun getSpreadElements(): List<ArraySpreadElement> = elements.filterIsInstance<ArraySpreadElement>()
+
+    companion object {
+        /**
+         * Create an ArrayLiteral from a list of expressions (all regular elements)
+         * For backward compatibility
+         */
+        fun fromExpressions(expressions: List<Expression>, sourceLocation: SourceLocation? = null): ArrayLiteral =
+            ArrayLiteral(expressions.map { ArrayRegularElement(it) }, sourceLocation = sourceLocation)
+    }
+}
+
+/**
+ * Sealed class for array elements - either regular expressions or spread expressions
+ */
+@Serializable
+@JsonClassDiscriminator("arrayElementKind")
+sealed class ArrayElement
+
+/**
+ * Regular array element (a single expression)
+ */
+@Serializable
+data class ArrayRegularElement(val expression: Expression) : ArrayElement()
+
+/**
+ * Spread element in an array literal (...expr)
+ */
+@Serializable
+data class ArraySpreadElement(val expression: Expression) : ArrayElement()
 
 @Serializable
 data class ArrayAccess(

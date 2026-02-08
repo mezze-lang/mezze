@@ -725,31 +725,35 @@ class FunctionCallSyntaxTest {
     }
 
     @Test
-    fun `test function call with boolean literal true should fail`() {
+    fun `test function call with boolean constructor True should fail`() {
+        // True/False are now variant constructors (uppercase identifiers), not boolean literals
+        // Function calls still require {} syntax
         val code = """
             let f = {x} -> x
-            let result = f true
+            let result = f True
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
             parser.parse(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
-        assertTrue(exception.message?.contains("boolean") == true)
+        assertTrue(exception.message?.contains("True") == true)
     }
 
     @Test
-    fun `test function call with boolean literal false should fail`() {
+    fun `test function call with boolean constructor False should fail`() {
+        // True/False are now variant constructors (uppercase identifiers), not boolean literals
+        // Function calls still require {} syntax
         val code = """
             let f = {x} -> x
-            let result = f false
+            let result = f False
         """.trimIndent()
 
         val exception = assertThrows<ParseException> {
             parser.parse(code)
         }
         assertTrue(exception.message?.contains("Function calls must use {} syntax") == true)
-        assertTrue(exception.message?.contains("boolean") == true)
+        assertTrue(exception.message?.contains("False") == true)
     }
 
     @Test

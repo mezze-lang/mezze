@@ -269,9 +269,9 @@ class SuspendedTypeAbilityTest {
 
             let getBool: {} -> Bool <Log> = {} -> do
                 Log.println { msg = "Getting bool" }
-                true
+                True
 
-            let result = getBool {} && false
+            let result = getBool {} && False
             result
             """.trimIndent(),
             "result",
@@ -293,9 +293,9 @@ class SuspendedTypeAbilityTest {
 
             let getBool: {} -> Bool <Log> = {} -> do
                 Log.println { msg = "Getting bool" }
-                false
+                False
 
-            let result = getBool {} || true
+            let result = getBool {} || True
             result
             """.trimIndent(),
             "result",
@@ -495,7 +495,7 @@ class SuspendedTypeAbilityTest {
 
             let getBool: {} -> Bool <Log> = {} -> do
                 Log.println { msg = "Getting bool" }
-                true
+                True
 
             let result = if getBool {} then 1 else 2
             result

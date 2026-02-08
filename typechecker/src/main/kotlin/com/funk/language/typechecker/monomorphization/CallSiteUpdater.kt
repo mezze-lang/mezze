@@ -100,7 +100,12 @@ class CallSiteUpdater(
             )
 
             is ArrayLiteral -> expr.copy(
-                elements = expr.elements.map { update(it) }
+                elements = expr.elements.map { element ->
+                    when (element) {
+                        is ArrayRegularElement -> ArrayRegularElement(update(element.expression))
+                        is ArraySpreadElement -> ArraySpreadElement(update(element.expression))
+                    }
+                }
             )
 
             is ArrayAccess -> expr.copy(

@@ -123,8 +123,8 @@ class PatternValidationTest {
 
             let is_some: {opt: Option} -> Bool = {opt} ->
                 match opt is
-                    Some { val } -> true
-                    None -> false
+                    Some { val } -> True
+                    None -> False
         """.trimIndent()
 
         // Should pass - Some has payload and pattern destructures it

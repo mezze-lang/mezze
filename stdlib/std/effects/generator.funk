@@ -161,9 +161,9 @@ pub let any = { gen, p } -> do
     match result.value is
         Some { val } ->
             if p { x = val }
-            then true
+            then True
             else any { gen = result.gen, p = p }
-        None -> false
+        None -> False
 
 # Check if all values match predicate
 pub let all = { gen, p } -> do
@@ -172,5 +172,5 @@ pub let all = { gen, p } -> do
         Some { val } ->
             if p { x = val }
             then all { gen = result.gen, p = p }
-            else false
-        None -> true
+            else False
+        None -> True

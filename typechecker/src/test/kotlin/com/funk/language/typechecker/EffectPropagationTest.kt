@@ -85,7 +85,7 @@ class EffectPropagationTest {
             impl Auth for SimpleAuth where {
               checkPermission : {resource: String} -> Boolean = {resource} -> do
                 Log.log {msg = "Checking permission for $(resource)"}
-                true
+                True
             }
 
             impl Database for SecureDB where {

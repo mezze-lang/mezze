@@ -352,7 +352,7 @@ object ContinuationImplementations {
             if (isInsideFork) {
                 // Nested fork: throw exception instead of executing
                 // This will be caught by the top-level fork
-                throw ForkedExecutionException(cont, values.elements)
+                throw ForkedExecutionException(cont, values.toList())
             }
 
             when (cont) {
@@ -360,10 +360,10 @@ object ContinuationImplementations {
                     // Top-level fork: execute state machine multiple times and throw exception
                     // to prevent the original state machine from continuing
 
-                    val results = executeFork(cont, values.elements)
+                    val results = executeFork(cont, values.toList())
 
                     // Throw exception to abort the current execution and return fork results
-                    throw ForkedExecutionException(cont, results.elements)
+                    throw ForkedExecutionException(cont, results.toList())
                 }
                 else -> throw NativeFunctionException("__native_continuation_fork", "cont must be a FunkContinuation")
             }

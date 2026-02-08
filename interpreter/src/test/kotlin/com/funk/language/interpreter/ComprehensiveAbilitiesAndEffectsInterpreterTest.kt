@@ -190,7 +190,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Auth for MockAuth where {
-              authenticate : {token: String} -> Boolean = {token} -> true
+              authenticate : {token: String} -> Boolean = {token} -> True
             }
             
             impl Database for MockDB where {
@@ -269,7 +269,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Eq Int where {
-              equals : {left: Int, right: Int} -> Bool = {left, right} -> true
+              equals : {left: Int, right: Int} -> Bool = {left, right} -> True
             }
 
             impl Show Int where {
@@ -277,7 +277,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Show Bool where {
-              show : {val: Bool} -> String = {val} -> "true"
+              show : {val: Bool} -> String = {val} -> "True"
             }
 
             do

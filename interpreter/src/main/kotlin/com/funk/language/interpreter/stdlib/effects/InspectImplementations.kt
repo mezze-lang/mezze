@@ -52,6 +52,7 @@ object InspectImplementations {
             is FunkBool -> value.value.toString()
             is FunkNat -> "${value.value}n"  // Add 'n' suffix for natural numbers
             is FunkFrac -> "${value.numerator}/${value.denominator}"
+            is FunkBytes -> value.getDisplayString()  // Use the built-in display representation
 
             // Unit/Null
             is FunkUnit -> "()"
@@ -80,7 +81,7 @@ object InspectImplementations {
 
             // Lists
             is FunkList -> {
-                val elementStrings = value.elements.map { valueToString(it) }
+                val elementStrings = value.toKotlinList().map { valueToString(it) }
                 "[${elementStrings.joinToString(", ")}]"
             }
 
@@ -92,10 +93,10 @@ object InspectImplementations {
 
             // Maps
             is FunkMap -> {
-                if (value.entries.isEmpty()) {
+                if (value.isEmpty()) {
                     "{}"
                 } else {
-                    val entryStrings = value.entries.map { (k, v) ->
+                    val entryStrings = value.toKotlinMap().map { (k, v) ->
                         "${valueToString(k)} = ${valueToString(v)}"
                     }
                     "{ ${entryStrings.joinToString(", ")} }"
@@ -104,10 +105,10 @@ object InspectImplementations {
 
             // Sets
             is FunkSet -> {
-                if (value.elements.isEmpty()) {
+                if (value.isEmpty()) {
                     "{}"
                 } else {
-                    val elementStrings = value.elements.map { valueToString(it) }
+                    val elementStrings = value.toList().map { valueToString(it) }
                     "{${elementStrings.joinToString(", ")}}"
                 }
             }

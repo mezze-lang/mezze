@@ -206,7 +206,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             impl Eq Int where {
-                equals : {left: Int, right: Int} -> Bool = {left, right} -> true
+                equals : {left: Int, right: Int} -> Bool = {left, right} -> True
             }
             
             impl Ord Int where {

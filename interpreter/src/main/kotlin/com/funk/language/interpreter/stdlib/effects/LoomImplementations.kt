@@ -39,6 +39,14 @@ object LoomImplementations {
     fun registerAll(context: MutableMap<String, FunkValue>) {
         registerSpawn(context)
         registerAwait(context)
+        registerRace(context)
+        registerAll_(context)
+        registerTimeout(context)
+        registerCancel(context)
+        registerSleep(context)
+        registerIsDone(context)
+        registerIsCancelled(context)
+        registerCheck(context)
         registerCurrentThread(context)
         registerPark(context)
         registerUnpark(context)
@@ -67,8 +75,8 @@ object LoomImplementations {
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_loom_spawn", "expects FunkRecord")
 
-            val computation = record.fields["computation"]
-                ?: throw NativeFunctionException("__native_loom_spawn", "expects 'computation' field")
+            val computation = record.fields["f"]
+                ?: throw NativeFunctionException("__native_loom_spawn", "expects 'f' field")
 
             // Ensure computation is a callable function
             when (computation) {
@@ -155,8 +163,8 @@ object LoomImplementations {
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_loom_await", "expects FunkRecord")
 
-            val promise = record.fields["promise"]
-                ?: throw NativeFunctionException("__native_loom_await", "expects 'promise' field")
+            val promise = record.fields["p"]
+                ?: throw NativeFunctionException("__native_loom_await", "expects 'p' field")
 
             when (promise) {
                 is FunkPromise -> {
@@ -168,6 +176,151 @@ object LoomImplementations {
                     "promise must be a FunkPromise, got: ${promise::class.simpleName}"
                 )
             }
+        }
+    }
+
+    /**
+     * __native_loom_race - Wait for first Promise to complete.
+     */
+    private fun registerRace(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_race"] = NativeFunkFunction("__native_loom_race") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_race", "expects FunkRecord")
+
+            val ps = record.fields["ps"]
+                ?: throw NativeFunctionException("__native_loom_race", "expects 'ps' field")
+
+            val promises = when (ps) {
+                is FunkArrayList -> ps.toList().map { it as FunkPromise }
+                else -> throw NativeFunctionException("__native_loom_race", "ps must be a list")
+            }
+
+            if (promises.isEmpty()) {
+                throw NativeFunctionException("__native_loom_race", "cannot race empty list")
+            }
+
+            // Use CompletableFuture.anyOf to wait for first completion
+            val futures = promises.map { it.future }
+            val firstFuture = CompletableFuture.anyOf(*futures.toTypedArray())
+            firstFuture.get() as FunkValue
+        }
+    }
+
+    /**
+     * __native_loom_all - Wait for all Promises to complete.
+     */
+    private fun registerAll_(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_all"] = NativeFunkFunction("__native_loom_all") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_all", "expects FunkRecord")
+
+            val ps = record.fields["ps"]
+                ?: throw NativeFunctionException("__native_loom_all", "expects 'ps' field")
+
+            val promises = when (ps) {
+                is FunkArrayList -> ps.toList().map { it as FunkPromise }
+                else -> throw NativeFunctionException("__native_loom_all", "ps must be a list")
+            }
+
+            // Wait for all and collect results
+            val results = promises.map { it.await() }
+            FunkArrayList(results)
+        }
+    }
+
+    /**
+     * __native_loom_timeout - Wait with timeout.
+     */
+    private fun registerTimeout(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_timeout"] = NativeFunkFunction("__native_loom_timeout") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_timeout", "expects FunkRecord")
+
+            val ms = record.fields["ms"]
+                ?: throw NativeFunctionException("__native_loom_timeout", "expects 'ms' field")
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_loom_timeout", "expects 'p' field")
+
+            val timeout = (ms as FunkInt).value.toLong()
+            val promise = p as FunkPromise
+
+            try {
+                val result = promise.future.get(timeout, java.util.concurrent.TimeUnit.MILLISECONDS)
+                FunkVariant("Some", FunkRecord(mapOf("val" to result)))
+            } catch (e: java.util.concurrent.TimeoutException) {
+                FunkVariant("None", FunkRecord(emptyMap()))
+            }
+        }
+    }
+
+    /**
+     * __native_loom_cancel - Cancel a Promise.
+     */
+    private fun registerCancel(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_cancel"] = NativeFunkFunction("__native_loom_cancel") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_cancel", "expects FunkRecord")
+
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_loom_cancel", "expects 'p' field")
+
+            val promise = p as FunkPromise
+            promise.future.cancel(true)
+            FunkRecord(emptyMap())
+        }
+    }
+
+    /**
+     * __native_loom_sleep - Sleep for specified milliseconds.
+     */
+    private fun registerSleep(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_sleep"] = NativeFunkFunction("__native_loom_sleep") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_sleep", "expects FunkRecord")
+
+            val ms = record.fields["ms"]
+                ?: throw NativeFunctionException("__native_loom_sleep", "expects 'ms' field")
+
+            val timeout = (ms as FunkInt).value.toLong()
+            Thread.sleep(timeout)
+            FunkRecord(emptyMap())
+        }
+    }
+
+    /**
+     * __native_loom_is_done - Check if Promise is complete.
+     */
+    private fun registerIsDone(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_is_done"] = NativeFunkFunction("__native_loom_is_done") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_is_done", "expects FunkRecord")
+
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_loom_is_done", "expects 'p' field")
+
+            val promise = p as FunkPromise
+            FunkBool(promise.future.isDone)
+        }
+    }
+
+    /**
+     * __native_loom_is_cancelled - Check if current computation was cancelled.
+     */
+    private fun registerIsCancelled(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_is_cancelled"] = NativeFunkFunction("__native_loom_is_cancelled") { args ->
+            FunkBool(Thread.currentThread().isInterrupted)
+        }
+    }
+
+    /**
+     * __native_loom_check - Cancellation checkpoint.
+     */
+    private fun registerCheck(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_check"] = NativeFunkFunction("__native_loom_check") { args ->
+            if (Thread.currentThread().isInterrupted) {
+                throw InterruptedException("Computation was cancelled")
+            }
+            FunkRecord(emptyMap())
         }
     }
 

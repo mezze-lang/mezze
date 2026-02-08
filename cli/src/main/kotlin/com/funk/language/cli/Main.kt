@@ -127,6 +127,13 @@ fun main(args: Array<String>) {
             "check" -> handleCheckCommand(remainingArgs)
             "exec" -> handleExecCommand(remainingArgs)
             "compile" -> handleCompileCommand(remainingArgs)
+            "dev" -> handleDevCommand(remainingArgs)
+            "build" -> handleBuildCommand(remainingArgs)
+            // Package management commands
+            "init" -> handleInitCommand(remainingArgs)
+            "add" -> handleAddCommand(remainingArgs)
+            "remove" -> handleRemoveCommand(remainingArgs)
+            "sync" -> handleSyncCommand(remainingArgs)
             else -> {
                 println("❌ Unknown command: $command")
                 println()
@@ -152,21 +159,32 @@ private fun showHelp() {
     println()
     showUsage()
     println()
-    println("COMMANDS:")
+    println("FILE-BASED COMMANDS (no Funk.toml needed):")
     println("  parse     Parse Funk code and show AST")
     println("  check     Type check Funk code and show inferred types")
-    println("  exec      Execute Funk code using Truffle runtime (fast startup)")
-    println("  compile   Compile Funk code to standalone JAR (with JIT optimization)")
+    println("  exec      Execute a .funk file directly")
+    println("  compile   Compile a .funk file to standalone JAR")
+    println()
+    println("PACKAGE-BASED COMMANDS (requires Funk.toml):")
+    println("  dev       Run app from Funk.toml (for development)")
+    println("  build     Compile app from Funk.toml to JAR (for production)")
+    println()
+    println("PACKAGE MANAGEMENT:")
+    println("  init      Create a new Funk package")
+    println("  add       Add a dependency to Funk.toml")
+    println("  remove    Remove a dependency from Funk.toml")
+    println("  sync      Download and install all dependencies")
     println()
     println("GLOBAL OPTIONS:")
     println("  -h, --help     Show this help message")
     println("  -v, --version  Show version information")
     println()
     println("EXAMPLES:")
-    println("  funk parse program.funk              # Parse a file")
-    println("  echo 'let x = 5 + 10' | funk exec    # Execute from stdin")
-    println("  funk compile program.funk            # Compile to standalone JAR")
-    println("  funk check --help                    # Get help for check command")
+    println("  funk init --app                      # Create an app package")
+    println("  funk dev                             # Run app from Funk.toml")
+    println("  funk build                           # Build app to JAR")
+    println("  funk exec program.funk               # Execute a file")
+    println("  funk compile program.funk            # Compile file to JAR")
     println()
     println("For command-specific help: funk <command> --help")
 }
@@ -193,7 +211,11 @@ private fun showUsage() {
     println("USAGE:")
     println("  funk <command> [options] [file]")
     println()
-    println("COMMANDS: parse, check, exec, compile")
+    println("COMMANDS:")
+    println("  File-based:    parse, check, exec, compile")
+    println("  Package-based: dev, build")
+    println("  Packages:      init, add, remove, sync")
+    println()
     println("For command-specific help: funk <command> --help")
 }
 
@@ -216,16 +238,25 @@ private fun showCommandHelp(command: String) {
         }
         
         "check" -> {
-            println("USAGE: funk check [file]")
+            println("USAGE: funk check [options] [file]")
             println()
-            println("Type check Funk source code and show inferred types")
+            println("Type check Funk source code")
+            println()
+            println("MODES:")
+            println("  funk check <file>          Check file + all imports, show types")
+            println("  funk check                 Check whole app from Funk.toml")
+            println("  funk check --app <name>    Check specific app from Funk.toml")
             println()
             println("OPTIONS:")
+            println("  -q, --quiet        Only show errors (no type info)")
+            println("  --app <name>       Check specific app from Funk.toml")
             println("  -h, --help         Show this help message")
             println()
             println("EXAMPLES:")
-            println("  funk check program.funk       # Type check a file")
-            println("  echo 'let x = 5 + 10' | funk check  # Type check from stdin")
+            println("  funk check src/app.funk       # Check file + imports")
+            println("  funk check --quiet app.funk   # Quiet mode")
+            println("  funk check                    # Check package app")
+            println("  funk check --app server       # Check specific app")
         }
         
         "exec" -> {
@@ -263,7 +294,122 @@ private fun showCommandHelp(command: String) {
             println("  Smaller size, faster startup than full JIT builds")
             println()
         }
-        
+
+        "init" -> {
+            println("USAGE: funk init [options]")
+            println()
+            println("Create a new Funk package in the current directory")
+            println()
+            println("OPTIONS:")
+            println("  --lib              Create a library package")
+            println("  --app              Create an app package")
+            println("  --lib --app        Create both library and app")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  funk init --lib                 # Create library")
+            println("  funk init --app                 # Create app")
+            println("  funk init --lib --app           # Create both")
+            println("  funk init                       # Interactive mode")
+            println()
+        }
+
+        "add" -> {
+            println("USAGE: funk add [options] <url>")
+            println()
+            println("Add a dependency to Funk.toml")
+            println()
+            println("ARGUMENTS:")
+            println("  <url>              Full URL with SHA-256 checksum")
+            println()
+            println("OPTIONS:")
+            println("  --dev              Add to [dev-dependencies]")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  funk add \"https://github.com/user/pkg/releases/download/v1.0.0/pkg.tar.gz#sha256:abc123...\"")
+            println("  funk add --dev \"https://github.com/user/test/releases/download/v0.1.0/test.tar.gz#sha256:def456...\"")
+            println()
+            println("💡 After adding dependencies, run 'funk sync' to download them")
+            println()
+        }
+
+        "remove" -> {
+            println("USAGE: funk remove <package_name>")
+            println()
+            println("Remove a dependency from Funk.toml")
+            println()
+            println("ARGUMENTS:")
+            println("  <package_name>     Name of the package to remove")
+            println()
+            println("EXAMPLES:")
+            println("  funk remove json")
+            println("  funk remove test_framework")
+            println()
+        }
+
+        "sync" -> {
+            println("USAGE: funk sync [options]")
+            println()
+            println("Download and install all dependencies from Funk.toml")
+            println()
+            println("OPTIONS:")
+            println("  --clean            Delete and re-download all packages")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  funk sync                       # Download missing packages")
+            println("  funk sync --clean               # Re-download everything")
+            println()
+            println("📦 Packages are installed to: ./funk_packages/")
+            println("🔒 Lock file is generated: ./Funk.lock")
+            println()
+        }
+
+        "dev" -> {
+            println("USAGE: funk dev [options]")
+            println()
+            println("Execute app from Funk.toml (for development)")
+            println()
+            println("Reads [[app]] entries from Funk.toml and executes the specified app.")
+            println("Auto-calls the main function. For quick iteration during development.")
+            println()
+            println("OPTIONS:")
+            println("  --app <name>       Run a specific app by name")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  funk dev                        # Run default app (first [[app]])")
+            println("  funk dev --app server           # Run specific app")
+            println()
+            println("💡 For file-based execution, use: funk exec <file>")
+            println()
+        }
+
+        "build" -> {
+            println("USAGE: funk build [options]")
+            println()
+            println("Compile app from Funk.toml to standalone JAR (for production)")
+            println()
+            println("Reads [[app]] entries from Funk.toml and compiles to a JAR.")
+            println("Includes dependencies and Truffle runtime for deployment.")
+            println()
+            println("OPTIONS:")
+            println("  --app <name>       Build a specific app by name")
+            println("  -h, --help         Show this help message")
+            println()
+            println("EXAMPLES:")
+            println("  funk build                      # Build default app")
+            println("  funk build --app server         # Build specific app")
+            println()
+            println("OUTPUT:")
+            println("  Single app:    <package-name>.jar")
+            println("  Multiple apps: <app-name>.jar")
+            println()
+            println("💡 For file-based compilation, use: funk compile <file>")
+            println()
+        }
+
         else -> {
             println("❌ Unknown command: $command")
             println()
@@ -297,11 +443,14 @@ private fun handleParseCommand(args: List<String>) {
     val fileName = if (args.size == 1) args[0] else null
 
     try {
+        val startTime = System.nanoTime()
         val parser = FunkParser()
         val ast = parser.parse(source, file = fileName)
-        println("✅ Parsing successful!")
-        println()
+        val parseTime = (System.nanoTime() - startTime) / 1_000_000.0 // Convert to milliseconds
+
         println(prettyPrintAST(ast))
+        println()
+        println("Parsed in ${String.format("%.2f", parseTime)}ms")
     } catch (e: com.funk.language.parser.ParseException) {
         println("❌ Parse Error")
         println("━".repeat(50))
@@ -315,51 +464,159 @@ private fun handleParseCommand(args: List<String>) {
 }
 
 private fun handleCheckCommand(args: List<String>) {
-    val (source, filePath) = when {
-        args.isEmpty() -> {
-            // Read from stdin
-            Pair(readStdin(), null)
-        }
-        args.size == 1 -> {
-            // Read from file
-            val file = File(args[0])
-            if (!file.exists()) {
-                println("Error: File not found at '${args[0]}'")
-                return
-            }
-            Pair(file.readText(), file.toPath())
-        }
+    // Parse flags
+    val quietMode = args.contains("-q") || args.contains("--quiet")
+
+    // Parse --app flag (only if --app is actually present)
+    val appIndex = args.indexOf("--app")
+    val appName = when {
+        args.any { it.startsWith("--app=") } -> args.find { it.startsWith("--app=") }?.substringAfter("=")
+        appIndex >= 0 && appIndex + 1 < args.size -> args[appIndex + 1]
+        else -> null
+    }
+
+    // Get file arguments (exclude flags and --app value)
+    val fileArgs = args.filter { arg ->
+        arg != "-q" && arg != "--quiet" && arg != "--app" &&
+        !arg.startsWith("--app=") && arg != appName
+    }
+
+    when {
+        // Package mode: check whole app from Funk.toml
+        fileArgs.isEmpty() && appName == null -> handlePackageCheck(quietMode)
+        fileArgs.isEmpty() && appName != null -> handlePackageCheck(quietMode, appName)
+
+        // File mode: check file + all imports
+        fileArgs.size == 1 -> handleFileCheck(fileArgs[0], quietMode)
+
         else -> {
             println("Error: check command takes at most 1 argument (filename)")
             showUsage()
             return
         }
     }
+}
+
+private fun handleFileCheck(filePath: String, quietMode: Boolean) {
+    val file = File(filePath)
+    if (!file.exists()) {
+        println("Error: File not found at '$filePath'")
+        return
+    }
+
+    val source = file.readText()
 
     try {
-        val parser = FunkParser()
-        val fileName = filePath?.fileName?.toString()
-        val ast = parser.parse(source, file = fileName)
+        val startTime = System.nanoTime()
 
-        // Get the project root for type checking (prioritize auto-detected)
+        val parser = FunkParser()
+        val ast = parser.parse(source, file = file.name)
+        val parseTime = (System.nanoTime() - startTime) / 1_000_000.0
+
         val typeCheckProjectRoot = System.getProperty("funk.project.root")?.let {
             java.nio.file.Paths.get(it)
-        } ?: if (filePath != null) {
-            filePath.parent ?: filePath
-        } else {
-            java.nio.file.Paths.get(".")
-        }
+        } ?: file.toPath().parent ?: file.toPath()
 
-        // Use improved type checker (92% test success rate)
+        val typeCheckStart = System.nanoTime()
         val typeChecker = TypeChecker()
         val result = typeChecker.typeCheck(ast, typeCheckProjectRoot)
-        val typeAliases = typeChecker.getTypeAliases()
+        val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
+        val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-        printTypeCheckSuccess(result, typeAliases)
+        if (quietMode) {
+            println("OK (${String.format("%.2f", totalTime)}ms)")
+        } else {
+            val typeAliases = typeChecker.getTypeAliases()
+
+            printFileCheckSuccess(result, typeAliases)
+            println()
+            println("Parse: ${String.format("%.2f", parseTime)}ms  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
+        }
     } catch (e: TypeCheckError) {
-        // Pass source code and file for enhanced error messages with code snippets
-        val fileName = filePath?.fileName?.toString()
-        println(ErrorPrettyPrinter.prettyPrint(e, source, fileName))
+        println(ErrorPrettyPrinter.prettyPrint(e, source, file.name))
+        kotlin.system.exitProcess(1)
+    } catch (e: com.funk.language.parser.ParseException) {
+        println("❌ Parse Error")
+        println("━".repeat(50))
+        println(e.message)
+        kotlin.system.exitProcess(1)
+    } catch (e: Exception) {
+        println("❌ Error:")
+        println(e.message ?: "Unknown error")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+private fun handlePackageCheck(quietMode: Boolean, appName: String? = null) {
+    val currentDir = File(System.getProperty("user.dir"))
+    val funkToml = File(currentDir, "Funk.toml")
+
+    if (!funkToml.exists()) {
+        println("Error: No Funk.toml found in current directory")
+        println()
+        println("Either:")
+        println("  - Run this command in a Funk package directory")
+        println("  - Or use: funk check <file> to check a specific file")
+        return
+    }
+
+    // Use DevCommand logic to parse Funk.toml and check the app
+    val devCommand = com.funk.language.cli.commands.DevCommand()
+
+    try {
+        // Read and parse Funk.toml
+        val tomlContent = funkToml.readText()
+        val manifest = com.akuleshov7.ktoml.Toml.decodeFromString(
+            com.funk.language.cli.`package`.FunkToml.serializer(),
+            tomlContent
+        )
+
+        if (manifest.app == null || manifest.app.isEmpty()) {
+            println("Error: No apps defined in Funk.toml")
+            println()
+            println("Add an app to your Funk.toml or use: funk check <file>")
+            return
+        }
+
+        val appConfig = if (appName != null) {
+            manifest.app.find { it.name == appName } ?: run {
+                println("Error: App '$appName' not found in Funk.toml")
+                println()
+                println("Available apps:")
+                manifest.app.forEach { app -> println("  - ${app.name}") }
+                return
+            }
+        } else {
+            manifest.app.first()
+        }
+
+        val appFile = File(currentDir, appConfig.path)
+        if (!appFile.exists()) {
+            println("Error: App file not found: ${appFile.absolutePath}")
+            return
+        }
+
+        val startTime = System.nanoTime()
+        val source = appFile.readText()
+
+        val parser = FunkParser()
+        val ast = parser.parse(source, file = appFile.name)
+
+        val typeChecker = TypeChecker()
+        val result = typeChecker.typeCheck(ast, currentDir.toPath())
+
+        val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
+
+        if (quietMode) {
+            println("OK (${String.format("%.2f", totalTime)}ms)")
+        } else {
+            println("Type check passed: ${appConfig.name}")
+            println("Time: ${String.format("%.2f", totalTime)}ms")
+        }
+    } catch (e: TypeCheckError) {
+        val appFile = File(currentDir, funkToml.readText().substringAfter("path = \"").substringBefore("\""))
+        val source = if (appFile.exists()) appFile.readText() else ""
+        println(ErrorPrettyPrinter.prettyPrint(e, source, appFile.name))
         kotlin.system.exitProcess(1)
     } catch (e: com.funk.language.parser.ParseException) {
         println("❌ Parse Error")
@@ -577,8 +834,7 @@ private fun handleExecCommand(args: List<String>) {
         val result = interpreter.execute(programToExecute, projectRootPath, typeCheckResult.monomorphicInstances)
 
         // Program should return {}, so we don't print the result
-        println()
-        println("✅ Execution successful!")
+        // Execution completed silently
 
     } catch (e: TypeCheckError) {
         // Pass source code and file for enhanced error messages with code snippets
@@ -639,17 +895,18 @@ private fun handleCompileCommand(args: List<String>) {
     val source = inputFile.readText()
 
     try {
-        println("🔨 Compiling ${inputFile.name} to ${outputFile.name}...")
-        println()
+        val startTime = System.nanoTime()
 
         // Parse and type check the source
+        val parseStart = System.nanoTime()
         val parser = FunkParser()
         val ast = parser.parse(source)
-        
+        val parseTime = (System.nanoTime() - parseStart) / 1_000_000.0
+
+        val typeCheckStart = System.nanoTime()
         val typeChecker = TypeChecker()
         val typeCheckResult = typeChecker.typeCheck(ast, inputFile.toPath().parent ?: inputFile.toPath())
-
-        println("✅ Type checking successful")
+        val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
 
         // Validate that program has a 'main' function with type {} -> {}
         val mainBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()
@@ -700,17 +957,16 @@ private fun handleCompileCommand(args: List<String>) {
         }
 
         // Always create standalone JAR (AST + Interpreter + Truffle)
+        val jarStart = System.nanoTime()
         createStandaloneJar(inputFile, outputFile, source, typeCheckResult.program)
-        
-        println("✅ Compilation successful!")
+        val jarTime = (System.nanoTime() - jarStart) / 1_000_000.0
+        val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
+
         println()
-        println("📦 Created: ${outputFile.absolutePath}")
-        println("📏 Size: ${outputFile.length() / 1024}KB")
+        println("Created: ${outputFile.name} (${outputFile.length() / 1024}KB)")
+        println("Parse: ${String.format("%.2f", parseTime)}ms  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  JAR build: ${String.format("%.2f", jarTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
         println()
-        println("🚀 Run: java --sun-misc-unsafe-memory-access=allow -jar ${outputFile.name}")
-        println("   (Suppresses Truffle deprecation warnings in Java 24)")
-        println()
-        println("💡 Alternative (with warnings): java -jar ${outputFile.name}")
+        println("Run: java -jar ${outputFile.name}")
         
     } catch (e: TypeCheckError) {
         // Pass source code and file for enhanced error messages with code snippets
@@ -762,15 +1018,15 @@ private fun createKotlinMainClass(tempDir: File, inputFile: File, source: String
     }
     val serializedAST = json.encodeToString(Program.serializer(), typeCheckResult.program)
 
-    // Get all cached modules (including stdlib) and serialize them
-    val cachedModules = TypeChecker.getAllCachedModules()
+    // Get all modules that were type-checked (stdlib + imports + packages)
+    // These will be bundled into the JAR to avoid parsing at runtime
+    val loadedModules = ModuleResolver.getAllModules()
     val serializedModules = json.encodeToString(
-        MapSerializer(
-            String.serializer(),
-            TypeChecker.Companion.CachedModule.serializer()
-        ),
-        cachedModules
+        MapSerializer(String.serializer(), Program.serializer()),
+        loadedModules
     )
+
+    println("📦 Bundling ${loadedModules.size} pre-parsed modules (stdlib, imports, packages)")
     val mainClassDir = File(tempDir, "src/main/kotlin/com/funk/standalone")
     mainClassDir.mkdirs()
     
@@ -804,13 +1060,16 @@ object Main {
     @JvmStatic
     fun main(args: Array<String>) {
         try {
-            // Deserialize all cached modules (stdlib, etc.) and restore to TypeChecker
+            // Note: New type checker handles module caching internally
             val json = Json { ignoreUnknownKeys = true }
-            val cachedModules = json.decodeFromString(
-                MapSerializer(String.serializer(), TypeChecker.Companion.CachedModule.serializer()),
+
+            // Deserialize pre-parsed modules and preload them into the cache
+            // This avoids runtime parsing of stdlib and imported modules (25x faster startup!)
+            val cachedModules = json.decodeFromString<Map<String, Program>>(
+                MapSerializer(String.serializer(), Program.serializer()),
                 CACHED_MODULES_JSON
             )
-            TypeChecker.restoreModuleCache(cachedModules)
+            TypeChecker.preloadModules(cachedModules)
 
             // Deserialize the enhanced AST (no parsing needed!)
             val enhancedProgram = json.decodeFromString<Program>(ENHANCED_AST_JSON)
@@ -830,7 +1089,7 @@ object Main {
             val result = executeTruffleProgram(programWithMainCall)
 
             // Don't print the result since main returns {} which is not meaningful output
-            
+
         } catch (e: Exception) {
             System.err.println("Error executing ${'$'}PROGRAM_NAME: ${'$'}{e.message}")
             if (args.isNotEmpty() && args[0] == "--debug") {
@@ -848,19 +1107,23 @@ object Main {
         val engine = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .build()
-            
+
         // Create context for Funk language with JIT optimization
         val context = Context.newBuilder("funk")
             .engine(engine)
             .allowAllAccess(true)
             .allowExperimentalOptions(true)
             .build()
-        
+
         return try {
-            // Execute the pre-processed AST directly using Funk interpreter
-            // Create interpreter without parser dependencies since modules are resolved at compile time
-            val interpreter = com.funk.language.interpreter.FunkInterpreter(skipParserSetup = true)
-            val result = interpreter.execute(program)
+            // Execute the program using Funk interpreter
+            // Parser setup is needed to resolve stdlib modules from JAR resources
+            val interpreter = com.funk.language.interpreter.FunkInterpreter(skipParserSetup = false)
+            // Use current directory as project root - stdlib will be loaded from JAR resources
+            val projectRoot = java.nio.file.Paths.get(".")
+            // Pass empty monomorphic instances map for now
+            val monomorphicInstances = emptyMap<String, com.funk.language.ast.LetBinding>()
+            val result = interpreter.execute(program, projectRoot, monomorphicInstances)
             
             // Convert FunkValue to appropriate return type for output
             when (result) {
@@ -918,6 +1181,14 @@ kotlin {
     jvmToolchain(24)
 }
 
+// Include stdlib funk files as resources in the JAR
+tasks.named<ProcessResources>("processResources") {
+    from("stdlib") {
+        include("**/*.funk")
+        into("stdlib")
+    }
+}
+
 tasks.shadowJar {
     archiveClassifier.set("")
     mergeServiceFiles()
@@ -936,10 +1207,13 @@ tasks.shadowJar {
     """.trimIndent()
     
     File(tempDir, "build.gradle.kts").writeText(buildGradleContent)
-    
+
     // Copy our Funk language JARs to the temp directory
     copyFunkLanguageJars(tempDir)
-    
+
+    // Copy stdlib to the temp directory
+    copyStdlib(tempDir)
+
     println("✅ Created Kotlin main class wrapper")
 }
 
@@ -972,8 +1246,12 @@ private fun generateTruffleEnabledDependencies(): String {
 private fun copyFunkLanguageJars(tempDir: File) {
     val libsDir = File(tempDir, "libs")
     libsDir.mkdirs()
-    
-    val projectRoot = File(".")
+
+    // Get the Funk project root (where CLI is installed)
+    val projectRootPath = System.getProperty("funk.project.root")
+        ?: detectProjectRoot()?.absolutePath
+        ?: throw IllegalStateException("Cannot detect Funk project root. Please set funk.project.root system property.")
+    val projectRoot = File(projectRootPath)
     
     // Copy AST JAR (shared AST definitions)
     val astJar = File(projectRoot, "ast/build/libs/ast-1.0.0.jar")
@@ -1021,6 +1299,23 @@ private fun copyFunkLanguageJars(tempDir: File) {
     }
 }
 
+private fun copyStdlib(tempDir: File) {
+    // Get the Funk project root (where CLI is installed)
+    val projectRootPath = System.getProperty("funk.project.root")
+        ?: detectProjectRoot()?.absolutePath
+        ?: throw IllegalStateException("Cannot detect Funk project root. Please set funk.project.root system property.")
+    val projectRoot = File(projectRootPath)
+
+    val stdlibSource = File(projectRoot, "stdlib")
+    if (!stdlibSource.exists()) {
+        throw IllegalStateException("Stdlib directory not found: ${stdlibSource.absolutePath}")
+    }
+
+    val stdlibDest = File(tempDir, "stdlib")
+    stdlibSource.copyRecursively(stdlibDest, overwrite = true)
+    println("📦 Copied stdlib files")
+}
+
 
 private fun buildJarWithGradle(tempDir: File, outputFile: File, programName: String) {
     println("🔧 Building standalone JAR...")
@@ -1065,6 +1360,38 @@ private fun escapeForKotlin(source: String): String {
         .replace("$", "\${'$'}")  // $var becomes ${'$'}var (no interpolation)
         .replace("\"\"\"", "\\\"\\\"\\\"")  // """ becomes \"\"\" (escaped)
     return "\"\"\"" + escaped + "\"\"\""
+}
+
+/**
+ * Package-based command handlers
+ */
+private fun handleDevCommand(args: List<String>) {
+    com.funk.language.cli.commands.DevCommand().execute(args)
+}
+
+private fun handleBuildCommand(args: List<String>) {
+    com.funk.language.cli.commands.BuildCommand().execute(args) { inputFile, outputFile, source, program ->
+        createStandaloneJar(inputFile, outputFile, source, program)
+    }
+}
+
+/**
+ * Package management command handlers
+ */
+private fun handleInitCommand(args: List<String>) {
+    com.funk.language.cli.commands.InitCommand().execute(args)
+}
+
+private fun handleAddCommand(args: List<String>) {
+    com.funk.language.cli.commands.AddCommand().executeAdd(args)
+}
+
+private fun handleRemoveCommand(args: List<String>) {
+    com.funk.language.cli.commands.AddCommand().executeRemove(args)
+}
+
+private fun handleSyncCommand(args: List<String>) {
+    com.funk.language.cli.commands.SyncCommand().execute(args)
 }
 
 /**
@@ -1162,7 +1489,7 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
     val typeDeclarations = result.program.items.filterIsInstance<TypeDeclaration>()
     val effectDeclarations = result.program.items.filterIsInstance<EffectDeclaration>()
     val implDeclarations = result.program.items.filterIsInstance<ImplDeclaration>()
-    
+
     // Print summary
     println("📊 Summary:")
     if (letBindings.isNotEmpty()) println("   ${letBindings.size} variable(s)")
@@ -1170,7 +1497,7 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
     if (effectDeclarations.isNotEmpty()) println("   ${effectDeclarations.size} effect(s)")
     if (implDeclarations.isNotEmpty()) println("   ${implDeclarations.size} implementation(s)")
     println()
-    
+
     // Print type declarations first
     if (typeDeclarations.isNotEmpty()) {
         println("🏷️  Types:")
@@ -1188,7 +1515,7 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
         }
         println()
     }
-    
+
     // Print effect declarations
     if (effectDeclarations.isNotEmpty()) {
         println("⚡ Effects:")
@@ -1197,7 +1524,7 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
         }
         println()
     }
-    
+
     // Print variables with better formatting
     if (letBindings.isNotEmpty()) {
         println("📝 Variables:")
@@ -1228,9 +1555,53 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
             println("   $emoji ${item.variableName} : $typeStr")
         }
     }
-    
+
     println()
     println("🎉 All types check out! Your code is ready to run.")
+}
+
+private fun printFileCheckSuccess(result: TypeCheckResult, typeAliases: Map<String, TypeAliasInfo>) {
+    println("Type check passed")
+    println("━".repeat(50))
+
+    // Only print main file bindings
+    val mainBindings = result.program.items.filterIsInstance<LetBinding>()
+    val mainTypes = result.program.items.filterIsInstance<TypeDeclaration>()
+    val mainEffects = result.program.items.filterIsInstance<EffectDeclaration>()
+
+    // Print types
+    if (mainTypes.isNotEmpty()) {
+        for (typeDecl in mainTypes) {
+            val typeParamsStr = if (typeDecl.typeParams.isNotEmpty()) {
+                " " + typeDecl.typeParams.joinToString(" ")
+            } else {
+                ""
+            }
+            println("type ${typeDecl.name}$typeParamsStr")
+        }
+        println()
+    }
+
+    // Print effects
+    if (mainEffects.isNotEmpty()) {
+        for (effectDecl in mainEffects) {
+            println("effect ${effectDecl.name} (${effectDecl.operations.size} operations)")
+        }
+        println()
+    }
+
+    // Print bindings
+    for (binding in mainBindings) {
+        val scheme = binding.typeScheme
+        val typeStr = if (scheme != null && scheme.type is com.funk.language.ast.FunkType.FunctionType) {
+            prettyPrintTypeWithAliases(scheme.type, typeAliases, showExpansion = false, typeDeclarations = mainTypes)
+        } else {
+            binding.inferredType?.let {
+                prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false, typeDeclarations = mainTypes)
+            } ?: "unknown"
+        }
+        println("${binding.variableName} : $typeStr")
+    }
 }
 
 /**

@@ -3,8 +3,24 @@ package com.funk.language.interpreter
 import com.funk.language.parser.FunkParser
 import com.funk.language.typechecker.TypeChecker
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.parallel.Execution
+import org.junit.jupiter.api.parallel.ExecutionMode
 
+@Execution(ExecutionMode.SAME_THREAD)
 class TestOfDetailed {
+
+    @BeforeEach
+    fun setup() {
+        com.funk.language.typechecker.ModuleResolver.clearCache()
+        com.funk.language.typechecker.TypeChecker.clearCache()
+    }
+
+    @AfterEach
+    fun teardown() {
+        TruffleContextHolder.clearEnv()
+    }
     @Test
     fun testSimpleOf() {
         println("\n=== TEST 1: Simple of call ===")
@@ -60,7 +76,7 @@ class TestOfDetailed {
             println("Function name: ${result.name}")
             println("Closure vars: ${result.closureVariables.keys}")
         } else if (result is FunkArrayList) {
-            println("Array size: ${result.elements.size}")
+            println("Array size: ${result.size()}")
         }
     }
 
@@ -89,7 +105,7 @@ class TestOfDetailed {
             println("Function name: ${result.name}")
             println("Closure vars: ${result.closureVariables.keys}")
         } else if (result is FunkArrayList) {
-            println("Array size: ${result.elements.size}")
+            println("Array size: ${result.size()}")
         }
     }
 
@@ -119,7 +135,7 @@ class TestOfDetailed {
             println("Function name: ${result.name}")
             println("Closure vars: ${result.closureVariables.keys}")
         } else if (result is FunkArrayList) {
-            println("Array size: ${result.elements.size}")
+            println("Array size: ${result.size()}")
         }
     }
 
@@ -183,7 +199,7 @@ class TestOfDetailed {
             println("Function name: ${result.name}")
             println("Closure vars: ${result.closureVariables.keys}")
         } else if (result is FunkArrayList) {
-            println("Array size: ${result.elements.size}")
+            println("Array size: ${result.size()}")
         }
     }
 }

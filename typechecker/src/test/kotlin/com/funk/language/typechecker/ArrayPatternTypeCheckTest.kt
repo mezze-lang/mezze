@@ -60,8 +60,8 @@ class ArrayPatternTypeCheckTest {
         val code = """
             let is_empty = {xs: [Int]} ->
                 match xs is
-                  [] -> true
-                  _ -> false
+                  [] -> True
+                  _ -> False
             let result = is_empty { xs = [] }
         """.trimIndent()
 
@@ -379,8 +379,8 @@ class ArrayPatternTypeCheckTest {
         val code = """
             let is_one_two = {xs: [Int]} ->
                 match xs is
-                  [1, 2] -> true
-                  _ -> false
+                  [1, 2] -> True
+                  _ -> False
             let result = is_one_two {xs = [1, 2]}
         """.trimIndent()
 
@@ -407,10 +407,10 @@ class ArrayPatternTypeCheckTest {
         val code = """
             let check_pattern = {xs: [Bool]} ->
                 match xs is
-                  [true, false] -> "pattern1"
-                  [false, true] -> "pattern2"
+                  [True, False] -> "pattern1"
+                  [False, True] -> "pattern2"
                   _ -> "other"
-            let result = check_pattern {xs = [true, false]}
+            let result = check_pattern {xs = [True, False]}
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -461,8 +461,8 @@ class ArrayPatternTypeCheckTest {
         val code = """
             let is_small = {xs: [Int]} ->
                 match xs is
-                  [] | [_] -> true
-                  _ -> false
+                  [] | [_] -> True
+                  _ -> False
             let result = is_small {xs = [1]}
         """.trimIndent()
 
@@ -494,8 +494,8 @@ class ArrayPatternTypeCheckTest {
         val code = """
             let starts_with_positive = {xs: [Int]} ->
                 match xs is
-                  [x, ...] if x > 0 -> true
-                  _ -> false
+                  [x, ...] if x > 0 -> True
+                  _ -> False
             let result = starts_with_positive {xs = [5, -1, -2]}
         """.trimIndent()
 
@@ -508,8 +508,8 @@ class ArrayPatternTypeCheckTest {
         val code = """
             let both_positive = {xs: [Int]} ->
                 match xs is
-                  [x, y] if x > 0 && y > 0 -> true
-                  _ -> false
+                  [x, y] if x > 0 && y > 0 -> True
+                  _ -> False
             let result = both_positive {xs = [5, 10]}
         """.trimIndent()
 
@@ -522,8 +522,8 @@ class ArrayPatternTypeCheckTest {
         val code = """
             let is_sorted_pair = {xs: [Int]} ->
                 match xs is
-                  [x, y] if x <= y -> true
-                  _ -> false
+                  [x, y] if x <= y -> True
+                  _ -> False
             let result = is_sorted_pair {xs = [1, 2]}
         """.trimIndent()
 
@@ -587,8 +587,8 @@ class ArrayPatternTypeCheckTest {
         val code = """
             let is_help_command = {args: [String]} ->
                 match args is
-                  ["help"] | ["--help"] | ["-h"] -> true
-                  _ -> false
+                  ["help"] | ["--help"] | ["-h"] -> True
+                  _ -> False
             let result = is_help_command {args = ["help"]}
         """.trimIndent()
 

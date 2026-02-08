@@ -69,6 +69,7 @@ object TypeDiffPrinter {
             is FunkType.NatType -> "Nat"
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
+            is FunkType.BytesType -> "Bytes"
             is FunkType.FunctionType -> formatFunctionType(type, indent)
             is FunkType.RecordType -> formatRecordType(type, indent)
             is FunkType.VariantType -> formatVariantType(type, indent)

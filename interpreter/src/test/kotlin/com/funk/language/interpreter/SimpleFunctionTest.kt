@@ -64,7 +64,7 @@ class SimpleFunctionTest {
     @Test
     fun `test function returning record`() {
         val source = """
-            let createPerson = {name, age} -> {name = name, age = age, active = true}
+            let createPerson = {name, age} -> {name = name, age = age, active = True}
             let person = createPerson {name = "Alice", age = 30}
         """.trimIndent()
 

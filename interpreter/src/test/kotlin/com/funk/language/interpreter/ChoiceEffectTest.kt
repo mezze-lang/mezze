@@ -54,9 +54,9 @@ class ChoiceEffectTest {
         // fork returns an array with results from each path
         assertTrue(result is FunkArrayList, "Expected array result, got: ${result::class.simpleName}")
         val array = result as FunkArrayList
-        assertEquals(2, array.elements.size, "Expected 2 results (one for each choice)")
+        assertEquals(2, array.size(), "Expected 2 results (one for each choice)")
 
-        val values = array.elements.map { (it as FunkInt).value }.sorted()
+        val values = array.toList().map { (it as FunkInt).value }.sorted()
         assertEquals(listOf(1L, 2L), values)
     }
 
@@ -79,10 +79,10 @@ class ChoiceEffectTest {
         // Should return array with 2*2=4 results: [11, 21, 12, 22]
         assertTrue(result is FunkArrayList, "Expected array result")
         val array = result as FunkArrayList
-        assertEquals(4, array.elements.size, "Expected 4 results (2 * 2 choices)")
+        assertEquals(4, array.size(), "Expected 4 results (2 * 2 choices)")
 
         // The results should be: 1+10=11, 1+20=21, 2+10=12, 2+20=22
-        val values = array.elements.map { (it as FunkInt).value }.sorted()
+        val values = array.toList().map { (it as FunkInt).value }.sorted()
         assertEquals(listOf(11L, 12L, 21L, 22L), values)
     }
 
@@ -109,7 +109,7 @@ class ChoiceEffectTest {
         val array = result as FunkArrayList
 
         // Results for x=1: 10, x=2: (failed), x=3: 30
-        val values = array.elements.map { (it as FunkInt).value }.sorted()
+        val values = array.toList().map { (it as FunkInt).value }.sorted()
         assertEquals(listOf(10L, 30L), values, "Expected only odd numbers to succeed")
     }
 
@@ -163,7 +163,7 @@ class ChoiceEffectTest {
         // Should return array of all pairs: 3 * 2 = 6 combinations
         assertTrue(result is FunkArrayList, "Expected array result")
         val array = result as FunkArrayList
-        assertEquals(6, array.elements.size, "Expected 6 pairs (3 * 2 choices)")
+        assertEquals(6, array.size(), "Expected 6 pairs (3 * 2 choices)")
 
         // Each element should be a record with first and second fields
         array.elements.forEach { element ->
@@ -193,9 +193,9 @@ class ChoiceEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val array = result as FunkArrayList
-        assertEquals(2, array.elements.size)
+        assertEquals(2, array.size())
 
-        val values = array.elements.map { (it as FunkInt).value }.sorted()
+        val values = array.toList().map { (it as FunkInt).value }.sorted()
         assertEquals(listOf(10L, 20L), values) // 5*2=10, 10*2=20
     }
 
@@ -224,7 +224,7 @@ class ChoiceEffectTest {
         // Nested choice should multiply: 2 outer * 2 inner = 4 results
         // But inner returns an array, so we might get nested arrays
         // This tests how nested multishot continuations interact
-        assertTrue(array.elements.size > 0, "Should have at least one result")
+        assertTrue(array.size() > 0, "Should have at least one result")
     }
 
     @Test
@@ -238,8 +238,8 @@ class ChoiceEffectTest {
                 let x = Choice.choose { options = [1, 2, 3, 4, 5] }
                 # Only keep values greater than 2
                 match x > 2 is
-                    true -> x
-                    false -> Choice.fail {}
+                    True -> x
+                    False -> Choice.fail {}
 
             computation {}
         """.trimIndent()
@@ -248,7 +248,7 @@ class ChoiceEffectTest {
         assertTrue(result is FunkArrayList)
         val array = result as FunkArrayList
 
-        val values = array.elements.map { (it as FunkInt).value }.sorted()
+        val values = array.toList().map { (it as FunkInt).value }.sorted()
         assertEquals(listOf(3L, 4L, 5L), values, "Should only return values > 2")
     }
 
@@ -270,7 +270,7 @@ class ChoiceEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val array = result as FunkArrayList
-        assertEquals(4, array.elements.size, "Should have 2 * 2 = 4 combinations")
+        assertEquals(4, array.size(), "Should have 2 * 2 = 4 combinations")
 
         // Verify each result is a record with color and size
         array.elements.forEach { element ->

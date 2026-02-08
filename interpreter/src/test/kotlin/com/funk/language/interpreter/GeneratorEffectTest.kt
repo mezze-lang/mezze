@@ -272,8 +272,8 @@ class GeneratorEffectTest {
         println("DEBUG after handler fix: result value = $result")
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
-        assertEquals(42, (list.elements[0] as FunkInt).value)
+        assertEquals(1, list.size())
+        assertEquals(42, (list.get(0) as FunkInt).value)
     }
 
     @Test
@@ -295,8 +295,8 @@ class GeneratorEffectTest {
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
         // Only one value available
-        assertEquals(1, list.elements.size)
-        assertEquals(99, (list.elements[0] as FunkInt).value)
+        assertEquals(1, list.size())
+        assertEquals(99, (list.get(0) as FunkInt).value)
     }
 
     @Test
@@ -316,8 +316,8 @@ class GeneratorEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
-        assertEquals(42, (list.elements[0] as FunkInt).value)
+        assertEquals(1, list.size())
+        assertEquals(42, (list.get(0) as FunkInt).value)
     }
 
     @Test
@@ -339,8 +339,8 @@ class GeneratorEffectTest {
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
         // Should only have 1 value even though we asked for 10
-        assertEquals(1, list.elements.size)
-        assertEquals(1, (list.elements[0] as FunkInt).value)
+        assertEquals(1, list.size())
+        assertEquals(1, (list.get(0) as FunkInt).value)
     }
 
     @Test
@@ -428,8 +428,8 @@ class GeneratorEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
-        assertEquals("hello", (list.elements[0] as FunkString).value)
+        assertEquals(1, list.size())
+        assertEquals("hello", (list.get(0) as FunkString).value)
     }
 
     @Test
@@ -440,7 +440,7 @@ class GeneratorEffectTest {
             use std::effects::generator::{to_list}
 
             let gen = {} -> do
-                yield { value =true }
+                yield { value =True }
 
             let g = gen {}
             to_list { gen = g }
@@ -449,8 +449,8 @@ class GeneratorEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
-        assertTrue((list.elements[0] as FunkBool).value)
+        assertEquals(1, list.size())
+        assertTrue((list.get(0) as FunkBool).value)
     }
 
     @Test
@@ -491,7 +491,7 @@ class GeneratorEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(0, list.elements.size)
+        assertEquals(0, list.size())
     }
 
     @Test
@@ -512,8 +512,8 @@ class GeneratorEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
-        assertEquals(77, (list.elements[0] as FunkInt).value)
+        assertEquals(1, list.size())
+        assertEquals(77, (list.get(0) as FunkInt).value)
     }
 
     @Test
@@ -536,9 +536,9 @@ class GeneratorEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
+        assertEquals(1, list.size())
         // 3 + 4 = 7, 3 * 4 = 12, 7 + 12 = 19
-        assertEquals(19, (list.elements[0] as FunkInt).value)
+        assertEquals(19, (list.get(0) as FunkInt).value)
     }
 
     @Test
@@ -579,15 +579,15 @@ class GeneratorEffectTest {
                 let value = if flag then 100 else 200
                 yield { value =value }
 
-            let g1 = gen { flag = true }
+            let g1 = gen { flag = True }
             to_list { gen = g1 }
         """.trimIndent()
 
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
-        assertEquals(100, (list.elements[0] as FunkInt).value)
+        assertEquals(1, list.size())
+        assertEquals(100, (list.get(0) as FunkInt).value)
     }
 
     @Test
@@ -668,8 +668,8 @@ class GeneratorEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
-        assertEquals(55, (list.elements[0] as FunkInt).value)
+        assertEquals(1, list.size())
+        assertEquals(55, (list.get(0) as FunkInt).value)
     }
 
     @Test
@@ -691,8 +691,8 @@ class GeneratorEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
-        assertEquals(123, (list.elements[0] as FunkInt).value)
+        assertEquals(1, list.size())
+        assertEquals(123, (list.get(0) as FunkInt).value)
     }
 
     @Test
@@ -771,8 +771,8 @@ class GeneratorEffectTest {
         val result = executeProgram(source)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(1, list.elements.size)
+        assertEquals(1, list.size())
         // 5^2 = 25, 5*2 = 10, 25 + 10 = 35
-        assertEquals(35, (list.elements[0] as FunkInt).value)
+        assertEquals(35, (list.get(0) as FunkInt).value)
     }
 }

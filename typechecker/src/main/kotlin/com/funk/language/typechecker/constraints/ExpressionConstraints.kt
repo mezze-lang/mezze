@@ -161,33 +161,55 @@ class ExpressionConstraintGenerator {
         }
 
         // Non-empty array: all elements must have same type
-        val elementResults = expr.elements.map { generate(it, context) }
-        val firstElementType = elementResults[0].type
-
+        // Handle both regular elements and spread elements
+        val elementType = FunkType.VarType(TypeVar.fresh())
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
+        val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+        val effects = mutableSetOf<String>()
 
-        // Add constraints and undefined variables from all elements
-        elementResults.forEach {
-            constraints.addAll(it.constraints)
-            undefinedVars.addAll(it.undefinedVariables)
-        }
-
-        // All elements must have same type as first element
-        for (i in 1 until elementResults.size) {
-            constraints.add(
-                Constraint.Equality(
-                    left = elementResults[i].type,
-                    right = firstElementType,
-                    context = "Array elements must have same type",
-                    sourceLocation = expr.elements.getOrNull(i)?.sourceLocation
-                )
-            )
+        for (element in expr.elements) {
+            when (element) {
+                is ArrayRegularElement -> {
+                    val result = generate(element.expression, context)
+                    constraints.addAll(result.constraints)
+                    undefinedVars.addAll(result.undefinedVariables)
+                    abilityConstraints.addAll(result.abilityConstraints)
+                    effects.addAll(result.effects)
+                    // Regular element must match element type
+                    constraints.add(
+                        Constraint.Equality(
+                            left = result.type,
+                            right = elementType,
+                            context = "Array elements must have same type",
+                            sourceLocation = element.expression.sourceLocation
+                        )
+                    )
+                }
+                is ArraySpreadElement -> {
+                    val result = generate(element.expression, context)
+                    constraints.addAll(result.constraints)
+                    undefinedVars.addAll(result.undefinedVariables)
+                    abilityConstraints.addAll(result.abilityConstraints)
+                    effects.addAll(result.effects)
+                    // Spread element must be an array with matching element type
+                    constraints.add(
+                        Constraint.Equality(
+                            left = result.type,
+                            right = FunkType.ArrayType(elementType),
+                            context = "Spread element must be an array",
+                            sourceLocation = element.expression.sourceLocation
+                        )
+                    )
+                }
+            }
         }
 
         return ConstraintResult(
-            type = FunkType.ArrayType(firstElementType),
+            type = FunkType.ArrayType(elementType),
             constraints = constraints,
+            effects = effects,
+            abilityConstraints = abilityConstraints,
             undefinedVariables = undefinedVars
         )
     }
@@ -1083,7 +1105,7 @@ class ExpressionConstraintGenerator {
             // Primitive types and VarType unchanged
             is FunkType.VarType, is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.EffectRow -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> type
         }
     }
 
@@ -1136,7 +1158,7 @@ class ExpressionConstraintGenerator {
             // Primitive types have no variables
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.EffectRow -> emptySet()
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> emptySet()
         }
     }
 
@@ -1191,7 +1213,7 @@ class ExpressionConstraintGenerator {
             // Primitive types unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.EffectRow -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> type
         }
     }
 
@@ -1274,6 +1296,7 @@ class ExpressionConstraintGenerator {
                     is FunkType.NatType -> implTypeName == "Nat"
                     is FunkType.FracType -> implTypeName == "Frac"
                     is FunkType.OrderingType -> implTypeName == "Ordering"
+                    is FunkType.BytesType -> implTypeName == "Bytes"
                     is FunkType.TypeApplication -> {
                         // For type constructors, match by name
                         // TODO: Handle type arguments

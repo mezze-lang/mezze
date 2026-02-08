@@ -48,10 +48,12 @@ class EqualNode(leftNode: FunkNode, rightNode: FunkNode) : BinaryComparisonNode(
             left is FunkBool && right is FunkBool -> FunkBool(left.value == right.value)
             left is FunkList && right is FunkList -> {
                 // Lists are equal if same length and all elements are equal (deep comparison)
-                if (left.elements.size != right.elements.size) {
+                val leftList = left.toKotlinList()
+                val rightList = right.toKotlinList()
+                if (leftList.size != rightList.size) {
                     FunkBool(false)
                 } else {
-                    val allEqual = left.elements.zip(right.elements).all { (elemL, elemR) ->
+                    val allEqual = leftList.zip(rightList).all { (elemL: FunkValue, elemR: FunkValue) ->
                         (executeComparison(elemL, elemR) as FunkBool).value
                     }
                     FunkBool(allEqual)

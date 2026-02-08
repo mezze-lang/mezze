@@ -115,14 +115,15 @@ class LiteralPatternParsingTest {
         assertEquals("", (pattern.value as StringLiteralValue).value)
     }
 
-    // ========== Boolean Literal Patterns ==========
+    // ========== Boolean Constructor Patterns ==========
+    // Note: Boolean values are now variant constructors (True/False), not literals
 
     @Test
-    fun `parse match with true literal pattern`() {
+    fun `parse match with True constructor pattern`() {
         val code = """
             match flag is
-              true -> "yes"
-              false -> "no"
+              True -> "yes"
+              False -> "no"
         """.trimIndent()
 
         val program = parser.parse(code)
@@ -130,19 +131,19 @@ class LiteralPatternParsingTest {
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
 
-        val pattern1 = matchExpr.cases[0].patterns.first() as LiteralPattern
-        assertTrue(pattern1.value is BooleanLiteralValue)
-        assertEquals(true, (pattern1.value as BooleanLiteralValue).value)
+        // True and False are now constructor patterns, not literal patterns
+        val pattern1 = matchExpr.cases[0].patterns.first() as ConstructorPattern
+        assertEquals("True", pattern1.constructor)
 
-        val pattern2 = matchExpr.cases[1].patterns.first() as LiteralPattern
-        assertEquals(false, (pattern2.value as BooleanLiteralValue).value)
+        val pattern2 = matchExpr.cases[1].patterns.first() as ConstructorPattern
+        assertEquals("False", pattern2.constructor)
     }
 
     @Test
-    fun `parse match with false literal pattern`() {
+    fun `parse match with False constructor pattern`() {
         val code = """
             match done is
-              false -> "continue"
+              False -> "continue"
               _ -> "stop"
         """.trimIndent()
 
@@ -151,8 +152,8 @@ class LiteralPatternParsingTest {
 
         val matchExpr = (program.items.first() as TopLevelExpression).expression as MatchExpression
 
-        val pattern = matchExpr.cases[0].patterns.first() as LiteralPattern
-        assertEquals(false, (pattern.value as BooleanLiteralValue).value)
+        val pattern = matchExpr.cases[0].patterns.first() as ConstructorPattern
+        assertEquals("False", pattern.constructor)
     }
 
     // ========== Multiple Literal Patterns with | ==========

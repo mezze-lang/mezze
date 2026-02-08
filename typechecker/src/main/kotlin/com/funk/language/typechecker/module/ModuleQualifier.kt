@@ -265,7 +265,12 @@ class ModuleQualifier {
 
             // Array operations - qualify elements/indices
             is ArrayLiteral -> expr.copy(
-                elements = expr.elements.map { qualifyExpression(it, moduleNames, prefix) }
+                elements = expr.elements.map { element ->
+                    when (element) {
+                        is ArrayRegularElement -> ArrayRegularElement(qualifyExpression(element.expression, moduleNames, prefix))
+                        is ArraySpreadElement -> ArraySpreadElement(qualifyExpression(element.expression, moduleNames, prefix))
+                    }
+                }
             )
 
             is ArrayAccess -> expr.copy(

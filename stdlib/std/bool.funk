@@ -9,13 +9,13 @@ pub let to_string = { b: Bool } ->
 
 # Bool logic operations
 pub let and = { l: Bool, r: Bool } ->
-    if l then r else false
+    if l then r else False
 
 pub let or = { l: Bool, r: Bool } ->
-    if l then true else r
+    if l then True else r
 
 pub let not = { b: Bool } ->
-    if b then false else true
+    if b then False else True
 
 pub let xor = { l: Bool, r: Bool } ->
     (l && not { b = r }) || (not { b = l } && r)
@@ -32,13 +32,13 @@ pub let iff = { l: Bool, r: Bool } ->
 
 # pub let all = { xs: [Bool] } ->
 #     match xs is
-#         [] -> true
-#         [head, ...tail] -> if head then all { xs = tail } else false
+#         [] -> True
+#         [head, ...tail] -> if head then all { xs = tail } else False
 
 # pub let any = { xs: [Bool] } ->
 #     match xs is
-#         [] -> false
-#         [head, ...tail] -> if head then true else any { xs = tail }
+#         [] -> False
+#         [head, ...tail] -> if head then True else any { xs = tail }
 
 # pub let none = { xs: [Bool] } ->
 #     not { x = any { xs = xs } }

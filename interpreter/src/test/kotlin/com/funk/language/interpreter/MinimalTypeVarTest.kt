@@ -36,10 +36,10 @@ class MinimalTypeVarTest {
         val result = eval(code)
         assertTrue(result is FunkArrayList)
         val list = result as FunkArrayList
-        assertEquals(3, list.elements.size)
+        assertEquals(3, list.size())
         // Verify the results
-        assertEquals(2L, (list.elements[0] as FunkInt).value)
-        assertEquals(4L, (list.elements[1] as FunkInt).value)
-        assertEquals(6L, (list.elements[2] as FunkInt).value)
+        assertEquals(2L, (list.get(0) as FunkInt).value)
+        assertEquals(4L, (list.get(1) as FunkInt).value)
+        assertEquals(6L, (list.get(2) as FunkInt).value)
     }
 }

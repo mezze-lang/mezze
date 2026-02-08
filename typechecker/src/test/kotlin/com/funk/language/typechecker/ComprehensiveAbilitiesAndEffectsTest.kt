@@ -316,13 +316,13 @@ class ComprehensiveAbilitiesAndEffectsTest {
             }
 
             impl Show Bool where {
-              show : {val: Bool} -> String = {val} -> if val then "true" else "false"
+              show : {val: Bool} -> String = {val} -> if val then "True" else "False"
             }
 
             let showValue: {val: 'a} -> String with Show 'a = {val} ->
               Show.show {val = val}
 
-            let result = showValue {val = true}
+            let result = showValue {val = True}
         """.trimIndent()
 
         val program = parser.parse(source)

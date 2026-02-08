@@ -943,6 +943,7 @@ class ConstraintSolver(
                 unwrappedType is FunkType.NatType ||
                 unwrappedType is FunkType.FracType ||
                 unwrappedType is FunkType.OrderingType ||
+                unwrappedType is FunkType.BytesType ||
                 isBoolVariant(unwrappedType) ||
                 // Derive Eq for records if all fields have Eq
                 (unwrappedType is FunkType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Eq", it) }) ||
@@ -1030,7 +1031,7 @@ class ConstraintSolver(
         return when (type) {
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType -> true
+            is FunkType.OrderingType, is FunkType.BytesType -> true
             is FunkType.VariantType -> true
             is FunkType.RecordType -> type.rowVar == null && type.fields.values.all { isConcrete(it) }
             is FunkType.FunctionType -> true
@@ -1052,6 +1053,7 @@ class ConstraintSolver(
             is FunkType.NatType -> "Nat"
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
+            is FunkType.BytesType -> "Bytes"
             is FunkType.TypeApplication -> {
                 // For "List Int" -> "List"
                 // The full type would need all args: "List_Int"
@@ -1497,6 +1499,37 @@ class ConstraintSolver(
 
                     return ConstraintResult.Success(resultSubst)
                 }
+
+                // SPECIAL CASE: Built-in List constructors (Cons/Nil) in pattern context
+                // When no user-defined type declaration exists for Cons/Nil, they belong to
+                // the built-in List type which should produce ListType.
+                if (constructorName == "Cons" || constructorName == "Nil") {
+                    val elemTypeVar = FunkType.VarType(TypeVar.fresh())
+                    val listType = FunkType.ListType(elemTypeVar)
+
+                    var resultSubst = Substitution.single(variantType.variable, listType)
+
+                    // For Cons, unify the payload type
+                    if (constructorName == "Cons" && expectedPayloadType != null) {
+                        val expectedConsPayload = FunkType.RecordType(mapOf(
+                            "head" to elemTypeVar,
+                            "tail" to listType
+                        ))
+                        val unifyResult = unify(expectedPayloadType, expectedConsPayload, typeDeclarations)
+                        when (unifyResult) {
+                            is UnificationResult.Success -> {
+                                resultSubst = resultSubst.compose(unifyResult.substitution)
+                            }
+                            is UnificationResult.Failure -> {
+                                return ConstraintResult.Failure(
+                                    "Cons pattern payload type mismatch: ${unifyResult.message}"
+                                )
+                            }
+                        }
+                    }
+
+                    return ConstraintResult.Success(resultSubst)
+                }
             }
 
             // SPECIAL CASE: Built-in Bool constructors in expression context
@@ -1509,6 +1542,82 @@ class ConstraintSolver(
                 return ConstraintResult.Success(
                     Substitution.single(variantType.variable, boolType)
                 )
+            }
+
+            // SPECIAL CASE: Cons/Nil constructors in expression context
+            // First check if there's a user-defined type declaration. If so, use VariantType.
+            // Only fall back to built-in ListType when no type declaration exists.
+            if (constructorName == "Cons" || constructorName == "Nil") {
+                val declaringTypeExpr = findTypeDeclarationForConstructor(constructorName)
+
+                if (declaringTypeExpr != null) {
+                    // User-defined List type - use VariantType
+                    val variantDef = declaringTypeExpr.definition as VariantDefinition
+
+                    val typeParamMapping = declaringTypeExpr.typeParams.associate { param ->
+                        param to FunkType.VarType(TypeVar.fresh())
+                    }
+
+                    val constructors = variantDef.constructors.associate { ctor ->
+                        val payloadType = ctor.dataType?.let { dataTypeAnnotation ->
+                            convertTypeAnnotation(dataTypeAnnotation, typeParamMapping)
+                        }
+                        ctor.name to payloadType
+                    }
+
+                    val declaredVariant = FunkType.VariantType(
+                        constructors = constructors,
+                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null
+                    )
+
+                    var resultSubst = Substitution.single(variantType.variable, declaredVariant)
+
+                    if (expectedPayloadType != null) {
+                        val declaredPayload = constructors[constructorName]
+                        if (declaredPayload != null) {
+                            val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
+                            when (unifyResult) {
+                                is UnificationResult.Success -> {
+                                    resultSubst = resultSubst.compose(unifyResult.substitution)
+                                }
+                                is UnificationResult.Failure -> {
+                                    return ConstraintResult.Failure(
+                                        "Constructor payload type mismatch for '$constructorName': ${unifyResult.message}"
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    return ConstraintResult.Success(resultSubst)
+                }
+
+                // No user-defined type - use built-in ListType
+                val elemTypeVar = FunkType.VarType(TypeVar.fresh())
+                val listType = FunkType.ListType(elemTypeVar)
+
+                var resultSubst = Substitution.single(variantType.variable, listType)
+
+                // For Cons, unify the payload type
+                if (constructorName == "Cons" && expectedPayloadType != null) {
+                    val expectedConsPayload = FunkType.RecordType(mapOf(
+                        "head" to elemTypeVar,
+                        "tail" to listType
+                    ))
+                    val unifyResult = unify(expectedPayloadType, expectedConsPayload, typeDeclarations)
+                    when (unifyResult) {
+                        is UnificationResult.Success -> {
+                            resultSubst = resultSubst.compose(unifyResult.substitution)
+                        }
+                        is UnificationResult.Failure -> {
+                            return ConstraintResult.Failure(
+                                "Cons constructor payload type mismatch: ${unifyResult.message}"
+                            )
+                        }
+                    }
+                }
+
+                return ConstraintResult.Success(resultSubst)
             }
 
             // Create an open variant during constraint solving
@@ -1633,6 +1742,42 @@ class ConstraintSolver(
             }
         }
 
+        // Special handling for ListType - allows pattern matching with Cons/Nil
+        // List is internally ListType for optimization, but users can pattern match
+        // on it as if it were `type List 'a = | Cons { head: 'a, tail: List 'a } | Nil |`
+        if (variantType is FunkType.ListType) {
+            if (constructorName == "Cons") {
+                // Cons has payload: { head: 'a, tail: List 'a }
+                if (expectedPayloadType != null) {
+                    val elemType = variantType.elementType
+                    val expectedConsPayload = FunkType.RecordType(mapOf(
+                        "head" to elemType,
+                        "tail" to variantType  // ListType with same element type
+                    ))
+                    val result = unify(expectedPayloadType, expectedConsPayload, typeDeclarations)
+                    return when (result) {
+                        is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
+                        is UnificationResult.Failure -> ConstraintResult.Failure(
+                            "Constructor 'Cons' payload type mismatch: ${result.message}"
+                        )
+                    }
+                }
+                return ConstraintResult.Success(Substitution.empty)
+            } else if (constructorName == "Nil") {
+                // Nil has no payload
+                if (expectedPayloadType != null) {
+                    return ConstraintResult.Failure(
+                        "Constructor 'Nil' does not have a payload"
+                    )
+                }
+                return ConstraintResult.Success(Substitution.empty)
+            } else {
+                return ConstraintResult.Failure(
+                    "List type only has constructors 'Cons' and 'Nil', not '$constructorName'"
+                )
+            }
+        }
+
         // Not a variant type
         return ConstraintResult.Failure(
             "Cannot use constructor '$constructorName' on non-variant type: ${formatType(variantType)}"
@@ -1736,6 +1881,7 @@ class ConstraintSolver(
             is FunkType.NatType,
             is FunkType.FracType,
             is FunkType.OrderingType,
+            is FunkType.BytesType,
             is FunkType.EffectRow -> type
         }
     }
@@ -1826,6 +1972,7 @@ class ConstraintSolver(
             is FunkType.NatType -> "Nat"
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
+            is FunkType.BytesType -> "Bytes"
             is FunkType.FunctionType -> "{...} -> ..."
             is FunkType.RecordType -> "{${type.fields.keys.take(3).joinToString()}}"
             is FunkType.VariantType -> {
@@ -1896,7 +2043,7 @@ class ConstraintSolver(
             // Primitives have no type variables
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.EffectRow -> emptySet()
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> emptySet()
         }
     }
 
@@ -1951,7 +2098,7 @@ class ConstraintSolver(
             // Primitives unchanged
             is FunkType.IntType, is FunkType.FloatType, is FunkType.StringType,
             is FunkType.BooleanType, is FunkType.NatType, is FunkType.FracType,
-            is FunkType.OrderingType, is FunkType.EffectRow -> type
+            is FunkType.OrderingType, is FunkType.BytesType, is FunkType.EffectRow -> type
         }
     }
 

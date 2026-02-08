@@ -135,8 +135,8 @@ class CompleteInferenceDemo {
             type Status = | Active, Inactive, Pending, Error |
             
             let isWorking = {status} -> match status is
-              Active | Pending -> true
-              Inactive | Error -> false
+              Active | Pending -> True
+              Inactive | Error -> False
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -146,7 +146,11 @@ class CompleteInferenceDemo {
         assertTrue(isWorkingType is FunkType.FunctionType)
         
         val functionType = isWorkingType as FunkType.FunctionType
-        assertTrue(functionType.returnType is FunkType.BooleanType, "Should return Boolean")
+        // Bool can be BooleanType or VariantType with True/False constructors
+        val returnType = functionType.returnType
+        assertTrue(returnType is FunkType.BooleanType ||
+                   (returnType is FunkType.VariantType && returnType.constructors.keys == setOf("True", "False")),
+                   "Should return Boolean")
     }
 
     @Test

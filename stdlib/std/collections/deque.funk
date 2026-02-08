@@ -1,0 +1,127 @@
+# std/collections/deque.funk - Double-ended queue operations
+#
+# Deque 'a is a built-in type implemented using the Banker's Queue algorithm.
+# Supports O(1) amortized operations on both ends.
+#
+# A Deque can be used as:
+# - A queue (FIFO): push_back, pop_front
+# - A stack (LIFO): push_front, pop_front or push_back, pop_back
+# - A double-ended queue: all operations
+
+# ============================================
+# Construction
+# ============================================
+
+pub let empty: {} -> Deque 'a = {} ->
+    __native_deque_empty {}
+
+pub let singleton: { x: 'a } -> Deque 'a = { x } ->
+    __native_deque_singleton { x = x }
+
+# Convert from a List (without type annotation to avoid unification issues)
+pub let from_list = { xs } ->
+    __native_deque_from_list { xs = xs }
+
+# ============================================
+# Add elements
+# ============================================
+
+# Push element to the front (O(1))
+pub let push_front: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
+    __native_deque_push_front { d = d, x = x }
+
+# Push element to the back (O(1))
+pub let push_back: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
+    __native_deque_push_back { d = d, x = x }
+
+# ============================================
+# Remove elements (returns Option)
+# ============================================
+
+# Pop element from front - returns Option {head: 'a, tail: Deque 'a}
+pub let pop_front: { d: Deque 'a } -> Option { head: 'a, tail: Deque 'a } = { d } ->
+    __native_deque_pop_front { d = d }
+
+# Pop element from back - returns Option {init: Deque 'a, last: 'a}
+pub let pop_back: { d: Deque 'a } -> Option { init: Deque 'a, last: 'a } = { d } ->
+    __native_deque_pop_back { d = d }
+
+# ============================================
+# Peek (without removing)
+# ============================================
+
+# Peek at front element without removing
+pub let peek_front: { d: Deque 'a } -> Option 'a = { d } ->
+    __native_deque_peek_front { d = d }
+
+# Peek at back element without removing
+pub let peek_back: { d: Deque 'a } -> Option 'a = { d } ->
+    __native_deque_peek_back { d = d }
+
+# ============================================
+# Queries
+# ============================================
+
+pub let is_empty: { d: Deque 'a } -> Bool = { d } ->
+    __native_deque_is_empty { d = d }
+
+pub let length: { d: Deque 'a } -> Int = { d } ->
+    __native_deque_length { d = d }
+
+# ============================================
+# Conversions
+# ============================================
+
+# Convert to a List (without type annotation to avoid unification issues)
+pub let to_list = { d } ->
+    __native_deque_to_list { d = d }
+
+pub let to_array: { d: Deque 'a } -> ['a] = { d } ->
+    __native_deque_to_array { d = d }
+
+# ============================================
+# Higher-order functions
+# ============================================
+
+pub let map: { d: Deque 'a, f: { x: 'a } -> 'b } -> Deque 'b = { d, f } ->
+    __native_deque_map { d = d, f = f }
+
+pub let filter: { d: Deque 'a, p: { x: 'a } -> Bool } -> Deque 'a = { d, p } ->
+    __native_deque_filter { d = d, p = p }
+
+pub let fold: { d: Deque 'a, init: 'b, f: { acc: 'b, x: 'a } -> 'b } -> 'b = { d, init, f } ->
+    __native_deque_fold { d = d, init = init, f = f }
+
+# ============================================
+# Transformation
+# ============================================
+
+pub let reverse: { d: Deque 'a } -> Deque 'a = { d } ->
+    __native_deque_reverse { d = d }
+
+pub let concat: { d1: Deque 'a, d2: Deque 'a } -> Deque 'a = { d1, d2 } ->
+    __native_deque_concat { d1 = d1, d2 = d2 }
+
+# ============================================
+# Queue operations (FIFO convenience)
+# ============================================
+
+# Enqueue (add to back)
+pub let enqueue: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
+    push_back { d = d, x = x }
+
+# Dequeue (remove from front)
+pub let dequeue: { d: Deque 'a } -> Option { head: 'a, tail: Deque 'a } = { d } ->
+    pop_front { d = d }
+
+# ============================================
+# Stack operations (LIFO convenience)
+# ============================================
+
+# Push (add to front)
+pub let push: { d: Deque 'a, x: 'a } -> Deque 'a = { d, x } ->
+    push_front { d = d, x = x }
+
+# Pop (remove from front)
+pub let pop: { d: Deque 'a } -> Option { head: 'a, tail: Deque 'a } = { d } ->
+    pop_front { d = d }

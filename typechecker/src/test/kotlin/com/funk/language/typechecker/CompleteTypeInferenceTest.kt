@@ -232,8 +232,8 @@ class CompleteTypeInferenceTest {
             type Range = | Range { min: Int, max: Int } |
             
             let isValid = {range: Range} -> match range is
-              Range { min, max } if min >= 0 && max <= 100 -> true
-              _ -> false
+              Range { min, max } if min >= 0 && max <= 100 -> True
+              _ -> False
               
             let result = isValid { range = Range { min = 10, max = 90 } }
         """.trimIndent()
@@ -245,7 +245,9 @@ class CompleteTypeInferenceTest {
         assertTrue(isValidType is FunkType.FunctionType)
         
         val resultType = getVariableType(program, "result")
-        assertEquals(FunkType.BooleanType, resultType)
+        // Bool can be BooleanType or VariantType with True/False constructors
+        assertTrue(resultType is FunkType.BooleanType ||
+                   (resultType is FunkType.VariantType && resultType.constructors.keys == setOf("True", "False")))
     }
 
     @Test

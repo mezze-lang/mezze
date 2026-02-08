@@ -358,7 +358,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test if expression inside interpolation`() {
         assertTypeChecks("""
-            let result = "$(if true then "yes" else "no")"
+            let result = "$(if True then "yes" else "no")"
             result
         """.trimIndent())
     }
@@ -523,7 +523,7 @@ class StringInterpolationTypeCheckerTest {
     @Test
     fun `test Bool in interpolation fails`() {
         assertTypeCheckFails("""
-            let flag = true
+            let flag = True
             let msg = "Flag: $(flag)"
             msg
         """.trimIndent())

@@ -374,7 +374,7 @@ class ExceptionTypeInferenceTest {
                 else
                     Exception.throw {error = ErrorB}
 
-            let result = perform MyHandler in conditional {flag = true}
+            let result = perform MyHandler in conditional {flag = True}
         """.trimIndent()
 
         // Should pass - both variants unified and handled
@@ -475,7 +475,7 @@ class ExceptionTypeInferenceTest {
             }
 
             pub let handle_request : {id: String, auth: Bool} -> {} <Exception> = {id, auth} ->
-                if auth == false then
+                if auth == False then
                     Exception.throw {error = Unauthorized}
                 else if id == "" then
                     Exception.throw {error = BadRequest {msg = "Empty ID"}}
@@ -486,7 +486,7 @@ class ExceptionTypeInferenceTest {
                 else
                     {}
 
-            let result = perform ApiHandler in handle_request {id = "", auth = true}
+            let result = perform ApiHandler in handle_request {id = "", auth = True}
         """.trimIndent()
 
         // Should pass - all four variants combine and are handled
@@ -514,7 +514,7 @@ class ExceptionTypeInferenceTest {
             }
 
             pub let handle_request : {id: String, auth: Bool} -> {} <Exception> = {id, auth} ->
-                if auth == false then
+                if auth == False then
                     Exception.throw {error = Unauthorized}
                 else if id == "" then
                     Exception.throw {error = BadRequest {msg = "Empty ID"}}
@@ -525,7 +525,7 @@ class ExceptionTypeInferenceTest {
                 else
                     {}
 
-            let result = perform PartialHandler in handle_request {id = "", auth = true}
+            let result = perform PartialHandler in handle_request {id = "", auth = True}
         """.trimIndent()
 
         // Should fail - PartialHandler can't handle Unauthorized or ServerError

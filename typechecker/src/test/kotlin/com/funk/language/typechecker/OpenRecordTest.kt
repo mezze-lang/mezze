@@ -71,7 +71,7 @@ class OpenRecordTest {
         val source = """
             let processUser: {name: String, age: Int, ...} -> String = {name, age} -> name
 
-            processUser {name = "Bob", age = 25, active = true}
+            processUser {name = "Bob", age = 25, active = True}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -99,7 +99,7 @@ class OpenRecordTest {
         val source = """
             let processUser: {name: String, ...} -> String = {name} -> name
 
-            processUser {name = "Alice", age = 30, city = "NYC", active = true, score = 100.0}
+            processUser {name = "Alice", age = 30, city = "NYC", active = True, score = 100.0}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -142,7 +142,7 @@ class OpenRecordTest {
         val source = """
             let my_func: {x: Int, ...} -> Int = {x} -> x
 
-            my_func {x = 1, name = "test", active = true, score = 3.14}
+            my_func {x = 1, name = "test", active = True, score = 3.14}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -170,7 +170,7 @@ class OpenRecordTest {
         val source = """
             let my_func: {a: {x: Int, y: Int, ...}, b: {p: String, q: String}} -> Int = {a, b} -> a.x + a.y
 
-            my_func {a = {x = 1, y = 0, z = ""}, b = {p = "hello", q = "world", r = true}}
+            my_func {a = {x = 1, y = 0, z = ""}, b = {p = "hello", q = "world", r = True}}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -185,7 +185,7 @@ class OpenRecordTest {
         val source = """
             let my_func: {a: {b: {c: Int, ...}, ...}, ...} -> Int = {a} -> a.b.c
 
-            my_func {a = {b = {c = 42, d = "extra"}, e = true}, f = 3.14}
+            my_func {a = {b = {c = 42, d = "extra"}, e = True}, f = 3.14}
         """.trimIndent()
 
         val program = parser.parse(source)

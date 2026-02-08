@@ -94,8 +94,8 @@ class VariantUnionTest {
             let test1 = {c} -> match c is
               Red -> Dog {breed = "Shepherd"}
               Blue {p} -> match p is
-                true -> Cat {name = "Orange"}
-                false -> Mouse
+                True -> Cat {name = "Orange"}
+                False -> Mouse
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -103,9 +103,10 @@ class VariantUnionTest {
 
         assertNotNull(result, "Should infer p as Bool from true/false patterns")
 
-        // Verify that p is typed as Bool
+        // Verify that p is typed as Bool (represented as variant with True/False constructors)
         val output = result.toString()
-        assertTrue(output.contains("Bool") || output.contains("p: Bool"),
+        assertTrue(output.contains("Bool") || output.contains("p: Bool") ||
+                   (output.contains("True") && output.contains("False")),
             "Parameter p should be inferred as Bool")
     }
 
@@ -114,8 +115,8 @@ class VariantUnionTest {
         val source = """
             let test2 = {x} -> match x is
               First {flag} -> match flag is
-                true -> Alpha
-                false -> Beta
+                True -> Alpha
+                False -> Beta
               Second -> Gamma
         """.trimIndent()
 
@@ -131,8 +132,8 @@ class VariantUnionTest {
             let test3 = {v} -> match v is
               A -> X
               B {cond} -> match cond is
-                true -> Y {value = 1}
-                false -> Z {value = 0}
+                True -> Y {value = 1}
+                False -> Z {value = 0}
               C -> W
         """.trimIndent()
 
@@ -199,8 +200,8 @@ class VariantUnionTest {
         val source = """
             let test1 = {outer} -> match outer is
               X {inner} -> match inner is
-                true -> A {x = 1}
-                false -> B {y = 2}
+                True -> A {x = 1}
+                False -> B {y = 2}
               Y {flag} -> if flag then C else D
               Z -> E
         """.trimIndent()
@@ -232,8 +233,8 @@ class VariantUnionTest {
         val source = """
             let test3 = {cond} -> if cond then
               match cond is
-                true -> Success
-                false -> Pending
+                True -> Success
+                False -> Pending
             else
               Failure
         """.trimIndent()
@@ -296,7 +297,7 @@ class VariantUnionTest {
         val source = """
             let test4 = {x} -> match x is
               A -> Result1 {data = {x = 1, y = 2}}
-              B -> Result2 {data = {a = "test", b = true}}
+              B -> Result2 {data = {a = "test", b = True}}
               C -> Result3
         """.trimIndent()
 

@@ -92,8 +92,8 @@ class InvalidConstructorInMatchTest {
 
             let is_red = {color} ->
                 match color is
-                    Red -> true
-                    _ -> false
+                    Red -> True
+                    _ -> False
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -290,9 +290,9 @@ class InvalidConstructorInMatchTest {
     @Test
     fun `test match branches with different variant constructors should unify`() {
         val code = """
-            let test = match true is
-              true -> Red
-              false -> Blue
+            let test = match True is
+              True -> Red
+              False -> Blue
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -302,9 +302,9 @@ class InvalidConstructorInMatchTest {
     @Test
     fun `test match branches with incompatible types should fail`() {
         val code = """
-            let test = match true is
-              true -> 42
-              false -> "hello"
+            let test = match True is
+              True -> 42
+              False -> "hello"
         """.trimIndent()
 
         val exception = assertThrows<TypeCheckError> {
@@ -337,8 +337,8 @@ class InvalidConstructorInMatchTest {
         // Exhaustiveness checking should detect unreachable patterns
         val code = """
             let x = {y} -> match y is
-              true -> 1
-              false -> 0
+              True -> 1
+              False -> 0
               _ -> -1
         """.trimIndent()
 
@@ -353,8 +353,8 @@ class InvalidConstructorInMatchTest {
     fun `test bool match without wildcard should be exhaustive`() {
         val code = """
             let x = {y} -> match y is
-              true -> 1
-              false -> 0
+              True -> 1
+              False -> 0
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -365,7 +365,7 @@ class InvalidConstructorInMatchTest {
     fun `test bool match with only true should require wildcard or false`() {
         val code = """
             let x = {y} -> match y is
-              true -> 1
+              True -> 1
         """.trimIndent()
 
         // Currently this might pass with a warning or fail

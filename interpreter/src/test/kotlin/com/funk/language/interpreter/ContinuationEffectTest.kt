@@ -443,7 +443,7 @@ class ContinuationEffectTest {
                 let x = 10
                 let cont = continuation::new {}
                 # Continuation is captured
-                # For true multishot, we'd need to call cont multiple times
+                # For True multishot, we'd need to call cont multiple times
                 # For now, verify capture works and execution continues
                 let y = 20
                 x + y

@@ -88,8 +88,8 @@ class ListTest {
 
             let xs = cons { head = 1, tail = cons { head = 2, tail = empty {} } }
 
-            let check_h = { h } -> if h == 1 then true else false
-            let check_h2 = { h2 } -> if h2 == 2 then true else false
+            let check_h = { h } -> if h == 1 then True else False
+            let check_h2 = { h2 } -> if h2 == 2 then True else False
             let check_empty = { t2 } -> is_empty { xs = t2 }
 
             match head { xs = xs } is
@@ -198,8 +198,8 @@ class ListTest {
             let xs = cons { head = 1, tail = cons { head = 2, tail = cons { head = 3, tail = empty {} } } }
             let ys = map { xs = xs, f = { x } -> x * 2 }
 
-            let check_h1 = { h1 } -> if h1 == 2 then true else false
-            let check_h2 = { h2 } -> if h2 == 4 then true else false
+            let check_h1 = { h1 } -> if h1 == 2 then True else False
+            let check_h2 = { h2 } -> if h2 == 4 then True else False
 
             match head { xs = ys } is
                 Some { val } ->

@@ -1,10 +1,14 @@
 package com.funk.language.interpreter
 
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.parallel.Execution
+import org.junit.jupiter.api.parallel.ExecutionMode
 
 /**
- * Tests for Phase 4: Loom Concurrency (spawn/await)
+ * Tests for Phase 4: LoomAsync Concurrency (spawn/await)
  *
  * Tests cover:
  * - Spawning computations on virtual threads
@@ -14,11 +18,34 @@ import org.junit.jupiter.api.Assertions.*
  *
  * Note: Park/unpark tests are in LoomVirtualThreadsTest which uses Kotlin API directly
  * to avoid issues with parking the JUnit test thread.
+ *
+ * IMPORTANT: Tests are run sequentially (@Execution(SAME_THREAD)) to avoid virtual thread
+ * scheduler saturation when many tests spawn threads concurrently.
  */
+@Execution(ExecutionMode.SAME_THREAD)
 class LoomConcurrencyTest {
 
-    private val parser = com.funk.language.parser.FunkParser()
-    private val typeChecker = com.funk.language.typechecker.TypeChecker()
+    private lateinit var parser: com.funk.language.parser.FunkParser
+    private lateinit var typeChecker: com.funk.language.typechecker.TypeChecker
+
+    @BeforeEach
+    fun setup() {
+        parser = com.funk.language.parser.FunkParser()
+        typeChecker = com.funk.language.typechecker.TypeChecker()
+        // Clear caches to prevent state pollution between tests
+        com.funk.language.typechecker.ModuleResolver.clearCache()
+        com.funk.language.typechecker.TypeChecker.clearCache()
+    }
+
+    @AfterEach
+    fun teardown() {
+        // Wait briefly for any outstanding virtual threads to complete
+        // This prevents accumulation of threads across tests
+        Thread.sleep(50)
+
+        // Clear ThreadLocal state to prevent context leaks
+        TruffleContextHolder.clearEnv()
+    }
 
     private fun eval(source: String): FunkValue {
         val program = parser.parse(source)
@@ -27,12 +54,12 @@ class LoomConcurrencyTest {
         return result
     }
 
-    // Common setup code
+    // Common setup code - uses same field names as std::async
     private val setupCode = """
-        newtype Promise = Promise __NativePromise
+        newtype Promise 'a = Promise __NativePromise
 
-        let spawn: {computation: {} -> 'a} -> Promise = {computation} -> __native_loom_spawn {computation = computation}
-        let await: {promise: Promise} -> 'a = {promise} -> __native_loom_await {promise = promise}
+        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
+        let await: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
     """.trimIndent()
 
     // Stdlib functions for tests that need them
@@ -51,8 +78,8 @@ class LoomConcurrencyTest {
             $setupCode
 
             let test = {} -> do
-                let promise = spawn {computation = {} -> 5 + 10}
-                await {promise = promise}
+                let promise = spawn {f = {} -> 5 + 10}
+                await {p =promise}
 
             test {}
         """
@@ -61,14 +88,13 @@ class LoomConcurrencyTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
     fun testSpawnWithConstant() {
         val code = """
             $setupCode
 
             let test: {} -> Int = {} -> do
-                let promise = spawn {computation = {} -> 42}
-                await {promise = promise}
+                let promise = spawn {f = {} -> 42}
+                await {p =promise}
 
             test {}
         """
@@ -77,19 +103,18 @@ class LoomConcurrencyTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
     fun testMultipleSpawnAndAwait() {
         val code = """
             $setupCode
 
             let test = {} -> do
-                let p1 = spawn {computation = {} -> 10}
-                let p2 = spawn {computation = {} -> 20}
-                let p3 = spawn {computation = {} -> 30}
+                let p1 = spawn {f = {} -> 10}
+                let p2 = spawn {f = {} -> 20}
+                let p3 = spawn {f = {} -> 30}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
-                let r3 = await {promise = p3}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
+                let r3 = await {p =p3}
 
                 r1 + r2 + r3
 
@@ -100,15 +125,14 @@ class LoomConcurrencyTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load")
     fun testSpawnWithClosure() {
         val code = """
             $setupCode
 
             let test = {} -> do
                 let x = 100
-                let promise = spawn {computation = {} -> x * 2}
-                await {promise = promise}
+                let promise = spawn {f = {} -> x * 2}
+                await {p =promise}
 
             test {}
         """
@@ -117,19 +141,18 @@ class LoomConcurrencyTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
     fun testSpawnWithComplexComputation() {
         val code = """
             $setupCode
 
             let test = {} -> do
-                let promise = spawn {computation = {} -> do
+                let promise = spawn {f = {} -> do
                     let a = 5
                     let b = 7
                     let c = a * b
                     c + 10
                 }
-                await {promise = promise}
+                await {p =promise}
 
             test {}
         """
@@ -143,11 +166,11 @@ class LoomConcurrencyTest {
             $setupCode
 
             let test = {} -> do
-                let outer = spawn {computation = {} -> do
-                    let inner = spawn {computation = {} -> 42}
-                    await {promise = inner}
+                let outer = spawn {f = {} -> do
+                    let inner = spawn {f = {} -> 42}
+                    await {p =inner}
                 }
-                await {promise = outer}
+                await {p =outer}
 
             test {}
         """
@@ -161,13 +184,13 @@ class LoomConcurrencyTest {
             $setupCode
 
             let test = {} -> do
-                let p1 = spawn {computation = {} -> 5 * 2}
-                let p2 = spawn {computation = {} -> 10 + 3}
-                let p3 = spawn {computation = {} -> 7 * 3}
+                let p1 = spawn {f = {} -> 5 * 2}
+                let p2 = spawn {f = {} -> 10 + 3}
+                let p3 = spawn {f = {} -> 7 * 3}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
-                let r3 = await {promise = p3}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
+                let r3 = await {p =p3}
 
                 r1 + r2 + r3
 
@@ -187,14 +210,14 @@ class LoomConcurrencyTest {
             $setupCode
 
             let pipeline = {} -> do
-                let stage1 = spawn {computation = {} -> 10}
-                let result1 = await {promise = stage1}
+                let stage1 = spawn {f = {} -> 10}
+                let result1 = await {p =stage1}
 
-                let stage2 = spawn {computation = {} -> result1 * 2}
-                let result2 = await {promise = stage2}
+                let stage2 = spawn {f = {} -> result1 * 2}
+                let result2 = await {p =stage2}
 
-                let stage3 = spawn {computation = {} -> result2 + 5}
-                await {promise = stage3}
+                let stage3 = spawn {f = {} -> result2 + 5}
+                await {p =stage3}
 
             pipeline {}
         """
@@ -208,17 +231,17 @@ class LoomConcurrencyTest {
             $setupCode
 
             let pipeline: {input: Int} -> Int = {input} -> do
-                let stage1 = spawn {computation = {} -> input + 5}
-                let r1 = await {promise = stage1}
+                let stage1 = spawn {f = {} -> input + 5}
+                let r1 = await {p =stage1}
 
-                let stage2 = spawn {computation = {} -> r1 * 2}
-                let r2 = await {promise = stage2}
+                let stage2 = spawn {f = {} -> r1 * 2}
+                let r2 = await {p =stage2}
 
-                let stage3 = spawn {computation = {} -> r2 - 3}
-                let r3 = await {promise = stage3}
+                let stage3 = spawn {f = {} -> r2 - 3}
+                let r3 = await {p =stage3}
 
-                let stage4 = spawn {computation = {} -> r3 * 3}
-                await {promise = stage4}
+                let stage4 = spawn {f = {} -> r3 * 3}
+                await {p =stage4}
 
             pipeline {input = 5}
         """
@@ -235,8 +258,8 @@ class LoomConcurrencyTest {
                 if remaining <= 0
                 then acc
                 else do
-                    let promise = spawn {computation = {} -> remaining * 2}
-                    let result = await {promise = promise}
+                    let promise = spawn {f = {} -> remaining * 2}
+                    let result = await {p =promise}
                     spawn_workers {remaining = remaining - 1, acc = acc + result}
 
             let fan_out_fan_in: {n: Int} -> Int = {n} ->
@@ -253,7 +276,7 @@ class LoomConcurrencyTest {
     // =============================================================================
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load")
+    // Previously disabled for flakiness - now fixed with sequential execution
     fun testRecursiveSpawn() {
         val code = """
             $setupCode
@@ -262,8 +285,8 @@ class LoomConcurrencyTest {
                 if n <= 0
                 then 0
                 else do
-                    let promise = spawn {computation = {} -> recursive_spawn {n = n - 1}}
-                    let result = await {promise = promise}
+                    let promise = spawn {f = {} -> recursive_spawn {n = n - 1}}
+                    let result = await {p =promise}
                     n + result
 
             recursive_spawn {n = 5}
@@ -281,8 +304,8 @@ class LoomConcurrencyTest {
                 if n <= 0
                 then acc
                 else do
-                    let promise = spawn {computation = {} -> n}
-                    let result = await {promise = promise}
+                    let promise = spawn {f = {} -> n}
+                    let result = await {p =promise}
                     parallel_sum {n = n - 1, acc = acc + result}
 
             parallel_sum {n = 10, acc = 0}
@@ -296,7 +319,7 @@ class LoomConcurrencyTest {
     // =============================================================================
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
+    // Previously disabled for flakiness - now fixed with sequential execution
     fun testMultipleClosures() {
         val code = """
             $setupCode
@@ -305,11 +328,11 @@ class LoomConcurrencyTest {
                 let a = 10
                 let b = 20
 
-                let p1 = spawn {computation = {} -> a * 2}
-                let p2 = spawn {computation = {} -> b * 3}
+                let p1 = spawn {f = {} -> a * 2}
+                let p2 = spawn {f = {} -> b * 3}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -320,7 +343,7 @@ class LoomConcurrencyTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
+    // Previously disabled for flakiness - now fixed with sequential execution
     fun testNestedClosuresInSpawn() {
         val code = """
             $setupCode
@@ -330,11 +353,11 @@ class LoomConcurrencyTest {
             let test = {} -> do
                 let add10 = makeAdder {x = 10}
 
-                let p1 = spawn {computation = {} -> add10 {y = 5}}
-                let p2 = spawn {computation = {} -> add10 {y = 15}}
+                let p1 = spawn {f = {} -> add10 {y = 5}}
+                let p2 = spawn {f = {} -> add10 {y = 15}}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -357,7 +380,7 @@ class LoomConcurrencyTest {
     // fun testConcurrentDataProcessing() { ... }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
+    // Previously disabled for flakiness - now fixed with sequential execution
     fun testConditionalConcurrency() {
         val code = """
             $setupCode
@@ -365,12 +388,12 @@ class LoomConcurrencyTest {
             let conditional: {use_async: Bool} -> Int = {use_async} ->
                 if use_async
                 then do
-                    let p = spawn {computation = {} -> 100}
-                    await {promise = p}
+                    let p = spawn {f = {} -> 100}
+                    await {p =p}
                 else 50
 
-            let r1 = conditional {use_async = true}
-            let r2 = conditional {use_async = false}
+            let r1 = conditional {use_async = True}
+            let r2 = conditional {use_async = False}
             r1 + r2
         """
         val result = eval(code)

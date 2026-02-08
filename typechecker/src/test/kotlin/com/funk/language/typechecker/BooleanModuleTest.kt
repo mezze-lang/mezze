@@ -32,7 +32,7 @@ class BooleanModuleTest {
     fun `test boolean and function`() {
         val source = """
             use std::bool
-            let result = bool::and { l = true, r = false }
+            let result = bool::and { l = True, r = False }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -43,7 +43,7 @@ class BooleanModuleTest {
     fun `test boolean or function`() {
         val source = """
             use std::bool
-            let result = bool::or { l = true, r = false }
+            let result = bool::or { l = True, r = False }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -54,7 +54,7 @@ class BooleanModuleTest {
     fun `test boolean not function`() {
         val source = """
             use std::bool::{not}
-            let result = not { b = true }
+            let result = not { b = True }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -65,7 +65,7 @@ class BooleanModuleTest {
     fun `test boolean xor function`() {
         val source = """
             use std::bool
-            let result = bool::xor { l = true, r = false }
+            let result = bool::xor { l = True, r = False }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -76,7 +76,7 @@ class BooleanModuleTest {
     fun `test boolean implies function`() {
         val source = """
             use std::bool
-            let result = bool::implies { l = true, r = false }
+            let result = bool::implies { l = True, r = False }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -87,7 +87,7 @@ class BooleanModuleTest {
     fun `test boolean iff function`() {
         val source = """
             use std::bool
-            let result = bool::iff { l = true, r = true }
+            let result = bool::iff { l = True, r = True }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)
@@ -98,8 +98,8 @@ class BooleanModuleTest {
     fun `test multiple boolean operations`() {
         val source = """
             use std::bool::{and, or, not, xor}
-            let a = true
-            let b = false
+            let a = True
+            let b = False
             let and_result = and { l = a, r = b }
             let or_result = or { l = a, r = b }
             let not_result = not { b = a }
@@ -114,8 +114,8 @@ class BooleanModuleTest {
     fun `test boolean logic composition`() {
         val source = """
             use std::bool
-            let p = true
-            let q = false
+            let p = True
+            let q = False
             let implies_result = bool::implies { l = p, r = q }
             let iff_result = bool::iff { l = p, r = q }
         """.trimIndent()

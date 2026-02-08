@@ -5,30 +5,25 @@ import com.funk.language.interpreter.*
 /**
  * Truffle-optimized implementations for List operations.
  *
- * Phase 3 of Truffle migration: Collection operations optimized for JIT performance.
- * List is an immutable linked list backed by Kotlin's List for performance.
+ * List is an immutable linked list using classic cons cells (FunkCons/FunkNil)
+ * for proper O(1) head/tail/cons operations and structural sharing.
  *
- * Optimizations:
- * - Helper function for consistent Truffle function calling
- * - Inline Kotlin collection operations (map, filter, fold, zip, etc.)
- * - Deep equality comparison for nested lists
- * - Custom comparators for sorting
+ * Performance characteristics:
+ * - cons (prepend): O(1)
+ * - head: O(1)
+ * - tail: O(1)
+ * - length: O(n)
+ * - index/get: O(n)
+ * - append: O(n) where n = length of first list
  */
 object TruffleListImplementations {
 
     /**
      * Helper to call any function type (Truffle or Native)
-     * Replaces the need for interpreter.callFunctionWithRecord
      */
     private fun callFunction(f: FunkValue, arg: FunkValue, operationName: String): FunkValue {
         return when (f) {
             is FunkTruffleFunction -> {
-                // Call Truffle function directly via CallTarget
-                // CRITICAL: FunkFunctionRootNode expects 4 arguments:
-                // [0] = FunkRecord of parameters
-                // [1] = Map<String, FunkValue> of closure variables (legacy, for backward compat)
-                // [2] = MaterializedFrame (lexical scope)
-                // [3] = Map<String, Int> lexical scope slot mapping
                 f.callTarget.call(
                     arg,
                     f.closureVariables,
@@ -37,7 +32,6 @@ object TruffleListImplementations {
                 ) as FunkValue
             }
             is NativeFunkFunction -> {
-                // Call native function
                 f.implementation(listOf(arg))
             }
             else -> {
@@ -48,8 +42,8 @@ object TruffleListImplementations {
 
     fun registerAll(context: MutableMap<String, FunkValue>) {
         // Basic list operations
-        context["__native_list_empty"] = NativeFunkFunction("__native_list_empty") { args ->
-            FunkList(emptyList())
+        context["__native_list_empty"] = NativeFunkFunction("__native_list_empty") { _ ->
+            FunkNil
         }
 
         context["__native_list_cons"] = NativeFunkFunction("__native_list_cons") { args ->
@@ -59,7 +53,7 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_cons", "expects 'head' field")
             val tail = record.fields["tail"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_cons", "expects 'tail' as List")
-            FunkList(listOf(head) + tail.elements)
+            FunkCons(head, tail)
         }
 
         context["__native_list_is_empty"] = NativeFunkFunction("__native_list_is_empty") { args ->
@@ -67,7 +61,7 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_is_empty", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_is_empty", "expects 'xs' as List")
-            FunkBool(xs.elements.isEmpty())
+            FunkBool(xs.isEmpty())
         }
 
         context["__native_list_head"] = NativeFunkFunction("__native_list_head") { args ->
@@ -76,11 +70,11 @@ object TruffleListImplementations {
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_head", "expects 'xs' as List")
 
-            // Return Option - Some if list is non-empty, None otherwise
-            if (xs.elements.isEmpty()) {
+            val head = xs.headOrNull()
+            if (head == null) {
                 FunkVariant("None", null)
             } else {
-                FunkVariant("Some", FunkRecord(mapOf("val" to xs.elements.first())))
+                FunkVariant("Some", FunkRecord(mapOf("val" to head)))
             }
         }
 
@@ -90,11 +84,11 @@ object TruffleListImplementations {
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_tail", "expects 'xs' as List")
 
-            // Return Option - Some if list is non-empty, None otherwise
-            if (xs.elements.isEmpty()) {
+            val tail = xs.tailOrNull()
+            if (tail == null) {
                 FunkVariant("None", null)
             } else {
-                FunkVariant("Some", FunkRecord(mapOf("val" to FunkList(xs.elements.drop(1)))))
+                FunkVariant("Some", FunkRecord(mapOf("val" to tail)))
             }
         }
 
@@ -103,7 +97,25 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_length", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_length", "expects 'xs' as List")
-            FunkInt(xs.elements.size.toLong())
+            FunkInt(xs.length().toLong())
+        }
+
+        // Deconstruction - uncons returns Option { head: 'a, tail: List 'a }
+        context["__native_list_uncons"] = NativeFunkFunction("__native_list_uncons") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_list_uncons", "expects FunkRecord")
+            val xs = record.fields["xs"] as? FunkList
+                ?: throw NativeFunctionException("__native_list_uncons", "expects 'xs' as List")
+
+            when (xs) {
+                is FunkNil -> FunkVariant("None", null)
+                is FunkCons -> FunkVariant("Some", FunkRecord(mapOf(
+                    "val" to FunkRecord(mapOf(
+                        "head" to xs.head,
+                        "tail" to xs.tail
+                    ))
+                )))
+            }
         }
 
         // List construction
@@ -114,7 +126,13 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_append", "expects 'xs' as List")
             val ys = record.fields["ys"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_append", "expects 'ys' as List")
-            FunkList(xs.elements + ys.elements)
+
+            // O(n) where n = length of xs - rebuild xs with ys as the tail
+            fun go(list: FunkList): FunkList = when (list) {
+                is FunkNil -> ys
+                is FunkCons -> FunkCons(list.head, go(list.tail))
+            }
+            go(xs)
         }
 
         // List access
@@ -126,13 +144,16 @@ object TruffleListImplementations {
             val index = record.fields["index"] as? FunkInt
                 ?: throw NativeFunctionException("__native_list_get", "expects 'index' as Int")
 
-            val idx = index.value.toInt()
-            // Return Option - Some if index is valid, None otherwise
-            if (idx < 0 || idx >= xs.elements.size) {
-                FunkVariant("None", null)
-            } else {
-                FunkVariant("Some", FunkRecord(mapOf("val" to xs.elements[idx])))
+            var idx = index.value.toInt()
+            var current: FunkList = xs
+            while (current is FunkCons) {
+                if (idx == 0) {
+                    return@NativeFunkFunction FunkVariant("Some", FunkRecord(mapOf("val" to current.head)))
+                }
+                current = current.tail
+                idx--
             }
+            FunkVariant("None", null)
         }
 
         context["__native_list_take"] = NativeFunkFunction("__native_list_take") { args ->
@@ -142,7 +163,14 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_take", "expects 'xs' as List")
             val n = record.fields["n"] as? FunkInt
                 ?: throw NativeFunctionException("__native_list_take", "expects 'n' as Int")
-            FunkList(xs.elements.take(n.value.toInt()))
+
+            fun go(list: FunkList, remaining: Int): FunkList = when {
+                remaining <= 0 -> FunkNil
+                list is FunkNil -> FunkNil
+                list is FunkCons -> FunkCons(list.head, go(list.tail, remaining - 1))
+                else -> FunkNil
+            }
+            go(xs, n.value.toInt())
         }
 
         context["__native_list_drop"] = NativeFunkFunction("__native_list_drop") { args ->
@@ -152,7 +180,14 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_drop", "expects 'xs' as List")
             val n = record.fields["n"] as? FunkInt
                 ?: throw NativeFunctionException("__native_list_drop", "expects 'n' as Int")
-            FunkList(xs.elements.drop(n.value.toInt()))
+
+            var current: FunkList = xs
+            var remaining = n.value.toInt()
+            while (remaining > 0 && current is FunkCons) {
+                current = current.tail
+                remaining--
+            }
+            current
         }
 
         // Higher-order functions
@@ -164,12 +199,15 @@ object TruffleListImplementations {
             val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_list_map", "expects 'f' function")
 
-            val mapped = xs.elements.map { elem ->
-                // Wrap in FunkRecord since all Funk function parameters are records
-                val callArg = FunkRecord(mapOf("x" to elem))
-                callFunction(f, callArg, "__native_list_map")
+            fun go(list: FunkList): FunkList = when (list) {
+                is FunkNil -> FunkNil
+                is FunkCons -> {
+                    val callArg = FunkRecord(mapOf("x" to list.head))
+                    val mapped = callFunction(f, callArg, "__native_list_map")
+                    FunkCons(mapped, go(list.tail))
+                }
             }
-            FunkList(mapped)
+            go(xs)
         }
 
         context["__native_list_filter"] = NativeFunkFunction("__native_list_filter") { args ->
@@ -180,14 +218,21 @@ object TruffleListImplementations {
             val p = record.fields["p"]
                 ?: throw NativeFunctionException("__native_list_filter", "expects 'p' predicate")
 
-            val filtered = xs.elements.filter { elem ->
-                // Wrap in FunkRecord since all Funk function parameters are records
-                val callArg = FunkRecord(mapOf("x" to elem))
-                val result = callFunction(p, callArg, "__native_list_filter")
-                (result as? FunkBool)?.value
-                    ?: throw NativeFunctionException("__native_list_filter", "predicate must return Boolean")
+            fun go(list: FunkList): FunkList = when (list) {
+                is FunkNil -> FunkNil
+                is FunkCons -> {
+                    val callArg = FunkRecord(mapOf("x" to list.head))
+                    val result = callFunction(p, callArg, "__native_list_filter")
+                    val keep = (result as? FunkBool)?.value
+                        ?: throw NativeFunctionException("__native_list_filter", "predicate must return Boolean")
+                    if (keep) {
+                        FunkCons(list.head, go(list.tail))
+                    } else {
+                        go(list.tail)
+                    }
+                }
             }
-            FunkList(filtered)
+            go(xs)
         }
 
         context["__native_list_fold_left"] = NativeFunkFunction("__native_list_fold_left") { args ->
@@ -201,9 +246,11 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_fold_left", "expects 'f' function")
 
             var acc = init
-            for (elem in xs.elements) {
-                val callArg = FunkRecord(mapOf("acc" to acc, "x" to elem))
+            var current: FunkList = xs
+            while (current is FunkCons) {
+                val callArg = FunkRecord(mapOf("acc" to acc, "x" to current.head))
                 acc = callFunction(f, callArg, "__native_list_fold_left")
+                current = current.tail
             }
             acc
         }
@@ -218,12 +265,16 @@ object TruffleListImplementations {
             val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_list_fold_right", "expects 'f' function")
 
-            var acc = init
-            for (elem in xs.elements.reversed()) {
-                val callArg = FunkRecord(mapOf("x" to elem, "acc" to acc))
-                acc = callFunction(f, callArg, "__native_list_fold_right")
+            // Fold right: process from end - use recursion
+            fun go(list: FunkList): FunkValue = when (list) {
+                is FunkNil -> init
+                is FunkCons -> {
+                    val tailResult = go(list.tail)
+                    val callArg = FunkRecord(mapOf("x" to list.head, "acc" to tailResult))
+                    callFunction(f, callArg, "__native_list_fold_right")
+                }
             }
-            acc
+            go(xs)
         }
 
         context["__native_list_reduce"] = NativeFunkFunction("__native_list_reduce") { args ->
@@ -237,9 +288,11 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_reduce", "expects 'f' function")
 
             var acc = init
-            for (elem in xs.elements) {
-                val callArg = FunkRecord(mapOf("a" to acc, "b" to elem))
+            var current: FunkList = xs
+            while (current is FunkCons) {
+                val callArg = FunkRecord(mapOf("a" to acc, "b" to current.head))
                 acc = callFunction(f, callArg, "__native_list_reduce")
+                current = current.tail
             }
             acc
         }
@@ -253,14 +306,16 @@ object TruffleListImplementations {
             val p = record.fields["p"]
                 ?: throw NativeFunctionException("__native_list_any", "expects 'p' predicate")
 
-            val result = xs.elements.any { elem ->
-                // Wrap in FunkRecord since all Funk function parameters are records
-                val callArg = FunkRecord(mapOf("x" to elem))
-                val res = callFunction(p, callArg, "__native_list_any")
-                (res as? FunkBool)?.value
+            var current: FunkList = xs
+            while (current is FunkCons) {
+                val callArg = FunkRecord(mapOf("x" to current.head))
+                val result = callFunction(p, callArg, "__native_list_any")
+                val matches = (result as? FunkBool)?.value
                     ?: throw NativeFunctionException("__native_list_any", "predicate must return Boolean")
+                if (matches) return@NativeFunkFunction FunkBool(true)
+                current = current.tail
             }
-            FunkBool(result)
+            FunkBool(false)
         }
 
         context["__native_list_all"] = NativeFunkFunction("__native_list_all") { args ->
@@ -271,14 +326,16 @@ object TruffleListImplementations {
             val p = record.fields["p"]
                 ?: throw NativeFunctionException("__native_list_all", "expects 'p' predicate")
 
-            val result = xs.elements.all { elem ->
-                // Wrap in FunkRecord since all Funk function parameters are records
-                val callArg = FunkRecord(mapOf("x" to elem))
-                val res = callFunction(p, callArg, "__native_list_all")
-                (res as? FunkBool)?.value
+            var current: FunkList = xs
+            while (current is FunkCons) {
+                val callArg = FunkRecord(mapOf("x" to current.head))
+                val result = callFunction(p, callArg, "__native_list_all")
+                val matches = (result as? FunkBool)?.value
                     ?: throw NativeFunctionException("__native_list_all", "predicate must return Boolean")
+                if (!matches) return@NativeFunkFunction FunkBool(false)
+                current = current.tail
             }
-            FunkBool(result)
+            FunkBool(true)
         }
 
         context["__native_list_contains"] = NativeFunkFunction("__native_list_contains") { args ->
@@ -289,9 +346,14 @@ object TruffleListImplementations {
             val x = record.fields["x"]
                 ?: throw NativeFunctionException("__native_list_contains", "expects 'x' value")
 
-            // Use structural equality for comparison
-            val result = xs.elements.any { elem -> compareValues(elem, x) }
-            FunkBool(result)
+            var current: FunkList = xs
+            while (current is FunkCons) {
+                if (compareValues(current.head, x)) {
+                    return@NativeFunkFunction FunkBool(true)
+                }
+                current = current.tail
+            }
+            FunkBool(false)
         }
 
         // List transformations
@@ -300,7 +362,15 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_reverse", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_reverse", "expects 'xs' as List")
-            FunkList(xs.elements.reversed())
+
+            // O(n) iterative reverse
+            var result: FunkList = FunkNil
+            var current: FunkList = xs
+            while (current is FunkCons) {
+                result = FunkCons(current.head, result)
+                current = current.tail
+            }
+            result
         }
 
         context["__native_list_concat"] = NativeFunkFunction("__native_list_concat") { args ->
@@ -309,11 +379,32 @@ object TruffleListImplementations {
             val xss = record.fields["xss"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_concat", "expects 'xss' as List")
 
-            val flattened = xss.elements.flatMap { elem ->
-                (elem as? FunkList)?.elements
+            // Flatten list of lists
+            var result: FunkList = FunkNil
+            val lists = mutableListOf<FunkList>()
+
+            // Collect all inner lists
+            var current: FunkList = xss
+            while (current is FunkCons) {
+                val innerList = current.head as? FunkList
                     ?: throw NativeFunctionException("__native_list_concat", "all elements must be Lists")
+                lists.add(innerList)
+                current = current.tail
             }
-            FunkList(flattened)
+
+            // Append in reverse order for efficiency
+            for (i in lists.indices.reversed()) {
+                var innerCurrent: FunkList = lists[i]
+                val innerElements = mutableListOf<FunkValue>()
+                while (innerCurrent is FunkCons) {
+                    innerElements.add(innerCurrent.head)
+                    innerCurrent = innerCurrent.tail
+                }
+                for (j in innerElements.indices.reversed()) {
+                    result = FunkCons(innerElements[j], result)
+                }
+            }
+            result
         }
 
         context["__native_list_flat_map"] = NativeFunkFunction("__native_list_flat_map") { args ->
@@ -324,14 +415,32 @@ object TruffleListImplementations {
             val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_list_flat_map", "expects 'f' function")
 
-            val mapped = xs.elements.flatMap { elem ->
-                // Wrap in FunkRecord since all Funk function parameters are records
-                val callArg = FunkRecord(mapOf("x" to elem))
+            // Collect all results then flatten
+            val results = mutableListOf<FunkList>()
+            var current: FunkList = xs
+            while (current is FunkCons) {
+                val callArg = FunkRecord(mapOf("x" to current.head))
                 val result = callFunction(f, callArg, "__native_list_flat_map")
-                (result as? FunkList)?.elements
+                val innerList = result as? FunkList
                     ?: throw NativeFunctionException("__native_list_flat_map", "f must return List")
+                results.add(innerList)
+                current = current.tail
             }
-            FunkList(mapped)
+
+            // Flatten
+            var finalResult: FunkList = FunkNil
+            for (i in results.indices.reversed()) {
+                var innerCurrent: FunkList = results[i]
+                val innerElements = mutableListOf<FunkValue>()
+                while (innerCurrent is FunkCons) {
+                    innerElements.add(innerCurrent.head)
+                    innerCurrent = innerCurrent.tail
+                }
+                for (j in innerElements.indices.reversed()) {
+                    finalResult = FunkCons(innerElements[j], finalResult)
+                }
+            }
+            finalResult
         }
 
         context["__native_list_zip"] = NativeFunkFunction("__native_list_zip") { args ->
@@ -342,10 +451,14 @@ object TruffleListImplementations {
             val ys = record.fields["ys"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_zip", "expects 'ys' as List")
 
-            val zipped = xs.elements.zip(ys.elements).map { (fst, snd) ->
-                FunkRecord(mapOf("fst" to fst, "snd" to snd))
+            fun go(l1: FunkList, l2: FunkList): FunkList = when {
+                l1 is FunkCons && l2 is FunkCons -> {
+                    val pair = FunkRecord(mapOf("fst" to l1.head, "snd" to l2.head))
+                    FunkCons(pair, go(l1.tail, l2.tail))
+                }
+                else -> FunkNil
             }
-            FunkList(zipped)
+            go(xs, ys)
         }
 
         context["__native_list_unzip"] = NativeFunkFunction("__native_list_unzip") { args ->
@@ -357,8 +470,9 @@ object TruffleListImplementations {
             val fsts = mutableListOf<FunkValue>()
             val snds = mutableListOf<FunkValue>()
 
-            for (elem in xs.elements) {
-                val pair = elem as? FunkRecord
+            var current: FunkList = xs
+            while (current is FunkCons) {
+                val pair = current.head as? FunkRecord
                     ?: throw NativeFunctionException("__native_list_unzip", "all elements must be records")
                 val fst = pair.fields["fst"]
                     ?: throw NativeFunctionException("__native_list_unzip", "record must have 'fst' field")
@@ -366,11 +480,12 @@ object TruffleListImplementations {
                     ?: throw NativeFunctionException("__native_list_unzip", "record must have 'snd' field")
                 fsts.add(fst)
                 snds.add(snd)
+                current = current.tail
             }
 
             FunkRecord(mapOf(
-                "fsts" to FunkList(fsts),
-                "snds" to FunkList(snds)
+                "fsts" to FunkList.fromKotlinList(fsts),
+                "snds" to FunkList.fromKotlinList(snds)
             ))
         }
 
@@ -380,21 +495,15 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_to_array", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_to_array", "expects 'xs' as List")
-            FunkArrayList(xs.elements.toMutableList())
+            FunkArrayList(xs.toKotlinList().toMutableList())
         }
 
         context["__native_list_from_array"] = NativeFunkFunction("__native_list_from_array") { args ->
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_list_from_array", "expects FunkRecord")
-
-
-            if (record.fields["xs"] is FunkTruffleFunction) {
-                val fn = record.fields["xs"] as FunkTruffleFunction
-
-            }
             val xs = record.fields["xs"] as? FunkArrayList
                 ?: throw NativeFunctionException("__native_list_from_array", "expects 'xs' as Array, got ${record.fields["xs"]?.let { it::class.simpleName } ?: "null"}")
-            FunkList(xs.elements.toList())
+            FunkList.fromKotlinList(xs.toList())
         }
 
         // List utilities
@@ -406,8 +515,12 @@ object TruffleListImplementations {
             val end = record.fields["end"] as? FunkInt
                 ?: throw NativeFunctionException("__native_list_range", "expects 'end' as Int")
 
-            val range = (start.value until end.value).map { FunkInt(it) }
-            FunkList(range)
+            // Build list in reverse, then it's already correct order
+            var result: FunkList = FunkNil
+            for (i in (end.value - 1) downTo start.value) {
+                result = FunkCons(FunkInt(i), result)
+            }
+            result
         }
 
         context["__native_list_repeat"] = NativeFunkFunction("__native_list_repeat") { args ->
@@ -418,8 +531,11 @@ object TruffleListImplementations {
             val n = record.fields["n"] as? FunkInt
                 ?: throw NativeFunctionException("__native_list_repeat", "expects 'n' as Int")
 
-            val repeated = List(n.value.toInt()) { x }
-            FunkList(repeated)
+            var result: FunkList = FunkNil
+            repeat(n.value.toInt()) {
+                result = FunkCons(x, result)
+            }
+            result
         }
 
         context["__native_list_intersperse"] = NativeFunkFunction("__native_list_intersperse") { args ->
@@ -430,31 +546,27 @@ object TruffleListImplementations {
             val sep = record.fields["sep"]
                 ?: throw NativeFunctionException("__native_list_intersperse", "expects 'sep' value")
 
-            if (xs.elements.isEmpty()) {
-                return@NativeFunkFunction FunkList(emptyList())
-            }
-
-            val interspersed = mutableListOf<FunkValue>()
-            xs.elements.forEachIndexed { index, elem ->
-                interspersed.add(elem)
-                if (index < xs.elements.size - 1) {
-                    interspersed.add(sep)
+            fun go(list: FunkList): FunkList = when (list) {
+                is FunkNil -> FunkNil
+                is FunkCons -> when (list.tail) {
+                    is FunkNil -> FunkCons(list.head, FunkNil)
+                    is FunkCons -> FunkCons(list.head, FunkCons(sep, go(list.tail)))
                 }
             }
-            FunkList(interspersed)
+            go(xs)
         }
 
-        // Sorting
+        // Sorting - convert to Kotlin list, sort, convert back
         context["__native_list_sort"] = NativeFunkFunction("__native_list_sort") { args ->
             val record = args.firstOrNull() as? FunkRecord
                 ?: throw NativeFunctionException("__native_list_sort", "expects FunkRecord")
             val xs = record.fields["xs"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_sort", "expects 'xs' as List")
 
-            val sorted = xs.elements.sortedWith { a, b ->
+            val sorted = xs.toKotlinList().sortedWith { a, b ->
                 compareValuesForSort(a, b)
             }
-            FunkList(sorted)
+            FunkList.fromKotlinList(sorted)
         }
 
         context["__native_list_sort_by"] = NativeFunkFunction("__native_list_sort_by") { args ->
@@ -465,13 +577,13 @@ object TruffleListImplementations {
             val cmp = record.fields["cmp"]
                 ?: throw NativeFunctionException("__native_list_sort_by", "expects 'cmp' function")
 
-            val sorted = xs.elements.sortedWith { a, b ->
+            val sorted = xs.toKotlinList().sortedWith { a, b ->
                 val callArg = FunkRecord(mapOf("l" to a, "r" to b))
                 val result = callFunction(cmp, callArg, "__native_list_sort_by")
                 (result as? FunkInt)?.value?.toInt()
                     ?: throw NativeFunctionException("__native_list_sort_by", "comparator must return Int")
             }
-            FunkList(sorted)
+            FunkList.fromKotlinList(sorted)
         }
 
         // List equality
@@ -483,20 +595,18 @@ object TruffleListImplementations {
             val r = record.fields["r"] as? FunkList
                 ?: throw NativeFunctionException("__native_list_equals", "expects 'r' as List")
 
-            // Lists are equal if they have the same length and all elements are equal
-            if (l.elements.size != r.elements.size) {
-                return@NativeFunkFunction FunkBool(false)
+            fun go(l1: FunkList, l2: FunkList): Boolean = when {
+                l1 is FunkNil && l2 is FunkNil -> true
+                l1 is FunkCons && l2 is FunkCons ->
+                    compareValuesDeep(l1.head, l2.head) && go(l1.tail, l2.tail)
+                else -> false
             }
-
-            val allEqual = l.elements.zip(r.elements).all { (elemL, elemR) ->
-                compareValuesDeep(elemL, elemR)
-            }
-            FunkBool(allEqual)
+            FunkBool(go(l, r))
         }
     }
 
     /**
-     * Compare two FunkValues for equality (shallow - doesn't handle lists)
+     * Compare two FunkValues for equality (shallow)
      */
     private fun compareValues(a: FunkValue, b: FunkValue): Boolean {
         return when {
@@ -519,13 +629,9 @@ object TruffleListImplementations {
             a is FunkString && b is FunkString -> a.value == b.value
             a is FunkBool && b is FunkBool -> a.value == b.value
             a is FunkNull && b is FunkNull -> true
-            a is FunkList && b is FunkList -> {
-                // Lists are equal if same length and all elements are equal
-                a.elements.size == b.elements.size &&
-                a.elements.zip(b.elements).all { (elemA, elemB) ->
-                    compareValuesDeep(elemA, elemB)
-                }
-            }
+            a is FunkNil && b is FunkNil -> true
+            a is FunkCons && b is FunkCons ->
+                compareValuesDeep(a.head, b.head) && compareValuesDeep(a.tail, b.tail)
             else -> false
         }
     }

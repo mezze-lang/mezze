@@ -13,6 +13,9 @@ import java.nio.file.Paths
  *
  * This replaces FunkInterpreter for tests, executing programs directly via
  * the GraalVM polyglot API and FunkLanguage.
+ *
+ * IMPORTANT: Tests that use virtual threads (LoomConcurrencyTest, StructuredConcurrencyTest)
+ * should use @Execution(ExecutionMode.SAME_THREAD) to prevent scheduler saturation.
  */
 object FunkTestHelper {
     private val parser = FunkParser()
@@ -72,27 +75,31 @@ object FunkTestHelper {
 
         // Create polyglot context with multi-threading enabled for Loom concurrency
         // Use the shared engine to avoid sharing layer violations
-        Context.newBuilder("funk")
+        val context = Context.newBuilder("funk")
             .engine(sharedEngine)
             .allowAllAccess(true)
             .allowCreateThread(true)  // Allow spawning threads
             .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
-            .build().use { context ->
-                // Set the polyglot context in ThreadLocal for cross-thread Truffle execution
-                TruffleContextHolder.setPolyglotContext(context)
+            .build()
 
-                try {
-                    // Execute the program directly by converting typed AST to Truffle nodes
-                    // This preserves all type information, monomorphization, etc.
-                    executeProgramDirectly(program, monomorphicInstances, context, root)
+        try {
+            // Set the polyglot context in ThreadLocal for cross-thread Truffle execution
+            TruffleContextHolder.setPolyglotContext(context)
 
-                    // Retrieve result from FunkLanguage storage
-                    return FunkLanguage.getLastExecutionResult() ?: FunkNull
-                } finally {
-                    // Clear the context from ThreadLocal
-                    TruffleContextHolder.clearEnv()
-                }
-            }
+            // Execute the program directly by converting typed AST to Truffle nodes
+            // This preserves all type information, monomorphization, etc.
+            executeProgramDirectly(program, monomorphicInstances, context, root)
+
+            // Retrieve result from FunkLanguage storage
+            return FunkLanguage.getLastExecutionResult() ?: FunkNull
+        } finally {
+            // Clear the context from ThreadLocal
+            TruffleContextHolder.clearEnv()
+
+            // Close context with cancelIfExecuting=true to properly terminate any lingering virtual threads
+            // This prevents "The language did not complete all polyglot threads" errors
+            context.close(true)
+        }
     }
 
     /**

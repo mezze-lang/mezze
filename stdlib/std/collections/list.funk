@@ -28,6 +28,10 @@ pub let tail = { xs } ->
 pub let length = { xs } ->
     __native_list_length { xs = xs }
 
+# Deconstruction - returns Option { head: 'a, tail: List 'a }
+pub let uncons = { xs } ->
+    __native_list_uncons { xs = xs }
+
 # List construction
 pub let singleton = { x } ->
     cons { head = x, tail = empty {} }
@@ -96,6 +100,11 @@ pub let to_array = { xs } ->
 
 pub let from_array = { xs } ->
     __native_list_from_array { xs = xs }
+
+# Alias for from_array - creates list from array elements
+# Note: Named 'of_array' instead of 'of' to avoid name collision with array::of
+pub let of_array = { elements } ->
+    __native_list_from_array { xs = elements }
 
 # List utilities
 pub let range = { start, end } ->

@@ -224,8 +224,8 @@ class NewMatchSyntaxTest {
             type Person = | Adult { age: Int }, Child { name: String } |
             
             let canVote = {person} -> match person is
-              Adult { age } if age >= 18 -> true
-              _ -> false
+              Adult { age } if age >= 18 -> True
+              _ -> False
         """.trimIndent()
 
         // Should not throw - age is correctly typed as Int
@@ -234,17 +234,20 @@ class NewMatchSyntaxTest {
 
         assertNotNull(canVoteType)
         assertTrue(canVoteType is FunkType.FunctionType)
-        assertTrue(canVoteType.returnType is FunkType.BooleanType)
+        // Bool can be BooleanType or VariantType with True/False constructors
+        val returnType = canVoteType.returnType
+        assertTrue(returnType is FunkType.BooleanType ||
+                   (returnType is FunkType.VariantType && returnType.constructors.keys == setOf("True", "False")))
     }
 
     @Test
     fun `test multiple patterns with same variable names`() {
         val code = """
             type Temp = | Hot { degrees: Int }, Cold { degrees: Int } |
-            
+
             let isExtreme = {temp} -> match temp is
-              Hot { degrees } | Cold { degrees } if degrees > 50 || degrees < -20 -> true
-              _ -> false
+              Hot { degrees } | Cold { degrees } if degrees > 50 || degrees < -20 -> True
+              _ -> False
         """.trimIndent()
 
         // Should not throw - both patterns bind 'degrees' as Int
@@ -253,7 +256,10 @@ class NewMatchSyntaxTest {
 
         assertNotNull(isExtremeType)
         assertTrue(isExtremeType is FunkType.FunctionType)
-        assertTrue(isExtremeType.returnType is FunkType.BooleanType)
+        // Bool can be BooleanType or VariantType with True/False constructors
+        val returnType = isExtremeType.returnType
+        assertTrue(returnType is FunkType.BooleanType ||
+                   (returnType is FunkType.VariantType && returnType.constructors.keys == setOf("True", "False")))
     }
 
     @Test
@@ -301,8 +307,8 @@ class NewMatchSyntaxTest {
             type Status = | Active { user: User }, Inactive |
             
             let canAccess = {status} -> match status is
-              Active { user } if user.age >= 18 -> true
-              _ -> false
+              Active { user } if user.age >= 18 -> True
+              _ -> False
         """.trimIndent()
 
         // Should not throw - nested pattern access in guards
@@ -311,6 +317,9 @@ class NewMatchSyntaxTest {
 
         assertNotNull(canAccessType)
         assertTrue(canAccessType is FunkType.FunctionType)
-        assertTrue(canAccessType.returnType is FunkType.BooleanType)
+        // Bool can be BooleanType or VariantType with True/False constructors
+        val returnType = canAccessType.returnType
+        assertTrue(returnType is FunkType.BooleanType ||
+                   (returnType is FunkType.VariantType && returnType.constructors.keys == setOf("True", "False")))
     }
 }

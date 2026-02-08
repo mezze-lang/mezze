@@ -45,8 +45,8 @@ class LiteralPatternTypeCheckingTest {
         val code = """
             let is_small = {n} ->
                 match n is
-                  1 | 2 | 3 -> true
-                  _ -> false
+                  1 | 2 | 3 -> True
+                  _ -> False
             let result = is_small { n = 2 }
         """.trimIndent()
 
@@ -62,7 +62,7 @@ class LiteralPatternTypeCheckingTest {
                   0 if verbose -> "exactly zero (verbose)"
                   0 -> "zero"
                   _ -> "other"
-            let result = describe { n = 0, verbose = true }
+            let result = describe { n = 0, verbose = True }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -91,8 +91,8 @@ class LiteralPatternTypeCheckingTest {
         val code = """
             let check_empty = {s} ->
                 match s is
-                  "" -> true
-                  _ -> false
+                  "" -> True
+                  _ -> False
             let result = check_empty { s = "" }
         """.trimIndent()
 
@@ -105,8 +105,8 @@ class LiteralPatternTypeCheckingTest {
         val code = """
             let is_greeting = {word} ->
                 match word is
-                  "hello" | "hi" | "hey" -> true
-                  _ -> false
+                  "hello" | "hi" | "hey" -> True
+                  _ -> False
             let result = is_greeting { word = "hello" }
         """.trimIndent()
 
@@ -121,9 +121,9 @@ class LiteralPatternTypeCheckingTest {
         val code = """
             let to_string = {b} ->
                 match b is
-                  true -> "yes"
-                  false -> "no"
-            let result = to_string { b = true }
+                  True ->"yes"
+                  False ->"no"
+            let result = to_string { b = True }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -135,9 +135,9 @@ class LiteralPatternTypeCheckingTest {
         val code = """
             let is_active = {flag} ->
                 match flag is
-                  true -> "active"
+                  True ->"active"
                   _ -> "inactive"
-            let result = is_active { flag = false }
+            let result = is_active { flag = False }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

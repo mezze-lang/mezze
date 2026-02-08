@@ -233,7 +233,11 @@ fun analyzeExpression(expr: Expression, tracker: InstanceTracker): InstanceTrack
         is ArrayLiteral -> {
             var currentTracker = tracker
             for (element in expr.elements) {
-                currentTracker = analyzeExpression(element, currentTracker)
+                val elementExpr = when (element) {
+                    is ArrayRegularElement -> element.expression
+                    is ArraySpreadElement -> element.expression
+                }
+                currentTracker = analyzeExpression(elementExpr, currentTracker)
             }
             currentTracker
         }

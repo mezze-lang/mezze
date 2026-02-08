@@ -204,8 +204,8 @@ class RecordPatternTypeCheckingTest {
         val code = """
             let is_origin_or_axis = {point} ->
                 match point is
-                  { x = 0, y = 0 } | { x = 0, ... } | { y = 0, ... } -> true
-                  _ -> false
+                  { x = 0, y = 0 } | { x = 0, ... } | { y = 0, ... } -> True
+                  _ -> False
             let result = is_origin_or_axis { point = { x = 0, y = 5 } }
         """.trimIndent()
 

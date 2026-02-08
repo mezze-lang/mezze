@@ -67,8 +67,8 @@ class ArrayPatternInterpreterTest {
         val code = """
             let is_empty = {xs: [Int]} ->
                 match xs is
-                  [] -> true
-                  _ -> false
+                  [] -> True
+                  _ -> False
 
             is_empty {xs = []}
         """.trimIndent()
@@ -352,9 +352,9 @@ class ArrayPatternInterpreterTest {
     @Test
     fun `literal pattern - boolean array`() {
         val code = """
-            match [true, false] is
-              [true, false] -> "pattern1"
-              [false, true] -> "pattern2"
+            match [True, False] is
+              [True, False] -> "pattern1"
+              [False, True] -> "pattern2"
               _ -> "other"
         """.trimIndent()
 
@@ -415,8 +415,8 @@ class ArrayPatternInterpreterTest {
         val code = """
             let is_help_command = {args: [String]} ->
                 match args is
-                  ["help"] | ["--help"] | ["-h"] -> true
-                  _ -> false
+                  ["help"] | ["--help"] | ["-h"] -> True
+                  _ -> False
 
             is_help_command {args = ["help"]}
         """.trimIndent()
@@ -434,8 +434,8 @@ class ArrayPatternInterpreterTest {
         val code = """
             let is_small = {xs: [Int]} ->
                 match xs is
-                  [] | [_] -> true
-                  _ -> false
+                  [] | [_] -> True
+                  _ -> False
 
             is_small {xs = [1]}
         """.trimIndent()
@@ -469,8 +469,8 @@ class ArrayPatternInterpreterTest {
         val code = """
             let starts_with_positive = {xs: [Int]} ->
                 match xs is
-                  [x, ...tail] if x > 0 -> true
-                  _ -> false
+                  [x, ...tail] if x > 0 -> True
+                  _ -> False
 
             starts_with_positive {xs = [5, -1, -2]}
         """.trimIndent()
@@ -484,8 +484,8 @@ class ArrayPatternInterpreterTest {
         val code = """
             let both_positive = {xs: [Int]} ->
                 match xs is
-                  [x, y] if x > 0 && y > 0 -> true
-                  _ -> false
+                  [x, y] if x > 0 && y > 0 -> True
+                  _ -> False
 
             both_positive {xs = [5, 10]}
         """.trimIndent()
@@ -499,8 +499,8 @@ class ArrayPatternInterpreterTest {
         val code = """
             let is_sorted_pair = {xs: [Int]} ->
                 match xs is
-                  [x, y] if x <= y -> true
-                  _ -> false
+                  [x, y] if x <= y -> True
+                  _ -> False
 
             is_sorted_pair {xs = [1, 2]}
         """.trimIndent()

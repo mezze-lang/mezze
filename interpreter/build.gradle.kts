@@ -25,6 +25,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.7.3")
 
+    // Vavr - persistent functional data structures with O(1) structural sharing
+    // Used for Array (Vector), Map (HashMap), Set (HashSet), SortedMap (TreeMap), SortedSet (TreeSet)
+    implementation("io.vavr:vavr:0.10.4")
+
     // Test dependencies
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testImplementation(kotlin("test"))
@@ -42,6 +46,9 @@ tasks.test {
 
     // Run tests serially to avoid Truffle context conflicts
     maxParallelForks = 1
+
+    // Set funk.project.root so tests can access stdlib modules
+    systemProperty("funk.project.root", rootProject.projectDir.absolutePath)
 
     // Increase timeout for Truffle initialization
     systemProperty("junit.jupiter.execution.timeout.default", "120s")

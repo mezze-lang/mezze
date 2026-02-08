@@ -41,11 +41,11 @@ class TruffleAndLoomIntegrationTest {
     private val setupCode = """
         use std::collections::array
 
-        newtype Promise = Promise __NativePromise
+        newtype Promise 'a = Promise __NativePromise
         newtype Thread = Thread __NativeThread
 
-        let spawn: {computation: {} -> 'a} -> Promise = {computation} -> __native_loom_spawn {computation = computation}
-        let await: {promise: Promise} -> 'a = {promise} -> __native_loom_await {promise = promise}
+        let spawn: {f: {} -> 'a} -> Promise 'a = {f} -> __native_loom_spawn {f = f}
+        let await: {p: Promise 'a} -> 'a = {p} -> __native_loom_await {p = p}
         let park: {} -> {} = {} -> __native_loom_park {}
         let unpark: {thread: Thread} -> {} = {thread} -> __native_loom_unpark {thread = thread}
         let current_thread: {} -> Thread = {} -> __native_loom_current_thread {}
@@ -66,8 +66,8 @@ class TruffleAndLoomIntegrationTest {
                 else n * factorial {n = n - 1}
 
             let test = {} -> do
-                let promise = spawn {computation = {} -> factorial {n = 5}}
-                await {promise = promise}
+                let promise = spawn {f = {} -> factorial {n = 5}}
+                await {p =promise}
 
             test {}
         """
@@ -87,13 +87,13 @@ class TruffleAndLoomIntegrationTest {
                 else fib {n = n - 1} + fib {n = n - 2}
 
             let test = {} -> do
-                let p1 = spawn {computation = {} -> fib {n = 7}}
-                let p2 = spawn {computation = {} -> fib {n = 6}}
-                let p3 = spawn {computation = {} -> fib {n = 5}}
+                let p1 = spawn {f = {} -> fib {n = 7}}
+                let p2 = spawn {f = {} -> fib {n = 6}}
+                let p3 = spawn {f = {} -> fib {n = 5}}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
-                let r3 = await {promise = p3}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
+                let r3 = await {p =p3}
 
                 r1 + r2 + r3
 
@@ -112,8 +112,8 @@ class TruffleAndLoomIntegrationTest {
                 let double = {x} -> x * 2
                 let data = [1, 2, 3, 4, 5]
 
-                let promise = spawn {computation = {} -> array::map {f = double, xs = data}}
-                await {promise = promise}
+                let promise = spawn {f = {} -> array::map {f = double, xs = data}}
+                await {p =promise}
 
             test {}
         """
@@ -137,8 +137,8 @@ class TruffleAndLoomIntegrationTest {
 
             let test = {} -> do
                 let x = 100
-                let promise = spawn {computation = {} -> x * 2}
-                await {promise = promise}
+                let promise = spawn {f = {} -> x * 2}
+                await {p =promise}
 
             test {}
         """
@@ -157,11 +157,11 @@ class TruffleAndLoomIntegrationTest {
             let test = {} -> do
                 let add10 = makeAdder {x = 10}
 
-                let p1 = spawn {computation = {} -> add10 {y = 5}}
-                let p2 = spawn {computation = {} -> add10 {y = 15}}
+                let p1 = spawn {f = {} -> add10 {y = 5}}
+                let p2 = spawn {f = {} -> add10 {y = 15}}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -182,11 +182,11 @@ class TruffleAndLoomIntegrationTest {
                 let double = makeMultiplier {factor = 2}
                 let triple = makeMultiplier {factor = 3}
 
-                let p1 = spawn {computation = {} -> double {value = 10}}
-                let p2 = spawn {computation = {} -> triple {value = 10}}
+                let p1 = spawn {f = {} -> double {value = 10}}
+                let p2 = spawn {f = {} -> triple {value = 10}}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -205,13 +205,13 @@ class TruffleAndLoomIntegrationTest {
                 let base_value = 100
                 let compute = {offset} -> base_value + offset
 
-                let p1 = spawn {computation = {} -> compute {offset = 1}}
-                let p2 = spawn {computation = {} -> compute {offset = 2}}
-                let p3 = spawn {computation = {} -> compute {offset = 3}}
+                let p1 = spawn {f = {} -> compute {offset = 1}}
+                let p2 = spawn {f = {} -> compute {offset = 2}}
+                let p3 = spawn {f = {} -> compute {offset = 3}}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
-                let r3 = await {promise = p3}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
+                let r3 = await {p =p3}
 
                 r1 + r2 + r3
 
@@ -239,10 +239,10 @@ class TruffleAndLoomIntegrationTest {
             }
 
             let test = {} -> do
-                let promise = spawn {computation = {} ->
+                let promise = spawn {f = {} ->
                     perform Calculator in Math.add {x = 10, y = 32}
                 }
-                await {promise = promise}
+                await {p =promise}
 
             test {}
         """
@@ -264,15 +264,15 @@ class TruffleAndLoomIntegrationTest {
             }
 
             let test = {} -> do
-                let p1 = spawn {computation = {} ->
+                let p1 = spawn {f = {} ->
                     perform Calculator in Math.mul {x = 5, y = 2}
                 }
-                let p2 = spawn {computation = {} ->
+                let p2 = spawn {f = {} ->
                     perform Calculator in Math.mul {x = 3, y = 4}
                 }
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -298,11 +298,11 @@ class TruffleAndLoomIntegrationTest {
                     _ -> 0
 
             let test = {} -> do
-                let p1 = spawn {computation = {} -> processValue {v = Red}}
-                let p2 = spawn {computation = {} -> processValue {v = Blue {val = 10}}}
+                let p1 = spawn {f = {} -> processValue {v = Red}}
+                let p2 = spawn {f = {} -> processValue {v = Blue {val = 10}}}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -324,11 +324,11 @@ class TruffleAndLoomIntegrationTest {
                 let data1 = [1, 2, 3]
                 let data2 = [4, 5, 6]
 
-                let p1 = spawn {computation = {} -> process {data = data1}}
-                let p2 = spawn {computation = {} -> process {data = data2}}
+                let p1 = spawn {f = {} -> process {data = data1}}
+                let p2 = spawn {f = {} -> process {data = data2}}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -351,11 +351,11 @@ class TruffleAndLoomIntegrationTest {
             let test = {} -> do
                 let point = {x = 10, y = 20}
 
-                let p1 = spawn {computation = {} -> point.x}
-                let p2 = spawn {computation = {} -> point.y}
+                let p1 = spawn {f = {} -> point.x}
+                let p2 = spawn {f = {} -> point.y}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -373,18 +373,18 @@ class TruffleAndLoomIntegrationTest {
             let test = {} -> do
                 let point = {x = 5, y = 10}
 
-                let p1 = spawn {computation = {} -> do
+                let p1 = spawn {f = {} -> do
                     let updated = {...point, x = 20}
                     updated.x + updated.y
                 }
 
-                let p2 = spawn {computation = {} -> do
+                let p2 = spawn {f = {} -> do
                     let updated = {...point, y = 30}
                     updated.x + updated.y
                 }
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -404,8 +404,8 @@ class TruffleAndLoomIntegrationTest {
             $setupCode
 
             let pipeline: {data: [Int]} -> Int = {data} -> do
-                let promises = data |> array::map {xs = @, f = {x} -> spawn {computation = {} -> x * 2}}
-                let results = promises |> array::map {xs = @, f = {x} -> await {promise = x}}
+                let promises = data |> array::map {xs = @, f = {x} -> spawn {f = {} -> x * 2}}
+                let results = promises |> array::map {xs = @, f = {x} -> await {p =x}}
                 results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
             pipeline {data = [1, 2, 3, 4, 5]}
@@ -421,8 +421,8 @@ class TruffleAndLoomIntegrationTest {
             $setupCode
 
             let map_phase: {data: [Int]} -> [Int] = {data} -> do
-                let promises = data |> array::map {xs = @, f = {x} -> spawn {computation = {} -> x * x}}
-                promises |> array::map {xs = @, f = {x} -> await {promise = x}}
+                let promises = data |> array::map {xs = @, f = {x} -> spawn {f = {} -> x * x}}
+                promises |> array::map {xs = @, f = {x} -> await {p =x}}
 
             let reduce_phase: {data: [Int]} -> Int = {data} ->
                 data |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
@@ -431,8 +431,8 @@ class TruffleAndLoomIntegrationTest {
                 let data = [1, 2, 3, 4, 5]
                 let mapped = map_phase {data = data}
 
-                let reduce_promise = spawn {computation = {} -> reduce_phase {data = mapped}}
-                await {promise = reduce_promise}
+                let reduce_promise = spawn {f = {} -> reduce_phase {data = mapped}}
+                await {p =reduce_promise}
 
             test {}
         """
@@ -448,17 +448,17 @@ class TruffleAndLoomIntegrationTest {
             let test = {} -> do
                 let outer_value = 100
 
-                let outer_promise = spawn {computation = {} -> do
+                let outer_promise = spawn {f = {} -> do
                     let inner_value = 10
 
-                    let inner_promise = spawn {computation = {} ->
+                    let inner_promise = spawn {f = {} ->
                         outer_value + inner_value
                     }
 
-                    await {promise = inner_promise}
+                    await {p =inner_promise}
                 }
 
-                await {promise = outer_promise}
+                await {p =outer_promise}
 
             test {}
         """
@@ -482,16 +482,16 @@ class TruffleAndLoomIntegrationTest {
             let test = {} -> do
                 let base = 100
 
-                let p1 = spawn {computation = {} ->
+                let p1 = spawn {f = {} ->
                     perform SimpleCalc in Compute.calculate {x = base, y = 10}
                 }
 
-                let p2 = spawn {computation = {} ->
+                let p2 = spawn {f = {} ->
                     perform SimpleCalc in Compute.calculate {x = base, y = 20}
                 }
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -524,10 +524,10 @@ class TruffleAndLoomIntegrationTest {
                 let items = [Red, Blue {val = 10}, Blue {val = 20}]
 
                 let promises = items |> array::map {xs = @, f = {x} ->
-                    spawn {computation = {} -> processItem {item = x}}
+                    spawn {f = {} -> processItem {item = x}}
                 }
 
-                let results = promises |> array::map {xs = @, f = {x} -> await {promise = x}}
+                let results = promises |> array::map {xs = @, f = {x} -> await {p =x}}
 
                 results |> array::fold {xs = @, init = 0, f = {acc, x} -> acc + x}
 
@@ -560,14 +560,14 @@ class TruffleAndLoomIntegrationTest {
                     let result = id * 2
                     result
 
-                let p1 = spawn {computation = {} -> worker {id = 10}}
-                let p2 = spawn {computation = {} -> worker {id = 20}}
-                let p3 = spawn {computation = {} -> worker {id = 30}}
+                let p1 = spawn {f = {} -> worker {id = 10}}
+                let p2 = spawn {f = {} -> worker {id = 20}}
+                let p3 = spawn {f = {} -> worker {id = 30}}
 
                 # Await ensures proper synchronization - workers complete before we proceed
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
-                let r3 = await {promise = p3}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
+                let r3 = await {p =p3}
 
                 r1 + r2 + r3
 
@@ -597,13 +597,13 @@ class TruffleAndLoomIntegrationTest {
                     unpark {thread = main_thread}
                     result
 
-                let promise = spawn {computation = worker}
+                let promise = spawn {f = worker}
 
                 # Wait for the worker to signal completion
                 park {}
 
                 # Now await the result (worker has already unparked us, so this is safe)
-                await {promise = promise}
+                await {p =promise}
 
             test {}
         """
@@ -627,13 +627,13 @@ class TruffleAndLoomIntegrationTest {
                     # but we can use them and return our computation
                     id * 10
 
-                let p1 = spawn {computation = {} -> get_thread_and_compute {id = 1}}
-                let p2 = spawn {computation = {} -> get_thread_and_compute {id = 2}}
-                let p3 = spawn {computation = {} -> get_thread_and_compute {id = 3}}
+                let p1 = spawn {f = {} -> get_thread_and_compute {id = 1}}
+                let p2 = spawn {f = {} -> get_thread_and_compute {id = 2}}
+                let p3 = spawn {f = {} -> get_thread_and_compute {id = 3}}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
-                let r3 = await {promise = p3}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
+                let r3 = await {p =p3}
 
                 r1 + r2 + r3
 
@@ -652,8 +652,8 @@ class TruffleAndLoomIntegrationTest {
                 if n <= 0
                 then acc
                 else do
-                    let promise = spawn {computation = {} -> n}
-                    let result = await {promise = promise}
+                    let promise = spawn {f = {} -> n}
+                    let result = await {p =promise}
                     parallel_sum {n = n - 1, acc = acc + result}
 
             parallel_sum {n = 10, acc = 0}
@@ -674,11 +674,11 @@ class TruffleAndLoomIntegrationTest {
                 let add10 = makeAdder {x = 10}
                 let add10_20 = add10 {y = 20}
 
-                let p1 = spawn {computation = {} -> add10_20 {z = 5}}
-                let p2 = spawn {computation = {} -> add10_20 {z = 15}}
+                let p1 = spawn {f = {} -> add10_20 {z = 5}}
+                let p2 = spawn {f = {} -> add10_20 {z = 15}}
 
-                let r1 = await {promise = p1}
-                let r2 = await {promise = p2}
+                let r1 = await {p =p1}
+                let r2 = await {p =p2}
 
                 r1 + r2
 
@@ -703,11 +703,11 @@ class TruffleAndLoomIntegrationTest {
 
             let processInParallel = {items} -> do
                 let promises = items |> array::map {xs = @, f = {x} ->
-                    spawn {computation = {} ->
+                    spawn {f = {} ->
                         perform Calculator in Math.square {x = x}
                     }}
 
-                promises |> array::map {xs = @, f = {x} -> await {promise = x}}
+                promises |> array::map {xs = @, f = {x} -> await {p =x}}
 
             let test = {} -> do
                 let data = [1, 2, 3, 4, 5]

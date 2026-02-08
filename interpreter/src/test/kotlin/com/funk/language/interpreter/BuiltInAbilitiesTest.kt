@@ -313,8 +313,8 @@ class BuiltInAbilitiesTest {
     @DisplayName("Boolean equality works")
     fun testBooleanEquality() {
         val source = """
-            let x = true
-            let y = true
+            let x = True
+            let y = True
             let result = x == y
             result
         """.trimIndent()
@@ -491,8 +491,8 @@ class BuiltInAbilitiesTest {
             let opt1 = Some { val = person1 }
             let opt2 = Some { val = person2 }
 
-            let nested1 = { user = opt1, active = true }
-            let nested2 = { user = opt2, active = true }
+            let nested1 = { user = opt1, active = True }
+            let nested2 = { user = opt2, active = True }
 
             let result = nested1 == nested2
             result
@@ -560,8 +560,8 @@ class BuiltInAbilitiesTest {
     @DisplayName("Record with mixed field types equality")
     fun testRecordWithMixedTypes() {
         val source = """
-            let rec1 = { name = "Alice", age = 30, active = true, score = 98.5 }
-            let rec2 = { name = "Alice", age = 30, active = true, score = 98.5 }
+            let rec1 = { name = "Alice", age = 30, active = True, score = 98.5 }
+            let rec2 = { name = "Alice", age = 30, active = True, score = 98.5 }
             let result = rec1 == rec2
             result
         """.trimIndent()

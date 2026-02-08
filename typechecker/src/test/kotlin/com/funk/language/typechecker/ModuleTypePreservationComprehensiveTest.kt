@@ -45,7 +45,7 @@ class ModuleTypePreservationComprehensiveTest {
             pub let pi: Float = 3.14159
             pub let max_value: Int = 1000
             pub let greeting: String = "Hello, Funk!"
-            pub let is_active: Bool = true
+            pub let is_active: Bool = True
 
             # Function types
             pub let add: { a: Int, b: Int } -> Int = { a, b } -> a + b

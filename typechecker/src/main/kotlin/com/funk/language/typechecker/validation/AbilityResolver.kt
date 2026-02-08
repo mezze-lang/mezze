@@ -68,6 +68,8 @@ class AbilityResolver(
             is FunkType.NatType,
             is FunkType.FracType -> checkNumericAbility(type, abilityName)
 
+            is FunkType.BytesType -> checkBytesAbility(abilityName)
+
             is FunkType.StringType -> checkStringAbility(abilityName)
             is FunkType.BooleanType -> checkBooleanAbility(abilityName)
             is FunkType.OrderingType -> checkOrderingAbility(abilityName)
@@ -162,6 +164,18 @@ class AbilityResolver(
             "Show", "Inspect" -> AbilityCheckResult.Satisfied("Built-in displayable")
 
             else -> checkUserDefinedAbilityImpl(FunkType.OrderingType, abilityName)
+        }
+    }
+
+    /**
+     * Check bytes type abilities.
+     */
+    private fun checkBytesAbility(abilityName: String): AbilityCheckResult {
+        return when (abilityName) {
+            "Eq" -> AbilityCheckResult.Satisfied("Built-in")
+            "Show", "Inspect" -> AbilityCheckResult.Satisfied("Built-in displayable")
+
+            else -> checkUserDefinedAbilityImpl(FunkType.BytesType, abilityName)
         }
     }
 
@@ -332,6 +346,7 @@ class AbilityResolver(
             is FunkType.NatType -> "Nat"
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
+            is FunkType.BytesType -> "Bytes"
 
             is FunkType.VarType -> type.variable.name.removePrefix("'")
 
@@ -380,6 +395,7 @@ class AbilityResolver(
             is FunkType.NatType -> "Nat"
             is FunkType.FracType -> "Frac"
             is FunkType.OrderingType -> "Ordering"
+            is FunkType.BytesType -> "Bytes"
             else -> type.toString()
         }
     }

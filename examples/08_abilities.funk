@@ -25,7 +25,7 @@ let display = { value: 'a } with Show 'a ->
 
 # Use with different types
 let int_display = display { value = 42 }
-let bool_display = display { value = true }
+let bool_display = display { value = True }
 
 # Ability with multiple operations
 ability NumOps'a {

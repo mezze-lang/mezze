@@ -336,50 +336,178 @@ data class FunkVariant(val constructor: String, val value: FunkValue?) : FunkVal
 }
 
 /**
- * Built-in List value (immutable, functional list)
+ * Built-in List value (immutable, functional linked list)
+ *
+ * Implemented as classic cons cells for proper O(1) head/tail/cons operations
+ * and structural sharing. This is the standard representation for functional
+ * programming languages.
+ *
+ * User-facing: type List 'a = Cons { head: 'a, tail: List 'a } | Nil
+ *
+ * Performance characteristics:
+ * - cons (prepend): O(1)
+ * - head: O(1)
+ * - tail: O(1)
+ * - length: O(n)
+ * - index/get: O(n)
+ * - append: O(n) where n = length of first list
+ * - Structural sharing: tail of a list can be shared between multiple lists
+ */
+sealed class FunkList : FunkValue() {
+    abstract fun isEmpty(): Boolean
+    abstract fun length(): Int
+    abstract fun headOrNull(): FunkValue?
+    abstract fun tailOrNull(): FunkList?
+
+    /** Convert to Kotlin list (for interop) - O(n) */
+    fun toKotlinList(): List<FunkValue> {
+        val result = mutableListOf<FunkValue>()
+        var current: FunkList = this
+        while (current is FunkCons) {
+            result.add(current.head)
+            current = current.tail
+        }
+        return result
+    }
+
+    companion object {
+        /** Create a FunkList from a Kotlin list - O(n) */
+        fun fromKotlinList(elements: List<FunkValue>): FunkList {
+            var result: FunkList = FunkNil
+            for (i in elements.indices.reversed()) {
+                result = FunkCons(elements[i], result)
+            }
+            return result
+        }
+
+        /** Create an empty list */
+        fun empty(): FunkList = FunkNil
+
+        /** Create a singleton list */
+        fun of(element: FunkValue): FunkList = FunkCons(element, FunkNil)
+    }
+}
+
+/**
+ * Empty list (Nil)
  */
 @ExportLibrary(InteropLibrary::class)
-data class FunkList(val elements: List<FunkValue>) : FunkValue() {
-    override fun getDisplayString(): String = "[${elements.joinToString(", ") { it.getDisplayString() }}]"
-    
+object FunkNil : FunkList() {
+    override fun isEmpty(): Boolean = true
+    override fun length(): Int = 0
+    override fun headOrNull(): FunkValue? = null
+    override fun tailOrNull(): FunkList? = null
+    override fun getDisplayString(): String = "Nil"
+
     @ExportMessage
     fun hasArrayElements(): Boolean = true
-    
+
     @ExportMessage
-    fun getArraySize(): Long = elements.size.toLong()
-    
+    fun getArraySize(): Long = 0
+
     @ExportMessage
-    fun isArrayElementReadable(index: Long): Boolean = index >= 0 && index < elements.size
-    
+    fun isArrayElementReadable(index: Long): Boolean = false
+
     @ExportMessage
     fun readArrayElement(index: Long): FunkValue {
-        if (index < 0 || index >= elements.size) {
-            throw FunkException("List index out of bounds: $index")
-        }
-        return elements[index.toInt()]
+        throw FunkException("List index out of bounds: $index (list is empty)")
     }
-    
+
     @ExportMessage
     fun hasMembers(): Boolean = true
-    
+
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(listOf("length", "isEmpty"))
+    }
+
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean {
+        return member in setOf("length", "isEmpty")
+    }
+
+    @ExportMessage
+    fun readMember(member: String): Any {
+        return when (member) {
+            "length" -> FunkInt(0)
+            "isEmpty" -> FunkBool(true)
+            else -> throw FunkException("Property '$member' not found in Nil")
+        }
+    }
+}
+
+/**
+ * Non-empty list cell (Cons)
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkCons(
+    val head: FunkValue,
+    val tail: FunkList
+) : FunkList() {
+    override fun isEmpty(): Boolean = false
+    override fun headOrNull(): FunkValue = head
+    override fun tailOrNull(): FunkList = tail
+
+    // Cached length for performance (computed lazily)
+    private var cachedLength: Int = -1
+
+    override fun length(): Int {
+        if (cachedLength < 0) {
+            cachedLength = 1 + tail.length()
+        }
+        return cachedLength
+    }
+
+    override fun getDisplayString(): String {
+        val elements = toKotlinList()
+        return "Cons [${elements.joinToString(", ") { it.getDisplayString() }}]"
+    }
+
+    @ExportMessage
+    fun hasArrayElements(): Boolean = true
+
+    @ExportMessage
+    fun getArraySize(): Long = length().toLong()
+
+    @ExportMessage
+    fun isArrayElementReadable(index: Long): Boolean = index >= 0 && index < length()
+
+    @ExportMessage
+    fun readArrayElement(index: Long): FunkValue {
+        if (index < 0) {
+            throw FunkException("List index out of bounds: $index")
+        }
+        var current: FunkList = this
+        var i = index
+        while (current is FunkCons) {
+            if (i == 0L) return current.head
+            current = current.tail
+            i--
+        }
+        throw FunkException("List index out of bounds: $index")
+    }
+
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+
     @ExportMessage
     fun getMembers(includeInternal: Boolean): Any {
         return FunkMemberKeysArray(listOf("length", "head", "tail", "isEmpty"))
     }
-    
+
     @ExportMessage
     fun isMemberReadable(member: String): Boolean {
         return member in setOf("length", "head", "tail", "isEmpty")
     }
-    
+
     @ExportMessage
     fun readMember(member: String): Any {
         return when (member) {
-            "length" -> FunkInt(elements.size.toLong())
-            "head" -> if (elements.isNotEmpty()) elements.first() else FunkNull
-            "tail" -> if (elements.isNotEmpty()) FunkList(elements.drop(1)) else FunkList(emptyList())
-            "isEmpty" -> FunkBool(elements.isEmpty())
-            else -> throw FunkException("Property '$member' not found in List")
+            "length" -> FunkInt(length().toLong())
+            "head" -> head
+            "tail" -> tail
+            "isEmpty" -> FunkBool(false)
+            else -> throw FunkException("Property '$member' not found in Cons")
         }
     }
 }
@@ -430,7 +558,7 @@ data class FunkNonEmptyList(val elements: List<FunkValue>) : FunkValue() {
         return when (member) {
             "length" -> FunkInt(elements.size.toLong())
             "head" -> elements.first()
-            "tail" -> FunkList(elements.drop(1))
+            "tail" -> FunkList.fromKotlinList(elements.drop(1))
             "last" -> elements.last()
             else -> throw FunkException("Property '$member' not found in NonEmptyList")
         }
@@ -438,70 +566,449 @@ data class FunkNonEmptyList(val elements: List<FunkValue>) : FunkValue() {
 }
 
 /**
- * Built-in Map value (immutable, functional map)
+ * Built-in Map value backed by Vavr HashMap for O(1) persistent operations.
+ *
+ * Vavr HashMap provides:
+ * - O(1) get, put, remove (effectively constant via HAMT)
+ * - Structural sharing for memory efficiency
+ * - Immutable semantics with persistent updates
+ *
+ * All "mutating" operations return new FunkMap instances with shared structure.
  */
 @ExportLibrary(InteropLibrary::class)
-data class FunkMap(val entries: Map<FunkValue, FunkValue>) : FunkValue() {
+data class FunkMap(val entries: io.vavr.collection.HashMap<FunkValue, FunkValue>) : FunkValue() {
+
+    constructor(kotlinMap: Map<FunkValue, FunkValue>) : this(
+        io.vavr.collection.HashMap.ofAll(kotlinMap)
+    )
+
+    fun size(): Int = entries.size()
+    fun isEmpty(): Boolean = entries.isEmpty
+
+    fun get(key: FunkValue): FunkValue? = entries.get(key).orNull
+
+    fun put(key: FunkValue, value: FunkValue): FunkMap =
+        FunkMap(entries.put(key, value))
+
+    fun remove(key: FunkValue): FunkMap =
+        FunkMap(entries.remove(key))
+
+    fun containsKey(key: FunkValue): Boolean = entries.containsKey(key)
+
+    fun keys(): List<FunkValue> = entries.keySet().toJavaList()
+
+    fun values(): List<FunkValue> = entries.values().toJavaList()
+
+    fun toKotlinMap(): Map<FunkValue, FunkValue> = entries.toJavaMap()
+
     override fun getDisplayString(): String {
-        val entriesStr = entries.entries.joinToString(", ") { (k, v) ->
+        val entriesStr = entries.toJavaMap().entries.joinToString(", ") { (k, v) ->
             "${k.getDisplayString()} = ${v.getDisplayString()}"
         }
         return "{ $entriesStr }"
     }
-    
+
     @ExportMessage
     fun hasMembers(): Boolean = true
-    
+
     @ExportMessage
     fun getMembers(includeInternal: Boolean): Any {
         return FunkMemberKeysArray(listOf("size", "keys", "values", "isEmpty"))
     }
-    
+
     @ExportMessage
     fun isMemberReadable(member: String): Boolean {
         return member in setOf("size", "keys", "values", "isEmpty")
     }
-    
+
     @ExportMessage
     fun readMember(member: String): Any {
         return when (member) {
-            "size" -> FunkInt(entries.size.toLong())
-            "keys" -> FunkList(entries.keys.toList())
-            "values" -> FunkList(entries.values.toList())
-            "isEmpty" -> FunkBool(entries.isEmpty())
+            "size" -> FunkInt(entries.size().toLong())
+            "keys" -> FunkList.fromKotlinList(keys())
+            "values" -> FunkList.fromKotlinList(values())
+            "isEmpty" -> FunkBool(entries.isEmpty)
             else -> throw FunkException("Property '$member' not found in Map")
+        }
+    }
+
+    companion object {
+        /** Create an empty map */
+        fun empty(): FunkMap = FunkMap(io.vavr.collection.HashMap.empty())
+
+        /** Create a map from a single entry */
+        fun of(key: FunkValue, value: FunkValue): FunkMap =
+            FunkMap(io.vavr.collection.HashMap.of(key, value))
+    }
+}
+
+/**
+ * Built-in Set value backed by Vavr HashSet for O(1) persistent operations.
+ *
+ * Vavr HashSet provides:
+ * - O(1) add, remove, contains (effectively constant via HAMT)
+ * - Structural sharing for memory efficiency
+ * - Immutable semantics with persistent updates
+ *
+ * All "mutating" operations return new FunkSet instances with shared structure.
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkSet(val elements: io.vavr.collection.HashSet<FunkValue>) : FunkValue() {
+
+    constructor(kotlinSet: Set<FunkValue>) : this(
+        io.vavr.collection.HashSet.ofAll(kotlinSet)
+    )
+
+    constructor(kotlinList: List<FunkValue>) : this(
+        io.vavr.collection.HashSet.ofAll(kotlinList)
+    )
+
+    fun size(): Int = elements.size()
+    fun isEmpty(): Boolean = elements.isEmpty
+
+    fun contains(element: FunkValue): Boolean = elements.contains(element)
+
+    fun add(element: FunkValue): FunkSet =
+        FunkSet(elements.add(element))
+
+    fun remove(element: FunkValue): FunkSet =
+        FunkSet(elements.remove(element))
+
+    fun union(other: FunkSet): FunkSet =
+        FunkSet(elements.addAll(other.elements))
+
+    fun intersect(other: FunkSet): FunkSet =
+        FunkSet(elements.filter { other.elements.contains(it) })
+
+    fun difference(other: FunkSet): FunkSet =
+        FunkSet(elements.removeAll(other.elements))
+
+    fun toKotlinSet(): Set<FunkValue> = elements.toJavaSet()
+
+    fun toList(): List<FunkValue> = elements.toJavaList()
+
+    override fun getDisplayString(): String = "{${elements.toJavaList().joinToString(", ") { it.getDisplayString() }}}"
+
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(listOf("size", "isEmpty"))
+    }
+
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean {
+        return member in setOf("size", "isEmpty")
+    }
+
+    @ExportMessage
+    fun readMember(member: String): Any {
+        return when (member) {
+            "size" -> FunkInt(elements.size().toLong())
+            "isEmpty" -> FunkBool(elements.isEmpty)
+            else -> throw FunkException("Property '$member' not found in Set")
+        }
+    }
+
+    companion object {
+        /** Create an empty set */
+        fun empty(): FunkSet = FunkSet(io.vavr.collection.HashSet.empty())
+
+        /** Create a singleton set */
+        fun of(element: FunkValue): FunkSet =
+            FunkSet(io.vavr.collection.HashSet.of(element))
+    }
+}
+
+/**
+ * Funk Deque - an immutable double-ended queue.
+ *
+ * Implemented using two lists (front and back) for amortized O(1) operations
+ * on both ends. This is the classic Banker's Queue / Okasaki-style deque.
+ *
+ * - front: Elements at the front (head is first to dequeue from front)
+ * - back: Elements at the back (head is first to dequeue from back, stored in reverse)
+ *
+ * When one side becomes empty, we rebalance by reversing the other side.
+ */
+@ExportLibrary(InteropLibrary::class)
+data class FunkDeque(
+    val front: List<FunkValue>,
+    val back: List<FunkValue>
+) : FunkValue() {
+
+    fun size(): Int = front.size + back.size
+    fun isEmpty(): Boolean = front.isEmpty() && back.isEmpty()
+
+    /**
+     * Rebalance for front operations - move back to front if front is empty.
+     */
+    private fun rebalanceForFront(): FunkDeque {
+        return if (front.isEmpty() && back.isNotEmpty()) {
+            FunkDeque(back.reversed(), emptyList())
+        } else {
+            this
+        }
+    }
+
+    /**
+     * Rebalance for back operations - move front to back if back is empty.
+     */
+    private fun rebalanceForBack(): FunkDeque {
+        return if (back.isEmpty() && front.isNotEmpty()) {
+            FunkDeque(emptyList(), front.reversed())
+        } else {
+            this
+        }
+    }
+
+    fun pushFront(x: FunkValue): FunkDeque =
+        FunkDeque(listOf(x) + front, back)
+
+    fun pushBack(x: FunkValue): FunkDeque =
+        FunkDeque(front, listOf(x) + back)
+
+    /**
+     * Remove and return the front element.
+     * Returns null if the deque is empty.
+     */
+    fun popFront(): Pair<FunkValue, FunkDeque>? {
+        val balanced = rebalanceForFront()
+        return if (balanced.front.isEmpty()) null
+        else balanced.front.first() to FunkDeque(balanced.front.drop(1), balanced.back)
+    }
+
+    /**
+     * Remove and return the back element.
+     * Returns null if the deque is empty.
+     */
+    fun popBack(): Pair<FunkDeque, FunkValue>? {
+        val balanced = rebalanceForBack()
+        return if (balanced.back.isEmpty()) null
+        else FunkDeque(balanced.front, balanced.back.drop(1)) to balanced.back.first()
+    }
+
+    fun peekFront(): FunkValue? {
+        // If front is non-empty, return its first element
+        // Otherwise, if back is non-empty, return its last element (which is the front of deque)
+        return if (front.isNotEmpty()) {
+            front.first()
+        } else if (back.isNotEmpty()) {
+            back.last()
+        } else {
+            null
+        }
+    }
+
+    fun peekBack(): FunkValue? {
+        // If back is non-empty, return its first element (back is stored in reverse)
+        // Otherwise, if front is non-empty, return its last element
+        return if (back.isNotEmpty()) {
+            back.first()
+        } else if (front.isNotEmpty()) {
+            front.last()
+        } else {
+            null
+        }
+    }
+
+    fun toList(): List<FunkValue> = front + back.reversed()
+
+    override fun getDisplayString(): String {
+        val elements = toList()
+        return "Deque(${elements.joinToString(", ") { it.getDisplayString() }})"
+    }
+
+    @ExportMessage
+    fun hasMembers(): Boolean = true
+
+    @ExportMessage
+    fun getMembers(includeInternal: Boolean): Any {
+        return FunkMemberKeysArray(listOf("length", "isEmpty"))
+    }
+
+    @ExportMessage
+    fun isMemberReadable(member: String): Boolean {
+        return member in setOf("length", "isEmpty")
+    }
+
+    @ExportMessage
+    fun readMember(member: String): Any {
+        return when (member) {
+            "length" -> FunkInt(size().toLong())
+            "isEmpty" -> FunkBool(isEmpty())
+            else -> throw FunkException("Property '$member' not found in Deque")
         }
     }
 }
 
 /**
- * Built-in Set value (immutable, functional set)
+ * Bytes - a primitive type for binary data.
+ *
+ * Provides compact storage and efficient operations for working with
+ * raw byte sequences, essential for IO, networking, and binary protocols.
+ *
+ * Backed by ByteArray for O(1) indexing. All operations are immutable.
  */
 @ExportLibrary(InteropLibrary::class)
-data class FunkSet(val elements: Set<FunkValue>) : FunkValue() {
-    override fun getDisplayString(): String = "{${elements.joinToString(", ") { it.getDisplayString() }}}"
-    
-    @ExportMessage
-    fun hasMembers(): Boolean = true
-    
-    @ExportMessage
-    fun getMembers(includeInternal: Boolean): Any {
-        return FunkMemberKeysArray(listOf("size", "isEmpty"))
-    }
-    
-    @ExportMessage
-    fun isMemberReadable(member: String): Boolean {
-        return member in setOf("size", "isEmpty")
-    }
-    
-    @ExportMessage
-    fun readMember(member: String): Any {
-        return when (member) {
-            "size" -> FunkInt(elements.size.toLong())
-            "isEmpty" -> FunkBool(elements.isEmpty())
-            else -> throw FunkException("Property '$member' not found in Set")
+data class FunkBytes(
+    val bytes: ByteArray
+) : FunkValue() {
+
+    companion object {
+        fun empty(): FunkBytes = FunkBytes(ByteArray(0))
+
+        fun fromString(s: String): FunkBytes = FunkBytes(s.toByteArray(Charsets.UTF_8))
+
+        fun fromArray(arr: List<Int>): FunkBytes {
+            val bytes = ByteArray(arr.size)
+            for (i in arr.indices) {
+                bytes[i] = arr[i].toByte()
+            }
+            return FunkBytes(bytes)
+        }
+
+        fun fromHex(hex: String): FunkBytes {
+            require(hex.length % 2 == 0) { "Hex string must have even length" }
+            val bytes = ByteArray(hex.length / 2)
+            for (i in bytes.indices) {
+                bytes[i] = hex.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+            }
+            return FunkBytes(bytes)
+        }
+
+        fun fromBase64(encoded: String): FunkBytes {
+            val bytes = java.util.Base64.getDecoder().decode(encoded)
+            return FunkBytes(bytes)
         }
     }
+
+    fun length(): Int = bytes.size
+    fun isEmpty(): Boolean = bytes.isEmpty()
+
+    fun get(index: Int): Int? {
+        return if (index >= 0 && index < bytes.size) {
+            bytes[index].toInt() and 0xFF  // Unsigned byte value 0-255
+        } else null
+    }
+
+    fun slice(start: Int, end: Int): FunkBytes {
+        val actualEnd = minOf(end, bytes.size)
+        val actualStart = maxOf(start, 0)
+        if (actualStart >= actualEnd) return empty()
+        return FunkBytes(bytes.copyOfRange(actualStart, actualEnd))
+    }
+
+    fun take(n: Int): FunkBytes = slice(0, n)
+
+    fun drop(n: Int): FunkBytes = slice(n, bytes.size)
+
+    fun concat(other: FunkBytes): FunkBytes {
+        val result = ByteArray(bytes.size + other.bytes.size)
+        System.arraycopy(bytes, 0, result, 0, bytes.size)
+        System.arraycopy(other.bytes, 0, result, bytes.size, other.bytes.size)
+        return FunkBytes(result)
+    }
+
+    fun reverse(): FunkBytes {
+        val reversed = ByteArray(bytes.size)
+        for (i in bytes.indices) {
+            reversed[bytes.size - 1 - i] = bytes[i]
+        }
+        return FunkBytes(reversed)
+    }
+
+    fun repeat(n: Int): FunkBytes {
+        if (n <= 0) return empty()
+        val result = ByteArray(bytes.size * n)
+        for (i in 0 until n) {
+            System.arraycopy(bytes, 0, result, i * bytes.size, bytes.size)
+        }
+        return FunkBytes(result)
+    }
+
+    fun indexOf(pattern: FunkBytes): Int {
+        if (pattern.bytes.isEmpty()) return 0
+        if (pattern.bytes.size > bytes.size) return -1
+
+        outer@ for (i in 0..(bytes.size - pattern.bytes.size)) {
+            for (j in pattern.bytes.indices) {
+                if (bytes[i + j] != pattern.bytes[j]) continue@outer
+            }
+            return i
+        }
+        return -1
+    }
+
+    fun contains(pattern: FunkBytes): Boolean = indexOf(pattern) >= 0
+
+    fun startsWith(prefix: FunkBytes): Boolean {
+        if (prefix.bytes.size > bytes.size) return false
+        for (i in prefix.bytes.indices) {
+            if (bytes[i] != prefix.bytes[i]) return false
+        }
+        return true
+    }
+
+    fun endsWith(suffix: FunkBytes): Boolean {
+        if (suffix.bytes.size > bytes.size) return false
+        val offset = bytes.size - suffix.bytes.size
+        for (i in suffix.bytes.indices) {
+            if (bytes[offset + i] != suffix.bytes[i]) return false
+        }
+        return true
+    }
+
+    fun toStringValue(): String = String(bytes, Charsets.UTF_8)
+
+    fun toArray(): List<Int> = bytes.map { it.toInt() and 0xFF }
+
+    fun toHex(): String = bytes.joinToString("") { "%02x".format(it) }
+
+    fun toBase64(): String = java.util.Base64.getEncoder().encodeToString(bytes)
+
+    // Truffle interop - expose as array-like for iteration
+    @ExportMessage
+    fun hasArrayElements(): Boolean = true
+
+    @ExportMessage
+    fun getArraySize(): Long = bytes.size.toLong()
+
+    @ExportMessage
+    fun isArrayElementReadable(index: Long): Boolean = index >= 0 && index < bytes.size.toLong()
+
+    @ExportMessage
+    @Throws(com.oracle.truffle.api.interop.InvalidArrayIndexException::class)
+    fun readArrayElement(index: Long): Any {
+        if (index < 0 || index >= bytes.size.toLong()) {
+            throw com.oracle.truffle.api.interop.InvalidArrayIndexException.create(index)
+        }
+        return FunkInt((bytes[index.toInt()].toInt() and 0xFF).toLong())
+    }
+
+    override fun getDisplayString(): String {
+        val preview = if (bytes.size <= 20) {
+            bytes.joinToString("") {
+                val c = it.toInt() and 0xFF
+                if (c in 32..126) c.toChar().toString() else "\\x%02x".format(c)
+            }
+        } else {
+            bytes.take(20).joinToString("") {
+                val c = it.toInt() and 0xFF
+                if (c in 32..126) c.toChar().toString() else "\\x%02x".format(c)
+            } + "..."
+        }
+        return "b\"$preview\""
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is FunkBytes) return false
+        return bytes.contentEquals(other.bytes)
+    }
+
+    override fun hashCode(): Int = bytes.contentHashCode()
 }
 
 /**

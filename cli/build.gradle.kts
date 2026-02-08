@@ -31,6 +31,13 @@ dependencies {
 
     // JSON serialization for enhanced AST
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+
+    // Package manager dependencies
+    implementation("io.github.z4kn4fein:semver:2.0.0")           // Semantic versioning
+    implementation("com.akuleshov7:ktoml-core:0.7.1")            // TOML parsing
+    implementation("io.ktor:ktor-client-core:2.3.12")            // HTTP client
+    implementation("io.ktor:ktor-client-cio:2.3.12")             // CIO engine for Ktor
+    implementation("org.apache.commons:commons-compress:1.28.0") // tar.gz handling
 }
 
 // Include stdlib funk files as resources in the JAR

@@ -517,11 +517,25 @@ class SubstitutionApplier(
     }
 
     private fun applyToArrayLiteral(expr: ArrayLiteral): ArrayLiteral {
-        val updatedElements = expr.elements.map { applyToExpression(it) }
+        val updatedElements = expr.elements.map { element ->
+            when (element) {
+                is ArrayRegularElement -> ArrayRegularElement(applyToExpression(element.expression))
+                is ArraySpreadElement -> ArraySpreadElement(applyToExpression(element.expression))
+            }
+        }
         // CRITICAL FIX: Compute type based on expression structure
         // Array type is Array<elementType>, where elementType is the type of the first element
         val updatedType = if (updatedElements.isNotEmpty()) {
-            val elementType = updatedElements.first().inferredType ?: FunkType.VarType(TypeVar.fresh())
+            val firstElement = updatedElements.first()
+            val elementType = when (firstElement) {
+                is ArrayRegularElement -> firstElement.expression.inferredType ?: FunkType.VarType(TypeVar.fresh())
+                is ArraySpreadElement -> {
+                    // For spread element, extract element type from the array type
+                    val arrayType = firstElement.expression.inferredType
+                    if (arrayType is FunkType.ArrayType) arrayType.elementType
+                    else FunkType.VarType(TypeVar.fresh())
+                }
+            }
             substitution.apply(FunkType.ArrayType(elementType))
         } else {
             // Empty array: use existing type if available, otherwise fresh type variable
@@ -1340,6 +1354,7 @@ class SubstitutionApplier(
             is FunkType.NatType,
             is FunkType.FracType,
             is FunkType.OrderingType,
+            is FunkType.BytesType,
             is FunkType.EffectRow -> type
         }
     }

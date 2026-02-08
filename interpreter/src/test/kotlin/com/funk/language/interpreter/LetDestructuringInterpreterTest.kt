@@ -111,9 +111,9 @@ class LetDestructuringInterpreterTest {
     @Test
     fun `test destructuring with boolean fields`() {
         val source = """
-            let flags = { active = true, verified = false }
+            let flags = { active = True, verified = False }
             let { active, verified } = flags
-            let bothTrue = if active then (if verified then true else false) else false
+            let bothTrue = if active then (if verified then True else False) else False
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
@@ -126,7 +126,7 @@ class LetDestructuringInterpreterTest {
     @Test
     fun `test destructuring with mixed types`() {
         val source = """
-            let data = { name = "Bob", age = 30, active = true }
+            let data = { name = "Bob", age = 30, active = True }
             let { name, age, active } = data
             let isAdult = age > 18
         """.trimIndent()

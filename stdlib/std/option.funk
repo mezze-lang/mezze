@@ -16,14 +16,14 @@ pub let get_or_else: { opt: (Option 'a), def: 'a } -> 'a = { opt, def } ->
 # Check if Option contains a value
 pub let is_some: { opt: (Option 'a) } -> Bool = { opt } ->
     match opt is
-        Some { val } -> true
-        None -> false
+        Some { val } -> True
+        None -> False
 
 # Check if Option is empty
 pub let is_none: { opt: (Option 'a) } -> Bool = { opt } ->
     match opt is
-        Some { val } -> false
-        None -> true
+        Some { val } -> False
+        None -> True
 
 # Filter Option based on predicate
 pub let filter: { opt: (Option 'a), p: {val: 'a} -> Bool } -> (Option 'a) = { opt, p } ->

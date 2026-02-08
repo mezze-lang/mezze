@@ -112,7 +112,7 @@ class ComplexIntegrationTest {
                 }
                 
             let person = {name = "Alice", age = 30}
-            let changes = {updateName = true, newName = "Alicia", updateAge = false, newAge = 25}
+            let changes = {updateName = True, newName = "Alicia", updateAge = False, newAge = 25}
             let updated = updatePerson {person = person, changes = changes}
         """.trimIndent()
 

@@ -309,7 +309,7 @@ let result = "World" |> greet {name = @}
     fun `test pipe with boolean operations`() {
         val source = """
 let negate = {b} -> !b
-let result = true |> negate {b = @}
+let result = True |> negate {b = @}
 """.trim()
 
         assertDoesNotThrow {

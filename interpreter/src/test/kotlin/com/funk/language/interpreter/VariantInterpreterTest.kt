@@ -77,9 +77,9 @@ class VariantInterpreterTest {
             let user = User {
                 id = 123, 
                 name = "Alice", 
-                profile = {email = "alice@example.com", active = true}
+                profile = {email = "alice@example.com", active = True}
             }
-            let admin = Admin {permissions = {read = true, write = true, delete = false}}
+            let admin = Admin {permissions = {read = True, write = True, delete = False}}
             let guest = Guest
         """.trimIndent()
 
@@ -127,16 +127,16 @@ class VariantInterpreterTest {
                     type = "guest",
                     id = -1,
                     displayName = "Guest User",
-                    canEdit = false
+                    canEdit = False
                 }
         }
             
             let user = User {
                 id = 456, 
                 name = "Bob", 
-                profile = {email = "bob@test.com", active = true}
+                profile = {email = "bob@test.com", active = True}
             }
-            let admin = Admin {permissions = {read = true, write = true, delete = true}}
+            let admin = Admin {permissions = {read = True, write = True, delete = True}}
             let guest = Guest
             
             let userInfo = processUser {userType = user}
@@ -225,8 +225,8 @@ class VariantInterpreterTest {
     fun `test variant with boolean logic`() {
         val source = """
             let evaluateCondition = {condition} -> match condition {
-                | Always -> true
-                | Never -> false
+                | Always -> True
+                | Never -> False
             | Sometimes {probability} -> probability > 50
         }
         
@@ -262,8 +262,8 @@ class VariantInterpreterTest {
                 then Some {value = x}
                 else None
             
-            let result1 = createResult {success = true, value = 42, error = ""}
-            let result2 = createResult {success = false, value = 0, error = "Failed"}
+            let result1 = createResult {success = True, value = 42, error = ""}
+            let result2 = createResult {success = False, value = 0, error = "Failed"}
             let option1 = wrapValue {x = 10}
             let option2 = wrapValue {x = -5}
         """.trimIndent()
@@ -306,7 +306,7 @@ class VariantInterpreterTest {
         let user = User {
                 id = 789,
                 name = "Diana",
-                profile = {email = "diana@test.com", active = true}
+                profile = {email = "diana@test.com", active = True}
             }
             
             let updatedUser = updateUserData {user = user, newName = "Diana Smith"}

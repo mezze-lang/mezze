@@ -37,7 +37,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let condNum = {x, y, p} -> if p.t then x * y else x / y
 
-            condNum {x = 5, y = 2, p = {t = true}}
+            condNum {x = 5, y = 2, p = {t = True}}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -53,7 +53,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let selectValue = {x, y, cond} -> if cond then x else y
 
-            selectValue {x = 10, y = 20, cond = true}
+            selectValue {x = 10, y = 20, cond = True}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -70,7 +70,7 @@ class ConditionalBoolConstraintTest {
             else
                 3
 
-            nestedCond {flags = {outer = true, inner = false}}
+            nestedCond {flags = {outer = True, inner = False}}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -86,7 +86,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let compute = {a, b, c, useAdd} -> if useAdd then a + b + c else a * b * c
 
-            compute {a = 1, b = 2, c = 3, useAdd = true}
+            compute {a = 1, b = 2, c = 3, useAdd = True}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -118,7 +118,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let makeSelector = {pred} -> {x, y} -> if pred then x else y
 
-            let selector = makeSelector {pred = true}
+            let selector = makeSelector {pred = True}
             selector {x = 10, y = 20}
         """.trimIndent()
 
@@ -135,7 +135,7 @@ class ConditionalBoolConstraintTest {
                 let result = if flag then 100 else 200
                 result + 1
 
-            process {flag = true}
+            process {flag = True}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -152,7 +152,7 @@ class ConditionalBoolConstraintTest {
                 let second = if cond then first + 10 else first - 10
                 second
 
-            doubleCheck {x = 5, cond = true}
+            doubleCheck {x = 5, cond = True}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -168,7 +168,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let deepCheck = {config} -> if config.settings.enabled then 1 else 0
 
-            deepCheck {config = {settings = {enabled = true}}}
+            deepCheck {config = {settings = {enabled = True}}}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -185,7 +185,7 @@ class ConditionalBoolConstraintTest {
                 let b = if opts.second then 3 else 4
                 a + b
 
-            multiCheck {opts = {first = true, second = false}}
+            multiCheck {opts = {first = True, second = False}}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -201,7 +201,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let andCheck = {x, y} -> if x && y then 1 else 0
 
-            andCheck {x = true, y = false}
+            andCheck {x = True, y = False}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -215,7 +215,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let orCheck = {x, y} -> if x || y then 1 else 0
 
-            orCheck {x = true, y = false}
+            orCheck {x = True, y = False}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -229,7 +229,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let notCheck = {x} -> if !x then 1 else 0
 
-            notCheck {x = true}
+            notCheck {x = True}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -273,7 +273,7 @@ class ConditionalBoolConstraintTest {
     @Test
     fun `test if with literal boolean`() {
         val source = """
-            let alwaysTrue = {x} -> if true then x else 0
+            let alwaysTrue = {x} -> if True then x else 0
 
             alwaysTrue {x = 42}
         """.trimIndent()
@@ -287,7 +287,7 @@ class ConditionalBoolConstraintTest {
     @Test
     fun `test if with literal boolean false`() {
         val source = """
-            let alwaysFalse = {x} -> if false then 0 else x
+            let alwaysFalse = {x} -> if False then 0 else x
 
             alwaysFalse {x = 42}
         """.trimIndent()
@@ -303,7 +303,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let complexCheck = {a, b, c} -> if (a && b) || !c then 1 else 0
 
-            complexCheck {a = true, b = false, c = true}
+            complexCheck {a = True, b = False, c = True}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -319,7 +319,7 @@ class ConditionalBoolConstraintTest {
         val source = """
             let polySelect = {cond, x, y} -> if cond then x else y
 
-            let resultInt = polySelect {cond = true, x = 1, y = 2}
+            let resultInt = polySelect {cond = True, x = 1, y = 2}
             resultInt
         """.trimIndent()
 

@@ -20,11 +20,11 @@ class MultiLineParsingTest {
     @Test
     fun `test multi-line if expressions`() {
         val source = """
-            let result1 = if true 
+            let result1 = if True 
                          then 42 
                          else 0
                          
-            let result2 = if false
+            let result2 = if False
                          then "no"
                          else "yes"
         """.trimIndent()
@@ -119,7 +119,7 @@ class MultiLineParsingTest {
     @Test
     fun `test multi-line expressions with whitespace flexibility`() {
         val source = """
-            let result = if   true   
+            let result = if   True   
                         then   42   
                         else   0
                         

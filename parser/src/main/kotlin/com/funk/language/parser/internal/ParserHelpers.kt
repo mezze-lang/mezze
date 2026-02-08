@@ -275,7 +275,12 @@ internal fun desugarExpression(expr: Expression): Expression {
             result = desugarExpression(expr.result)
         )
         is ArrayLiteral -> expr.copy(
-            elements = expr.elements.map { desugarExpression(it) }
+            elements = expr.elements.map { element ->
+                when (element) {
+                    is ArrayRegularElement -> ArrayRegularElement(desugarExpression(element.expression))
+                    is ArraySpreadElement -> ArraySpreadElement(desugarExpression(element.expression))
+                }
+            }
         )
         is PerformExpression -> expr.copy(
             expression = desugarExpression(expr.expression)

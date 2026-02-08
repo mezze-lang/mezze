@@ -75,8 +75,8 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_small = {n: Int} ->
                 match n is
-                  0 | 1 | 2 | 3 -> true
-                  _ -> false
+                  0 | 1 | 2 | 3 -> True
+                  _ -> False
             let result = is_small { n = 2 }
         """.trimIndent()
 
@@ -157,8 +157,8 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_special = {x: Float} ->
                 match x is
-                  0.0 | 1.0 | 2.0 -> true
-                  _ -> false
+                  0.0 | 1.0 | 2.0 -> True
+                  _ -> False
             let result = is_special { x = 1.0 }
         """.trimIndent()
 
@@ -220,9 +220,9 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let parse_yes_no = {input: String} ->
                 match input is
-                  "y" | "yes" | "Y" | "YES" -> true
-                  "n" | "no" | "N" | "NO" -> false
-                  _ -> false
+                  "y" | "yes" | "Y" | "YES" -> True
+                  "n" | "no" | "N" | "NO" -> False
+                  _ -> False
             let result = parse_yes_no { input = "yes" }
         """.trimIndent()
 
@@ -239,9 +239,9 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let bool_to_string = {b: Bool} ->
                 match b is
-                  true -> "yes"
-                  false -> "no"
-            let result = bool_to_string { b = true }
+                  True -> "yes"
+                  False -> "no"
+            let result = bool_to_string { b = True }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -253,9 +253,9 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let negate_string = {b: Bool} ->
                 match b is
-                  true -> "false"
-                  false -> "true"
-            let result = negate_string { b = false }
+                  True -> "False"
+                  False -> "True"
+            let result = negate_string { b = False }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -267,10 +267,10 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let describe = {flag: Bool, verbose: Bool} ->
                 match flag is
-                  true if verbose -> "Flag is enabled (verbose mode)"
-                  true -> "enabled"
-                  false -> "disabled"
-            let result = describe { flag = true, verbose = true }
+                  True if verbose -> "Flag is enabled (verbose mode)"
+                  True -> "enabled"
+                  False -> "disabled"
+            let result = describe { flag = True, verbose = True }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -303,8 +303,8 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_ok = {result} ->
                 match result is
-                  Ok { val } -> true
-                  Err { error } -> false
+                  Ok { val } -> True
+                  Err { error } -> False
 
             let result = is_ok { result = Ok { val = 42 } }
         """.trimIndent()
@@ -515,7 +515,7 @@ class ComprehensivePatternMatchingTest {
                   0 -> "zero"
                   x if debug -> "debug: other"
                   _ -> "other"
-            let result = special_case { n = 0, debug = true }
+            let result = special_case { n = 0, debug = True }
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)
@@ -531,9 +531,9 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_vowel = {c: String} ->
                 match c is
-                  "a" | "e" | "i" | "o" | "u" -> true
-                  "A" | "E" | "I" | "O" | "U" -> true
-                  _ -> false
+                  "a" | "e" | "i" | "o" | "u" -> True
+                  "A" | "E" | "I" | "O" | "U" -> True
+                  _ -> False
             let result = is_vowel { c = "e" }
         """.trimIndent()
 
@@ -546,8 +546,8 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_primary = {color} ->
                 match color is
-                  Red | Green | Blue -> true
-                  _ -> false
+                  Red | Green | Blue -> True
+                  _ -> False
 
             let result = is_primary { color = Red }
         """.trimIndent()
@@ -604,10 +604,10 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_zero = {expr} ->
                 match expr is
-                  Num { value = 0 } -> true
-                  Num { value } -> false
-                  Add { left, right } -> false
-                  Mul { left, right } -> false
+                  Num { value = 0 } -> True
+                  Num { value } -> False
+                  Add { left, right } -> False
+                  Mul { left, right } -> False
 
             let result = is_zero { expr = Num { value = 0 } }
         """.trimIndent()
@@ -826,8 +826,8 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_valid_rectangle = {rect} ->
                 match rect is
-                  { width, height } if width > 0 && height > 0 -> true
-                  _ -> false
+                  { width, height } if width > 0 && height > 0 -> True
+                  _ -> False
             let result = is_valid_rectangle { rect = { width = 10, height = 20 } }
         """.trimIndent()
 
@@ -840,8 +840,8 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_square = {rect} ->
                 match rect is
-                  { width, height } if width == height -> true
-                  _ -> false
+                  { width, height } if width == height -> True
+                  _ -> False
             let result = is_square { rect = { width = 10, height = 10 } }
         """.trimIndent()
 
@@ -854,8 +854,8 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_admin = {user} ->
                 match user is
-                  { role, ... } if role == "admin" -> true
-                  _ -> false
+                  { role, ... } if role == "admin" -> True
+                  _ -> False
             let result = is_admin { user = { name = "Alice", role = "admin", id = 1 } }
         """.trimIndent()
 
@@ -872,9 +872,9 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_positive_some = {opt} ->
                 match opt is
-                  Some { val } if val > 0 -> true
-                  Some { val } -> false
-                  None -> false
+                  Some { val } if val > 0 -> True
+                  Some { val } -> False
+                  None -> False
             let result = is_positive_some { opt = Some { val = 42 } }
         """.trimIndent()
 
@@ -887,9 +887,9 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_valid_range = {range} ->
                 match range is
-                  Range { min, max } if min < max -> true
-                  Range { min, max } -> false
-                  Empty -> false
+                  Range { min, max } if min < max -> True
+                  Range { min, max } -> False
+                  Empty -> False
             let result = is_valid_range { range = Range { min = 1, max = 10 } }
         """.trimIndent()
 
@@ -902,8 +902,8 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_above_threshold = {opt, threshold} ->
                 match opt is
-                  Some { val } if val > threshold -> true
-                  _ -> false
+                  Some { val } if val > threshold -> True
+                  _ -> False
             let result = is_above_threshold { opt = Some { val = 100 }, threshold = 50 }
         """.trimIndent()
 
@@ -965,9 +965,9 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_origin_point = {opt} ->
                 match opt is
-                  Some { val = { x = 0, y = 0 } } -> true
-                  Some { val } -> false
-                  None -> false
+                  Some { val = { x = 0, y = 0 } } -> True
+                  Some { val } -> False
+                  None -> False
             let result = is_origin_point { opt = Some { val = { x = 0, y = 0 } } }
         """.trimIndent()
 
@@ -1017,8 +1017,8 @@ class ComprehensivePatternMatchingTest {
         val code = """
             let is_pythagorean = {triple} ->
                 match triple is
-                  { a, b, c } if a*a + b*b == c*c -> true
-                  _ -> false
+                  { a, b, c } if a*a + b*b == c*c -> True
+                  _ -> False
             let result = is_pythagorean { triple = { a = 3, b = 4, c = 5 } }
         """.trimIndent()
 

@@ -437,7 +437,12 @@ class ContinuationTransformer {
                 expr.value?.let { collectUsedVariablesRecursive(it, collector) }
             }
             is ArrayLiteral -> {
-                expr.elements.forEach { collectUsedVariablesRecursive(it, collector) }
+                expr.elements.forEach { element ->
+                    when (element) {
+                        is ArrayRegularElement -> collectUsedVariablesRecursive(element.expression, collector)
+                        is ArraySpreadElement -> collectUsedVariablesRecursive(element.expression, collector)
+                    }
+                }
             }
             is ArrayAccess -> {
                 collectUsedVariablesRecursive(expr.array, collector)

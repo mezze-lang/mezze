@@ -265,9 +265,9 @@ class ReturnEffectTest {
             let is_valid = {x} ->
                 perform WithReturn { cont = continuation::new {} } in do
                     if x < 0 then
-                        Return.return {val = false}
+                        Return.return {val = False}
                     else {}
-                    true
+                    True
 
             is_valid {x = -1}
         """.trimIndent()

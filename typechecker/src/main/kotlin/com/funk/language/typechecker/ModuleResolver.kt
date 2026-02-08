@@ -163,6 +163,25 @@ class ModuleResolver(
                 moduleCache[modulePath] = module
             }
         }
+
+        /**
+         * Get all cached modules as a map of module paths to Programs.
+         * Used for bundling modules into compiled JARs.
+         */
+        @JvmStatic
+        fun getAllModules(): Map<String, Program> {
+            synchronized(cacheLock) {
+                return moduleCache.mapValues { (_, module) -> module.program }
+            }
+        }
+
+        /**
+         * Factory method to create a new ModuleResolver instance.
+         */
+        @JvmStatic
+        fun create(): ModuleResolver {
+            return ModuleResolver()
+        }
     }
 
     // Track modules currently being loaded to detect circular dependencies (per-instance to track call stack)
@@ -801,7 +820,12 @@ class ModuleResolver(
                 }
             )
             is ArrayLiteral -> expr.copy(
-                elements = expr.elements.map { qualifyExpression(it, moduleNames, prefix) }
+                elements = expr.elements.map { element ->
+                    when (element) {
+                        is ArrayRegularElement -> ArrayRegularElement(qualifyExpression(element.expression, moduleNames, prefix))
+                        is ArraySpreadElement -> ArraySpreadElement(qualifyExpression(element.expression, moduleNames, prefix))
+                    }
+                }
             )
             // Literal expressions don't need qualification
             is IntLiteral, is NatLiteral, is FloatLiteral, is StringLiteral,

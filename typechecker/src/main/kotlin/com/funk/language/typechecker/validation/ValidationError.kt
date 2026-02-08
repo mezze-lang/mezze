@@ -473,6 +473,7 @@ private fun formatType(type: FunkType): String {
         is FunkType.NatType -> "Nat"
         is FunkType.FracType -> "Frac"
         is FunkType.OrderingType -> "Ordering"
+        is FunkType.BytesType -> "Bytes"
         is FunkType.FunctionType -> "{...} -> ..."
         is FunkType.RecordType -> "{${type.fields.keys.take(3).joinToString()}}"
         is FunkType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}]"

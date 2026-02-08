@@ -404,7 +404,8 @@ internal val FunkParser.recordLiteralEntryParser: Parser<RecordLiteralEntry>
 internal val FunkParser.arrayLiteral: Parser<Expression>
     get() = { stream ->
         // Parse: [element1, element2, ...]
-        // Also supports spread: [1, ...rest, 3]
+        // Supports spread only at the start: [...xs, a, b, c]
+        // NOT allowed: [a, ...xs] or [a, ...xs, b]
         val arrayLocation = stream.current()?.let { tokenLocation(it, currentFile) }  // Capture [ token location
         val lbracket = tok(TokenType.LBRACKET)(stream)
         when (lbracket) {
@@ -415,7 +416,7 @@ internal val FunkParser.arrayLiteral: Parser<Expression>
                 val rbracket = tok(TokenType.RBRACKET)(stream1)
                 if (rbracket is ParseResult.Success) {
                     ParseResult.Success(
-                        ArrayLiteral(emptyList(), sourceLocation = arrayLocation),
+                        ArrayLiteral(emptyList<ArrayElement>(), sourceLocation = arrayLocation),
                         rbracket.remaining
                     )
                 } else {
@@ -427,6 +428,9 @@ internal val FunkParser.arrayLiteral: Parser<Expression>
 
                     when (elements) {
                         is ParseResult.Success -> {
+                            // Validate spread position: spreads must come before regular elements
+                            validateArraySpreadPosition(elements.value, arrayLocation)
+
                             val stream2 = skipNewlines(elements.remaining)
                             val rbracket2 = tok(TokenType.RBRACKET)(stream2)
 
@@ -446,11 +450,61 @@ internal val FunkParser.arrayLiteral: Parser<Expression>
         }
     }
 
-internal val FunkParser.arrayElementParser: Parser<Expression>
+/**
+ * Validate that array spread elements only appear at the beginning.
+ * Valid: [...xs, a, b, c] or [...xs]
+ * Invalid: [a, ...xs] or [a, ...xs, b]
+ */
+private fun validateArraySpreadPosition(elements: List<ArrayElement>, location: SourceLocation?) {
+    var seenRegular = false
+    for (element in elements) {
+        when (element) {
+            is ArrayRegularElement -> seenRegular = true
+            is ArraySpreadElement -> {
+                if (seenRegular) {
+                    throw ParseException(
+                        "Array spread must come before regular elements. Use [...arr, elem1, elem2] syntax.",
+                        position = 0,
+                        line = location?.line ?: 0,
+                        column = location?.column ?: 0
+                    )
+                }
+            }
+        }
+    }
+}
+
+internal val FunkParser.arrayElementParser: Parser<ArrayElement>
     get() = { stream ->
-        // Array spread operator (...) is not yet implemented
-        // For now, just parse regular expressions
-        expression(stream)
+        val current = stream.current()
+
+        if (current?.type == TokenType.ELLIPSIS) {
+            // Spread syntax: ...expr
+            val ellipsis = tok(TokenType.ELLIPSIS)(stream)
+            when (ellipsis) {
+                is ParseResult.Success -> {
+                    val expr = expression(ellipsis.remaining)
+                    when (expr) {
+                        is ParseResult.Success -> ParseResult.Success(
+                            ArraySpreadElement(expr.value),
+                            expr.remaining
+                        )
+                        is ParseResult.Failure -> expr
+                    }
+                }
+                is ParseResult.Failure -> ellipsis
+            }
+        } else {
+            // Regular element
+            val expr = expression(stream)
+            when (expr) {
+                is ParseResult.Success -> ParseResult.Success(
+                    ArrayRegularElement(expr.value),
+                    expr.remaining
+                )
+                is ParseResult.Failure -> expr
+            }
+        }
     }
 
 // ===== PRIMARY EXPRESSION =====
@@ -1090,7 +1144,12 @@ internal fun FunkParser.desugarPipe(pipeValue: Expression, target: Expression): 
 
             // Recurse into array literals
             is ArrayLiteral -> target.copy(
-                elements = target.elements.map { desugarPipe(pipeValue, it) }
+                elements = target.elements.map { element ->
+                    when (element) {
+                        is ArrayRegularElement -> element.copy(expression = desugarPipe(pipeValue, element.expression))
+                        is ArraySpreadElement -> element.copy(expression = desugarPipe(pipeValue, element.expression))
+                    }
+                }
             )
 
             // Recurse into perform expressions
