@@ -4,6 +4,8 @@ import com.funk.language.ast.*
 import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.context.TypingContext
 import com.funk.language.typechecker.context.TypeScheme
+import com.funk.language.typechecker.debug.DebugLogger
+import com.funk.language.typechecker.debug.DebugLogger.Category
 
 /**
  * Constraint generator - orchestrator for constraint-based type inference.
@@ -67,10 +69,11 @@ class ConstraintGenerator(
         program: Program,
         context: TypingContext
     ): ProgramConstraintResult {
-        // DEBUG: Print ability and effect names
-        if (System.getProperty("funk.debug.abilities") == "true") {
-            println("[DEBUG ConstraintGenerator] abilityNames = $abilityNames")
-            println("[DEBUG ConstraintGenerator] effectNames = $effectNames")
+        DebugLogger.debugSection(Category.ConstraintGenerator, "Abilities and Effects") {
+            listOf(
+                "abilityNames = $abilityNames",
+                "effectNames = $effectNames"
+            )
         }
 
         val results = mutableMapOf<String, ConstraintResult>()
@@ -466,12 +469,11 @@ class ConstraintGenerator(
         recordLiteralBindings: Set<String>,
         preConvertedAnnotationType: FunkType? = null
     ): ConstraintResult {
-        // DEBUG
-        if (System.getProperty("funk.debug.abilities") == "true") {
-            println("[DEBUG generateLetBinding] binding=${binding.variableName} expr=${binding.expression.javaClass.simpleName}")
-            if (binding.expression is Identifier) {
-                println("[DEBUG generateLetBinding] Identifier='${(binding.expression as Identifier).name}'")
-            }
+        DebugLogger.debug(Category.ConstraintGenerator) {
+            val exprInfo = if (binding.expression is Identifier) {
+                " Identifier='${(binding.expression as Identifier).name}'"
+            } else ""
+            "generateLetBinding: binding=${binding.variableName} expr=${binding.expression.javaClass.simpleName}$exprInfo"
         }
 
         // BIDIRECTIONAL TYPING: If there's a type annotation, use it as the expected type
@@ -639,23 +641,22 @@ class ConstraintGenerator(
         abilityConstraints: List<Constraint.AbilityRequired>,
         substitution: com.funk.language.typechecker.solving.Substitution
     ): FunkType {
-        // DEBUG: Print what we're receiving
-        if (System.getProperty("funk.debug.constraints") == "true") {
-            println("[DEBUG] addAbilityConstraintsToFunctionType called:")
-            println("  - Type: $type")
+        DebugLogger.debugSection(Category.ConstraintGenerator, "addAbilityConstraintsToFunctionType") {
+            val lines = mutableListOf("Type: $type")
             if (type is FunkType.FunctionType) {
-                println("  - Param type: ${type.paramType}")
+                lines.add("Param type: ${type.paramType}")
                 if (type.paramType is FunkType.RecordType) {
                     val record = type.paramType as FunkType.RecordType
-                    println("    - Record fields:")
+                    lines.add("  Record fields:")
                     record.fields.forEach { (name, fieldType) ->
-                        println("      * $name: $fieldType")
+                        lines.add("    * $name: $fieldType")
                     }
                 }
-                println("  - Return type: ${type.returnType}")
+                lines.add("Return type: ${type.returnType}")
             }
-            println("  - Ability constraints received: ${abilityConstraints.size} constraints")
-            abilityConstraints.forEach { println("    * $it") }
+            lines.add("Ability constraints received: ${abilityConstraints.size} constraints")
+            abilityConstraints.forEach { lines.add("  * $it") }
+            lines
         }
 
         // Only add ability constraints to function types
@@ -695,10 +696,8 @@ class ConstraintGenerator(
         collectTypeVars(type.paramType)
         collectTypeVars(type.returnType)
 
-        // DEBUG: Print collected type vars
-        if (System.getProperty("funk.debug.constraints") == "true") {
-            println("[DEBUG] Collected type vars from function type:")
-            typeVars.forEach { println("    * ${it.name} (id=${it.id})") }
+        DebugLogger.debugSection(Category.ConstraintGenerator, "Collected type vars") {
+            typeVars.map { "* ${it.name} (id=${it.id})" }
         }
 
         // Find ability constraints that apply to type variables in the function
@@ -737,13 +736,12 @@ class ConstraintGenerator(
             }
         }
 
-        // DEBUG: Print result
-        if (System.getProperty("funk.debug.constraints") == "true") {
-            println("[DEBUG] addAbilityConstraintsToFunctionType result:")
-            println("  - All constraints: ${allConstraints.size} constraints")
-            allConstraints.forEach { println("    * $it") }
-            println("  - Function ability constraints added: ${functionAbilityConstraints.size}")
-            functionAbilityConstraints.forEach { println("    * $it") }
+        DebugLogger.debugSection(Category.ConstraintGenerator, "addAbilityConstraintsToFunctionType result") {
+            val lines = mutableListOf("All constraints: ${allConstraints.size} constraints")
+            allConstraints.forEach { lines.add("  * $it") }
+            lines.add("Function ability constraints added: ${functionAbilityConstraints.size}")
+            functionAbilityConstraints.forEach { lines.add("  * $it") }
+            lines
         }
 
         return FunkType.FunctionType(

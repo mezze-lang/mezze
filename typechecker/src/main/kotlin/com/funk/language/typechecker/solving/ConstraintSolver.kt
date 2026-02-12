@@ -4,6 +4,8 @@ import com.funk.language.ast.*
 import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.constraints.Constraint
 import com.funk.language.typechecker.context.TypingContext
+import com.funk.language.typechecker.debug.DebugLogger
+import com.funk.language.typechecker.debug.DebugLogger.Category
 
 /**
  * Constraint solver - solves type constraints to infer types.
@@ -465,20 +467,18 @@ class ConstraintSolver(
         // are only created during HasConstructor constraint solving
         for (typeVar in mustBeOpenTypes) {
             val resolved = substitution.apply(FunkType.VarType(typeVar))
-            if (System.getProperty("funk.typecheck.debug") == "true") {
-                println("[DEBUG] MustBeOpen typeVar=$typeVar resolved to $resolved")
-            }
+            DebugLogger.debug(Category.ConstraintSolver) { "MustBeOpen typeVar=$typeVar resolved to $resolved" }
             if (resolved is FunkType.VariantType) {
                 resolved.rowVar?.let { mustBeOpenRowVars.add(it) }
-                if (System.getProperty("funk.typecheck.debug") == "true") {
-                    println("[DEBUG] Added rowVar=${resolved.rowVar} to mustBeOpenRowVars")
-                }
+                DebugLogger.debug(Category.ConstraintSolver) { "Added rowVar=${resolved.rowVar} to mustBeOpenRowVars" }
             }
         }
 
-        if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("[DEBUG] patternBasedRowVars = $patternBasedRowVars")
-            println("[DEBUG] mustBeOpenRowVars = $mustBeOpenRowVars")
+        DebugLogger.debugSection(Category.ConstraintSolver, "Row Variables") {
+            listOf(
+                "patternBasedRowVars = $patternBasedRowVars",
+                "mustBeOpenRowVars = $mustBeOpenRowVars"
+            )
         }
 
         // PHASE 2c: Close pattern-based variants now that all constructors are collected
@@ -510,9 +510,8 @@ class ConstraintSolver(
             iterationCount++
             processedInThisPass.clear()
 
-            // DEBUG
-            if (System.getProperty("funk.typecheck.debug") == "true") {
-                println("[DEBUG] Worklist iteration $iterationCount, ${constraintWorklist.size} constraints remaining")
+            DebugLogger.debug(Category.ConstraintSolver) {
+                "Worklist iteration $iterationCount, ${constraintWorklist.size} constraints remaining"
             }
 
             val iterator = constraintWorklist.iterator()
@@ -744,17 +743,13 @@ class ConstraintSolver(
      * so we have access to the full accumulated substitution.
      */
     private fun solveEquality(constraint: Constraint.Equality): ConstraintResult {
-        // DEBUG: Log equality constraint solving
-        if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("[DEBUG] solveEquality: ${constraint.left} = ${constraint.right} (${constraint.context})")
+        DebugLogger.debug(Category.ConstraintSolver) {
+            "solveEquality: ${constraint.left} = ${constraint.right} (${constraint.context})"
         }
 
         val result = unify(constraint.left, constraint.right, typeDeclarations)
 
-        // DEBUG: Log result
-        if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("[DEBUG]   result: $result")
-        }
+        DebugLogger.debug(Category.ConstraintSolver) { "  result: $result" }
 
         return when (result) {
             is UnificationResult.Success -> {

@@ -1,6 +1,8 @@
 package com.funk.language.typechecker.monomorphization
 
 import com.funk.language.ast.*
+import com.funk.language.typechecker.debug.DebugLogger
+import com.funk.language.typechecker.debug.DebugLogger.Category
 
 /**
  * Instance generator - creates specialized versions of polymorphic functions.
@@ -100,8 +102,9 @@ class InstanceGenerator(
         }
 
         if (errors.isNotEmpty()) {
-            println("Warning: Some monomorphic instances could not be generated:")
-            errors.forEach { println("  - $it") }
+            DebugLogger.debugSection(Category.Monomorphization, "Warning: Some monomorphic instances could not be generated") {
+                errors.map { "- $it" }
+            }
         }
 
         return instances

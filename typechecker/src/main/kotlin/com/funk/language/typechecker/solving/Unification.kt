@@ -1,6 +1,8 @@
 package com.funk.language.typechecker.solving
 
 import com.funk.language.ast.*
+import com.funk.language.typechecker.debug.DebugLogger
+import com.funk.language.typechecker.debug.DebugLogger.Category
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -1067,10 +1069,11 @@ internal fun expandTypeApplicationToVariant(typeApp: FunkType.TypeApplication, t
     // Only variant definitions can be expanded to variant types
     val variantDef = typeDecl.definition as? VariantDefinition ?: return null
 
-    // DEBUG: Check how many constructors we're expanding
-    if (System.getProperty("funk.debug.expansion") == "true") {
-        println("[DEBUG expandTypeApplication] Expanding ${typeApp.constructor}")
-        println("[DEBUG expandTypeApplication] Variant has ${variantDef.constructors.size} constructors: ${variantDef.constructors.map { it.name }}")
+    DebugLogger.debugSection(Category.Unification, "expandTypeApplication") {
+        listOf(
+            "Expanding ${typeApp.constructor}",
+            "Variant has ${variantDef.constructors.size} constructors: ${variantDef.constructors.map { it.name }}"
+        )
     }
 
     // Build substitution map for type parameters

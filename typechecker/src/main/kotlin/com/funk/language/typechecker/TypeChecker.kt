@@ -9,6 +9,8 @@ import com.funk.language.typechecker.context.ContextBuilder
 import com.funk.language.typechecker.context.TypingContext
 import com.funk.language.typechecker.context.TypeScheme
 import com.funk.language.typechecker.context.collectFreeTypeVars
+import com.funk.language.typechecker.debug.DebugLogger
+import com.funk.language.typechecker.debug.DebugLogger.Category
 import com.funk.language.typechecker.module.*
 import com.funk.language.typechecker.monomorphization.MonomorphizationEngine
 import com.funk.language.typechecker.monomorphization.MonomorphizationResult
@@ -147,6 +149,9 @@ class TypeChecker(
      * @param currentPath Optional path for module resolution (defaults to current directory)
      */
     fun checkProgram(program: Program, currentPath: Path = Paths.get(".")): TypeCheckResult {
+        // Clear caches for fresh type checking
+        com.funk.language.typechecker.solving.clearUnificationCache()
+
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
         val enhancedContext = if (hasImports(program)) {
@@ -198,10 +203,11 @@ class TypeChecker(
         val effectNames = buildResult.effectDeclarations.keys +
             (importContext?.importedEffects?.keys ?: emptySet())
 
-        // DEBUG: Print ability and effect names
-        if (System.getProperty("funk.debug.abilities") == "true") {
-            println("[DEBUG TypeChecker] abilityNames = $abilityNames")
-            println("[DEBUG TypeChecker] effectNames = $effectNames")
+        DebugLogger.debugSection(Category.TypeChecker, "Abilities and Effects") {
+            listOf(
+                "abilityNames = $abilityNames",
+                "effectNames = $effectNames"
+            )
         }
 
         // Merge local and imported effect declarations
@@ -722,9 +728,7 @@ class TypeChecker(
         // Reset type variable counter for consistent naming (old behavior)
         com.funk.language.ast.TypeVar.resetCounter()
 
-        // Clear unification cache for fresh type checking
-        com.funk.language.typechecker.solving.clearUnificationCache()
-
+        // Note: checkProgram() clears the unification cache internally
         val result = checkProgram(program, currentPath)
 
         return when (result) {

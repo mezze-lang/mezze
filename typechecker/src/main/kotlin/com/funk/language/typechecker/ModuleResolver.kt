@@ -2,6 +2,8 @@ package com.funk.language.typechecker
 
 import com.funk.language.ast.*
 import com.funk.language.parser.FunkParser
+import com.funk.language.typechecker.debug.DebugLogger
+import com.funk.language.typechecker.debug.DebugLogger.Category
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.Files
@@ -80,20 +82,14 @@ sealed class ModuleError(message: String) : Exception(message) {
 private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
     var current = startPath.toAbsolutePath()
 
-    if (System.getProperty("funk.typecheck.debug") == "true") {
-        println("DEBUG: Finding project root, starting from: $current")
-    }
+    DebugLogger.debug(Category.ModuleResolver) { "Finding project root, starting from: $current" }
 
     // Look for stdlib directory in current and parent directories
     for (i in 0..5) { // Check up to 5 levels up
         val stdlibPath = current.resolve("stdlib")
-        if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("DEBUG: Checking for stdlib at: $stdlibPath (exists: ${Files.exists(stdlibPath)})")
-        }
+        DebugLogger.debug(Category.ModuleResolver) { "Checking for stdlib at: $stdlibPath (exists: ${Files.exists(stdlibPath)})" }
         if (Files.exists(stdlibPath) && Files.isDirectory(stdlibPath)) {
-            if (System.getProperty("funk.typecheck.debug") == "true") {
-                println("DEBUG: Found project root: $current")
-            }
+            DebugLogger.debug(Category.ModuleResolver) { "Found project root: $current" }
             return current
         }
         val parent = current.parent
@@ -102,9 +98,7 @@ private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
     }
 
     // Fallback to current directory
-    if (System.getProperty("funk.typecheck.debug") == "true") {
-        println("DEBUG: Using fallback project root: ${startPath.toAbsolutePath()}")
-    }
+    DebugLogger.debug(Category.ModuleResolver) { "Using fallback project root: ${startPath.toAbsolutePath()}" }
     return startPath.toAbsolutePath()
 }
 
@@ -259,9 +253,7 @@ class ModuleResolver(
         
         // Check cache first (thread-safe) - fast path
         getFromCache(modulePath)?.let {
-            if (System.getProperty("funk.typecheck.debug") == "true") {
-                println("DEBUG: Found cached module: $modulePath")
-            }
+            DebugLogger.debug(Category.ModuleResolver) { "Found cached module: $modulePath" }
             return it
         }
 
@@ -409,9 +401,7 @@ class ModuleResolver(
             // Fall back to filesystem for development
             // Note: relativeFilePath already contains "stdlib/std/..." prefix
             val flatStdlibPath = projectRoot.resolve(relativeFilePath)
-            if (System.getProperty("funk.typecheck.debug") == "true") {
-                println("DEBUG: Checking flat stdlib path: $flatStdlibPath (exists: ${Files.exists(flatStdlibPath)})")
-            }
+            DebugLogger.debug(Category.ModuleResolver) { "Checking flat stdlib path: $flatStdlibPath (exists: ${Files.exists(flatStdlibPath)})" }
             if (Files.exists(flatStdlibPath) && Files.isRegularFile(flatStdlibPath)) {
                 return flatStdlibPath
             }
@@ -487,13 +477,16 @@ class ModuleResolver(
                         val funkType = fromContext ?: fromAnnotation ?: fromInferred ?: FunkType.VarType(TypeVar.fresh())
 
                         // DEBUG key items (only for specific debugging)
-                        if (System.getProperty("funk.typecheck.debug") == "true" && item.variableName == "not") {
-                            println("\n=== extractExports DEBUG for 'not' ===")
-                            println("Variable name: ${item.variableName}")
-                            println("fromContext: $fromContext")
-                            println("fromAnnotation: $fromAnnotation")
-                            println("fromInferred: $fromInferred")
-                            println("Final funkType: $funkType")
+                        if (item.variableName == "not") {
+                            DebugLogger.debugSection(Category.ModuleResolver, "extractExports for 'not'") {
+                                listOf(
+                                    "Variable name: ${item.variableName}",
+                                    "fromContext: $fromContext",
+                                    "fromAnnotation: $fromAnnotation",
+                                    "fromInferred: $fromInferred",
+                                    "Final funkType: $funkType"
+                                )
+                            }
                         }
 
                         exports[item.variableName] = ExportedItem(
@@ -687,14 +680,15 @@ class ModuleResolver(
      * @param typeContext Optional context from TypeChecker with inferred types for exports
      */
     fun updateModuleExports(modulePath: String, typedProgram: Program, typeContext: Map<String, FunkType>? = null) {
-        if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("\nDEBUG updateModuleExports: modulePath=$modulePath")
-            println("DEBUG updateModuleExports: Program has ${typedProgram.items.size} items")
+        DebugLogger.debug(Category.ModuleResolver) { "updateModuleExports: modulePath=$modulePath, ${typedProgram.items.size} items" }
 
+        if (DebugLogger.isCategoryEnabled(Category.ModuleResolver)) {
             // Check if identifiers are qualified
             typedProgram.items.forEach { item ->
                 if (item is LetBinding) {
-                    println("DEBUG updateModuleExports: LetBinding '${item.variableName}' expression type: ${item.expression.javaClass.simpleName}")
+                    DebugLogger.debug(Category.ModuleResolver) {
+                        "LetBinding '${item.variableName}' expression type: ${item.expression.javaClass.simpleName}"
+                    }
                     // Check for identifiers in the expression
                     checkIdentifiersInExpression(item.expression, "  ")
                 }
@@ -719,18 +713,16 @@ class ModuleResolver(
         }
         putInCache(modulePath, updatedModule)
 
-        if (System.getProperty("funk.typecheck.debug") == "true") {
-            println("DEBUG updateModuleExports: Cached module with ${updatedModule.exports.size} exports")
-        }
+        DebugLogger.debug(Category.ModuleResolver) { "Cached module with ${updatedModule.exports.size} exports" }
     }
 
     private fun checkIdentifiersInExpression(expr: Expression, indent: String) {
         when (expr) {
             is Identifier -> {
-                println("${indent}Identifier: '${expr.name}'")
+                DebugLogger.debug(Category.ModuleResolver) { "${indent}Identifier: '${expr.name}'" }
             }
             is FunctionCall -> {
-                println("${indent}FunctionCall:")
+                DebugLogger.debug(Category.ModuleResolver) { "${indent}FunctionCall:" }
                 checkIdentifiersInExpression(expr.function, "$indent  ")
                 checkIdentifiersInExpression(expr.arguments, "$indent  ")
             }

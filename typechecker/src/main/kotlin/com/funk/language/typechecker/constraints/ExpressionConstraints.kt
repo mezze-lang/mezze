@@ -5,6 +5,8 @@ import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.context.TypingContext
 import com.funk.language.typechecker.TypeCheckError
 import com.funk.language.typechecker.SpreadSyntaxError
+import com.funk.language.typechecker.debug.DebugLogger
+import com.funk.language.typechecker.debug.DebugLogger.Category
 import com.funk.language.typechecker.solving.collectFreeTypeVars
 import com.funk.language.typechecker.ErrorType
 
@@ -219,17 +221,15 @@ class ExpressionConstraintGenerator {
     // ========================================================================
 
     private fun generateIdentifier(expr: Identifier, context: ConstraintContext): ConstraintResult {
-        // DEBUG
-        if (expr.name == "Show" && System.getProperty("funk.debug.abilities") == "true") {
-            println("[DEBUG ExpressionConstraints.generateIdentifier] Looking up '${expr.name}'")
+        if (expr.name == "Show") {
+            DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Looking up '${expr.name}'" }
         }
 
         // Look up variable in typing context
         return when (val result = context.typingContext.lookup(expr.name)) {
             is TypingContext.LookupResult.Found -> {
-                // DEBUG
-                if (expr.name == "Show" && System.getProperty("funk.debug.abilities") == "true") {
-                    println("[DEBUG ExpressionConstraints.generateIdentifier] Found '${expr.name}' in context!")
+                if (expr.name == "Show") {
+                    DebugLogger.debug(Category.ExpressionConstraints) { "generateIdentifier: Found '${expr.name}' in context!" }
                 }
                 when (val binding = result.binding) {
                     is TypingContext.Binding.Monomorphic -> {
@@ -289,14 +289,16 @@ class ExpressionConstraintGenerator {
                 val isUserDefinedAbility = expr.name in context.abilityNames
                 val isEffect = expr.name in context.effectNames
 
-                // DEBUG
-                if (expr.name == "Show" && System.getProperty("funk.debug.abilities") == "true") {
-                    println("[DEBUG ExpressionConstraints] Checking '${expr.name}':")
-                    println("  - isBuiltInAbility: $isBuiltInAbility")
-                    println("  - isUserDefinedAbility: $isUserDefinedAbility")
-                    println("  - context.abilityNames: ${context.abilityNames}")
-                    println("  - isEffect: $isEffect")
-                    println("  - context.effectNames: ${context.effectNames}")
+                if (expr.name == "Show") {
+                    DebugLogger.debugSection(Category.ExpressionConstraints, "Checking '${expr.name}'") {
+                        listOf(
+                            "isBuiltInAbility: $isBuiltInAbility",
+                            "isUserDefinedAbility: $isUserDefinedAbility",
+                            "context.abilityNames: ${context.abilityNames}",
+                            "isEffect: $isEffect",
+                            "context.effectNames: ${context.effectNames}"
+                        )
+                    }
                 }
 
                 if (isBuiltInAbility || isUserDefinedAbility || isEffect) {
@@ -2272,14 +2274,14 @@ class ExpressionConstraintGenerator {
             }
         }
 
-        // DEBUG
-        if (System.getProperty("funk.debug.effects") == "true") {
-            println("[DEBUG generatePerform] Processing perform expression")
-            println("  handlers: ${expr.handlers.map { it.name }}")
-            println("  performerToEffect map: ${context.performerToEffect}")
-            println("  handledEffects: $handledEffects")
-            println("  exprResult.type: ${exprResult.type}")
-            println("  exprResult.effects: ${exprResult.effects}")
+        DebugLogger.debugSection(Category.ExpressionConstraints, "generatePerform") {
+            listOf(
+                "handlers: ${expr.handlers.map { it.name }}",
+                "performerToEffect map: ${context.performerToEffect}",
+                "handledEffects: $handledEffects",
+                "exprResult.type: ${exprResult.type}",
+                "exprResult.effects: ${exprResult.effects}"
+            )
         }
 
         // Remove handled effects from the expression's type (for types that already have effects embedded)
@@ -2289,10 +2291,11 @@ class ExpressionConstraintGenerator {
         // This is where effects are tracked during constraint generation
         val remainingEffects = exprResult.effects - handledEffects
 
-        // DEBUG
-        if (System.getProperty("funk.debug.effects") == "true") {
-            println("  resultType after removal: $resultType")
-            println("  remainingEffects: $remainingEffects")
+        DebugLogger.debugSection(Category.ExpressionConstraints, "generatePerform result") {
+            listOf(
+                "resultType after removal: $resultType",
+                "remainingEffects: $remainingEffects"
+            )
         }
 
         return ConstraintResult(
@@ -2395,15 +2398,111 @@ class ExpressionConstraintGenerator {
     }
 
     private fun generateEffectCall(expr: EffectCallExpression, context: ConstraintContext): ConstraintResult {
-        // Effect.operation {args}
+        // EffectCallExpression represents effect operation calls like Effect.operation(args)
+        // The effectName and operationName are already parsed out
 
-        // TODO: Implement effect call constraint generation
+        val effectName = expr.effectName
+        val operationName = expr.operationName
+
+        // Look up effect type from context
+        val effectKey = "${effectName}_ability"
+        val effectBinding = when (val lookup = context.typingContext.lookup(effectKey)) {
+            is TypingContext.LookupResult.Found -> lookup.binding
+            is TypingContext.LookupResult.NotFound -> {
+                // Effect not found - return error with fresh type var
+                return ConstraintResult(
+                    type = FunkType.VarType(TypeVar.fresh()),
+                    constraints = emptyList(),
+                    effects = setOf(effectName),
+                    undefinedVariables = listOf(ConstraintResult.UndefinedVariable(effectName, expr.sourceLocation))
+                )
+            }
+        }
+
+        // Get effect type from binding
+        val effectType = when (effectBinding) {
+            is TypingContext.Binding.Monomorphic -> effectBinding.type
+            is TypingContext.Binding.Polymorphic -> effectBinding.scheme.instantiate().type
+        }
+
+        // Effect should be stored as RecordType with operations as fields
+        if (effectType !is FunkType.RecordType) {
+            throw IllegalStateException("Effect '$effectName' is not properly registered as RecordType")
+        }
+
+        // Look up operation in effect
+        val operationType = effectType.fields[operationName]
+        if (operationType == null) {
+            val availableOperations = effectType.fields.keys.joinToString(", ")
+            throw TypeCheckError(
+                message = "Operation '$operationName' not found in effect '$effectName'. Available operations: $availableOperations",
+                expression = expr,
+                errorType = ErrorType.MISSING_FIELD
+            )
+        }
+
+        // Handle associated type substitution if we're in a perform context
+        var instantiatedOperationType = operationType
+        val performContext = context.performContext
+        if (performContext != null && instantiatedOperationType is FunkType.FunctionType) {
+            // Find which performer is handling this effect
+            var performerName: String? = null
+            for (handler in performContext.handlers) {
+                val handlerEffectName = context.performerToEffect[handler.name]
+                if (handlerEffectName == effectName) {
+                    performerName = handler.name
+                    break
+                }
+            }
+
+            if (performerName != null) {
+                // Get the performer's associated type bindings
+                val performerKey = "${performerName}_performer"
+                when (val lookup = context.typingContext.lookup(performerKey)) {
+                    is TypingContext.LookupResult.Found -> {
+                        val performerBinding = lookup.binding
+                        val performerType = when (performerBinding) {
+                            is TypingContext.Binding.Monomorphic -> performerBinding.type
+                            is TypingContext.Binding.Polymorphic -> performerBinding.scheme.type
+                        }
+                        if (performerType is FunkType.RecordType) {
+                            instantiatedOperationType = substituteAssociatedTypesInType(
+                                instantiatedOperationType,
+                                performerType.fields
+                            )
+                        }
+                    }
+                    is TypingContext.LookupResult.NotFound -> {
+                        // Performer not registered - continue without substitution
+                    }
+                }
+            }
+        }
+
+        // Instantiate with fresh vars to avoid variable sharing across different calls
+        instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
+
+        // Generate constraints for arguments
         val argResult = generate(expr.arguments, context)
 
+        // If operation is a function, add constraint that argument type matches parameter type
+        val (resultType, additionalConstraints) = if (instantiatedOperationType is FunkType.FunctionType) {
+            val paramConstraint = Constraint.Equality(
+                left = argResult.type,
+                right = instantiatedOperationType.paramType,
+                context = "Effect operation argument type",
+                sourceLocation = expr.sourceLocation
+            )
+            instantiatedOperationType.returnType to listOf(paramConstraint)
+        } else {
+            // Operation is not a function (unusual but possible for thunks)
+            instantiatedOperationType to emptyList()
+        }
+
         return ConstraintResult(
-            type = FunkType.VarType(TypeVar.fresh()),
-            constraints = argResult.constraints,
-            effects = setOf(expr.effectName),
+            type = resultType,
+            constraints = argResult.constraints + additionalConstraints,
+            effects = setOf(effectName),
             undefinedVariables = argResult.undefinedVariables
         )
     }
@@ -2413,10 +2512,73 @@ class ExpressionConstraintGenerator {
     // ========================================================================
 
     private fun generateStateMachine(expr: StateMachineExpression, context: ConstraintContext): ConstraintResult {
-        // State machines are compiler-generated, not user code
-        // TODO: Implement state machine constraint generation
+        // State machines are compiler-generated continuation transformations.
+        // The type of a state machine is determined by its CompleteState expressions.
+        // We need to:
+        // 1. Type-check all computations in ComputeState nodes
+        // 2. Type-check all yield expressions in YieldState nodes
+        // 3. Find all CompleteState nodes and unify their result types
 
-        return ConstraintResult.simple(FunkType.VarType(TypeVar.fresh()))
+        val allConstraints = mutableListOf<Constraint>()
+        val allEffects = mutableSetOf<String>()
+        val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
+
+        // Track result types from CompleteStates to unify them
+        val resultTypes = mutableListOf<FunkType>()
+
+        for (state in expr.states) {
+            when (state) {
+                is ComputeState -> {
+                    // Type check the computation expression
+                    val computeResult = generate(state.computation, context)
+                    allConstraints.addAll(computeResult.constraints)
+                    allEffects.addAll(computeResult.effects)
+                    undefinedVars.addAll(computeResult.undefinedVariables)
+                }
+                is YieldState -> {
+                    // Type check the yield value expression
+                    val yieldResult = generate(state.valueExpression, context)
+                    allConstraints.addAll(yieldResult.constraints)
+                    allEffects.addAll(yieldResult.effects)
+                    undefinedVars.addAll(yieldResult.undefinedVariables)
+                }
+                is CompleteState -> {
+                    // Type check the result expression and track its type
+                    val completeResult = generate(state.resultExpression, context)
+                    allConstraints.addAll(completeResult.constraints)
+                    allEffects.addAll(completeResult.effects)
+                    undefinedVars.addAll(completeResult.undefinedVariables)
+                    resultTypes.add(completeResult.type)
+                }
+            }
+        }
+
+        // Determine the state machine's result type
+        val resultType = if (resultTypes.isEmpty()) {
+            // No complete states - use a fresh type variable (will be constrained by context)
+            FunkType.VarType(TypeVar.fresh())
+        } else if (resultTypes.size == 1) {
+            resultTypes.first()
+        } else {
+            // Multiple complete states - unify all result types
+            val unifiedType = FunkType.VarType(TypeVar.fresh())
+            for (rt in resultTypes) {
+                allConstraints.add(Constraint.Equality(
+                    left = unifiedType,
+                    right = rt,
+                    context = "State machine branches must have same type",
+                    sourceLocation = expr.sourceLocation
+                ))
+            }
+            unifiedType
+        }
+
+        return ConstraintResult(
+            type = resultType,
+            constraints = allConstraints,
+            effects = allEffects,
+            undefinedVariables = undefinedVars
+        )
     }
 
     // ========================================================================

@@ -4,6 +4,8 @@ import com.funk.language.ast.*
 import com.funk.language.typechecker.context.TypingContext
 import com.funk.language.typechecker.constraints.Constraint
 import com.funk.language.typechecker.constraints.ConstraintResult
+import com.funk.language.typechecker.debug.DebugLogger
+import com.funk.language.typechecker.debug.DebugLogger.Category
 import com.funk.language.typechecker.solving.Substitution
 import com.funk.language.typechecker.abilities.BuiltInAbilities
 
@@ -1694,8 +1696,8 @@ class TypeValidator(
             if (variantType.rowVar == null) {
                 val validConstructors = variantType.constructors.keys.sorted()
 
-                if (System.getProperty("funk.debug.validation") == "true") {
-                    println("[DEBUG validateVariantConstructor] ADDING ERROR for constructor $constructorName not in $validConstructors")
+                DebugLogger.debug(Category.TypeValidator) {
+                    "validateVariantConstructor: ADDING ERROR for constructor $constructorName not in $validConstructors"
                 }
 
                 return listOf(
