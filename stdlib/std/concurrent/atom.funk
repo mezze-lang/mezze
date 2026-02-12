@@ -1,0 +1,80 @@
+# std/concurrent/atom.funk - Clojure-style atomic references
+#
+# Atoms provide a way to manage shared, synchronous, independent state.
+# They are thread-safe and lock-free, using compare-and-swap (CAS) internally.
+#
+# Key properties:
+# - Reading is always instant (no blocking)
+# - Updates via swap retry automatically on contention
+# - No locks - uses hardware CAS instructions
+# - Good for independent state that changes frequently
+#
+# Usage:
+#   use std::concurrent::atom::{Atom, atom, deref, reset, swap}
+#
+#   let counter = atom {value = 0}
+#   swap {atom = counter, f = {current} -> current + 1}  # Increment atomically
+#   let current = deref {atom = counter}      # Read current value
+
+# Opaque type wrapping Java's AtomicReference
+pub newtype Atom 'a = Atom __NativeAtomicRef
+
+# Create a new atom with an initial value
+#
+# Example:
+#   let counter = atom {value = 0}
+#   let state = atom {value = {users = [], count = 0}}
+pub let atom: {value: 'a} -> Atom 'a =
+    {value} -> __native_atom_new {value = value}
+
+# Read the current value of an atom (non-blocking)
+#
+# Example:
+#   let current = deref {atom = counter}
+pub let deref: {atom: Atom 'a} -> 'a =
+    {atom} -> __native_atom_deref {atom = atom}
+
+# Set the atom to a new value, returns the new value
+# This is NOT atomic with respect to reads - use swap for read-modify-write
+#
+# Example:
+#   reset {atom = counter, value = 0}  # Reset counter to 0
+pub let reset: {atom: Atom 'a, value: 'a} -> 'a =
+    {atom, value} -> __native_atom_reset {atom = atom, value = value}
+
+# Atomically apply a function to the atom's value
+# If another thread modified the atom, retries with the new value
+# Returns the new value after successful update
+#
+# The function f should be pure and fast - it may be called multiple times!
+#
+# Example:
+#   swap {atom = counter, f = {current} -> current + 1}           # Increment
+#   swap {atom = state, f = {current} -> {users = current.users, count = current.count + 1}}
+pub let swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a =
+    {atom, f} -> __native_atom_swap {atom = atom, f = f}
+
+# Low-level compare-and-set operation
+# Sets atom to new value only if current value equals expected
+# Returns true if successful, false if value had changed
+#
+# Example:
+#   let success = compare_and_set {atom = counter, expected = 0, new = 1}
+pub let compare_and_set: {atom: Atom 'a, expected: 'a, new: 'a} -> Bool =
+    {atom, expected, new} -> __native_atom_cas {atom = atom, expected = expected, new = new}
+
+# Atomically apply a function, also passing an extra argument
+# Useful when the update depends on external data
+#
+# Example:
+#   swap_with {atom = counter, f = {current, delta} -> current + delta, arg = 5}
+pub let swap_with: {atom: Atom 'a, f: {'a, 'b} -> 'a, arg: 'b} -> 'a =
+    {atom, f, arg} -> __native_atom_swap_with {atom = atom, f = f, arg = arg}
+
+# Read the current value and apply a function atomically
+# Returns both the old and new values
+#
+# Example:
+#   let {old, new} = get_and_swap {atom = counter, f = {current} -> current + 1}
+pub let get_and_swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> {old: 'a, new: 'a} =
+    {atom, f} -> __native_atom_get_and_swap {atom = atom, f = f}

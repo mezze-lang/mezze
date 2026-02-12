@@ -149,6 +149,9 @@ object AtomImplementations {
     /**
      * __native_atom_cas: {atom: Atom 'a, expected: 'a, new: 'a} -> Bool
      * Low-level compare-and-set. Returns true if successful.
+     *
+     * Note: Uses value equality (equals) not reference equality, since
+     * FunkInt(10) != FunkInt(10) by reference but should be equal by value.
      */
     private fun registerCas(context: MutableMap<String, FunkValue>) {
         context["__native_atom_cas"] = NativeFunkFunction("__native_atom_cas") { args ->
@@ -161,10 +164,25 @@ object AtomImplementations {
             val expected = record.fields["expected"]
                 ?: throw FunkException("__native_atom_cas expects 'expected' field")
 
-            val new = record.fields["new"]
+            val newValue = record.fields["new"]
                 ?: throw FunkException("__native_atom_cas expects 'new' field")
 
-            FunkBool(atom.ref.compareAndSet(expected, new))
+            // CAS with value equality check instead of reference equality
+            var result = false
+            while (true) {
+                val current = atom.ref.get()
+                if (current != expected) {
+                    // Value doesn't match expected, CAS fails
+                    result = false
+                    break
+                }
+                if (atom.ref.compareAndSet(current, newValue)) {
+                    result = true
+                    break
+                }
+                // Reference changed but might still equal expected, retry
+            }
+            FunkBool(result)
         }
     }
 
@@ -199,20 +217,23 @@ object AtomImplementations {
     }
 
     /**
-     * Helper to call a Funk function with one argument.
+     * Helper to call a Funk function with the current atom value.
+     * Wraps the value in a record {current: value} as expected by Funk function syntax.
      */
     private fun callFunction(f: FunkValue, arg: FunkValue): FunkValue {
+        // Funk functions take a single record argument
+        val argsRecord = FunkRecord(mapOf("current" to arg))
         return when (f) {
             is FunkTruffleFunction -> {
                 f.callTarget.call(
-                    arg,
+                    argsRecord,
                     f.closureVariables,
                     f.lexicalScope,
                     f.lexicalScopeSlotMap
                 ) as FunkValue
             }
             is NativeFunkFunction -> {
-                f.call(listOf(arg))
+                f.call(listOf(argsRecord))
             }
             else -> throw FunkException("Expected function, got: ${f::class.simpleName}")
         }

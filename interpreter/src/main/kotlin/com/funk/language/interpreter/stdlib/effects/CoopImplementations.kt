@@ -30,8 +30,11 @@ object CoopImplementations {
         registerRace(context)
         registerAllPromises(context)
         registerTimeout(context)
+        registerCancel(context)
         registerSleep(context)
         registerIsDone(context)
+        registerIsCancelled(context)
+        registerCheck(context)
 
         // Keep legacy functions for compatibility
         registerWrapPromise(context)
@@ -175,6 +178,52 @@ object CoopImplementations {
 
             // In Coop, promises are always "ready" (computation stored, not executed)
             FunkBool(true)
+        }
+    }
+
+    /**
+     * __native_coop_cancel - Cancel a promise (marks as cancelled in Coop).
+     */
+    private fun registerCancel(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_cancel"] = NativeFunkFunction("__native_coop_cancel") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_coop_cancel", "expects FunkRecord")
+
+            val promise = record.fields["p"]
+                ?: throw NativeFunctionException("__native_coop_cancel", "expects 'p' field")
+
+            when (promise) {
+                is FunkPromise -> {
+                    promise.future.cancel(true)
+                    FunkRecord(emptyMap())
+                }
+                else -> throw NativeFunctionException(
+                    "__native_coop_cancel",
+                    "p must be a FunkPromise"
+                )
+            }
+        }
+    }
+
+    /**
+     * __native_coop_is_cancelled - Check if current computation was cancelled.
+     * In single-threaded Coop, this always returns false.
+     */
+    private fun registerIsCancelled(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_is_cancelled"] = NativeFunkFunction("__native_coop_is_cancelled") { args ->
+            // In single-threaded Coop, cancellation is not applicable
+            FunkBool(false)
+        }
+    }
+
+    /**
+     * __native_coop_check - Cancellation checkpoint.
+     * In single-threaded Coop, this is a no-op.
+     */
+    private fun registerCheck(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_check"] = NativeFunkFunction("__native_coop_check") { args ->
+            // In single-threaded Coop, no cancellation to check
+            FunkRecord(emptyMap())
         }
     }
 

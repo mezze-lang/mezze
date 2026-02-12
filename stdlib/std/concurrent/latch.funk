@@ -1,0 +1,32 @@
+## CountDownLatch - A synchronization primitive that allows threads to wait until a count reaches zero.
+##
+## A latch is initialized with a count. Threads can decrement the count with `count_down`,
+## and threads can block until the count reaches zero with `await_latch`.
+##
+## Example:
+##   let l = latch {count = 3}
+##   # In worker threads:
+##   count_down {latch = l}
+##   # In main thread:
+##   await_latch {latch = l}  # Blocks until count reaches 0
+
+pub newtype Latch = Latch __NativeLatch
+
+## Create a new latch with the given count.
+## The count must be non-negative.
+pub let latch: {count: Int} -> Latch = {count} -> __native_latch_new {count = count}
+
+## Decrement the latch count by one.
+## If the count reaches zero, all waiting threads are released.
+pub let count_down: {latch: Latch} -> {} = {latch} -> __native_latch_count_down {latch = latch}
+
+## Wait until the latch count reaches zero.
+## If the count is already zero, returns immediately.
+pub let await_latch: {latch: Latch} -> {} = {latch} -> __native_latch_await {latch = latch}
+
+## Wait until the latch count reaches zero or timeout expires.
+## Returns True if the count reached zero, False if timeout expired.
+pub let await_latch_timeout: {latch: Latch, ms: Int} -> Bool = {latch, ms} -> __native_latch_await_timeout {latch = latch, ms = ms}
+
+## Get the current count of the latch.
+pub let get_count: {latch: Latch} -> Int = {latch} -> __native_latch_get_count {latch = latch}

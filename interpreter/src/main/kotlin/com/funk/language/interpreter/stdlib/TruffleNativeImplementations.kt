@@ -29,6 +29,12 @@ import com.funk.language.interpreter.stdlib.effects.ContinuationImplementations
 import com.funk.language.interpreter.stdlib.effects.LoomImplementations
 import com.funk.language.interpreter.stdlib.effects.OSThreadImplementations
 import com.funk.language.interpreter.stdlib.effects.CoopImplementations
+import com.funk.language.interpreter.stdlib.concurrent.AtomImplementations
+import com.funk.language.interpreter.stdlib.concurrent.ChannelImplementations
+import com.funk.language.interpreter.stdlib.concurrent.MutexImplementations
+import com.funk.language.interpreter.stdlib.concurrent.SemaphoreImplementations
+import com.funk.language.interpreter.stdlib.concurrent.LatchImplementations
+import com.funk.language.interpreter.stdlib.concurrent.WaitGroupImplementations
 import com.funk.language.interpreter.stdlib.conversion.TruffleConversionImplementations
 import com.funk.language.interpreter.stdlib.io.TruffleIOImplementations
 import com.funk.language.interpreter.stdlib.system.TruffleSystemImplementations
@@ -91,6 +97,14 @@ object TruffleNativeImplementations {
         LoomImplementations.registerAll(context)  // Project Loom virtual threads
         OSThreadImplementations.registerAll(context)  // OS platform threads
         CoopImplementations.registerAll(context)  // Cooperative async (single-threaded)
+
+        // Register concurrent primitives (Atom, Channel, Mutex, Semaphore, Latch, WaitGroup)
+        AtomImplementations.registerAll(context)
+        ChannelImplementations.registerAll(context)
+        MutexImplementations.registerAll(context)
+        SemaphoreImplementations.registerAll(context)
+        LatchImplementations.registerAll(context)
+        WaitGroupImplementations.registerAll(context)
 
         // Register logic implementations (boolean operations, comparisons)
         TruffleLogicImplementations.registerAll(context)

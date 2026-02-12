@@ -22,6 +22,14 @@ import com.funk.language.typechecker.types.effects.TimeTypes
 import com.funk.language.typechecker.types.effects.EnvironmentTypes
 import com.funk.language.typechecker.types.effects.ContinuationTypes
 import com.funk.language.typechecker.types.effects.LoomTypes
+import com.funk.language.typechecker.types.effects.OSThreadTypes
+import com.funk.language.typechecker.types.effects.CoopTypes
+import com.funk.language.typechecker.types.concurrent.AtomTypes
+import com.funk.language.typechecker.types.concurrent.ChannelTypes
+import com.funk.language.typechecker.types.concurrent.MutexTypes
+import com.funk.language.typechecker.types.concurrent.SemaphoreTypes
+import com.funk.language.typechecker.types.concurrent.LatchTypes
+import com.funk.language.typechecker.types.concurrent.WaitGroupTypes
 
 /**
  * Helper function to create Option type (as TypeApplication)
@@ -69,6 +77,16 @@ object NativeFunctionTypes {
         EnvironmentTypes.registerAll(context)
         ContinuationTypes.registerAll(context)
         LoomTypes.registerAll(context)
+        OSThreadTypes.registerAll(context)
+        CoopTypes.registerAll(context)
+
+        // Concurrent primitives (Atom, Channel, Mutex, Semaphore, Latch, WaitGroup)
+        AtomTypes.registerAll(context)
+        ChannelTypes.registerAll(context)
+        MutexTypes.registerAll(context)
+        SemaphoreTypes.registerAll(context)
+        LatchTypes.registerAll(context)
+        WaitGroupTypes.registerAll(context)
 
         context["crash"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("msg" to FunkType.StringType)),

@@ -1,0 +1,63 @@
+# =============================================================================
+# std/async/coop.funk - Cooperative (Single-Threaded) Async
+# =============================================================================
+
+# Cooperative async provides the same API as Loom but uses cooperative
+# scheduling internally. All operations are single-threaded - "parallelism"
+# is achieved by interleaving at await points.
+#
+# Use when:
+# - Single-threaded environments (e.g., JavaScript compile target)
+# - Testing with deterministic execution
+# - Workflow orchestration with serializable state
+#
+# Key difference from Loom:
+# - Loom: spawns actual virtual threads, await blocks the thread
+# - Coop: stores computation in promise, await executes it immediately
+
+# =============================================================================
+# Opaque Types
+# =============================================================================
+
+# Promise wraps a stored computation
+newtype CoopPromise 'a = CoopPromise __NativePromise
+
+# =============================================================================
+# Core Functions
+# =============================================================================
+
+## Spawn a computation (stores it for later execution).
+## Unlike Loom, this does not start execution immediately.
+pub let coop_spawn: {f: {} -> 'a} -> CoopPromise 'a = {f} -> __native_coop_spawn {f = f}
+
+## Await a promise (executes the stored computation).
+## Unlike Loom, this executes synchronously.
+pub let coop_await: {p: CoopPromise 'a} -> 'a = {p} -> __native_coop_await {p = p}
+
+## Execute the first promise in the list.
+## In Coop, this is deterministic (always the first).
+pub let coop_race: {ps: [CoopPromise 'a]} -> 'a = {ps} -> __native_coop_race {ps = ps}
+
+## Execute all promises and return results.
+pub let coop_all: {ps: [CoopPromise 'a]} -> ['a] = {ps} -> __native_coop_all {ps = ps}
+
+## Execute promise with timeout (timeout is simulated in Coop).
+## Always succeeds since execution is synchronous.
+pub let coop_timeout: {p: CoopPromise 'a, ms: Int} -> Option 'a = {p, ms} -> __native_coop_timeout {p = p, ms = ms}
+
+## Cancel a promise.
+## In Coop, this marks the promise as cancelled.
+pub let coop_cancel: {p: CoopPromise 'a} -> {} = {p} -> __native_coop_cancel {p = p}
+
+## Simulated sleep (no-op in single-threaded Coop).
+pub let coop_sleep: {ms: Int} -> {} = {ms} -> __native_coop_sleep {ms = ms}
+
+## Check if a promise is done.
+## In Coop, promises are always "ready" (computation stored, not executed).
+pub let coop_is_done: {p: CoopPromise 'a} -> Bool = {p} -> __native_coop_is_done {p = p}
+
+## Check if current computation was cancelled.
+pub let coop_is_cancelled: {} -> Bool = {} -> __native_coop_is_cancelled {}
+
+## Cancellation checkpoint.
+pub let coop_check: {} -> {} = {} -> __native_coop_check {}

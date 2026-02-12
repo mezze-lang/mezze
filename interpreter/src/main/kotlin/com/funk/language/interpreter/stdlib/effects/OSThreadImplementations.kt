@@ -25,6 +25,9 @@ object OSThreadImplementations {
         registerIsDone(context)
         registerIsCancelled(context)
         registerCheck(context)
+        registerCurrentThread(context)
+        registerPark(context)
+        registerUnpark(context)
     }
 
     /**
@@ -244,6 +247,49 @@ object OSThreadImplementations {
                 throw InterruptedException("Computation was cancelled")
             }
             FunkRecord(emptyMap())
+        }
+    }
+
+    /**
+     * __native_os_current_thread - Get a handle to the current thread.
+     */
+    private fun registerCurrentThread(context: MutableMap<String, FunkValue>) {
+        context["__native_os_current_thread"] = NativeFunkFunction("__native_os_current_thread") { args ->
+            FunkThread(Thread.currentThread())
+        }
+    }
+
+    /**
+     * __native_os_park - Park (suspend) the current thread.
+     */
+    private fun registerPark(context: MutableMap<String, FunkValue>) {
+        context["__native_os_park"] = NativeFunkFunction("__native_os_park") { args ->
+            java.util.concurrent.locks.LockSupport.park()
+            FunkRecord(emptyMap())
+        }
+    }
+
+    /**
+     * __native_os_unpark - Unpark (resume) a parked thread.
+     */
+    private fun registerUnpark(context: MutableMap<String, FunkValue>) {
+        context["__native_os_unpark"] = NativeFunkFunction("__native_os_unpark") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_os_unpark", "expects FunkRecord")
+
+            val threadValue = record.fields["thread"]
+                ?: throw NativeFunctionException("__native_os_unpark", "expects 'thread' field")
+
+            when (threadValue) {
+                is FunkThread -> {
+                    java.util.concurrent.locks.LockSupport.unpark(threadValue.thread)
+                    FunkRecord(emptyMap())
+                }
+                else -> throw NativeFunctionException(
+                    "__native_os_unpark",
+                    "thread must be a FunkThread, got: ${threadValue::class.simpleName}"
+                )
+            }
         }
     }
 }

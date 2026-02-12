@@ -94,5 +94,25 @@ object OSThreadTypes {
             FunkType.RecordType(emptyMap()),
             FunkType.RecordType(emptyMap())
         )
+
+        // __native_os_current_thread: {} -> Thread
+        val threadType = FunkType.VarType(TypeVar("Thread"))
+        context["__native_os_current_thread"] = FunkType.FunctionType(
+            FunkType.RecordType(emptyMap()),
+            threadType
+        )
+
+        // __native_os_park: {} -> {}
+        context["__native_os_park"] = FunkType.FunctionType(
+            FunkType.RecordType(emptyMap()),
+            FunkType.RecordType(emptyMap())
+        )
+
+        // __native_os_unpark: {thread: Thread} -> {}
+        val unparkThread = FunkType.VarType(TypeVar("Thread"))
+        context["__native_os_unpark"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("thread" to unparkThread)),
+            FunkType.RecordType(emptyMap())
+        )
     }
 }

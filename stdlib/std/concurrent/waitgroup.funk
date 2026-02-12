@@ -1,0 +1,39 @@
+## WaitGroup - A synchronization primitive for waiting on a dynamic collection of tasks.
+##
+## Unlike Latch which has a fixed count, WaitGroup allows adding tasks dynamically.
+## This is useful when spawning tasks in a loop where the final count isn't known upfront.
+##
+## Example:
+##   let wg = wait_group {}
+##   # For each task:
+##   let _ = add {wg = wg, delta = 1}
+##   let _ = spawn {f = {} -> do
+##       # ... do work ...
+##       done {wg = wg}
+##   }
+##   # Wait for all tasks:
+##   wait {wg = wg}
+
+pub newtype WaitGroup = WaitGroup __NativeWaitGroup
+
+## Create a new wait group with count 0.
+pub let wait_group: {} -> WaitGroup = {} -> __native_waitgroup_new {}
+
+## Add delta to the wait group counter.
+## Delta can be positive (adding tasks) or negative (completing tasks).
+## The counter must never go negative.
+pub let add: {wg: WaitGroup, delta: Int} -> {} = {wg, delta} -> __native_waitgroup_add {wg = wg, delta = delta}
+
+## Decrement the wait group counter by 1 (equivalent to add {delta = -1}).
+## Call this when a task completes.
+pub let done: {wg: WaitGroup} -> {} = {wg} -> __native_waitgroup_done {wg = wg}
+
+## Wait until the wait group counter reaches zero.
+pub let wait: {wg: WaitGroup} -> {} = {wg} -> __native_waitgroup_wait {wg = wg}
+
+## Wait until the wait group counter reaches zero or timeout expires.
+## Returns True if counter reached zero, False if timeout expired.
+pub let wait_timeout: {wg: WaitGroup, ms: Int} -> Bool = {wg, ms} -> __native_waitgroup_wait_timeout {wg = wg, ms = ms}
+
+## Get the current count of the wait group.
+pub let get_count_wg: {wg: WaitGroup} -> Int = {wg} -> __native_waitgroup_get_count {wg = wg}
