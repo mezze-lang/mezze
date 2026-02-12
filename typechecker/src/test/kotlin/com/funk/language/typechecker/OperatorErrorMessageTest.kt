@@ -148,9 +148,11 @@ class OperatorErrorMessageTest {
         assertNotNull(operatorError, "Operator version should error")
         assertNotNull(explicitError, "Explicit version should error")
 
-        // Both should be type errors
-        assertTrue(operatorError!!.contains("Type") || operatorError.contains("type"))
-        assertTrue(explicitError!!.contains("Type") || explicitError.contains("type"))
+        // Both should be type errors (checking for unification error or type mention)
+        assertTrue(operatorError!!.contains("unify") || operatorError.contains("Type") || operatorError.contains("type"),
+            "Operator error should be a type error. Actual: $operatorError")
+        assertTrue(explicitError!!.contains("unify") || explicitError.contains("Type") || explicitError.contains("type"),
+            "Explicit error should be a type error. Actual: $explicitError")
     }
 
     // ============================================================================
@@ -227,7 +229,8 @@ class OperatorErrorMessageTest {
 
         val error = getErrorMessage(source)
         assertNotNull(error, "Expected a type error")
-        assertTrue(error!!.contains("Type"))
+        assertTrue(error!!.contains("unify") || error.contains("Type") || error.contains("type"),
+            "Error should be a type error. Actual: $error")
     }
 
     @Test

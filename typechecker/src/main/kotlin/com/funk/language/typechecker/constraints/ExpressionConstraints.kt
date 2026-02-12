@@ -529,7 +529,7 @@ class ExpressionConstraintGenerator {
                                 "Got fields: ${explicitFieldNames.joinToString(", ")}",
                         expression = expr,
                         errorType = ErrorType.MISSING_FIELD,
-                        context = mapOf(
+                        metadata = mapOf(
                             "missingFields" to missingFields.toList(),
                             "explicitFieldNames" to explicitFieldNames.toList()
                         )
@@ -544,7 +544,7 @@ class ExpressionConstraintGenerator {
                                 "Got extra fields: ${extraFields.joinToString(", ")}",
                         expression = expr,
                         errorType = ErrorType.TYPE_MISMATCH,
-                        context = mapOf(
+                        metadata = mapOf(
                             "extraFields" to extraFields.toList(),
                             "expectedFields" to resolvedType.fields.keys.toList()
                         )
@@ -711,7 +711,7 @@ class ExpressionConstraintGenerator {
                         message = "Field '${expr.member}' not found in record type. Available fields: ${fieldNames.joinToString()}",
                         expression = expr,
                         errorType = ErrorType.MISSING_FIELD,
-                        context = mapOf(
+                        metadata = mapOf(
                             "field" to expr.member,
                             "availableFields" to fieldNames.toList()
                         )
@@ -723,7 +723,7 @@ class ExpressionConstraintGenerator {
                         message = "Field '${expr.member}' not found in open record. Explicitly declared fields: ${fieldNames.joinToString()}",
                         expression = expr,
                         errorType = ErrorType.MISSING_FIELD,
-                        context = mapOf(
+                        metadata = mapOf(
                             "field" to expr.member,
                             "availableFields" to fieldNames.toList()
                         )
@@ -1674,7 +1674,7 @@ class ExpressionConstraintGenerator {
                             "Use explicit named arguments instead, e.g., { x = $spreadVarName.x, y = $spreadVarName.y }",
                     expression = expr,
                     errorType = ErrorType.TYPE_MISMATCH,
-                    context = mapOf(
+                    metadata = mapOf(
                         "functionName" to functionName,
                         "spreadVariable" to spreadVarName
                     )

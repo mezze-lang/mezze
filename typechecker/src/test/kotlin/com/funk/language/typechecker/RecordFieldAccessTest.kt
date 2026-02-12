@@ -335,7 +335,7 @@ class RecordFieldAccessTest {
             typeChecker.typeCheck(program).program
         }
         // The error context should include available fields
-        assertTrue(error.context?.get("availableFields") != null, "Error should include available fields in context")
+        assertTrue(error.metadata["availableFields"] != null, "Error should include available fields in metadata")
     }
 
     @Test
@@ -350,6 +350,6 @@ class RecordFieldAccessTest {
         val error = assertThrows<TypeCheckError> {
             typeChecker.typeCheck(program).program
         }
-        assertTrue(error.context?.get("field") == "nonexistent", "Error should include the attempted field name")
+        assertTrue(error.metadata["field"] == "nonexistent", "Error should include the attempted field name")
     }
 }

@@ -1429,8 +1429,8 @@ private fun printTypeError(error: TypeCheckError) {
     when (error.errorType) {
         ErrorType.TYPE_MISMATCH -> {
             println("🔍 Type Mismatch")
-            val expected = error.context["expected"] as? FunkType
-            val actual = error.context["actual"] as? FunkType
+            val expected = error.metadata["expected"] as? FunkType
+            val actual = error.metadata["actual"] as? FunkType
             if (expected != null && actual != null) {
                 println("   Expected: ${prettyPrintType(expected)}")
                 println("   Actual:   ${prettyPrintType(actual)}")
@@ -1440,7 +1440,7 @@ private fun printTypeError(error: TypeCheckError) {
         }
         ErrorType.UNDEFINED_VARIABLE -> {
             println("🔍 Undefined Variable")
-            val variable = error.context["variable"] as? String
+            val variable = error.metadata["variable"] as? String
             if (variable != null) {
                 println("   Variable '$variable' is not defined in the current scope")
                 println()
@@ -1451,8 +1451,8 @@ private fun printTypeError(error: TypeCheckError) {
         }
         ErrorType.MISSING_FIELD -> {
             println("🔍 Missing Field")
-            val field = error.context["field"] as? String
-            val type = error.context["type"] as? FunkType
+            val field = error.metadata["field"] as? String
+            val type = error.metadata["type"] as? FunkType
             if (field != null && type != null) {
                 println("   Field '$field' not found in type ${prettyPrintType(type)}")
                 println()
@@ -1464,7 +1464,7 @@ private fun printTypeError(error: TypeCheckError) {
         ErrorType.INEXHAUSTIVE_MATCH -> {
             println("🔍 Non-exhaustive Pattern Match")
             @Suppress("UNCHECKED_CAST")
-            val missing = error.context["missing"] as? List<String>
+            val missing = error.metadata["missing"] as? List<String>
             if (missing != null) {
                 println("   Missing patterns: ${missing.joinToString(", ")}")
                 println()
