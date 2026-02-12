@@ -121,12 +121,8 @@ class SubstitutionApplier(
             // After processing a let binding, add its final type to identifierContext
             // This allows subsequent bindings to see the correct type (including SuspendedType)
             if (updatedItem is LetBinding) {
-                val bindingName = try {
-                    (updatedItem.pattern as? VariablePattern)?.name
-                        ?: updatedItem.pattern.extractBindings().firstOrNull()
-                } catch (e: Exception) {
-                    null
-                }
+                val bindingName = (updatedItem.pattern as? VariablePattern)?.name
+                    ?: updatedItem.pattern.extractBindings().firstOrNull()
                 updatedItem.inferredType?.let { type ->
                     if (bindingName != null) {
                         identifierContext[bindingName] = type

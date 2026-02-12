@@ -135,6 +135,8 @@ class ModuleResolver(
         // Access is synchronized for thread safety
         private val moduleCache = mutableMapOf<String, Module>()
         private val cacheLock = Any()
+        // Per-module locks to prevent duplicate loading of the same module
+        private val moduleLoadingLocks = mutableMapOf<String, Any>()
 
         /**
          * Clear the module cache. This is useful for tests to ensure clean state between runs.
@@ -143,6 +145,16 @@ class ModuleResolver(
         fun clearCache() {
             synchronized(cacheLock) {
                 moduleCache.clear()
+                moduleLoadingLocks.clear()
+            }
+        }
+
+        /**
+         * Get or create a per-module lock for loading (thread-safe).
+         */
+        private fun getModuleLock(modulePath: String): Any {
+            synchronized(cacheLock) {
+                return moduleLoadingLocks.getOrPut(modulePath) { Any() }
             }
         }
 
@@ -245,64 +257,73 @@ class ModuleResolver(
             return createEmptyModule(modulePath, "Core module skipped - types are now built-in")
         }
         
-        // Check cache first (thread-safe)
+        // Check cache first (thread-safe) - fast path
         getFromCache(modulePath)?.let {
             if (System.getProperty("funk.typecheck.debug") == "true") {
                 println("DEBUG: Found cached module: $modulePath")
             }
             return it
         }
-        
-        // Check for deprecated core modules and provide migration warnings
-        checkForDeprecatedCoreModule(modulePath)
-        
-        // Check for circular dependency
-        if (modulePath in loadingStack) {
-            throw ModuleError.CircularDependency(loadingStack.toList() + modulePath)
-        }
-        
-        // Find the file for this module
-        val filePath = resolveModuleFile(modulePath)
-            ?: throw ModuleError.ModuleNotFound(modulePath, getSearchPaths(modulePath))
-        
-        // Mark as loading
-        loadingStack.add(modulePath)
-        
-        try {
-            // Parse the module with file name for better error messages
-            // Create fresh parser for thread safety
-            val source = Files.readString(filePath)
-            val program = FunkParser().parse(source, file = filePath.toString())
 
-            // Don't type-check during module resolution to avoid circular dependencies
-            // The module will be type-checked when it's actually used
-            val typedProgram = program
+        // Use per-module lock to prevent duplicate loading of the same module
+        // This implements proper double-checked locking
+        val moduleLock = getModuleLock(modulePath)
+        synchronized(moduleLock) {
+            // Double-check: another thread may have loaded it while we waited for the lock
+            getFromCache(modulePath)?.let {
+                return it
+            }
 
-            // Extract dependencies first
-            val dependencies = extractDependencies(typedProgram)
-            
-            // Create module representation
-            val module = Module(
-                name = modulePath,
-                filePath = filePath.toString(),
-                program = typedProgram,
-                exports = extractExports(typedProgram),
-                dependencies = dependencies
-            )
+            // Check for deprecated core modules and provide migration warnings
+            checkForDeprecatedCoreModule(modulePath)
 
-            // Cache the module immediately so updateModuleExports can find and update it (thread-safe)
-            // The exports may be incomplete (based on annotations only), but will be updated later
-            putInCache(modulePath, module)
-            return module
-            
-        } catch (e: com.funk.language.parser.ParseException) {
-            // Preserve the formatted error message with code snippets
-            throw ModuleError.ParseError(modulePath, e.message ?: "Unknown parse error")
-        } catch (e: Exception) {
-            // Catch other unexpected errors
-            throw ModuleError.ParseError(modulePath, "Unexpected error: ${e.message}")
-        } finally {
-            loadingStack.remove(modulePath)
+            // Check for circular dependency
+            if (modulePath in loadingStack) {
+                throw ModuleError.CircularDependency(loadingStack.toList() + modulePath)
+            }
+
+            // Find the file for this module
+            val filePath = resolveModuleFile(modulePath)
+                ?: throw ModuleError.ModuleNotFound(modulePath, getSearchPaths(modulePath))
+
+            // Mark as loading
+            loadingStack.add(modulePath)
+
+            try {
+                // Parse the module with file name for better error messages
+                // Create fresh parser for thread safety
+                val source = Files.readString(filePath)
+                val program = FunkParser().parse(source, file = filePath.toString())
+
+                // Don't type-check during module resolution to avoid circular dependencies
+                // The module will be type-checked when it's actually used
+                val typedProgram = program
+
+                // Extract dependencies first
+                val dependencies = extractDependencies(typedProgram)
+
+                // Create module representation
+                val module = Module(
+                    name = modulePath,
+                    filePath = filePath.toString(),
+                    program = typedProgram,
+                    exports = extractExports(typedProgram),
+                    dependencies = dependencies
+                )
+
+                // Cache the module (thread-safe)
+                putInCache(modulePath, module)
+                return module
+
+            } catch (e: com.funk.language.parser.ParseException) {
+                // Preserve the formatted error message with code snippets
+                throw ModuleError.ParseError(modulePath, e.message ?: "Unknown parse error")
+            } catch (e: Exception) {
+                // Catch other unexpected errors
+                throw ModuleError.ParseError(modulePath, "Unexpected error: ${e.message}")
+            } finally {
+                loadingStack.remove(modulePath)
+            }
         }
     }
     

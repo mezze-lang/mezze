@@ -81,22 +81,19 @@ fun unify(type1: FunkType, type2: FunkType, typeDeclarations: Map<String, TypeDe
         return UnificationResult.Success(Substitution.empty)
     }
 
-    // Check memoization cache (only for calls without type declarations to avoid stale results)
-    // We skip caching when typeDeclarations is non-empty because the result may depend on
-    // type expansions that could differ between invocations.
-    val cacheKey = if (typeDeclarations.isEmpty()) Pair(type1, type2) else null
-    if (cacheKey != null) {
-        val cachedResult = unificationCache.get()[cacheKey]
-        if (cachedResult != null) {
-            return cachedResult
-        }
+    // Check memoization cache
+    // Note: The cache is cleared between type-checking invocations (in TypeChecker.typeCheck()),
+    // and typeDeclarations is constant within a single invocation, so we can safely cache
+    // results regardless of whether typeDeclarations is empty.
+    val cacheKey = Pair(type1, type2)
+    val cachedResult = unificationCache.get()[cacheKey]
+    if (cachedResult != null) {
+        return cachedResult
     }
 
     // Perform unification and cache the result
     val result = unifyImpl(type1, type2, typeDeclarations)
-    if (cacheKey != null) {
-        unificationCache.get()[cacheKey] = result
-    }
+    unificationCache.get()[cacheKey] = result
     return result
 }
 
