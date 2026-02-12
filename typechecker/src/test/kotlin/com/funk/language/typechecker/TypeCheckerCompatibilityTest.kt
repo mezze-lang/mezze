@@ -9,20 +9,20 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * Test that NewTypeChecker is a drop-in replacement for old TypeChecker.
+ * Test that TypeChecker is a drop-in replacement for old TypeChecker.
  *
  * This test verifies that:
- * 1. NewTypeChecker has the same API as old TypeChecker
+ * 1. TypeChecker has the same API as old TypeChecker
  * 2. It returns the same TypeCheckResult type
  * 3. It throws exceptions on errors (old behavior)
  * 4. Basic type checking works correctly
  */
-class NewTypeCheckerCompatibilityTest {
+class TypeCheckerCompatibilityTest {
 
     @BeforeEach
     fun setup() {
         // Clear cache before each test (old TypeChecker behavior)
-        NewTypeChecker.clearCache()
+        TypeChecker.clearCache()
     }
 
     @Test
@@ -30,7 +30,7 @@ class NewTypeCheckerCompatibilityTest {
         val source = "let x = 5"
         val program = FunkParser().parse(source)
 
-        val checker = NewTypeChecker()
+        val checker = TypeChecker()
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
@@ -47,7 +47,7 @@ class NewTypeCheckerCompatibilityTest {
 
         val program = FunkParser().parse(source)
 
-        val checker = NewTypeChecker()
+        val checker = TypeChecker()
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
@@ -63,7 +63,7 @@ class NewTypeCheckerCompatibilityTest {
         """.trimIndent()
 
         val program = FunkParser().parse(source)
-        val checker = NewTypeChecker()
+        val checker = TypeChecker()
 
         try {
             checker.typeCheck(program)
@@ -83,7 +83,7 @@ class NewTypeCheckerCompatibilityTest {
         """.trimIndent()
 
         val program = FunkParser().parse(source)
-        val checker = NewTypeChecker()
+        val checker = TypeChecker()
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
@@ -100,7 +100,7 @@ class NewTypeCheckerCompatibilityTest {
         """.trimIndent()
 
         val program = FunkParser().parse(source)
-        val checker = NewTypeChecker()
+        val checker = TypeChecker()
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
@@ -124,7 +124,7 @@ class NewTypeCheckerCompatibilityTest {
         """.trimIndent()
 
         val program = FunkParser().parse(source)
-        val checker = NewTypeChecker()
+        val checker = TypeChecker()
         val result = checker.typeCheck(program)
 
         assertNotNull(result)
@@ -134,10 +134,10 @@ class NewTypeCheckerCompatibilityTest {
     @Test
     fun `test static cache methods exist`() {
         // Verify static methods exist (compatibility API)
-        NewTypeChecker.clearCache()
-        val cached = NewTypeChecker.getTypedModule("test")
-        val allModules = NewTypeChecker.getAllCachedModules()
-        NewTypeChecker.restoreModuleCache(emptyMap())
+        TypeChecker.clearCache()
+        val cached = TypeChecker.getTypedModule("test")
+        val allModules = TypeChecker.getAllCachedModules()
+        TypeChecker.restoreModuleCache(emptyMap())
 
         // These should not throw - compatibility API exists
         assertTrue(true)

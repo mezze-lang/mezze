@@ -301,7 +301,7 @@ class ExpressionConstraintGenerator {
 
                 if (isBuiltInAbility || isUserDefinedAbility || isEffect) {
                     // This is an ability or effect being used as a value - error!
-                    // Mark as undefined variable so NewTypeChecker can provide a better error message
+                    // Mark as undefined variable so TypeChecker can provide a better error message
                     val freshType = FunkType.VarType(TypeVar.fresh())
                     return ConstraintResult(
                         type = freshType,
@@ -1404,7 +1404,7 @@ class ExpressionConstraintGenerator {
 
         if ((isBuiltInAbility || isUserDefinedAbility || isEffect) && expr.value == null) {
             // This is an ability or effect being used as a value - error!
-            // Mark as undefined variable so NewTypeChecker can provide a better error message
+            // Mark as undefined variable so TypeChecker can provide a better error message
             val freshType = FunkType.VarType(TypeVar.fresh())
             return ConstraintResult(
                 type = freshType,
@@ -2238,7 +2238,7 @@ class ExpressionConstraintGenerator {
         // ALSO CRITICAL: Skip validation if there are undefined variables!
         // If the expression contains undefined variables, we can't properly validate effects yet
         // because we don't know if those variables are effectful functions or not.
-        // The undefined variables will be caught later in NewTypeChecker.checkProgram() at line 242.
+        // The undefined variables will be caught later in TypeChecker.checkProgram() at line 242.
         val hasUndefinedVariables = exprResult.undefinedVariables.isNotEmpty()
         if (!isNestedPerform && !hasPolymorphicEffects && !hasUndefinedVariables) {
             // If the expression has no effects (neither tracked nor in type), providing handlers is meaningless

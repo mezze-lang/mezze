@@ -6,19 +6,19 @@ import org.junit.jupiter.api.BeforeEach
 import kotlin.test.assertNotNull
 
 /**
- * Test that NewTypeChecker is a drop-in replacement for TypeChecker.
- * This is a copy of TestResultImport but using NewTypeChecker instead.
+ * Test that TypeChecker is a drop-in replacement for TypeChecker.
+ * This is a copy of TestResultImport but using TypeChecker instead.
  */
-class TestResultImportWithNewTypeChecker {
+class TestResultImportWithTypeChecker {
 
     private val parser = FunkParser()
-    private lateinit var typeChecker: NewTypeChecker  // Changed from TypeChecker
+    private lateinit var typeChecker: TypeChecker  // Changed from TypeChecker
 
     @BeforeEach
     fun setup() {
         ModuleResolver.clearCache()
-        NewTypeChecker.clearCache()  // Changed from TypeChecker
-        typeChecker = NewTypeChecker()  // Changed from TypeChecker
+        TypeChecker.clearCache()  // Changed from TypeChecker
+        typeChecker = TypeChecker()  // Changed from TypeChecker
         System.setProperty("funk.project.root", "/Users/shriyans/Projects/funk")
     }
 
@@ -28,13 +28,13 @@ class TestResultImportWithNewTypeChecker {
             use std::result
         """.trimIndent()
 
-        println("Testing import only (with NewTypeChecker)")
+        println("Testing import only (with TypeChecker)")
 
         try {
             val program = parser.parse(source)
             val typed = typeChecker.typeCheck(program).program
             assertNotNull(typed)
-            println("SUCCESS: Import succeeded with NewTypeChecker!")
+            println("SUCCESS: Import succeeded with TypeChecker!")
         } catch (e: Exception) {
             println("FAILED: ${e.message}")
             if (e.message != null && e.message!!.length < 1000) {

@@ -80,7 +80,7 @@ import java.nio.file.Paths
  *
  * ## Usage:
  * ```kotlin
- * val typeChecker = NewTypeChecker()
+ * val typeChecker = TypeChecker()
  * val result = typeChecker.checkProgram(program)
  *
  * when (result) {
@@ -97,7 +97,7 @@ import java.nio.file.Paths
  * }
  * ```
  */
-class NewTypeChecker(
+class TypeChecker(
     private val parentContext: TypingContext = createInitialContext()
 ) {
     // Transformer for converting perform blocks into state machines (for continuation support)
@@ -199,8 +199,8 @@ class NewTypeChecker(
 
         // DEBUG: Print ability and effect names
         if (System.getProperty("funk.debug.abilities") == "true") {
-            println("[DEBUG NewTypeChecker] abilityNames = $abilityNames")
-            println("[DEBUG NewTypeChecker] effectNames = $effectNames")
+            println("[DEBUG TypeChecker] abilityNames = $abilityNames")
+            println("[DEBUG TypeChecker] effectNames = $effectNames")
         }
 
         // Merge local and imported effect declarations
@@ -774,15 +774,15 @@ class NewTypeChecker(
         /**
          * Create a type checker with empty context.
          */
-        fun create(): NewTypeChecker {
-            return NewTypeChecker()
+        fun create(): TypeChecker {
+            return TypeChecker()
         }
 
         /**
          * Create a type checker with parent context (for modules).
          */
-        fun withContext(context: TypingContext): NewTypeChecker {
-            return NewTypeChecker(context)
+        fun withContext(context: TypingContext): TypeChecker {
+            return TypeChecker(context)
         }
 
         // ====================================================================
@@ -1198,12 +1198,12 @@ class NewTypeChecker(
  * @param colorize Whether to colorize output (default: false)
  */
 fun formatTypeCheckResult(
-    result: NewTypeChecker.TypeCheckResult,
+    result: TypeChecker.TypeCheckResult,
     sourceCode: String? = null,
     colorize: Boolean = false
 ): String {
     return when (result) {
-        is NewTypeChecker.TypeCheckResult.Success -> buildString {
+        is TypeChecker.TypeCheckResult.Success -> buildString {
             appendLine("✓ Type checking succeeded!")
 
             if (result.monomorphicInstances.isNotEmpty()) {
@@ -1222,7 +1222,7 @@ fun formatTypeCheckResult(
                 }
             }
         }
-        is NewTypeChecker.TypeCheckResult.Failure -> buildString {
+        is TypeChecker.TypeCheckResult.Failure -> buildString {
             appendLine("✗ Type checking failed with ${result.errors.size} error(s):")
             appendLine()
 

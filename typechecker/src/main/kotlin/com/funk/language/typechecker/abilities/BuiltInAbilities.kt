@@ -4,7 +4,7 @@ import com.funk.language.ast.FunkType
 import com.funk.language.ast.TypeVar
 
 /**
- * Built-in ability registry for NewTypeChecker.
+ * Built-in ability registry for TypeChecker.
  *
  * Abilities are type classes that define operations on types.
  * For example, NumAdd defines the `add` operation for numeric types.

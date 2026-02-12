@@ -9,7 +9,7 @@ import com.funk.language.typechecker.solving.ConstraintSolver
 import com.funk.language.typechecker.validation.ValidationError
 
 /**
- * Main error formatter for NewTypeChecker errors.
+ * Main error formatter for TypeChecker errors.
  *
  * Provides beautiful, helpful error messages with:
  * - Source code context
@@ -33,10 +33,10 @@ object ErrorFormatter {
     /**
      * Format a type check error with full context.
      *
-     * This is the main entry point for formatting NewTypeChecker errors.
+     * This is the main entry point for formatting TypeChecker errors.
      */
     fun format(
-        error: NewTypeChecker.TypeCheckError,
+        error: TypeChecker.TypeCheckError,
         sourceCode: String? = null,
         colorize: Boolean = false
     ): String {

@@ -90,7 +90,7 @@ class ContinuationTransformer {
     }
 
     /**
-     * Transform with result type (new API for integration with NewTypeChecker).
+     * Transform with result type (new API for integration with TypeChecker).
      *
      * @param doExpr The do-expression to transform
      * @return ContinuationTransformResult

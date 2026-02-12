@@ -1,7 +1,7 @@
 package com.funk.language.typechecker.module
 
 import com.funk.language.ast.*
-import com.funk.language.typechecker.NewTypeChecker
+import com.funk.language.typechecker.TypeChecker
 import com.funk.language.typechecker.ModuleResolver
 import com.funk.language.typechecker.context.TypingContext
 import com.funk.language.typechecker.context.TypeScheme
@@ -69,12 +69,12 @@ class ModuleTypeChecker(
         // Build context for this module
         val moduleContext = buildModuleContext(importContext)
 
-        // Type-check the module using NewTypeChecker
-        val typeChecker = NewTypeChecker.withContext(moduleContext)
+        // Type-check the module using TypeChecker
+        val typeChecker = TypeChecker.withContext(moduleContext)
         val result = typeChecker.checkProgram(module.program)
 
         return when (result) {
-            is NewTypeChecker.TypeCheckResult.Success -> {
+            is TypeChecker.TypeCheckResult.Success -> {
                 // Create typed module
                 val typedModule = TypedModule(
                     modulePath = module.modulePath,
@@ -101,7 +101,7 @@ class ModuleTypeChecker(
 
                 ModuleTypeCheckResult.Success(typedModule)
             }
-            is NewTypeChecker.TypeCheckResult.Failure -> {
+            is TypeChecker.TypeCheckResult.Failure -> {
                 // Convert type check errors
                 val errors = result.errors.map { error ->
                     ModuleTypeCheckResult.TypeCheckError(
