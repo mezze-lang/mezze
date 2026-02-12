@@ -497,11 +497,21 @@ class ConstraintGenerator(
             constraintContext
         )
 
+        // CRITICAL: Unwrap SuspendedType for let bindings.
+        // Data types (Result, Option, etc.) are orthogonal to effects.
+        // When we write `let res = effectfulFunc {}`, we want `res` to be the
+        // unwrapped value type, not Suspended<T>. The effects are tracked
+        // separately and will be handled by perform.
+        val bindingType = when (val t = exprResult.type) {
+            is FunkType.SuspendedType -> t.valueType
+            else -> t
+        }
+
         // Generate pattern constraints
-        // The pattern must match the expression's type
+        // The pattern must match the unwrapped expression type
         val patternResult = patternGenerator.generate(
             binding.pattern,
-            exprResult.type,
+            bindingType,
             constraintContext
         )
 

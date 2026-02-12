@@ -2070,11 +2070,21 @@ class ExpressionConstraintGenerator {
                     effects.addAll(exprResult.effects)
                     abilityConstraints.addAll(exprResult.abilityConstraints)
 
+                    // CRITICAL: Inside a do block, unwrap SuspendedType for let bindings.
+                    // Data types (Result, Option, etc.) are orthogonal to effects.
+                    // When we write `let res = effectfulFunc {}`, we want `res` to be the
+                    // unwrapped value type, not Suspended<T>. The effects are tracked
+                    // separately in the effects set and will be handled by perform.
+                    val bindingType = when (val t = exprResult.type) {
+                        is FunkType.SuspendedType -> t.valueType
+                        else -> t
+                    }
+
                     // Generate pattern constraints
-                    // The pattern must match the expression's type
+                    // The pattern must match the unwrapped expression type
                     val patternResult = patternGenerator.generate(
                         stmt.pattern,
-                        exprResult.type,
+                        bindingType,
                         currentContext
                     )
                     constraints.addAll(patternResult.constraints)
@@ -2122,8 +2132,19 @@ class ExpressionConstraintGenerator {
 
         // CRITICAL: If do block has effects, wrap the result in SuspendedType
         // This allows perform expressions to properly detect and handle effects
+        // BUT: Don't double-wrap if the result is already a SuspendedType!
+        // Data types (like Result) are orthogonal to effects - we should not nest Suspended types.
         val resultType = if (effects.isNotEmpty()) {
-            FunkType.SuspendedType(resultResult.type, FunkType.EffectRow(effects))
+            when (val innerType = resultResult.type) {
+                is FunkType.SuspendedType -> {
+                    // Result is already suspended - merge effects instead of double-wrapping
+                    val mergedEffects = innerType.effects.effects + effects
+                    FunkType.SuspendedType(innerType.valueType, FunkType.EffectRow(mergedEffects))
+                }
+                else -> {
+                    FunkType.SuspendedType(resultResult.type, FunkType.EffectRow(effects))
+                }
+            }
         } else {
             resultResult.type
         }
