@@ -1672,8 +1672,6 @@ class TypeValidator(
         // Get the inferred type for the expression
         val inferredType = variantExpr.inferredType
 
-        java.io.File("/tmp/funk_debug.log").appendText("[DEBUG validateVariantConstructor] constructor=${variantExpr.constructor}, inferredType=$inferredType\n")
-
         if (inferredType == null) {
             return emptyList()  // No type yet, skip validation
         }
@@ -1681,19 +1679,14 @@ class TypeValidator(
         // Apply substitution to get final type
         val finalType = substitution.apply(inferredType)
 
-        java.io.File("/tmp/funk_debug.log").appendText("[DEBUG validateVariantConstructor] finalType=$finalType\n")
-
         // Only validate if the final type is a VariantType
         val variantType = finalType as? FunkType.VariantType
         if (variantType == null) {
-            java.io.File("/tmp/funk_debug.log").appendText("[DEBUG validateVariantConstructor] finalType is not VariantType, skipping\n")
             return emptyList()
         }
 
         // Get the constructor name
         val constructorName = variantExpr.constructor
-
-        java.io.File("/tmp/funk_debug.log").appendText("[DEBUG validateVariantConstructor] variantType.constructors=${variantType.constructors.keys}, rowVar=${variantType.rowVar}\n")
 
         // Check if constructor exists in the variant type
         if (!variantType.constructors.containsKey(constructorName)) {

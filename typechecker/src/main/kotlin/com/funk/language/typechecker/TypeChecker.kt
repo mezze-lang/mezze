@@ -169,7 +169,8 @@ class TypeChecker(
                 }
                 is ImportResolutionResult.Failure -> {
                     // Throw the new module error directly - tests will see it
-                    throw importResult.errors.first()
+                    throw importResult.errors.firstOrNull()
+                        ?: TypeCheckError("Import failed with unknown error")
                 }
             }
         } else {
@@ -472,7 +473,14 @@ class TypeChecker(
         return when (result) {
             is TypeCheckResult.Success -> {
                 // Extract the typed expression
-                val typedExpr = (result.program.items.first() as TopLevelExpression).expression
+                val firstItem = result.program.items.firstOrNull()
+                    ?: return ExpressionCheckResult.Failure(listOf(
+                        TypeCheckError(phase = "ExpressionCheck", message = "No items in program after type checking")
+                    ))
+                val typedExpr = (firstItem as? TopLevelExpression)?.expression
+                    ?: return ExpressionCheckResult.Failure(listOf(
+                        TypeCheckError(phase = "ExpressionCheck", message = "Expected TopLevelExpression but got ${firstItem::class.simpleName}")
+                    ))
                 val inferredType = typedExpr.inferredType ?: FunkType.VarType(TypeVar.fresh())
 
                 ExpressionCheckResult.Success(
@@ -728,7 +736,8 @@ class TypeChecker(
             }
             is TypeCheckResult.Failure -> {
                 // Throw exception for first error (old behavior)
-                val error = result.errors.first()
+                val error = result.errors.firstOrNull()
+                    ?: throw TypeCheckError("Type checking failed with unknown error")
                 throw TypeCheckError(error.message, error.sourceLocation)
             }
         }
