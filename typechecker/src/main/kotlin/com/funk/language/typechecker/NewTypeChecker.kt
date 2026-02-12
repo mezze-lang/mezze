@@ -367,7 +367,10 @@ class NewTypeChecker(
                     mustBeOpenRowVars,
                     mustBeOpenBindings,
                     mustBeOpenTypes,
-                    context.getAllAbilityImpls()  // Pass ability implementations for resolving calls
+                    context.getAllAbilityImpls(),  // Pass ability implementations for resolving calls
+                    buildResult.abilityDeclarations,  // For resolving ability references
+                    allEffectDeclarations,  // For resolving effect references
+                    allTypeDeclarations  // For resolving variant constructors
                 )
                 val typedProgram = applier.applyToProgram(program)
 

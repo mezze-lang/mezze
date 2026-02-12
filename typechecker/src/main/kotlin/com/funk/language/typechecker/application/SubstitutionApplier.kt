@@ -1,6 +1,7 @@
 package com.funk.language.typechecker.application
 
 import com.funk.language.ast.*
+import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.solving.Substitution
 
 /**
@@ -21,6 +22,7 @@ import com.funk.language.typechecker.solving.Substitution
  * - Exhaustive pattern matching on all Expression types
  * - Applies substitution recursively to all sub-expressions
  * - Updates inferredType field on each expression
+ * - Sets resolution field on VariantConstruction nodes for proper interpreter handling
  */
 class SubstitutionApplier(
     private val substitution: Substitution,
@@ -29,7 +31,10 @@ class SubstitutionApplier(
     private val mustBeOpenRowVars: Set<RowVar> = emptySet(),
     private val mustBeOpenBindings: Set<String> = emptySet(),
     private val mustBeOpenTypes: Set<TypeVar> = emptySet(),
-    private val abilityImpls: Map<String, com.funk.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap()
+    private val abilityImpls: Map<String, com.funk.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
+    private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),
+    private val effectDeclarations: Map<String, EffectDeclaration> = emptyMap(),
+    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap()
 ) {
     // Compute variants that must stay open by resolving type vars with substitution
     // This handles the case where per-binding solving created different row vars than global solving
@@ -54,6 +59,51 @@ class SubstitutionApplier(
     // This mimics OldTypeChecker's context map (OldTypeChecker.kt:1900-1910)
     // Maps identifier names to their types
     private val identifierContext = mutableMapOf<String, FunkType>()
+
+    /**
+     * Resolve what an uppercase identifier represents.
+     * The parser creates VariantConstruction for ALL uppercase identifiers.
+     * This function determines if it's actually an ability, effect, handler, or variant.
+     *
+     * @param name The constructor/identifier name to resolve
+     * @return The appropriate ConstructorResolution
+     */
+    private fun resolveConstructor(name: String): ConstructorResolution {
+        // Check built-in abilities first
+        if (BuiltInAbilities.isBuiltInAbility(name)) {
+            return ConstructorResolution.AbilityReference(name)
+        }
+
+        // Check user-defined abilities
+        if (abilityDeclarations.containsKey(name)) {
+            return ConstructorResolution.AbilityReference(name)
+        }
+
+        // Check effects
+        if (effectDeclarations.containsKey(name)) {
+            return ConstructorResolution.EffectReference(name)
+        }
+
+        // Check handlers (performers) - reverse lookup from performerToEffect
+        val effectName = performerToEffect[name]
+        if (effectName != null) {
+            return ConstructorResolution.HandlerReference(name, effectName)
+        }
+
+        // Check variant constructors - look through type declarations
+        for ((_, typeDecl) in typeDeclarations) {
+            val definition = typeDecl.definition
+            if (definition is VariantDefinition) {
+                if (definition.constructors.any { it.name == name }) {
+                    return ConstructorResolution.VariantConstructor
+                }
+            }
+        }
+
+        // Cannot determine - leave unresolved
+        return ConstructorResolution.Unresolved
+    }
+
     /**
      * Apply substitution to a program.
      *
@@ -661,7 +711,14 @@ class SubstitutionApplier(
     private fun applyToVariantConstruction(expr: VariantConstruction): VariantConstruction {
         val updatedValue = expr.value?.let { applyToExpression(it) }
         val updatedType = expr.inferredType?.let { substitution.apply(it) }
-        return expr.copy(value = updatedValue, inferredType = updatedType)
+
+        // CRITICAL: Resolve what this uppercase identifier actually represents
+        // The parser creates VariantConstruction for ALL uppercase identifiers
+        // (abilities like Inspect, effects like Log, handlers like Console, variants like Some)
+        // Set the resolution so the interpreter knows how to handle it
+        val resolution = resolveConstructor(expr.constructor)
+
+        return expr.copy(value = updatedValue, inferredType = updatedType, resolution = resolution)
     }
 
     // ========================================================================

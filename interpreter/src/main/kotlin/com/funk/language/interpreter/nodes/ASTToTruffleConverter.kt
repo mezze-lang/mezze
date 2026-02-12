@@ -1793,11 +1793,55 @@ class ASTToTruffleConverter(
     
     /**
      * Convert variant construction to a variant construction node
+     *
+     * CRITICAL: The parser treats uppercase identifiers as variant constructors,
+     * even for abilities like Inspect! The typechecker populates the `resolution` field
+     * to tell us what each one actually is.
+     *
+     * ARCHITECTURE:
+     * - Parser: Creates VariantConstruction for ALL uppercase identifiers
+     * - Typechecker: Resolves what each is (ability/effect/handler/variant) → sets `resolution`
+     * - Interpreter: Uses `resolution` to determine correct node type
      */
     private fun convertVariantConstruction(variantConst: VariantConstruction): FunkNode {
         val constructorName = variantConst.constructor
-        val valueNode = variantConst.value?.let { convertExpression(it) }
-        return com.funk.language.interpreter.nodes.literal.VariantConstructionNode(constructorName, valueNode)
+
+        // NEW: Check resolution metadata from typechecker (if available)
+        when (variantConst.resolution) {
+            is com.funk.language.ast.ConstructorResolution.AbilityReference -> {
+                // This is an ability reference - create variable lookup
+                // Works for both builtin (Inspect, Eq) and user-defined abilities
+                val slot = getOrCreateSlot(constructorName)
+                return SimpleReadVariableNode(slot, constructorName)
+            }
+
+            is com.funk.language.ast.ConstructorResolution.EffectReference -> {
+                // This is an effect reference - create variable lookup
+                // Works for both builtin (Log, Filesystem) and user-defined effects
+                val slot = getOrCreateSlot(constructorName)
+                return SimpleReadVariableNode(slot, constructorName)
+            }
+
+            is com.funk.language.ast.ConstructorResolution.HandlerReference -> {
+                // This is a handler/performer reference - create variable lookup
+                // Works for Console, NativeRandom, user-defined handlers
+                val slot = getOrCreateSlot(constructorName)
+                return SimpleReadVariableNode(slot, constructorName)
+            }
+
+            is com.funk.language.ast.ConstructorResolution.VariantConstructor -> {
+                // Confirmed variant constructor by typechecker
+                val valueNode = variantConst.value?.let { convertExpression(it) }
+                return com.funk.language.interpreter.nodes.literal.VariantConstructionNode(constructorName, valueNode)
+            }
+
+            com.funk.language.ast.ConstructorResolution.Unresolved -> {
+                // Typechecker didn't resolve it - treat as variant constructor
+                // This should only happen for actual variant constructors that weren't in typeDeclarations
+                val valueNode = variantConst.value?.let { convertExpression(it) }
+                return com.funk.language.interpreter.nodes.literal.VariantConstructionNode(constructorName, valueNode)
+            }
+        }
     }
     
     /**

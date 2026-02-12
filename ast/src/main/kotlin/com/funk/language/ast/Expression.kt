@@ -354,12 +354,41 @@ data class RecordUpdateEntry(
 // VARIANTS
 // ============================================================================
 
+/**
+ * Resolution metadata for uppercase identifiers.
+ * The parser creates VariantConstruction for all uppercase names (Inspect, Some, Console, etc.)
+ * The typechecker resolves what each one actually is and populates this field.
+ */
+@Serializable
+sealed class ConstructorResolution {
+    /** Regular variant constructor (Some, Nothing, etc.) */
+    @Serializable
+    object VariantConstructor : ConstructorResolution()
+
+    /** Ability reference (Inspect, Eq, Ord, user-defined abilities) */
+    @Serializable
+    data class AbilityReference(val abilityName: String) : ConstructorResolution()
+
+    /** Effect reference (Log, Filesystem, user-defined effects) */
+    @Serializable
+    data class EffectReference(val effectName: String) : ConstructorResolution()
+
+    /** Handler/Performer reference (Console, NativeRandom, etc.) */
+    @Serializable
+    data class HandlerReference(val handlerName: String, val effectName: String? = null) : ConstructorResolution()
+
+    /** Not yet resolved by typechecker (default) */
+    @Serializable
+    object Unresolved : ConstructorResolution()
+}
+
 @Serializable
 data class VariantConstruction(
     val constructor: String,
     val value: Expression? = null,
     override val inferredType: FunkType? = null,
-    override val sourceLocation: SourceLocation? = null
+    override val sourceLocation: SourceLocation? = null,
+    val resolution: ConstructorResolution = ConstructorResolution.Unresolved
 ) : Expression
 
 // ============================================================================
