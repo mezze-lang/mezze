@@ -1511,6 +1511,7 @@ internal val FunkParser.postfixExpression: Parser<Expression>
                 TokenType.IDENTIFIER -> {
                     // BUG #10 FIX: Check for function call without {} syntax
                     // Only check when the previous expression is a simple identifier (like `my_func x`)
+                    // or a variant constructor (like `Left 42`)
                     // For complex expressions (like `Show.show {val = @}` followed by newline and identifier),
                     // skip this check as the identifier is likely a separate statement
                     val funcExpr = result.value
@@ -1525,6 +1526,17 @@ internal val FunkParser.postfixExpression: Parser<Expression>
                             currentSource,
                             currentFile
                         )
+                    } else if (funcExpr is VariantConstruction) {
+                        // BUG FIX: Reject variant constructor with bare argument like "Left 42"
+                        val constructorName = funcExpr.constructor
+                        val argName = token.text
+                        throw createParseException(
+                            "Variant constructors must use {} syntax. Instead of '$constructorName $argName', " +
+                            "use '$constructorName { <field> = $argName }' with named arguments.",
+                            currentStream,
+                            currentSource,
+                            currentFile
+                        )
                     }
                     // For non-identifier expressions, treat following identifier as separate statement
                     break
@@ -1532,9 +1544,10 @@ internal val FunkParser.postfixExpression: Parser<Expression>
                 TokenType.STRING, TokenType.INTEGER, TokenType.FLOAT, TokenType.FRACTION, TokenType.BOOLEAN -> {
                     // Function call with literal argument without {} syntax
                     val funcExpr = result.value
-                    if (funcExpr is Identifier || funcExpr is MemberAccess) {
+                    if (funcExpr is Identifier || funcExpr is MemberAccess || funcExpr is VariantConstruction) {
                         val funcName = when (funcExpr) {
                             is Identifier -> funcExpr.name
+                            is VariantConstruction -> funcExpr.constructor
                             is MemberAccess -> {
                                 // Extract clean name for member access like Parse.decode
                                 val receiverName = when (val receiver = funcExpr.receiver) {
@@ -1554,9 +1567,18 @@ internal val FunkParser.postfixExpression: Parser<Expression>
                             TokenType.BOOLEAN -> "boolean ${token.text}"
                             else -> "value"
                         }
-                        throw createParseException(
+
+                        // Use appropriate error message based on expression type
+                        val errorMessage = if (funcExpr is VariantConstruction) {
+                            "Variant constructors must use {} syntax. Instead of '$funcName $literalType', " +
+                            "use '$funcName { <field> = $literalType }' with named arguments."
+                        } else {
                             "Function calls must use {} syntax. Instead of '$funcName $literalType', " +
-                            "use '$funcName { <field> = $literalType }' with named arguments.",
+                            "use '$funcName { <field> = $literalType }' with named arguments."
+                        }
+
+                        throw createParseException(
+                            errorMessage,
                             currentStream,
                             currentSource,
                             currentFile

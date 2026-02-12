@@ -2213,7 +2213,13 @@ class ExpressionConstraintGenerator {
         // If effects are non-empty, we know what effects the expression uses - we can validate
         // We only skip validation for nested performs (which may have complex effect flows)
         // ALSO skip validation if effects are polymorphic (<...>) - they could match any handler
-        if (!isNestedPerform && !hasPolymorphicEffects) {
+        //
+        // ALSO CRITICAL: Skip validation if there are undefined variables!
+        // If the expression contains undefined variables, we can't properly validate effects yet
+        // because we don't know if those variables are effectful functions or not.
+        // The undefined variables will be caught later in NewTypeChecker.checkProgram() at line 242.
+        val hasUndefinedVariables = exprResult.undefinedVariables.isNotEmpty()
+        if (!isNestedPerform && !hasPolymorphicEffects && !hasUndefinedVariables) {
             // If the expression has no effects (neither tracked nor in type), providing handlers is meaningless
             if (handlerEffects.isNotEmpty() && allEffects.isEmpty()) {
                 // Expression is pure but handlers provided

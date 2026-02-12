@@ -209,12 +209,64 @@ class EffectHandler {
         }
 
         // Create a deferred computation function that will resolve the handler when executed
-        // This function will be called later when handlers become available
+        // This function will be called later when handlers become available via FunkSuspended.executeWith
         val deferredFunction = NativeFunkFunction("deferred-$effectName-$operationName") { args ->
-            // This will be executed later when handlers are available
-            // At that time, we need to look up the handler and execute the operation
-            // For now, throw an error - this should be handled by FunkSuspended.executeWith
-            throw RuntimeException("Deferred effect call not yet implemented for $effectName.$operationName")
+            // At execution time, handlers will be available on the handler stack (pushed by FunkSuspended.executeWith)
+            // Retrieve the handler from the stack and execute the operation
+            val handlersRecord = getCurrentHandlers()
+                ?: throw RuntimeException("No handlers available for deferred effect call $effectName.$operationName")
+
+            val handlers = handlersRecord.fields
+
+            // Smart handler resolution (same logic as executeEffectCall)
+            var handler = handlers[effectName]
+
+            // If not found, look for performers that implement this effect
+            if (handler == null) {
+                val performers = getPerformersForEffect(effectName)
+                for (performerName in performers) {
+                    handler = handlers[performerName]
+                    if (handler != null) {
+                        break
+                    }
+                }
+            }
+
+            if (handler == null) {
+                throw RuntimeException("No handler found for effect $effectName in deferred call")
+            }
+
+            if (handler !is FunkRecord) {
+                throw RuntimeException("Handler for $effectName is not a record: $handler")
+            }
+
+            val operation = handler.fields[operationName]
+                ?: throw RuntimeException("Operation $operationName not found in handler for $effectName")
+
+            // Execute the operation with the captured arguments
+            val operationArgs = args.firstOrNull() ?: arguments
+            when (operation) {
+                is NativeFunkFunction -> {
+                    if (operationArgs !is FunkRecord) {
+                        throw RuntimeException("Native function expects record arguments, got: ${operationArgs::class.simpleName}")
+                    }
+                    operation.call(listOf(operationArgs))
+                }
+                is FunkTruffleFunction -> {
+                    operation.callTarget.call(
+                        operationArgs,
+                        operation.closureVariables,
+                        operation.lexicalScope,
+                        operation.lexicalScopeSlotMap
+                    ) as FunkValue
+                }
+                else -> {
+                    throw RuntimeException(
+                        "Operation $operationName in handler for $effectName must be a Truffle function or native function. " +
+                        "Got: ${operation::class.simpleName}"
+                    )
+                }
+            }
         }
 
         // Create a thunk with the deferred function

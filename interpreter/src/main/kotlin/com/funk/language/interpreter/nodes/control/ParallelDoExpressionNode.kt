@@ -311,15 +311,77 @@ class SimpleDoExpressionNode(
         var lastResult: FunkValue = FunkNull
 
         // Execute statements sequentially
-        // CRITICAL: Check for FunkContinuationSuspended and FunkSuspended and propagate immediately
-        statementNodes.forEach { statementNode ->
+        for ((index, statementNode) in statementNodes.withIndex()) {
             lastResult = statementNode.execute(frame)
 
-            // If a statement returned a suspended continuation (e.g., from Exception.throw or Return.early)
-            // or a suspended effect computation (e.g., from unhandled effects),
-            // propagate it immediately instead of continuing to the next statement
-            if (lastResult is FunkContinuationSuspended || lastResult is com.funk.language.interpreter.FunkSuspended) {
+            // CRITICAL: Handle suspended continuations (early return, exceptions)
+            if (lastResult is FunkContinuationSuspended) {
                 return lastResult
+            }
+
+            // CRITICAL: Handle suspended effect computations with continuation composition
+            if (lastResult is com.funk.language.interpreter.FunkSuspended) {
+                // Capture the suspended value for use in closures
+                val suspendedValue = lastResult
+
+                // Create a continuation that executes the remaining statements + result
+                val remainingStatements = statementNodes.sliceArray((index + 1) until statementNodes.size)
+
+                // Capture the context for use in closures
+                val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
+
+                // Create a composed suspended computation
+                val composedFunc = com.funk.language.interpreter.NativeFunkFunction(
+                    "do-composition-${index}"
+                ) { args ->
+                    val effectHandler = context.effectHandler
+                    val currentHandlers = effectHandler.getCurrentHandlers()
+
+                    if (currentHandlers == null) {
+                        throw RuntimeException("No handlers available in composed do-continuation")
+                    }
+
+                    // Execute the original suspended effect
+                    val suspendedResult = when (val func = suspendedValue.computation.function) {
+                        is com.funk.language.interpreter.NativeFunkFunction -> {
+                            func.call(listOf(suspendedValue.computation.arguments))
+                        }
+                        is com.funk.language.interpreter.FunkTruffleFunction -> {
+                            func.callTarget.call(
+                                suspendedValue.computation.arguments,
+                                func.closureVariables,
+                                func.lexicalScope,
+                                func.lexicalScopeSlotMap
+                            ) as FunkValue
+                        }
+                        else -> {
+                            throw RuntimeException("Cannot execute thunk with function type: ${func::class.simpleName}")
+                        }
+                    }
+
+                    // Execute remaining statements
+                    var result: FunkValue = FunkNull
+                    for (remaining in remainingStatements) {
+                        result = remaining.execute(frame)
+
+                        if (result is com.funk.language.interpreter.FunkSuspended || result is FunkContinuationSuspended) {
+                            return@NativeFunkFunction result
+                        }
+                    }
+
+                    // Execute the result expression
+                    resultNode.execute(frame)
+                }
+
+                // Return the composed FunkSuspended
+                return com.funk.language.interpreter.FunkSuspended(
+                    computation = com.funk.language.interpreter.FunkThunk(
+                        function = composedFunc,
+                        arguments = com.funk.language.interpreter.FunkRecord(emptyMap())
+                    ),
+                    unhandledEffects = suspendedValue.unhandledEffects,
+                    capturedHandlers = suspendedValue.capturedHandlers
+                )
             }
         }
 

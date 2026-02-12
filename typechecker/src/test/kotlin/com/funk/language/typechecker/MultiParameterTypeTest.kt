@@ -4,6 +4,7 @@ import com.funk.language.parser.FunkParser
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.assertThrows
 
 /**
  * Tests for multi-parameter type declarations
@@ -23,7 +24,7 @@ class MultiParameterTypeTest {
     @Test
     fun `test two parameter type declaration parses correctly`() {
         val source = """
-            type Either 'a 'b = | Left 'a, Right 'b |
+            type Either 'a 'b = | Left { val: 'a }, Right { val: 'b } |
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -69,10 +70,10 @@ class MultiParameterTypeTest {
     @Test
     fun `test Either type with constructors`() {
         val source = """
-            type Either 'a 'b = | Left 'a, Right 'b |
-            
-            let left_val = Left 42
-            let right_val = Right "hello"
+            type Either 'a 'b = | Left { val: 'a }, Right { val: 'b } |
+
+            let left_val = Left { val = 42 }
+            let right_val = Right { val = "hello" }
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -85,7 +86,7 @@ class MultiParameterTypeTest {
         // Check that the let bindings typecheck
         val letBindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
         assertEquals(2, letBindings.size)
-        
+
         // Both should have inferred types
         assertNotNull(letBindings[0].inferredType)
         assertNotNull(letBindings[1].inferredType)
@@ -130,7 +131,7 @@ class MultiParameterTypeTest {
     @Test
     fun `test multi-parameter type preserves type variables correctly`() {
         val source = """
-            type Either 'a 'b = | Left 'a, Right 'b |
+            type Either 'a 'b = | Left { val: 'a }, Right { val: 'b } |
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -141,13 +142,17 @@ class MultiParameterTypeTest {
 
         // Check Left constructor
         val leftConstructor = definition.constructors.find { it.name == "Left" }!!
-        val leftType = leftConstructor.dataType as com.funk.language.ast.IdentifierTypeAnnotation
-        assertEquals("'a", leftType.name)
+        val leftType = leftConstructor.dataType as com.funk.language.ast.RecordTypeAnnotation
+        val leftField = leftType.entries.find { it.name == "val" }!!
+        val leftFieldType = leftField.type as com.funk.language.ast.IdentifierTypeAnnotation
+        assertEquals("'a", leftFieldType.name)
 
         // Check Right constructor
         val rightConstructor = definition.constructors.find { it.name == "Right" }!!
-        val rightType = rightConstructor.dataType as com.funk.language.ast.IdentifierTypeAnnotation
-        assertEquals("'b", rightType.name)
+        val rightType = rightConstructor.dataType as com.funk.language.ast.RecordTypeAnnotation
+        val rightField = rightType.entries.find { it.name == "val" }!!
+        val rightFieldType = rightField.type as com.funk.language.ast.IdentifierTypeAnnotation
+        assertEquals("'b", rightFieldType.name)
     }
 
     @Test
@@ -162,13 +167,31 @@ class MultiParameterTypeTest {
         val typeDecl = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>().first()
         assertEquals("Status", typeDecl.name)
         assertEquals(2, typeDecl.typeParams.size)
-        
+
         val definition = typeDecl.definition as com.funk.language.ast.VariantDefinition
         assertEquals(3, definition.constructors.size)
-        
+
         // All constructors should have null dataType (unit constructors)
         definition.constructors.forEach { constructor ->
             assertNull(constructor.dataType)
         }
+    }
+
+    @Test
+    fun `test Either with wrong syntax should fail`() {
+        val source = """
+            type Either 'a 'b = | Left { val: 'a }, Right { val: 'b } |
+
+            let wrong = Left 42
+        """.trimIndent()
+
+        // The parser should now reject "Left 42" syntax
+        val exception = assertThrows<Exception> {
+            parser.parse(source)
+        }
+
+        // Verify the error message mentions that variant constructors must use {} syntax
+        assertTrue(exception.message?.contains("Variant constructors must use {} syntax") == true,
+                   "Error message should mention variant constructor syntax requirement, but got: ${exception.message}")
     }
 }

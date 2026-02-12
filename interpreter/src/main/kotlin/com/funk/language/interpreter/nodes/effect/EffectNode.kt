@@ -114,7 +114,14 @@ class PerformNode(
         effectHandler.pushHandlers(handlersRecord)
 
         try {
-            return expressionNode.execute(frame)
+            val result = expressionNode.execute(frame)
+
+            // If the expression returned a suspended computation, execute it now with handlers available
+            return if (result is com.funk.language.interpreter.FunkSuspended) {
+                result.executeWith(handlers, getContext(), frame)
+            } else {
+                result
+            }
         } finally {
             // Always pop handlers, even if exception occurs
             effectHandler.popHandlers()

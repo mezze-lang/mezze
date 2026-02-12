@@ -19,6 +19,10 @@ object InspectImplementations {
 
     /**
      * Register all Inspect ability implementations
+     *
+     * CRITICAL: Inspect is an ABILITY, not an effect!
+     * Abilities are automatically available for all types without requiring imports.
+     * This is different from effects which require handlers via `perform`.
      */
     fun registerAll(context: MutableMap<String, FunkValue>) {
         // Register the native implementation

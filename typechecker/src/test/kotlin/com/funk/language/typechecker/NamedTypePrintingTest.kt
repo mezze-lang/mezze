@@ -195,10 +195,10 @@ class NamedTypePrintingTest {
     @Test
     fun `test unit constructors print correctly with named types`() {
         val source = """
-            type Option 'a = | None, Some 'a |
-            
+            type Option 'a = | None, Some { val: 'a } |
+
             let none_value = None
-            let some_value = Some 42
+            let some_value = Some { val = 42 }
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -206,7 +206,7 @@ class NamedTypePrintingTest {
 
         val typeDecls = result.items.filterIsInstance<com.funk.language.ast.TypeDeclaration>()
         val letBindings = result.items.filterIsInstance<com.funk.language.ast.LetBinding>()
-        
+
         // Both bindings should typecheck successfully
         assertEquals(2, letBindings.size)
         assertNotNull(letBindings[0].inferredType)

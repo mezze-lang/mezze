@@ -295,8 +295,22 @@ private fun findTypeDeclarationForVariant(
     for (decl in typeDeclarations) {
         val variantDef = decl.definition as? VariantDefinition ?: continue
 
-        // Check if constructor names match
-        if (variantDef.constructors.map { it.name }.toSet() != variantType.constructors.keys) {
+        val declConstructors = variantDef.constructors.map { it.name }.toSet()
+        val typeConstructors = variantType.constructors.keys
+
+        // CRITICAL FIX: Allow the inferred type to be a subset of the declared type
+        // Example: | Node ... | should match Tree if Tree = | Leaf, Node ... |
+        // This handles cases where only some constructors are used
+        if (!typeConstructors.all { it in declConstructors }) {
+            continue
+        }
+
+        // Additional check: For exact matches (all constructors present), require exact equality
+        // For subset matches (some constructors missing), allow it
+        val isSubsetMatch = typeConstructors.size < declConstructors.size
+        val isExactMatch = typeConstructors.size == declConstructors.size && declConstructors == typeConstructors
+
+        if (!isSubsetMatch && !isExactMatch) {
             continue
         }
 
@@ -310,6 +324,15 @@ private fun findTypeDeclarationForVariant(
         val typeArgs = extractTypeArgumentsFromVariant(variantType, decl.typeParams.size, typeVarMapping)
         if (typeArgs != null) {
             return TypeDeclMatch(decl.name, typeArgs)
+        }
+
+        // CRITICAL FIX: For concrete types, infer type arguments by matching structure
+        // Example: | Node { value: Int, ... } | matches Tree 'a if we can infer 'a = Int
+        if (decl.typeParams.isNotEmpty()) {
+            val inferredArgs = inferTypeArgsFromStructure(variantType, variantDef, decl.typeParams)
+            if (inferredArgs != null) {
+                return TypeDeclMatch(decl.name, inferredArgs)
+            }
         }
 
         // FALLBACK: If we have the right constructors but couldn't extract type args,
@@ -351,6 +374,48 @@ private fun extractTypeArgumentsFromVariant(
 }
 
 /**
+ * Infer type arguments from structural matching for concrete types.
+ * This handles cases like: | Node { value: Int, ...} | matching Tree 'a where we infer 'a = Int
+ */
+private fun inferTypeArgsFromStructure(
+    variantType: FunkType.VariantType,
+    variantDef: VariantDefinition,
+    typeParams: List<String>
+): List<FunkType>? {
+    // Find a constructor that exists in both the inferred type and the declaration
+    val commonConstructor = variantType.constructors.keys.firstOrNull { constructorName ->
+        variantDef.constructors.any { it.name == constructorName }
+    } ?: return null
+
+    val inferredPayload = variantType.constructors[commonConstructor]
+    val declConstructor = variantDef.constructors.find { it.name == commonConstructor } ?: return null
+
+    // If there's no payload, we can't infer type arguments
+    if (inferredPayload == null || declConstructor.dataType == null) {
+        return null
+    }
+
+    // Match the payloads and extract type arguments
+    // For single-parameter types, look for a simple field that contains the type param
+    if (typeParams.size == 1 && inferredPayload is FunkType.RecordType && declConstructor.dataType is RecordTypeAnnotation) {
+        val typeParam = typeParams[0]
+
+        // Find a field in the declaration that has type 'a (the type parameter)
+        for (declField in declConstructor.dataType.entries) {
+            if (declField.type is IdentifierTypeAnnotation && declField.type.name == typeParam) {
+                // Found a field with type parameter - get the concrete type from the inferred payload
+                val concreteType = inferredPayload.fields[declField.name]
+                if (concreteType != null) {
+                    return listOf(concreteType)
+                }
+            }
+        }
+    }
+
+    return null
+}
+
+/**
  * Pretty printer for Funk types with type alias expansion support
  */
 fun prettyPrintTypeWithAliases(
@@ -361,7 +426,29 @@ fun prettyPrintTypeWithAliases(
 ): String {
     val typeVarMapping = collectTypeVariables(type)
 
-    // First, check if this type matches any alias
+    // CRITICAL FIX: For variant types, check typeDeclarations FIRST
+    // This handles recursive types like Tree 'a which can't be matched via unification
+    if (type is FunkType.VariantType) {
+        val declMatch = findTypeDeclarationForVariant(type, typeDeclarations, typeVarMapping)
+        if (declMatch != null) {
+            val typeArgsStr = if (declMatch.typeArgs.isEmpty()) {
+                ""
+            } else {
+                " " + declMatch.typeArgs.joinToString(" ") {
+                    prettyPrintTypeWithAliases(it, typeAliases, showExpansion, typeDeclarations)
+                }
+            }
+            val aliasName = declMatch.declName + typeArgsStr
+
+            return if (showExpansion) {
+                "$aliasName (= ${prettyPrintTypeWithMapping(type, typeVarMapping)})"
+            } else {
+                aliasName
+            }
+        }
+    }
+
+    // Second, check if this type matches any alias (for non-recursive types)
     val aliasMatch = findTypeAliasForType(type, typeAliases)
 
     return if (aliasMatch != null) {

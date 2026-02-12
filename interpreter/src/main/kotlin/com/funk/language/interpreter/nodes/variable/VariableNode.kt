@@ -21,6 +21,14 @@ class ReadVariableNode(private val slot: Int, private val variableName: String) 
         // Return the value if it's a valid FunkValue (but NOT FunkNull)
         // FunkNull closure variables can occur with recursive functions
         if (value is FunkValue && value !is FunkNull) {
+            // If the value is a suspended computation and handlers are available, execute it
+            if (value is com.funk.language.interpreter.FunkSuspended) {
+                val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
+                val handlers = context.effectHandler.getCurrentHandlers()
+                if (handlers != null) {
+                    return value.executeWith(handlers.fields, context, frame)
+                }
+            }
             return value
         }
 
@@ -30,6 +38,13 @@ class ReadVariableNode(private val slot: Int, private val variableName: String) 
             val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
             val globalValue = context.lookupGlobal(variableName)
             if (globalValue != null) {
+                // If the global value is a suspended computation and handlers are available, execute it
+                if (globalValue is com.funk.language.interpreter.FunkSuspended) {
+                    val handlers = context.effectHandler.getCurrentHandlers()
+                    if (handlers != null) {
+                        return globalValue.executeWith(handlers.fields, context, frame)
+                    }
+                }
                 return globalValue
             }
 
@@ -38,6 +53,13 @@ class ReadVariableNode(private val slot: Int, private val variableName: String) 
                 val genericName = variableName.substringBefore("$")
                 val genericValue = context.lookupGlobal(genericName)
                 if (genericValue != null) {
+                    // If the generic value is a suspended computation and handlers are available, execute it
+                    if (genericValue is com.funk.language.interpreter.FunkSuspended) {
+                        val handlers = context.effectHandler.getCurrentHandlers()
+                        if (handlers != null) {
+                            return genericValue.executeWith(handlers.fields, context, frame)
+                        }
+                    }
                     return genericValue
                 }
             }
@@ -87,6 +109,14 @@ class SimpleReadVariableNode(private val slot: Int, private val variableName: St
         // FunkNull closure variables can occur with recursive functions where the function
         // references itself before it's defined
         if (value is FunkValue && value !is FunkNull) {
+            // If the value is a suspended computation and handlers are available, execute it
+            if (value is com.funk.language.interpreter.FunkSuspended) {
+                val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
+                val handlers = context.effectHandler.getCurrentHandlers()
+                if (handlers != null) {
+                    return value.executeWith(handlers.fields, context, frame)
+                }
+            }
             return value
         }
 
@@ -98,6 +128,13 @@ class SimpleReadVariableNode(private val slot: Int, private val variableName: St
             val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
             val globalValue = context.lookupGlobal(variableName)
             if (globalValue != null) {
+                // If the global value is a suspended computation and handlers are available, execute it
+                if (globalValue is com.funk.language.interpreter.FunkSuspended) {
+                    val handlers = context.effectHandler.getCurrentHandlers()
+                    if (handlers != null) {
+                        return globalValue.executeWith(handlers.fields, context, frame)
+                    }
+                }
                 return globalValue
             }
 
@@ -106,6 +143,13 @@ class SimpleReadVariableNode(private val slot: Int, private val variableName: St
                 val genericName = variableName.substringBefore("$")
                 val genericValue = context.lookupGlobal(genericName)
                 if (genericValue != null) {
+                    // If the generic value is a suspended computation and handlers are available, execute it
+                    if (genericValue is com.funk.language.interpreter.FunkSuspended) {
+                        val handlers = context.effectHandler.getCurrentHandlers()
+                        if (handlers != null) {
+                            return genericValue.executeWith(handlers.fields, context, frame)
+                        }
+                    }
                     return genericValue
                 }
             }
