@@ -12,6 +12,9 @@ import org.junit.jupiter.api.parallel.ExecutionMode
 
 /**
  * Tests for Coop (cooperative) async implementation using actual Funk code.
+ *
+ * These tests use the stdlib's Async effect with CoopAsync handler, which
+ * provides cooperative scheduling using delimited continuations.
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class CoopTest {
@@ -40,16 +43,10 @@ class CoopTest {
         return result
     }
 
-    // Setup code for Coop operations
+    // Setup code for Coop operations using stdlib
     private val coopSetup = """
-        newtype CoopPromise 'a = CoopPromise __NativePromise
-
-        let coop_spawn: {f: {} -> 'a} -> CoopPromise 'a = {f} -> __native_coop_spawn {f = f}
-        let coop_await: {p: CoopPromise 'a} -> 'a = {p} -> __native_coop_await {p = p}
-        let coop_sleep: {ms: Int} -> {} = {ms} -> __native_coop_sleep {ms = ms}
-        let coop_is_done: {p: CoopPromise 'a} -> Bool = {p} -> __native_coop_is_done {p = p}
-        let coop_is_cancelled: {} -> Bool = {} -> __native_coop_is_cancelled {}
-        let coop_check: {} -> {} = {} -> __native_coop_check {}
+        use std::async::{Async, CoopAsync}
+        use std::control::continuation
     """.trimIndent()
 
     // =============================================================================
@@ -61,9 +58,10 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            let p = coop_spawn {f = {} -> 42}
-            # Promise is created but computation not executed yet
-            coop_is_done {p = p}
+            perform CoopAsync {cont = continuation::new {}} in do
+                let p = Async.spawn {f = {} -> 42}
+                # Promise is created but computation not executed yet
+                Async.is_done {p = p}
         """
         val result = eval(code)
         // In Coop, promises are always "ready" since computation is stored
@@ -75,8 +73,9 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            let p = coop_spawn {f = {} -> 42}
-            coop_await {p = p}
+            perform CoopAsync {cont = continuation::new {}} in do
+                let p = Async.spawn {f = {} -> 42}
+                Async.await {p = p}
         """
         val result = eval(code)
         assertEquals(FunkInt(42), result)
@@ -87,8 +86,9 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            let p = coop_spawn {f = {} -> 10 + 20 + 12}
-            coop_await {p = p}
+            perform CoopAsync {cont = continuation::new {}} in do
+                let p = Async.spawn {f = {} -> 10 + 20 + 12}
+                Async.await {p = p}
         """
         val result = eval(code)
         assertEquals(FunkInt(42), result)
@@ -99,9 +99,10 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            # In Coop, sleep is a no-op (single-threaded)
-            let _ = coop_sleep {ms = 1000}
-            True
+            perform CoopAsync {cont = continuation::new {}} in do
+                # In Coop, sleep is a no-op (single-threaded)
+                let _ = Async.sleep {ms = 1000}
+                True
         """
         val result = eval(code)
         assertEquals(FunkBool(true), result)
@@ -112,8 +113,9 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            # In single-threaded Coop, cancellation is not applicable
-            coop_is_cancelled {}
+            perform CoopAsync {cont = continuation::new {}} in do
+                # In single-threaded Coop, cancellation is not applicable
+                Async.is_cancelled {}
         """
         val result = eval(code)
         assertEquals(FunkBool(false), result)
@@ -124,8 +126,9 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            let _ = coop_check {}
-            True
+            perform CoopAsync {cont = continuation::new {}} in do
+                let _ = Async.check {}
+                True
         """
         val result = eval(code)
         assertEquals(FunkBool(true), result)
@@ -140,17 +143,18 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            # In Coop, spawn stores computation, await executes it
-            # This is deterministic and sequential
-            let p1 = coop_spawn {f = {} -> 1}
-            let p2 = coop_spawn {f = {} -> 2}
-            let p3 = coop_spawn {f = {} -> 3}
+            perform CoopAsync {cont = continuation::new {}} in do
+                # In Coop, spawn stores computation, await executes it
+                # This is deterministic and sequential
+                let p1 = Async.spawn {f = {} -> 1}
+                let p2 = Async.spawn {f = {} -> 2}
+                let p3 = Async.spawn {f = {} -> 3}
 
-            let r1 = coop_await {p = p1}
-            let r2 = coop_await {p = p2}
-            let r3 = coop_await {p = p3}
+                let r1 = Async.await {p = p1}
+                let r2 = Async.await {p = p2}
+                let r3 = Async.await {p = p3}
 
-            r1 + r2 + r3
+                r1 + r2 + r3
         """
         val result = eval(code)
         assertEquals(FunkInt(6), result)
@@ -161,13 +165,14 @@ class CoopTest {
         val code = """
             $coopSetup
 
-            let outer = coop_spawn {f = {} -> do
-                let inner = coop_spawn {f = {} -> 21}
-                let x = coop_await {p = inner}
-                x * 2
-            }
+            perform CoopAsync {cont = continuation::new {}} in do
+                let outer = Async.spawn {f = {} -> do
+                    let inner = Async.spawn {f = {} -> 21}
+                    let x = Async.await {p = inner}
+                    x * 2
+                }
 
-            coop_await {p = outer}
+                Async.await {p = outer}
         """
         val result = eval(code)
         assertEquals(FunkInt(42), result)

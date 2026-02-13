@@ -141,7 +141,7 @@ pub impl Async for CoopAsync { cont: Continuation } where {
     cancel = {p} -> {},
     sleep = {ms} -> __native_coop_sleep { ms = ms, cont = cont },
     is_done = {p} -> __native_coop_is_done { p = p },
-    is_cancelled = {} -> false,
+    is_cancelled = {} -> False,
     check = {} -> {}
 }
 
