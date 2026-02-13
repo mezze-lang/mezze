@@ -35,15 +35,14 @@ object LoomTypes {
             promiseType
         )
 
-        // __native_loom_spawn_cfg: {f: {} -> 'a, max_concurrent: Int, timeout_ms: Int} -> Promise 'a
+        // __native_loom_spawn_cfg: {f: {} -> 'a, max_concurrent: Int} -> Promise 'a
         context["__native_loom_spawn_cfg"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf(
                 "f" to FunkType.FunctionType(
                     FunkType.RecordType(emptyMap()),
                     FunkType.VarType(com.funk.language.ast.TypeVar("a"))
                 ),
-                "max_concurrent" to FunkType.IntType,
-                "timeout_ms" to FunkType.IntType
+                "max_concurrent" to FunkType.IntType
             )),
             promiseType
         )

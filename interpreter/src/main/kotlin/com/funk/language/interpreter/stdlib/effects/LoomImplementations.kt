@@ -156,12 +156,11 @@ object LoomImplementations {
     /**
      * __native_loom_spawn_cfg - Spawn with configuration.
      *
-     * Takes: { f: {} -> 'a, max_concurrent: Int, timeout_ms: Int }
+     * Takes: { f: {} -> 'a, max_concurrent: Int }
      * Returns: Promise 'a
      *
      * Like spawn but with configuration:
      * - max_concurrent: Maximum concurrent tasks (0 = unbounded)
-     * - timeout_ms: Default timeout in milliseconds (0 = no timeout, currently unused)
      */
     private fun registerSpawnCfg(context: MutableMap<String, FunkValue>) {
         context["__native_loom_spawn_cfg"] = NativeFunkFunction("__native_loom_spawn_cfg") { args ->
@@ -172,8 +171,6 @@ object LoomImplementations {
                 ?: throw NativeFunctionException("__native_loom_spawn_cfg", "expects 'f' field")
 
             val maxConcurrent = (record.fields["max_concurrent"] as? FunkInt)?.value?.toInt() ?: 0
-            // timeout_ms is captured for future use but spawn itself doesn't use it
-            // (timeout is applied at await time via the timeout operation)
 
             when (computation) {
                 is FunkTruffleFunction, is NativeFunkFunction -> {

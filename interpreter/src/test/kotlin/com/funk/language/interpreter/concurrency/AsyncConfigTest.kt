@@ -49,7 +49,7 @@ class AsyncConfigTest {
         val code = """
             use std::async::{Async, LoomAsyncWith}
 
-            perform LoomAsyncWith {max_concurrent = 4, timeout_ms = 0} in do
+            perform LoomAsyncWith {max_concurrent = 4} in do
                 let p = Async.spawn {f = {} -> 42}
                 Async.await {p = p}
         """
@@ -62,7 +62,7 @@ class AsyncConfigTest {
         val code = """
             use std::async::{Async, LoomAsyncWith}
 
-            perform LoomAsyncWith {max_concurrent = 2, timeout_ms = 0} in do
+            perform LoomAsyncWith {max_concurrent = 2} in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
@@ -83,7 +83,7 @@ class AsyncConfigTest {
             use std::async::{Async, LoomAsyncWith}
 
             # max_concurrent = 0 means unbounded
-            perform LoomAsyncWith {max_concurrent = 0, timeout_ms = 0} in do
+            perform LoomAsyncWith {max_concurrent = 0} in do
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
@@ -106,7 +106,7 @@ class AsyncConfigTest {
         val code = """
             use std::async::{Async, OSThreadAsyncWith}
 
-            perform OSThreadAsyncWith {pool_size = 2, timeout_ms = 0} in do
+            perform OSThreadAsyncWith {pool_size = 2} in do
                 let p = Async.spawn {f = {} -> 42}
                 Async.await {p = p}
         """
@@ -119,7 +119,7 @@ class AsyncConfigTest {
         val code = """
             use std::async::{Async, OSThreadAsyncWith}
 
-            perform OSThreadAsyncWith {pool_size = 4, timeout_ms = 0} in do
+            perform OSThreadAsyncWith {pool_size = 4} in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
@@ -140,7 +140,7 @@ class AsyncConfigTest {
             use std::async::{Async, OSThreadAsyncWith}
 
             # pool_size = 0 means create new thread for each spawn
-            perform OSThreadAsyncWith {pool_size = 0, timeout_ms = 0} in do
+            perform OSThreadAsyncWith {pool_size = 0} in do
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
 

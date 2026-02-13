@@ -100,12 +100,11 @@ object OSThreadImplementations {
     /**
      * __native_os_spawn_cfg - Spawn with configuration.
      *
-     * Takes: { f: {} -> 'a, pool_size: Int, timeout_ms: Int }
+     * Takes: { f: {} -> 'a, pool_size: Int }
      * Returns: Promise 'a
      *
      * Like spawn but with configuration:
      * - pool_size: Maximum concurrent OS threads (0 = unbounded)
-     * - timeout_ms: Default timeout in milliseconds (0 = no timeout, currently unused at spawn time)
      */
     private fun registerSpawnCfg(context: MutableMap<String, FunkValue>) {
         context["__native_os_spawn_cfg"] = NativeFunkFunction("__native_os_spawn_cfg") { args ->
