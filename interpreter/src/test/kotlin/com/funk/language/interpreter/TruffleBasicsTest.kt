@@ -250,7 +250,7 @@ class TruffleBasicsTest {
             }
 
             impl Math for Calculator where {
-                add: {x: Int, y: Int} -> Int = {x, y} -> x + y
+                add: {x: Int, y: Int} -> Int = {x, y} -> x + y,
                 mul: {x: Int, y: Int} -> Int = {x, y} -> x * y
             }
 

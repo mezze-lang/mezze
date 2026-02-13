@@ -213,7 +213,7 @@ class FunkParser(
     ) { Unit }
 
     internal fun tok(type: TokenType): Parser<Token> =
-        Parsers.token({ it.type == type }, type.name)
+        Parsers.token({ it.type == type }, tokenDescription(type))
     internal fun <T, S> sepByWithNewlines(parser: Parser<T>, separator: Parser<S>): Parser<List<T>> = { stream ->
         when (val first = parser(stream)) {
             is ParseResult.Success -> {
@@ -552,4 +552,97 @@ class ParseException(
             return sb.toString().trim()
         }
     }
+}
+
+/**
+ * Convert a TokenType to a user-friendly description for error messages.
+ * Instead of "Expected RBRACE but got IDENTIFIER", we show "Expected '}' but got identifier".
+ */
+internal fun tokenDescription(type: TokenType): String = when (type) {
+    // Delimiters - show the actual character
+    TokenType.LPAREN -> "'('"
+    TokenType.RPAREN -> "')'"
+    TokenType.LBRACE -> "'{'"
+    TokenType.RBRACE -> "'}'"
+    TokenType.LBRACKET -> "'['"
+    TokenType.RBRACKET -> "']'"
+    TokenType.COMMA -> "','"
+    TokenType.DOT -> "'.'"
+    TokenType.COLON -> "':'"
+    TokenType.SEMICOLON -> "';'"
+    TokenType.ARROW -> "'->'"
+    TokenType.ASSIGN -> "'='"
+    TokenType.ELLIPSIS -> "'...'"
+    TokenType.DOUBLE_COLON -> "'::'"
+    TokenType.AT -> "'@'"
+    TokenType.PIPE -> "'|'"
+    TokenType.PIPE_OP -> "'|>'"
+    TokenType.PLACEHOLDER -> "'_'"
+
+    // Operators - show the actual operator
+    TokenType.PLUS -> "'+'"
+    TokenType.MINUS -> "'-'"
+    TokenType.STAR -> "'*'"
+    TokenType.SLASH -> "'/'"
+    TokenType.PERCENT -> "'%'"
+    TokenType.EQ -> "'=='"
+    TokenType.NEQ -> "'!='"
+    TokenType.LT -> "'<'"
+    TokenType.GT -> "'>'"
+    TokenType.LTE -> "'<='"
+    TokenType.GTE -> "'>='"
+    TokenType.AND -> "'&&'"
+    TokenType.OR -> "'||'"
+    TokenType.NOT -> "'!'"
+
+    // Keywords - show the keyword
+    TokenType.LET -> "'let'"
+    TokenType.TYPE -> "'type'"
+    TokenType.NEWTYPE -> "'newtype'"
+    TokenType.IF -> "'if'"
+    TokenType.THEN -> "'then'"
+    TokenType.ELSE -> "'else'"
+    TokenType.MATCH -> "'match'"
+    TokenType.IS -> "'is'"
+    TokenType.DO -> "'do'"
+    TokenType.EFFECT -> "'effect'"
+    TokenType.IMPL -> "'impl'"
+    TokenType.PERFORM -> "'perform'"
+    TokenType.ABILITY -> "'ability'"
+    TokenType.PUB -> "'pub'"
+    TokenType.FOR -> "'for'"
+    TokenType.WHERE -> "'where'"
+    TokenType.WITH -> "'with'"
+    TokenType.IN -> "'in'"
+    TokenType.USE -> "'use'"
+    TokenType.HAVING -> "'having'"
+    TokenType.FORALL -> "'forall'"
+
+    // Literals and identifiers - describe what they are
+    TokenType.INTEGER -> "integer"
+    TokenType.NAT -> "natural number"
+    TokenType.FLOAT -> "float"
+    TokenType.FRACTION -> "fraction"
+    TokenType.STRING -> "string"
+    TokenType.BOOLEAN -> "boolean"
+    TokenType.IDENTIFIER -> "identifier"
+
+    // Special
+    TokenType.NEWLINE -> "newline"
+    TokenType.EOF -> "end of file"
+    TokenType.ERROR -> "error"
+}
+
+/**
+ * Convert a Token (or null) to a user-friendly description for "but got X" messages.
+ */
+internal fun tokenGotDescription(token: Token?): String = when {
+    token == null -> "end of file"
+    token.type == TokenType.IDENTIFIER -> "'${token.text}'"
+    token.type == TokenType.INTEGER -> "number '${token.text}'"
+    token.type == TokenType.FLOAT -> "number '${token.text}'"
+    token.type == TokenType.STRING -> "string"
+    token.type == TokenType.NEWLINE -> "newline"
+    token.type == TokenType.EOF -> "end of file"
+    else -> tokenDescription(token.type)
 }

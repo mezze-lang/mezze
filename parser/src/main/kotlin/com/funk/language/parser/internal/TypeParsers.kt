@@ -52,8 +52,8 @@ internal val FunkParser.recordTypeEntryParser: Parser<RecordTypeEntry>
                                 "Record type field '$fieldName' is missing a type annotation.\n" +
                                         "Expected format: { $fieldName: Type, ... }"
                             else ->
-                                "Record type field '$fieldName' is missing a type annotation.\n" +
-                                        "Expected ':' followed by a type, but got ${nextToken?.type}"
+                                "Record type field '$fieldName' is missing a type annotation. " +
+                                        "Expected ':' followed by a type, but got ${tokenGotDescription(nextToken)}"
                         }
                         ident.remaining.failure(message)
                     }
@@ -427,8 +427,8 @@ internal val FunkParser.recordTypeAnnotationParser: Parser<TypeAnnotation>
                                         }
                                         else -> {
                                             // Generic error
-                                            val message = "Expected closing '}' for record type, but got ${currentToken?.type}.\n" +
-                                                    "Record type fields must have format: { field: Type }"
+                                            val message = "Expected '}' to close record type, but got ${tokenGotDescription(currentToken)}. " +
+                                                    "Record type format: { field: Type }"
                                             stream3.failure(message)
                                         }
                                     }
@@ -528,21 +528,42 @@ internal val FunkParser.simpleTypeArgument: Parser<TypeAnnotation>
     }
 
 // Type application annotation parser
+// Handles: Constructor Arg1 Arg2 ... (e.g., Option Int, List String)
+// Also handles: module::Type Arg1 Arg2 ... (e.g., codec::Entry String Json)
 internal val FunkParser.typeApplicationAnnotation: Parser<TypeAnnotation>
     get() = { stream ->
-        // Parse: Constructor Arg1 Arg2 ... (e.g., Option Int, List String)
-        // Try to parse identifier followed by type arguments
         val ident = identifierParser(stream)
         when (ident) {
             is ParseResult.Success -> {
-                // Check if this identifier is capitalized (type constructor)
-                if (ident.value.text[0].isUpperCase()) {
+                // Check for qualified path (module::Type)
+                var currentStream = ident.remaining
+                val pathSegments = mutableListOf(ident.value.text)
+
+                while (true) {
+                    val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
+                    if (doubleColon is ParseResult.Success) {
+                        val nextIdent = identifierParser(doubleColon.remaining)
+                        if (nextIdent is ParseResult.Success) {
+                            pathSegments.add(nextIdent.value.text)
+                            currentStream = nextIdent.remaining
+                        } else {
+                            break
+                        }
+                    } else {
+                        break
+                    }
+                }
+
+                val isQualified = pathSegments.size > 1
+                val typeName = pathSegments.last()
+                val modulePath = if (isQualified) pathSegments.dropLast(1) else emptyList()
+
+                // Check if this is a type constructor (capitalized)
+                if (typeName[0].isUpperCase()) {
                     // Try to parse type arguments
                     val args = mutableListOf<TypeAnnotation>()
-                    var currentStream = ident.remaining
 
                     while (true) {
-                        // Try to parse a type argument (but not another constructor application)
                         val argResult = simpleTypeArgument(currentStream)
                         when (argResult) {
                             is ParseResult.Success -> {
@@ -553,23 +574,29 @@ internal val FunkParser.typeApplicationAnnotation: Parser<TypeAnnotation>
                         }
                     }
 
-                    if (args.isNotEmpty()) {
+                    if (isQualified) {
+                        // Qualified type: codec::Entry String Json
                         ParseResult.Success(
-                            TypeApplicationAnnotation(ident.value.text, args),
+                            QualifiedTypeAnnotation(modulePath, typeName, args),
+                            currentStream
+                        )
+                    } else if (args.isNotEmpty()) {
+                        ParseResult.Success(
+                            TypeApplicationAnnotation(typeName, args),
                             currentStream
                         )
                     } else {
                         // No args, just an identifier type
                         ParseResult.Success(
-                            IdentifierTypeAnnotation(ident.value.text),
-                            ident.remaining
+                            IdentifierTypeAnnotation(typeName),
+                            currentStream
                         )
                     }
                 } else {
                     // Lowercase identifier, just a type variable or simple type
                     ParseResult.Success(
-                        IdentifierTypeAnnotation(ident.value.text),
-                        ident.remaining
+                        IdentifierTypeAnnotation(typeName),
+                        currentStream
                     )
                 }
             }

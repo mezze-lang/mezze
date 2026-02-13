@@ -12,12 +12,12 @@ class TestTwoOperations {
     fun testTwoOperationsNoConcat() {
         val source = """
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> String,
               debug : {val: 'a} -> String
             }
 
             impl Show String where {
-              show : {val: String} -> String = {val} -> val
+              show : {val: String} -> String = {val} -> val,
               debug : {val: String} -> String = {val} -> val
             }
         """.trimIndent()

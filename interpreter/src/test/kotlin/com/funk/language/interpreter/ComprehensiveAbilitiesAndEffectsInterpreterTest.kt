@@ -340,9 +340,9 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl StringContainer for TestContainer where {
-              empty : {} -> String = {} -> ""
+              empty : {} -> String = {} -> "",
               add : {container: String, item: String} -> String = {container, item} ->
-                if container == "" then item else "$(container),$(item)"
+                if container == "" then item else "$(container),$(item)",
               size : {container: String} -> Int = {container} ->
                 if container == "" then 0 else 1
             }

@@ -73,12 +73,12 @@ class AbilityTypeCheckerTest {
     fun testMultipleAbilityOperations() {
         val source = """
             ability Show 'a where {
-              show : {val: 'a} -> String
+              show : {val: 'a} -> String,
               debug : {val: 'a} -> String
             }
-            
+
             impl Show String where {
-              show : {val: String} -> String = {val} -> val
+              show : {val: String} -> String = {val} -> val,
               debug : {val: String} -> String = {val} -> "\"$(val)\""
             }
         """.trimIndent()
@@ -105,7 +105,7 @@ class AbilityTypeCheckerTest {
     fun testAbilityWithComplexTypes() {
         val source = """
             ability Serializer 'a where {
-              serialize : {val: 'a} -> String
+              serialize : {val: 'a} -> String,
               deserialize : {str: String} -> 'a
             }
         """.trimIndent()

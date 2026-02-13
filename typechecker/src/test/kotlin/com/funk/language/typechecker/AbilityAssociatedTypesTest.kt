@@ -24,9 +24,9 @@ class AbilityAssociatedTypesTest {
     fun `test basic ability with having associated type`() {
         val source = """
             ability Collection 'c having 'item where {
-                empty: {} -> 'c
-                add: {collection: 'c, element: 'item} -> 'c
-                size: {collection: 'c} -> Int
+                empty: {} -> 'c,
+                add: {collection: 'c, element: 'item} -> 'c,
+                size: {collection: 'c} -> Int,
             }
         """.trimIndent()
 
@@ -50,15 +50,15 @@ class AbilityAssociatedTypesTest {
     fun `test ability implementation with associated type binding`() {
         val source = """
             ability Collection 'c having 'item where {
-                empty: {} -> 'c
-                add: {collection: 'c, element: 'item} -> 'c
-                size: {collection: 'c} -> Int
+                empty: {} -> 'c,
+                add: {collection: 'c, element: 'item} -> 'c,
+                size: {collection: 'c} -> Int,
             }
 
             impl Collection [Int] having 'item = Int where {
-                empty = {} -> []
-                add = {collection, element} -> collection
-                size = {collection} -> 0
+                empty = {} -> [],
+                add = {collection, element} -> collection,
+                size = {collection} -> 0,
             }
         """.trimIndent()
 
@@ -78,11 +78,11 @@ class AbilityAssociatedTypesTest {
     fun `test ability with associated type in multiple operations`() {
         val source = """
             ability Container 'c having 'item where {
-                empty: {} -> 'c
-                add: {container: 'c, element: 'item} -> 'c
-                contains: {container: 'c, element: 'item} -> Bool
-                get: {container: 'c, index: Int} -> 'item
-                toArray: {container: 'c} -> ['item]
+                empty: {} -> 'c,
+                add: {container: 'c, element: 'item} -> 'c,
+                contains: {container: 'c, element: 'item} -> Bool,
+                get: {container: 'c, index: Int} -> 'item,
+                toArray: {container: 'c} -> ['item],
             }
         """.trimIndent()
 
@@ -100,15 +100,15 @@ class AbilityAssociatedTypesTest {
     fun `test ability with having and with constraint together`() {
         val source = """
             ability Container 'c having 'item with Eq 'item where {
-                empty: {} -> 'c
-                add: {container: 'c, element: 'item} -> 'c
-                contains: {container: 'c, element: 'item} -> Bool
+                empty: {} -> 'c,
+                add: {container: 'c, element: 'item} -> 'c,
+                contains: {container: 'c, element: 'item} -> Bool,
             }
 
             impl Container [Int] having 'item = Int where {
-                empty = {} -> []
-                add = {container, element} -> container
-                contains = {container, element} -> False
+                empty = {} -> [],
+                add = {container, element} -> container,
+                contains = {container, element} -> False,
             }
         """.trimIndent()
 
@@ -125,18 +125,18 @@ class AbilityAssociatedTypesTest {
     fun `test multiple implementations with different associated type bindings`() {
         val source = """
             ability Collection 'c having 'item where {
-                empty: {} -> 'c
-                add: {collection: 'c, element: 'item} -> 'c
+                empty: {} -> 'c,
+                add: {collection: 'c, element: 'item} -> 'c,
             }
 
             impl Collection [Int] having 'item = Int where {
-                empty = {} -> []
-                add = {collection, element} -> collection
+                empty = {} -> [],
+                add = {collection, element} -> collection,
             }
 
             impl Collection [String] having 'item = String where {
-                empty = {} -> []
-                add = {collection, element} -> collection
+                empty = {} -> [],
+                add = {collection, element} -> collection,
             }
         """.trimIndent()
 
@@ -159,8 +159,8 @@ class AbilityAssociatedTypesTest {
     fun `test ability with associated type used in return position`() {
         val source = """
             ability Factory 'f having 'product where {
-                create: {factory: 'f} -> 'product
-                createMany: {factory: 'f, count: Int} -> ['product]
+                create: {factory: 'f} -> 'product,
+                createMany: {factory: 'f, count: Int} -> ['product],
             }
         """.trimIndent()
 
@@ -179,9 +179,9 @@ class AbilityAssociatedTypesTest {
     fun `test ability operations can reference associated type multiple times`() {
         val source = """
             ability Transformable 't having 'item where {
-                size: {container: 't} -> Int
-                first: {container: 't} -> 'item
-                add: {container: 't, item: 'item} -> 't
+                size: {container: 't} -> Int,
+                first: {container: 't} -> 'item,
+                add: {container: 't, item: 'item} -> 't,
             }
         """.trimIndent()
 
@@ -200,7 +200,7 @@ class AbilityAssociatedTypesTest {
         // This should be caught by the parser, but we test the complete flow
         val source = """
             ability Collection 'c having item where {
-                empty: {} -> 'c
+                empty: {} -> 'c,
             }
         """.trimIndent()
 
@@ -215,9 +215,9 @@ class AbilityAssociatedTypesTest {
     fun `test ability using associated type in complex type structure`() {
         val source = """
             ability Keyed 'k having 'key where {
-                getKey: {keyed: 'k} -> 'key
-                setKey: {keyed: 'k, key: 'key} -> 'k
-                keys: {collection: ['k]} -> ['key]
+                getKey: {keyed: 'k} -> 'key,
+                setKey: {keyed: 'k, key: 'key} -> 'k,
+                keys: {collection: ['k]} -> ['key],
             }
         """.trimIndent()
 
@@ -232,13 +232,13 @@ class AbilityAssociatedTypesTest {
     fun `test ability implementation with concrete type binding`() {
         val source = """
             ability Store 's having 'value where {
-                get: {store: 's} -> 'value
-                put: {store: 's, value: 'value} -> 's
+                get: {store: 's} -> 'value,
+                put: {store: 's, value: 'value} -> 's,
             }
 
             impl Store {value: Int} having 'value = Int where {
-                get = {store} -> store.value
-                put = {store, value} -> {value = value}
+                get = {store} -> store.value,
+                put = {store, value} -> {value = value},
             }
         """.trimIndent()
 
@@ -256,13 +256,13 @@ class AbilityAssociatedTypesTest {
     fun `test ability method call with associated types`() {
         val source = """
             ability Collection 'c having 'item where {
-                empty: {} -> 'c
-                add: {collection: 'c, element: 'item} -> 'c
+                empty: {} -> 'c,
+                add: {collection: 'c, element: 'item} -> 'c,
             }
 
             impl Collection [Int] having 'item = Int where {
-                empty = {} -> []
-                add = {collection, element} -> collection
+                empty = {} -> [],
+                add = {collection, element} -> collection,
             }
 
             let intColl = Collection.empty {}
@@ -281,9 +281,9 @@ class AbilityAssociatedTypesTest {
     fun `test ability with multiple constraints and associated type`() {
         val source = """
             ability SortedSet 's having 'elem with Eq 'elem, Ord 'elem where {
-                empty: {} -> 's
-                insert: {set: 's, element: 'elem} -> 's
-                contains: {set: 's, element: 'elem} -> Bool
+                empty: {} -> 's,
+                insert: {set: 's, element: 'elem} -> 's,
+                contains: {set: 's, element: 'elem} -> Bool,
             }
         """.trimIndent()
 
@@ -299,8 +299,8 @@ class AbilityAssociatedTypesTest {
     fun `test ability associated type in nested type constructors`() {
         val source = """
             ability NestedCollection 'c having 'item where {
-                empty: {} -> 'c
-                nested: {outer: ['c], inner: 'item} -> [['item]]
+                empty: {} -> 'c,
+                nested: {outer: ['c], inner: 'item} -> [['item]],
             }
         """.trimIndent()
 
@@ -315,11 +315,11 @@ class AbilityAssociatedTypesTest {
     fun `test error when impl has binding but ability doesn't`() {
         val source = """
             ability Show 't where {
-                show: {value: 't} -> String
+                show: {value: 't} -> String,
             }
 
             impl Show Int having 'extra = String where {
-                show = {value} -> "42"
+                show = {value} -> "42",
             }
         """.trimIndent()
 
@@ -339,8 +339,8 @@ class AbilityAssociatedTypesTest {
     fun `test ability with two associated types`() {
         val source = """
             ability Convert 'from having 'to, 'error where {
-                convert: {value: 'from} -> 'to
-                tryConvert: {value: 'from} -> (Result 'to 'error)
+                convert: {value: 'from} -> 'to,
+                tryConvert: {value: 'from} -> (Result 'to 'error),
             }
         """.trimIndent()
 
@@ -359,10 +359,10 @@ class AbilityAssociatedTypesTest {
     fun `test ability with three associated types`() {
         val source = """
             ability Triple 't having 'a, 'b, 'c where {
-                first: {triple: 't} -> 'a
-                second: {triple: 't} -> 'b
-                third: {triple: 't} -> 'c
-                make: {a: 'a, b: 'b, c: 'c} -> 't
+                first: {triple: 't} -> 'a,
+                second: {triple: 't} -> 'b,
+                third: {triple: 't} -> 'c,
+                make: {a: 'a, b: 'b, c: 'c} -> 't,
             }
         """.trimIndent()
 
@@ -380,13 +380,13 @@ class AbilityAssociatedTypesTest {
     fun `test ability implementation with two associated type bindings`() {
         val source = """
             ability Convert 'from having 'to, 'error where {
-                convert: {value: 'from} -> 'to
-                tryConvert: {value: 'from} -> (Result 'to 'error)
+                convert: {value: 'from} -> 'to,
+                tryConvert: {value: 'from} -> (Result 'to 'error),
             }
 
             impl Convert String having 'to = Int, 'error = String where {
-                convert = {value} -> 42
-                tryConvert = {value} -> Ok { val = 42 }
+                convert = {value} -> 42,
+                tryConvert = {value} -> Ok { val = 42 },
             }
         """.trimIndent()
 
@@ -402,15 +402,15 @@ class AbilityAssociatedTypesTest {
     fun `test ability implementation with three associated type bindings`() {
         val source = """
             ability Triple 't having 'a, 'b, 'c where {
-                first: {triple: 't} -> 'a
-                second: {triple: 't} -> 'b
-                third: {triple: 't} -> 'c
+                first: {triple: 't} -> 'a,
+                second: {triple: 't} -> 'b,
+                third: {triple: 't} -> 'c,
             }
 
             impl Triple {x: Int, y: String, z: Bool} having 'a = Int, 'b = String, 'c = Bool where {
-                first = {triple} -> triple.x
-                second = {triple} -> triple.y
-                third = {triple} -> triple.z
+                first = {triple} -> triple.x,
+                second = {triple} -> triple.y,
+                third = {triple} -> triple.z,
             }
         """.trimIndent()
 
@@ -426,13 +426,13 @@ class AbilityAssociatedTypesTest {
     fun `test type substitution works correctly for each associated type in ability`() {
         val source = """
             ability Convert 'from having 'to, 'error where {
-                convert: {value: 'from} -> 'to
-                getError: {} -> 'error
+                convert: {value: 'from} -> 'to,
+                getError: {} -> 'error,
             }
 
             impl Convert String having 'to = Int, 'error = Bool where {
-                convert = {value} -> 42
-                getError = {} -> True
+                convert = {value} -> 42,
+                getError = {} -> True,
             }
         """.trimIndent()
 
@@ -447,11 +447,11 @@ class AbilityAssociatedTypesTest {
     fun `test error when missing one of multiple associated type bindings in ability`() {
         val source = """
             ability Convert 'from having 'to, 'error where {
-                convert: {value: 'from} -> 'to
+                convert: {value: 'from} -> 'to,
             }
 
             impl Convert String having 'to = Int where {
-                convert = {value} -> 42
+                convert = {value} -> 42,
             }
         """.trimIndent()
 
@@ -469,15 +469,15 @@ class AbilityAssociatedTypesTest {
     fun `test error when missing multiple associated type bindings in ability`() {
         val source = """
             ability Triple 't having 'a, 'b, 'c where {
-                first: {triple: 't} -> 'a
-                second: {triple: 't} -> 'b
-                third: {triple: 't} -> 'c
+                first: {triple: 't} -> 'a,
+                second: {triple: 't} -> 'b,
+                third: {triple: 't} -> 'c,
             }
 
             impl Triple {x: Int} having 'a = Int where {
-                first = {triple} -> triple.x
-                second = {triple} -> 0
-                third = {triple} -> 0
+                first = {triple} -> triple.x,
+                second = {triple} -> 0,
+                third = {triple} -> 0,
             }
         """.trimIndent()
 
@@ -496,11 +496,11 @@ class AbilityAssociatedTypesTest {
     fun `test error when providing wrong binding name with multiple types in ability`() {
         val source = """
             ability Convert 'from having 'to, 'error where {
-                convert: {value: 'from} -> 'to
+                convert: {value: 'from} -> 'to,
             }
 
             impl Convert String having 'to = Int, 'wrong = String where {
-                convert = {value} -> 42
+                convert = {value} -> 42,
             }
         """.trimIndent()
 
@@ -518,13 +518,13 @@ class AbilityAssociatedTypesTest {
     fun `test complex types as multiple associated type bindings in ability`() {
         val source = """
             ability Pair 'p having 'first, 'second where {
-                getFirst: {pair: 'p} -> 'first
-                getSecond: {pair: 'p} -> 'second
+                getFirst: {pair: 'p} -> 'first,
+                getSecond: {pair: 'p} -> 'second,
             }
 
             impl Pair {x: Int, y: String} having 'first = Int, 'second = String where {
-                getFirst = {pair} -> pair.x
-                getSecond = {pair} -> pair.y
+                getFirst = {pair} -> pair.x,
+                getSecond = {pair} -> pair.y,
             }
         """.trimIndent()
 
@@ -539,21 +539,21 @@ class AbilityAssociatedTypesTest {
     fun `test multiple abilities each with multiple associated types`() {
         val source = """
             ability Convert 'from having 'to, 'error where {
-                convert: {value: 'from} -> 'to
+                convert: {value: 'from} -> 'to,
             }
 
             ability Parser 'input having 'output, 'state where {
-                parse: {input: 'input} -> 'output
-                getState: {input: 'input} -> 'state
+                parse: {input: 'input} -> 'output,
+                getState: {input: 'input} -> 'state,
             }
 
             impl Convert String having 'to = Int, 'error = String where {
-                convert = {value} -> 42
+                convert = {value} -> 42,
             }
 
             impl Parser String having 'output = Bool, 'state = Float where {
-                parse = {input} -> True
-                getState = {input} -> 3.14
+                parse = {input} -> True,
+                getState = {input} -> 3.14,
             }
         """.trimIndent()
 
@@ -573,8 +573,8 @@ class AbilityAssociatedTypesTest {
     fun `test ability with multiple associated types and constraints`() {
         val source = """
             ability Converter 'from having 'to, 'error with Eq 'from, Show 'error where {
-                convert: {value: 'from} -> 'to
-                describe: {error: 'error} -> String
+                convert: {value: 'from} -> 'to,
+                describe: {error: 'error} -> String,
             }
         """.trimIndent()
 
@@ -590,19 +590,19 @@ class AbilityAssociatedTypesTest {
     fun `test multiple implementations with different associated type bindings for same ability`() {
         val source = """
             ability Convert 'from having 'to, 'error where {
-                convert: {value: 'from} -> 'to
+                convert: {value: 'from} -> 'to,
             }
 
             impl Convert String having 'to = Int, 'error = String where {
-                convert = {value} -> 42
+                convert = {value} -> 42,
             }
 
             impl Convert Bool having 'to = Int, 'error = String where {
-                convert = {value} -> 1
+                convert = {value} -> 1,
             }
 
             impl Convert Float having 'to = String, 'error = Bool where {
-                convert = {value} -> "3.14"
+                convert = {value} -> "3.14",
             }
         """.trimIndent()
 

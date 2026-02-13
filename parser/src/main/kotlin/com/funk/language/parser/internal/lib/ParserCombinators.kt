@@ -37,13 +37,23 @@ data class TokenStream(
     fun getSourceColumn(): Int = current()?.column ?: tokens.lastOrNull()?.column ?: 1
 
     /**
-     * Create a ParseResult.Failure with full location info
+     * Create a ParseResult.Failure with full location info from current stream position
      */
     fun failure(message: String): ParseResult.Failure = ParseResult.Failure(
         message,
         getSourcePosition(),
         getSourceLine(),
         getSourceColumn()
+    )
+
+    /**
+     * Create a ParseResult.Failure at a specific token's location
+     */
+    fun failureAt(message: String, token: Token): ParseResult.Failure = ParseResult.Failure(
+        message,
+        token.position,
+        token.line,
+        token.column
     )
 }
 
@@ -69,8 +79,44 @@ object Parsers {
         if (current != null && predicate(current)) {
             ParseResult.Success(current, stream.advance())
         } else {
-            stream.failure("Expected $description but got ${current?.type}")
+            val gotDesc = describeToken(current)
+            stream.failure("Expected $description but got $gotDesc")
         }
+    }
+
+    /**
+     * Describe a token for error messages in a user-friendly way.
+     */
+    private fun describeToken(token: Token?): String = when {
+        token == null -> "end of file"
+        token.type == TokenType.IDENTIFIER -> "'${token.text}'"
+        token.type == TokenType.INTEGER -> "number '${token.text}'"
+        token.type == TokenType.NAT -> "number '${token.text}n'"
+        token.type == TokenType.FLOAT -> "number '${token.text}'"
+        token.type == TokenType.FRACTION -> "fraction '${token.text}'"
+        token.type == TokenType.STRING -> "string"
+        token.type == TokenType.NEWLINE -> "newline"
+        token.type == TokenType.EOF -> "end of file"
+        // For delimiters and operators, show the actual text
+        token.type in listOf(
+            TokenType.LPAREN, TokenType.RPAREN, TokenType.LBRACE, TokenType.RBRACE,
+            TokenType.LBRACKET, TokenType.RBRACKET, TokenType.COMMA, TokenType.DOT,
+            TokenType.COLON, TokenType.SEMICOLON, TokenType.ARROW, TokenType.ASSIGN,
+            TokenType.ELLIPSIS, TokenType.DOUBLE_COLON, TokenType.AT, TokenType.PIPE,
+            TokenType.PIPE_OP, TokenType.PLUS, TokenType.MINUS, TokenType.STAR,
+            TokenType.SLASH, TokenType.PERCENT, TokenType.EQ, TokenType.NEQ,
+            TokenType.LT, TokenType.GT, TokenType.LTE, TokenType.GTE,
+            TokenType.AND, TokenType.OR, TokenType.NOT, TokenType.PLACEHOLDER
+        ) -> "'${token.text}'"
+        // For keywords, show the keyword
+        token.type in listOf(
+            TokenType.LET, TokenType.TYPE, TokenType.NEWTYPE, TokenType.IF,
+            TokenType.THEN, TokenType.ELSE, TokenType.MATCH, TokenType.IS,
+            TokenType.DO, TokenType.EFFECT, TokenType.IMPL, TokenType.PERFORM,
+            TokenType.ABILITY, TokenType.PUB, TokenType.FOR, TokenType.WHERE,
+            TokenType.WITH, TokenType.IN, TokenType.USE, TokenType.HAVING, TokenType.FORALL
+        ) -> "keyword '${token.text}'"
+        else -> "'${token.text}'"
     }
 
     // Sequence: parse first, then second

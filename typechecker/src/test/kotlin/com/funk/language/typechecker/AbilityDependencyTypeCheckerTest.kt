@@ -65,7 +65,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Serializable 'a with Show 'a, Eq 'a where {
-                serialize : {val: 'a} -> String
+                serialize : {val: 'a} -> String,
                 deserialize : {str: String} -> 'a
             }
         """.trimIndent()
@@ -96,7 +96,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Bounded 'a with Ord 'a where {
-                minBound : {} -> 'a
+                minBound : {} -> 'a,
                 maxBound : {} -> 'a
             }
         """.trimIndent()
@@ -163,7 +163,7 @@ class AbilityDependencyTypeCheckerTest {
     fun testMultiParameterAbilityDependencies() {
         val source = """
             ability KVStore 'a 'b where {
-                store : {key: 'a, value: 'b} -> {}
+                store : {key: 'a, value: 'b} -> {},
                 retrieve : {key: 'a} -> 'b
             }
             
@@ -249,7 +249,7 @@ class AbilityDependencyTypeCheckerTest {
             }
             
             ability Serializable 'a with Debug 'a, Ord 'a where {
-                serialize : {val: 'a} -> String
+                serialize : {val: 'a} -> String,
                 deserialize : {str: String} -> 'a
             }
         """.trimIndent()

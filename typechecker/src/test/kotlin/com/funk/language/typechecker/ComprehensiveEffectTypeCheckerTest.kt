@@ -275,7 +275,7 @@ class ComprehensiveEffectTypeCheckerTest {
             }
 
             impl FileSystem for MockFS where {
-              readFile : {path: String} -> String = {path} -> "mock content"
+              readFile : {path: String} -> String = {path} -> "mock content",
               writeFile : {path: String, content: String} -> {} = {path, content} -> native_print {msg = "Writing to $(path)"}
             }
         """.trimIndent()
@@ -346,7 +346,7 @@ class ComprehensiveEffectTypeCheckerTest {
             }
 
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"},
               debug : {msg: String} -> {} = {msg} -> native_print {msg = "[DEBUG] $(msg)"}
             }
 

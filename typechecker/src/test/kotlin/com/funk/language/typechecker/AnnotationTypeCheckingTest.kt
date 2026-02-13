@@ -1046,7 +1046,7 @@ class AnnotationTypeCheckingTest {
         val program = parseAndTypeCheck(
             """
             effect State where {
-              get: {} -> Int <State>
+              get: {} -> Int <State>,
               put: { val: Int } -> {} <State>
             }
 

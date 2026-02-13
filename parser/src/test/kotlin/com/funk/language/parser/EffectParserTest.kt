@@ -135,8 +135,8 @@ class EffectParserTest {
     fun testEffectDeclarationWithHaving() {
         val source = """
             effect State having 'state where {
-                get: {} -> 'state <State>
-                put: {value: 'state} -> {} <State>
+                get: {} -> 'state <State>,
+                put: {value: 'state} -> {} <State>,
             }
         """.trimIndent()
 
@@ -215,13 +215,13 @@ class EffectParserTest {
     fun testEffectImplementationWithHaving() {
         val source = """
             effect State having 'state where {
-                get: {} -> 'state <State>
-                put: {value: 'state} -> {} <State>
+                get: {} -> 'state <State>,
+                put: {value: 'state} -> {} <State>,
             }
 
             impl State for Counter having 'state = Int where {
-                get = {} -> 42
-                put = {value} -> {}
+                get = {} -> 42,
+                put = {value} -> {},
             }
         """.trimIndent()
 

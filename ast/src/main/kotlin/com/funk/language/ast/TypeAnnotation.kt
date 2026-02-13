@@ -34,6 +34,13 @@ data class IdentifierTypeAnnotation(
 ) : TypeAnnotation
 
 @Serializable
+data class QualifiedTypeAnnotation(
+    val modulePath: List<String>,
+    val typeName: String,
+    val args: List<TypeAnnotation> = emptyList()
+) : TypeAnnotation
+
+@Serializable
 data class TypeApplicationAnnotation(
     val constructor: String,
     val args: List<TypeAnnotation>
@@ -175,6 +182,19 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
         }
         is ArrayTypeAnnotation -> {
             FunkType.ArrayType(convertTypeAnnotation(annotation.elementType))
+        }
+        is QualifiedTypeAnnotation -> {
+            // Qualified type like codec::Entry String Json
+            // Create a TypeApplication with the fully qualified name
+            val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+            if (annotation.args.isNotEmpty()) {
+                FunkType.TypeApplication(
+                    qualifiedName,
+                    annotation.args.map { convertTypeAnnotation(it) }
+                )
+            } else {
+                FunkType.VarType(TypeVar(qualifiedName))
+            }
         }
         else -> {
             throw RuntimeException("Unsupported type annotation: ${annotation::class.simpleName}")

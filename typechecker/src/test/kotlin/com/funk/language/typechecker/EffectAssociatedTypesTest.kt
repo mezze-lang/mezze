@@ -35,7 +35,7 @@ class EffectAssociatedTypesTest {
     fun `test effect with associated type type checks`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
         """.trimIndent()
@@ -48,12 +48,12 @@ class EffectAssociatedTypesTest {
     fun `test effect implementation with associated type binding type checks`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
 
             impl State for Counter having 'state = Int where {
-                get = {} -> 42
+                get = {} -> 42,
                 put = {value} -> {}
             }
         """.trimIndent()
@@ -69,12 +69,12 @@ class EffectAssociatedTypesTest {
             type List 'a = | Cons { head: 'a, tail: (List 'a) }, Nil |
 
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
 
             impl State for ListState having 'state = (List String) where {
-                get = {} -> Nil
+                get = {} -> Nil,
                 put = {value} -> {}
             }
         """.trimIndent()
@@ -87,12 +87,12 @@ class EffectAssociatedTypesTest {
     fun `test error when impl missing associated type binding`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
 
             impl State for Counter {} where {
-                get = {} -> 42
+                get = {} -> 42,
                 put = {value} -> {}
             }
         """.trimIndent()
@@ -150,12 +150,12 @@ class EffectAssociatedTypesTest {
     fun `test effect with associated type used in perform block`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
 
             impl State for Counter having 'state = Int where {
-                get = {} -> 42
+                get = {} -> 42,
                 put = {value} -> {}
             }
 
@@ -199,7 +199,7 @@ class EffectAssociatedTypesTest {
     fun `test multiple effects with different associated types`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
 
@@ -208,7 +208,7 @@ class EffectAssociatedTypesTest {
             }
 
             impl State for IntState having 'state = Int where {
-                get = {} -> 0
+                get = {} -> 0,
                 put = {value} -> {}
             }
 
@@ -318,14 +318,14 @@ class EffectAssociatedTypesTest {
     fun `test multiple operations all using same associated type`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
-                put: {value: 'state} -> {} <State>
+                get: {} -> 'state <State>,
+                put: {value: 'state} -> {} <State>,
                 modify: {f: {s: 'state} -> 'state} -> {} <State>
             }
 
             impl State for IntState having 'state = Int where {
-                get = {} -> 0
-                put = {value} -> {}
+                get = {} -> 0,
+                put = {value} -> {},
                 modify = {f} -> {}
             }
         """.trimIndent()
@@ -452,7 +452,7 @@ class EffectAssociatedTypesTest {
     fun `test effect with two associated types type checks`() {
         val code = """
             effect Operation having 'ok, 'err where {
-                succeed: {value: 'ok} -> {} <Operation>
+                succeed: {value: 'ok} -> {} <Operation>,
                 fail: {error: 'err} -> {} <Operation>
             }
         """.trimIndent()
@@ -465,8 +465,8 @@ class EffectAssociatedTypesTest {
     fun `test effect with three associated types type checks`() {
         val code = """
             effect Triple having 'a, 'b, 'c where {
-                getFirst: {} -> 'a <Triple>
-                getSecond: {} -> 'b <Triple>
+                getFirst: {} -> 'a <Triple>,
+                getSecond: {} -> 'b <Triple>,
                 getThird: {} -> 'c <Triple>
             }
         """.trimIndent()
@@ -479,12 +479,12 @@ class EffectAssociatedTypesTest {
     fun `test implementation with two associated type bindings type checks`() {
         val code = """
             effect Operation having 'ok, 'err where {
-                succeed: {value: 'ok} -> {} <Operation>
+                succeed: {value: 'ok} -> {} <Operation>,
                 fail: {error: 'err} -> {} <Operation>
             }
 
             impl Operation for IntStringOperation having 'ok = Int, 'err = String where {
-                succeed = {value} -> {}
+                succeed = {value} -> {},
                 fail = {error} -> {}
             }
         """.trimIndent()
@@ -497,14 +497,14 @@ class EffectAssociatedTypesTest {
     fun `test implementation with three associated type bindings type checks`() {
         val code = """
             effect Triple having 'a, 'b, 'c where {
-                getFirst: {} -> 'a <Triple>
-                getSecond: {} -> 'b <Triple>
+                getFirst: {} -> 'a <Triple>,
+                getSecond: {} -> 'b <Triple>,
                 getThird: {} -> 'c <Triple>
             }
 
             impl Triple for IntStringBoolTriple having 'a = Int, 'b = String, 'c = Bool where {
-                getFirst = {} -> 42
-                getSecond = {} -> "hello"
+                getFirst = {} -> 42,
+                getSecond = {} -> "hello",
                 getThird = {} -> True
             }
         """.trimIndent()
@@ -517,12 +517,12 @@ class EffectAssociatedTypesTest {
     fun `test multiple associated types used in perform block`() {
         val code = """
             effect Operation having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Operation>
+                succeed: {value: 'ok} -> 'ok <Operation>,
                 fail: {error: 'err} -> 'err <Operation>
             }
 
             impl Operation for IntStringOperation having 'ok = Int, 'err = String where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
@@ -543,12 +543,12 @@ class EffectAssociatedTypesTest {
     fun `test type substitution works correctly for each associated type`() {
         val code = """
             effect Operation having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Operation>
+                succeed: {value: 'ok} -> 'ok <Operation>,
                 fail: {error: 'err} -> 'err <Operation>
             }
 
             impl Operation for BoolFloatOperation having 'ok = Bool, 'err = Float where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
@@ -570,12 +570,12 @@ class EffectAssociatedTypesTest {
     fun `test error when missing one of multiple associated type bindings`() {
         val code = """
             effect Operation having 'ok, 'err where {
-                succeed: {value: 'ok} -> {} <Operation>
+                succeed: {value: 'ok} -> {} <Operation>,
                 fail: {error: 'err} -> {} <Operation>
             }
 
             impl Operation for PartialOperation having 'ok = Int where {
-                succeed = {value} -> {}
+                succeed = {value} -> {},
                 fail = {error} -> {}
             }
         """.trimIndent()
@@ -592,14 +592,14 @@ class EffectAssociatedTypesTest {
     fun `test error when missing multiple associated type bindings`() {
         val code = """
             effect Triple having 'a, 'b, 'c where {
-                getFirst: {} -> 'a <Triple>
-                getSecond: {} -> 'b <Triple>
+                getFirst: {} -> 'a <Triple>,
+                getSecond: {} -> 'b <Triple>,
                 getThird: {} -> 'c <Triple>
             }
 
             impl Triple for PartialTriple having 'a = Int where {
-                getFirst = {} -> 42
-                getSecond = {} -> "oops"
+                getFirst = {} -> 42,
+                getSecond = {} -> "oops",
                 getThird = {} -> True
             }
         """.trimIndent()
@@ -638,12 +638,12 @@ class EffectAssociatedTypesTest {
     fun `test complex types as multiple associated type bindings`() {
         val code = """
             effect Operation having 'ok, 'err where {
-                succeed: {value: 'ok} -> {} <Operation>
+                succeed: {value: 'ok} -> {} <Operation>,
                 fail: {error: 'err} -> {} <Operation>
             }
 
             impl Operation for ComplexOperation having 'ok = [Int], 'err = {code: Int, message: String} where {
-                succeed = {value} -> {}
+                succeed = {value} -> {},
                 fail = {error} -> {}
             }
         """.trimIndent()
@@ -656,12 +656,12 @@ class EffectAssociatedTypesTest {
     fun `test multiple associated types with performer parameters`() {
         val code = """
             effect Operation having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Operation>
+                succeed: {value: 'ok} -> 'ok <Operation>,
                 fail: {error: 'err} -> 'err <Operation>
             }
 
             impl Operation for ConfigurableOperation {defaultOk: Int, defaultErr: String} having 'ok = Int, 'err = String where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
@@ -679,22 +679,22 @@ class EffectAssociatedTypesTest {
     fun `test multiple effects each with multiple associated types`() {
         val code = """
             effect Operation having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Operation>
+                succeed: {value: 'ok} -> 'ok <Operation>,
                 fail: {error: 'err} -> 'err <Operation>
             }
 
             effect State having 'state, 'change where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 update: {delta: 'change} -> {} <State>
             }
 
             impl Operation for IntStringOperation having 'ok = Int, 'err = String where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
             impl State for IntFloatState having 'state = Int, 'change = Float where {
-                get = {} -> 0
+                get = {} -> 0,
                 update = {delta} -> {}
             }
 

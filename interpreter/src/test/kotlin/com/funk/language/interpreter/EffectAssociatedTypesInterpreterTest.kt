@@ -47,12 +47,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test state effect with Int executes correctly`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
 
             impl State for Counter having 'state = Int where {
-                get = {} -> 42
+                get = {} -> 42,
                 put = {value} -> {}
             }
 
@@ -146,12 +146,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test combined get and put operations execute correctly`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
 
             impl State for Counter having 'state = Int where {
-                get = {} -> 10
+                get = {} -> 10,
                 put = {value} -> {}
             }
 
@@ -238,12 +238,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test state effect with Bool type executes correctly`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
 
             impl State for BoolState having 'state = Bool where {
-                get = {} -> True
+                get = {} -> True,
                 put = {value} -> {}
             }
 
@@ -261,12 +261,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test stateful operations with get modify put sequence`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 put: {value: 'state} -> {} <State>
             }
 
             impl State for Counter having 'state = Int where {
-                get = {} -> 10
+                get = {} -> 10,
                 put = {value} -> {}
             }
 
@@ -414,14 +414,14 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test multiple operations with same associated type execute correctly`() {
         val code = """
             effect State having 'state where {
-                get: {} -> 'state <State>
-                put: {value: 'state} -> {} <State>
+                get: {} -> 'state <State>,
+                put: {value: 'state} -> {} <State>,
                 modify: {delta: Int} -> 'state <State>
             }
 
             impl State for Counter having 'state = Int where {
-                get = {} -> 50
-                put = {value} -> {}
+                get = {} -> 50,
+                put = {value} -> {},
                 modify = {delta} -> 50 + delta
             }
 
@@ -490,12 +490,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test effect with two associated types executes correctly`() {
         val code = """
             effect Outcome having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
+                succeed: {value: 'ok} -> 'ok <Result>,
                 fail: {error: 'err} -> 'err <Result>
             }
 
             impl Outcome for IntStringResult having 'ok = Int, 'err = String where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
@@ -512,14 +512,14 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test effect with three associated types executes correctly`() {
         val code = """
             effect Triple having 'a, 'b, 'c where {
-                getFirst: {} -> 'a <Triple>
-                getSecond: {} -> 'b <Triple>
+                getFirst: {} -> 'a <Triple>,
+                getSecond: {} -> 'b <Triple>,
                 getThird: {} -> 'c <Triple>
             }
 
             impl Triple for IntStringBoolTriple having 'a = Int, 'b = String, 'c = Bool where {
-                getFirst = {} -> 100
-                getSecond = {} -> "hello"
+                getFirst = {} -> 100,
+                getSecond = {} -> "hello",
                 getThird = {} -> True
             }
 
@@ -538,12 +538,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test multiple associated types in perform block`() {
         val code = """
             effect Outcome having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
+                succeed: {value: 'ok} -> 'ok <Result>,
                 fail: {error: 'err} -> 'err <Result>
             }
 
             impl Outcome for BoolFloatResult having 'ok = Bool, 'err = Float where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
@@ -561,12 +561,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test type substitution for each associated type executes correctly`() {
         val code = """
             effect Outcome having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
+                succeed: {value: 'ok} -> 'ok <Result>,
                 fail: {error: 'err} -> 'err <Result>
             }
 
             impl Outcome for StringIntResult having 'ok = String, 'err = Int where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
@@ -583,12 +583,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test complex types as multiple associated type bindings execute correctly`() {
         val code = """
             effect Outcome having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
+                succeed: {value: 'ok} -> 'ok <Result>,
                 fail: {error: 'err} -> 'err <Result>
             }
 
             impl Outcome for ComplexResult having 'ok = Int, 'err = {code: Int, message: String} where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
@@ -609,22 +609,22 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test multiple effects each with multiple associated types execute correctly`() {
         val code = """
             effect Outcome having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
+                succeed: {value: 'ok} -> 'ok <Result>,
                 fail: {error: 'err} -> 'err <Result>
             }
 
             effect State having 'state, 'change where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 update: {delta: 'change} -> 'state <State>
             }
 
             impl Outcome for IntStringResult having 'ok = Int, 'err = String where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
             impl State for IntFloatState having 'state = Int, 'change = Float where {
-                get = {} -> 100
+                get = {} -> 100,
                 update = {delta} -> 100
             }
 
@@ -643,12 +643,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test multiple associated types with performer parameters execute correctly`() {
         val code = """
             effect State having 'state, 'error where {
-                get: {} -> 'state <State>
+                get: {} -> 'state <State>,
                 getError: {} -> 'error <State>
             }
 
             impl State for ConfigurableState {initialState: Int, defaultError: String} having 'state = Int, 'error = String where {
-                get = {} -> initialState
+                get = {} -> initialState,
                 getError = {} -> defaultError
             }
 
@@ -665,12 +665,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test nested operations with multiple associated types execute correctly`() {
         val code = """
             effect Outcome having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
+                succeed: {value: 'ok} -> 'ok <Result>,
                 fail: {error: 'err} -> 'err <Result>
             }
 
             impl Outcome for IntStringResult having 'ok = Int, 'err = String where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 
@@ -689,12 +689,12 @@ class EffectAssociatedTypesInterpreterTest {
     fun `test multiple associated types in conditional logic execute correctly`() {
         val code = """
             effect Outcome having 'ok, 'err where {
-                succeed: {value: 'ok} -> 'ok <Result>
+                succeed: {value: 'ok} -> 'ok <Result>,
                 fail: {error: 'err} -> 'err <Result>
             }
 
             impl Outcome for BoolStringResult having 'ok = Bool, 'err = String where {
-                succeed = {value} -> value
+                succeed = {value} -> value,
                 fail = {error} -> error
             }
 

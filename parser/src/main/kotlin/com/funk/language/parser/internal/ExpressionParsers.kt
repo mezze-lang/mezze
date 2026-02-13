@@ -121,7 +121,7 @@ internal fun FunkParser.lookAheadForArrowAfterBrace(stream: TokenStream): Boolea
 internal val FunkParser.lambdaOrRecordExpression: Parser<Expression>
     get() = { stream ->
         if (stream.current()?.type != TokenType.LBRACE) {
-            stream.failure("Expected LBRACE")
+            stream.failure("Expected '{' to start a lambda or record literal, but got ${tokenGotDescription(stream.current())}")
         } else {
             // Look ahead to find the matching RBRACE and check if there's an ARROW after it
             val hasArrowAfterBrace = lookAheadForArrowAfterBrace(stream)
@@ -240,7 +240,7 @@ internal val FunkParser.typedLambdaParams: Parser<LambdaParameters>
                 val entryList = entries.value
                 if (entryList.isEmpty()) {
                     // No parameters found
-                    stream.failure("Expected typed parameters")
+                    stream.failure("Expected at least one parameter in lambda. Use {x} -> expr or {x: Type} -> expr")
                 } else {
                     // Check if at least one parameter has a type annotation
                     val hasTypedParam = entryList.any { it.second != null }
@@ -254,7 +254,7 @@ internal val FunkParser.typedLambdaParams: Parser<LambdaParameters>
                         ParseResult.Success(TypedParameters(recordType), entries.remaining)
                     } else {
                         // All parameters are untyped, fail so we can try untyped parser
-                        stream.failure("Expected at least one typed parameter")
+                        stream.failure("When using type annotations, at least one parameter must have a type. Use {x: Int} -> expr")
                     }
                 }
             }
@@ -439,7 +439,10 @@ internal val FunkParser.arrayLiteral: Parser<Expression>
                                     ArrayLiteral(elements.value, sourceLocation = arrayLocation),
                                     rbracket2.remaining
                                 )
-                                is ParseResult.Failure -> rbracket2
+                                is ParseResult.Failure -> {
+                                    val token = stream2.current()
+                                    stream2.failure("Expected ',' between array elements or ']' to close array, but got ${tokenGotDescription(token)}")
+                                }
                             }
                         }
                         is ParseResult.Failure -> elements
@@ -818,7 +821,7 @@ internal val FunkParser.doExpression: Parser<Expression>
                         finalResult.second
                     )
                 } else {
-                    currentStream.failure("Expected result expression in do block")
+                    currentStream.failure("Do block must end with a result expression. Example:\n  do\n    let x = 1\n    x + 1")
                 }
             }
             is ParseResult.Failure -> {
@@ -1320,7 +1323,7 @@ internal val FunkParser.unaryExpression: Parser<Expression>
                                 streamAfterMinus.advance()
                             )
                         } else {
-                            streamAfterMinus.failure("Invalid fraction literal: ${literalToken.text}")
+                            streamAfterMinus.failure("Invalid fraction literal '${literalToken.text}'. Expected format: numerator//denominator (e.g., 3//4)")
                         }
                     }
                     else -> {
@@ -1686,7 +1689,7 @@ internal val FunkParser.literalExpression: Parser<Expression>
                         stream.advance()
                     )
                 } else {
-                    stream.failure("Invalid fraction literal: ${token.text}")
+                    stream.failure("Invalid fraction literal '${token.text}'. Expected format: numerator//denominator (e.g., 3//4)")
                 }
             }
             TokenType.STRING -> {
@@ -1709,7 +1712,7 @@ internal val FunkParser.literalExpression: Parser<Expression>
                 BooleanLiteral(token.text == "true", sourceLocation = location),
                 stream.advance()
             )
-            else -> stream.failure("Expected literal")
+            else -> stream.failure("Expected a literal (number, string, or boolean), but got ${tokenGotDescription(token)}")
         }
     }
 

@@ -100,7 +100,7 @@ internal val FunkParser.arrayPattern: Parser<Pattern>
                                         else -> {
                                             // Expected identifier or end of pattern
                                             ellipsisStream.failure(
-                                                "Expected identifier or ']' after ... in array pattern"
+                                                "After '...' in array pattern, expected a name for the rest or ']' to end the pattern. Examples: [first, ...rest] or [first, ...]"
                                             )
                                         }
                                     }
@@ -132,7 +132,7 @@ internal val FunkParser.arrayPattern: Parser<Pattern>
                                             ParseResult.Success(Pair(newAccum, Pair(null, afterPattern)), afterPattern)
                                         }
                                         else -> afterPattern.failure(
-                                            "Expected ',' or ']' in array pattern"
+                                            "Expected ',' to continue array pattern or ']' to end it, but got ${tokenGotDescription(afterPattern.current())}"
                                         )
                                     }
                                 }
@@ -252,7 +252,7 @@ internal val FunkParser.literalPattern: Parser<Pattern>
                         stream.advance()
                     )
                 } else {
-                    stream.failure("Invalid integer literal: ${token.text}")
+                    stream.failure("Invalid integer literal '${token.text}'. Integer must be a valid number (e.g., 42, -10, 1_000)")
                 }
             }
             TokenType.NAT -> {
@@ -263,7 +263,7 @@ internal val FunkParser.literalPattern: Parser<Pattern>
                         stream.advance()
                     )
                 } else {
-                    stream.failure("Invalid nat literal: ${token.text}")
+                    stream.failure("Invalid nat literal '${token.text}'. Natural numbers must be non-negative (e.g., 0n, 42n)")
                 }
             }
             TokenType.STRING -> {
@@ -294,10 +294,10 @@ internal val FunkParser.literalPattern: Parser<Pattern>
                         stream.advance()
                     )
                 } else {
-                    stream.failure("Invalid float literal: ${token.text}")
+                    stream.failure("Invalid float literal '${token.text}'. Float must be a valid decimal (e.g., 3.14, 1.0e-5)")
                 }
             }
-            else -> stream.failure("Expected literal (integer, nat, string, boolean, or float)")
+            else -> stream.failure("Expected a literal pattern (number, string, or boolean), but got ${tokenGotDescription(token)}")
         }
     }
 
@@ -310,7 +310,7 @@ internal val FunkParser.variablePattern: Parser<Pattern>
                 // Check if next token is LBRACE - if so, it's a constructor pattern
                 val next = ident.remaining.current()
                 if (next?.type == TokenType.LBRACE) {
-                    stream.failure("Constructor pattern, not variable")
+                    stream.failure("'${ident.value.text}' looks like a constructor pattern (followed by '{'), not a variable")
                 } else {
                     ParseResult.Success(VariablePattern(ident.value.text), ident.remaining)
                 }
@@ -332,7 +332,7 @@ internal val FunkParser.constructorPattern: Parser<Pattern>
                 val isConstructor = ident.value.text.firstOrNull()?.isUpperCase() == true
 
                 if (!isConstructor) {
-                    stream.failure("Expected constructor (uppercase)")
+                    stream.failure("Expected constructor name starting with uppercase letter, but got '${ident.value.text}'. Constructors must start with uppercase (e.g., Some, None, Ok, Err)")
                 } else {
                     val stream1 = ident.remaining
                     val next = stream1.current()

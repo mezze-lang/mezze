@@ -38,8 +38,8 @@ class AbilityDependencyParserTest {
     fun testAbilityWithMultipleDependencies() {
         val source = """
             ability Serializable 'a with Show 'a, Eq 'a where {
-                serialize : {val: 'a} -> String
-                deserialize : {str: String} -> 'a
+                serialize : {val: 'a} -> String,
+                deserialize : {str: String} -> 'a,
             }
         """.trimIndent()
 
@@ -166,16 +166,16 @@ class AbilityDependencyParserTest {
     fun testMultipleAbilitiesWithDependencies() {
         val source = """
             ability Eq 'a where {
-                equals : {left: 'a, right: 'a} -> Boolean
+                equals : {left: 'a, right: 'a} -> Boolean,
             }
 
             ability Ord 'a with Eq 'a where {
-                compare : {left: 'a, right: 'a} -> String
+                compare : {left: 'a, right: 'a} -> String,
             }
 
             ability Bounded 'a with Ord 'a where {
-                minBound : {} -> 'a
-                maxBound : {} -> 'a
+                minBound : {} -> 'a,
+                maxBound : {} -> 'a,
             }
         """.trimIndent()
 

@@ -212,7 +212,7 @@ class ConstructorResolutionTest {
     fun `test user-defined effect is resolved as EffectReference`() {
         val typedProgram = typeCheckAndGetProgram("""
             effect Counter where {
-                increment: {} -> Int
+                increment: {} -> Int,
                 get_count: {} -> Int
             }
 
@@ -231,7 +231,7 @@ class ConstructorResolutionTest {
     fun `test user-defined effect with operations is resolved as EffectReference`() {
         val typedProgram = typeCheckAndGetProgram("""
             effect State where {
-                get: {} -> Int <State>
+                get: {} -> Int <State>,
                 put: {val: Int} -> {} <State>
             }
 

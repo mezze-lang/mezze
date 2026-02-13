@@ -120,17 +120,17 @@ class EffectHandlerUsageValidationTest {
     fun `test effect handler call inside same type impl should succeed`() {
         val source = """
             effect Log where {
-              info : {msg: String} -> {} <Log>
+              info : {msg: String} -> {} <Log>,
               debug : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> {}
+              info : {msg: String} -> {} = {msg} -> {},
               debug : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             impl Log for EnhancedLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] $(msg)"},
               debug : {msg: String} -> {} = {msg} -> BasicLogger.debug {msg = "[DEBUG] $(msg)"}
             }
         """.trimIndent()

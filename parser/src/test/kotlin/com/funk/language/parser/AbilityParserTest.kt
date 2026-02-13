@@ -34,8 +34,8 @@ class AbilityParserTest {
     fun testAbilityWithMultipleOperations() {
         val source = """
             ability Show 'a where {
-              show : {val: 'a} -> String
-              debug : {val: 'a} -> String
+              show : {val: 'a} -> String,
+              debug : {val: 'a} -> String,
             }
         """.trimIndent()
 
@@ -77,8 +77,8 @@ class AbilityParserTest {
     fun testImplAbilityWithMultipleOperations() {
         val source = """
             impl Show String where {
-              show : {val: String} -> String = {val} -> val
-              debug : {val: String} -> String = {val} -> "\"$(val)\""
+              show : {val: String} -> String = {val} -> val,
+              debug : {val: String} -> String = {val} -> "\"$(val)\"",
             }
         """.trimIndent()
 
@@ -120,13 +120,13 @@ class AbilityParserTest {
     fun testComplexAbilityExample() {
         val source = """
             ability Serializer 'a where {
-              serialize : {val: 'a} -> String
-              deserialize : {str: String} -> 'a
+              serialize : {val: 'a} -> String,
+              deserialize : {str: String} -> 'a,
             }
 
             impl Serializer Int where {
-              serialize : {val: Int} -> String = {val} -> intToString {val = val}
-              deserialize : {str: String} -> Int = {str} -> stringToInt {str = str}
+              serialize : {val: Int} -> String = {val} -> intToString {val = val},
+              deserialize : {str: String} -> Int = {str} -> stringToInt {str = str},
             }
         """.trimIndent()
 

@@ -197,7 +197,7 @@ class EffectPropagationTest {
                   ""
                 else do
                   Log.log {msg = "Reading file: $(path)"}
-                  "file content"
+                  "file content",
               writeFile : {path: String, content: String} -> {} = {path, content} -> do
                 Log.log {msg = "Writing to file: $(path)"}
                 {}

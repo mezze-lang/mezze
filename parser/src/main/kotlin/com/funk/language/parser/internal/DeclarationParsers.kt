@@ -56,7 +56,9 @@ internal fun FunkParser.parseLetBindingWithVisibility(stream: TokenStream, visib
                                 "Let bindings only support irrefutable patterns. " +
                                 "${pattern.kindDescription()} can fail to match. " +
                                 "Use 'match' expression for refutable patterns.",
-                                stream1.getSourcePosition()
+                                stream1.getSourcePosition(),
+                                stream1.getSourceLine(),
+                                stream1.getSourceColumn()
                             )
                         }
 
@@ -158,7 +160,7 @@ internal fun FunkParser.parseConstrainedLambda(stream: TokenStream): ParseResult
                         // Check that it's actually a lambda
                         val lambdaExpr = lambda.value
                         if (lambdaExpr !is LambdaExpression) {
-                            return stream2.failure("Expected lambda expression")
+                            return stream2.failure("Expected lambda expression after '=', but got ${lambdaExpr::class.simpleName}")
                         }
 
                         // Create lambda with ability constraints attached
@@ -207,7 +209,9 @@ internal fun FunkParser.parseEffectDeclaration(stream: TokenStream, visibility: 
                                             return ParseResult.Failure(
                                                 "Associated type must be a type variable starting with '. " +
                                                 "Expected something like 'state, but got: ${typeVar.value.text}",
-                                                currentStream.getSourcePosition()
+                                                typeVar.value.position,
+                                                typeVar.value.line,
+                                                typeVar.value.column
                                             )
                                         }
                                         associatedTypes.add(typeVar.value.text)
@@ -224,17 +228,18 @@ internal fun FunkParser.parseEffectDeclaration(stream: TokenStream, visibility: 
                                                                 return ParseResult.Failure(
                                                                     "Associated type must be a type variable starting with '. " +
                                                                     "Expected something like 'error, but got: ${nextTypeVar.value.text}",
-                                                                    streamAfterComma.getSourcePosition()
+                                                                    nextTypeVar.value.position,
+                                                                    nextTypeVar.value.line,
+                                                                    nextTypeVar.value.column
                                                                 )
                                                             }
                                                             associatedTypes.add(nextTypeVar.value.text)
                                                             currentStream = skipNewlines(nextTypeVar.remaining)
                                                         }
                                                         is ParseResult.Failure -> {
-                                                            return ParseResult.Failure(
+                                                            return streamAfterComma.failure(
                                                                 "Expected type variable after ',' in having clause. " +
-                                                                "Example: effect ${name.value.text} having 'state, 'error where { ... }",
-                                                                streamAfterComma.getSourcePosition()
+                                                                "Example: effect ${name.value.text} having 'state, 'error where { ... }"
                                                             )
                                                         }
                                                     }
@@ -245,10 +250,9 @@ internal fun FunkParser.parseEffectDeclaration(stream: TokenStream, visibility: 
                                         currentStream
                                     }
                                     is ParseResult.Failure -> {
-                                        return ParseResult.Failure(
+                                        return stream2a.failure(
                                             "Expected type variable after 'having' keyword in effect declaration. " +
-                                            "Example: effect ${name.value.text} having 'state where { ... }",
-                                            stream2a.getSourcePosition()
+                                            "Example: effect ${name.value.text} having 'state where { ... }"
                                         )
                                     }
                                 }
@@ -266,27 +270,52 @@ internal fun FunkParser.parseEffectDeclaration(stream: TokenStream, visibility: 
                                 when (lbrace) {
                                     is ParseResult.Success -> {
                                         val stream4 = skipNewlines(lbrace.remaining)
-                                        // Parse operations separated by newlines or commas (both supported)
+                                        // Parse operations separated by commas (trailing comma allowed)
                                         val operations = mutableListOf<EffectOperation>()
                                         var currentStream = stream4
 
-                                        while (true) {
-                                            when (val op = effectOperationParser(currentStream)) {
-                                                is ParseResult.Success -> {
-                                                    operations.add(op.value)
-                                                    currentStream = skipNewlines(op.remaining)
+                                        // Parse first operation (if any)
+                                        when (val firstOp = effectOperationParser(currentStream)) {
+                                            is ParseResult.Success -> {
+                                                operations.add(firstOp.value)
+                                                currentStream = skipNewlines(firstOp.remaining)
 
-                                                    // Optionally consume a comma
+                                                // Parse remaining operations, each preceded by comma
+                                                while (true) {
                                                     when (val comma = tok(TokenType.COMMA)(currentStream)) {
                                                         is ParseResult.Success -> {
                                                             currentStream = skipNewlines(comma.remaining)
+                                                            // Check if this is a trailing comma (next token is })
+                                                            if (currentStream.current()?.type == TokenType.RBRACE) {
+                                                                break  // Trailing comma, done
+                                                            }
+                                                            // Parse next operation
+                                                            when (val op = effectOperationParser(currentStream)) {
+                                                                is ParseResult.Success -> {
+                                                                    operations.add(op.value)
+                                                                    currentStream = skipNewlines(op.remaining)
+                                                                }
+                                                                is ParseResult.Failure -> {
+                                                                    return op  // Return error from operation parsing
+                                                                }
+                                                            }
                                                         }
                                                         is ParseResult.Failure -> {
-                                                            // No comma, that's fine - continue to next operation or end
+                                                            // No comma - check if there's another operation (error) or }
+                                                            val next = currentStream.current()
+                                                            if (next?.type == TokenType.IDENTIFIER) {
+                                                                return currentStream.failure(
+                                                                    "Missing ',' between effect operations. " +
+                                                                    "Effect operations must be comma-separated."
+                                                                )
+                                                            }
+                                                            break  // No comma and no identifier, done
                                                         }
                                                     }
                                                 }
-                                                is ParseResult.Failure -> break
+                                            }
+                                            is ParseResult.Failure -> {
+                                                // No operations, that's fine - empty effect
                                             }
                                         }
 
@@ -305,25 +334,22 @@ internal fun FunkParser.parseEffectDeclaration(stream: TokenStream, visibility: 
                                                     rbrace.remaining
                                                 )
                                             }
-                                            is ParseResult.Failure -> ParseResult.Failure(
+                                            is ParseResult.Failure -> stream5.failure(
                                                 "Expected '}' to close effect declaration '${name.value.text}'. " +
-                                                "Make sure all effect operations are properly formatted: operationName: { params } -> ReturnType <${name.value.text}>",
-                                                stream5.getSourcePosition()
+                                                "Make sure all effect operations are properly formatted: operationName: { params } -> ReturnType <${name.value.text}>"
                                             )
                                         }
                                     }
-                                    is ParseResult.Failure -> ParseResult.Failure(
+                                    is ParseResult.Failure -> stream3.failure(
                                         "Expected '{' after 'where' in effect declaration '${name.value.text}'. " +
-                                        "Syntax: effect ${name.value.text} where { operations }",
-                                        stream3.getSourcePosition()
+                                        "Syntax: effect ${name.value.text} where { operations }"
                                     )
                                 }
                             }
-                            is ParseResult.Failure -> ParseResult.Failure(
+                            is ParseResult.Failure -> streamAfterHaving.failure(
                                 "Effect declarations require 'where' keyword. " +
                                 "Expected: effect ${name.value.text} where { operations }. " +
-                                "Each operation must declare the effect in its type signature: operationName: { params } -> ReturnType <${name.value.text}>",
-                                streamAfterHaving.getSourcePosition()
+                                "Each operation must declare the effect in its type signature: operationName: { params } -> ReturnType <${name.value.text}>"
                             )
                         }
                     }
@@ -364,10 +390,9 @@ internal val FunkParser.effectOperationParser: Parser<EffectOperation> get() = {
                                         functionType.remaining
                                     )
                                 } else {
-                                    ParseResult.Failure(
+                                    stream2.failure(
                                         "Expected function type for effect operation '${name.value.text}'. " +
-                                        "Effect operations must have the format: operationName: { params } -> ReturnType <EffectName>",
-                                        stream2.getSourcePosition()
+                                        "Effect operations must have the format: operationName: { params } -> ReturnType <EffectName>"
                                     )
                                 }
                             }
@@ -375,14 +400,15 @@ internal val FunkParser.effectOperationParser: Parser<EffectOperation> get() = {
                                 "Invalid type annotation for effect operation '${name.value.text}'. " +
                                 "Expected format: ${name.value.text}: { params } -> ReturnType <EffectName>. " +
                                 "Error: ${functionType.message}",
-                                functionType.position
+                                functionType.position,
+                                functionType.line,
+                                functionType.column
                             )
                         }
                     }
-                    is ParseResult.Failure -> ParseResult.Failure(
+                    is ParseResult.Failure -> stream1.failure(
                         "Expected ':' after effect operation name '${name.value.text}'. " +
-                        "Effect operations must have the format: ${name.value.text}: { params } -> ReturnType <EffectName>",
-                        stream1.getSourcePosition()
+                        "Effect operations must have the format: ${name.value.text}: { params } -> ReturnType <EffectName>"
                     )
                 }
             }
@@ -625,7 +651,7 @@ internal val FunkParser.recordTypeParser: Parser<TypeDefinition> get() = { strea
                         recordType.remaining
                     )
                 } else {
-                    stream.failure("Expected record type annotation")
+                    stream.failure("Expected record type like { field: Type }, but got ${value::class.simpleName}")
                 }
             }
             is ParseResult.Failure -> recordType
@@ -682,27 +708,52 @@ internal fun FunkParser.parseImplDeclaration(stream: TokenStream): ParseResult<P
                                                 when (lbrace) {
                                                     is ParseResult.Success -> {
                                                         val stream7 = skipNewlines(lbrace.remaining)
-                                                        // Parse operations separated by newlines or commas (both supported)
+                                                        // Parse operations separated by commas (trailing comma allowed)
                                                         val operations = mutableListOf<PerformerOperation>()
                                                         var currentStream = stream7
 
-                                                        while (true) {
-                                                            when (val op = performerOperationParser(currentStream)) {
-                                                                is ParseResult.Success -> {
-                                                                    operations.add(op.value)
-                                                                    currentStream = skipNewlines(op.remaining)
+                                                        // Parse first operation (if any)
+                                                        when (val firstOp = performerOperationParser(currentStream)) {
+                                                            is ParseResult.Success -> {
+                                                                operations.add(firstOp.value)
+                                                                currentStream = skipNewlines(firstOp.remaining)
 
-                                                                    // Optionally consume a comma
+                                                                // Parse remaining operations, each preceded by comma
+                                                                while (true) {
                                                                     when (val comma = tok(TokenType.COMMA)(currentStream)) {
                                                                         is ParseResult.Success -> {
                                                                             currentStream = skipNewlines(comma.remaining)
+                                                                            // Check if this is a trailing comma (next token is })
+                                                                            if (currentStream.current()?.type == TokenType.RBRACE) {
+                                                                                break  // Trailing comma, done
+                                                                            }
+                                                                            // Parse next operation
+                                                                            when (val op = performerOperationParser(currentStream)) {
+                                                                                is ParseResult.Success -> {
+                                                                                    operations.add(op.value)
+                                                                                    currentStream = skipNewlines(op.remaining)
+                                                                                }
+                                                                                is ParseResult.Failure -> {
+                                                                                    return op  // Return error from operation parsing
+                                                                                }
+                                                                            }
                                                                         }
                                                                         is ParseResult.Failure -> {
-                                                                            // No comma, that's fine - continue to next operation or end
+                                                                            // No comma - check if there's another operation (error) or }
+                                                                            val next = currentStream.current()
+                                                                            if (next?.type == TokenType.IDENTIFIER) {
+                                                                                return currentStream.failure(
+                                                                                    "Missing ',' between effect impl operations. " +
+                                                                                    "Operations must be comma-separated."
+                                                                                )
+                                                                            }
+                                                                            break  // No comma and no identifier, done
                                                                         }
                                                                     }
                                                                 }
-                                                                is ParseResult.Failure -> break
+                                                            }
+                                                            is ParseResult.Failure -> {
+                                                                // No operations, that's fine - empty impl
                                                             }
                                                         }
 
@@ -936,7 +987,9 @@ internal fun FunkParser.parseAbilityDeclaration(stream: TokenStream, visibility:
                                             return ParseResult.Failure(
                                                 "Associated type must be a type variable starting with '. " +
                                                 "Expected something like 'item, but got: ${typeVar.value.text}",
-                                                havingStream.getSourcePosition()
+                                                typeVar.value.position,
+                                                typeVar.value.line,
+                                                typeVar.value.column
                                             )
                                         }
                                         associatedTypes.add(typeVar.value.text)
@@ -953,17 +1006,18 @@ internal fun FunkParser.parseAbilityDeclaration(stream: TokenStream, visibility:
                                                                 return ParseResult.Failure(
                                                                     "Associated type must be a type variable starting with '. " +
                                                                     "Expected something like 'iter, but got: ${nextTypeVar.value.text}",
-                                                                    streamAfterComma.getSourcePosition()
+                                                                    nextTypeVar.value.position,
+                                                                    nextTypeVar.value.line,
+                                                                    nextTypeVar.value.column
                                                                 )
                                                             }
                                                             associatedTypes.add(nextTypeVar.value.text)
                                                             havingStream = skipNewlines(nextTypeVar.remaining)
                                                         }
                                                         is ParseResult.Failure -> {
-                                                            return ParseResult.Failure(
+                                                            return streamAfterComma.failure(
                                                                 "Expected type variable after ',' in having clause. " +
-                                                                "Example: ability ${name.value.text} having 'item, 'iter where { ... }",
-                                                                streamAfterComma.getSourcePosition()
+                                                                "Example: ability ${name.value.text} having 'item, 'iter where { ... }"
                                                             )
                                                         }
                                                     }
@@ -974,10 +1028,9 @@ internal fun FunkParser.parseAbilityDeclaration(stream: TokenStream, visibility:
                                         havingStream
                                     }
                                     is ParseResult.Failure -> {
-                                        return ParseResult.Failure(
+                                        return streamH.failure(
                                             "Expected type variable after 'having' keyword in ability declaration. " +
-                                            "Example: ability ${name.value.text} 'iter having 'item where { ... }",
-                                            streamH.getSourcePosition()
+                                            "Example: ability ${name.value.text} 'iter having 'item where { ... }"
                                         )
                                     }
                                 }
@@ -1055,27 +1108,52 @@ internal fun FunkParser.parseAbilityDeclaration(stream: TokenStream, visibility:
                                 when (lbrace) {
                                     is ParseResult.Success -> {
                                         val stream5 = skipNewlines(lbrace.remaining)
-                                        // Parse operations separated by newlines or commas (both supported)
+                                        // Parse operations separated by commas (trailing comma allowed)
                                         val operations = mutableListOf<AbilityOperation>()
                                         var currentStream = stream5
 
-                                        while (true) {
-                                            when (val op = abilityOperationParser(currentStream)) {
-                                                is ParseResult.Success -> {
-                                                    operations.add(op.value)
-                                                    currentStream = skipNewlines(op.remaining)
+                                        // Parse first operation (if any)
+                                        when (val firstOp = abilityOperationParser(currentStream)) {
+                                            is ParseResult.Success -> {
+                                                operations.add(firstOp.value)
+                                                currentStream = skipNewlines(firstOp.remaining)
 
-                                                    // Optionally consume a comma
+                                                // Parse remaining operations, each preceded by comma
+                                                while (true) {
                                                     when (val comma = tok(TokenType.COMMA)(currentStream)) {
                                                         is ParseResult.Success -> {
                                                             currentStream = skipNewlines(comma.remaining)
+                                                            // Check if this is a trailing comma (next token is })
+                                                            if (currentStream.current()?.type == TokenType.RBRACE) {
+                                                                break  // Trailing comma, done
+                                                            }
+                                                            // Parse next operation
+                                                            when (val op = abilityOperationParser(currentStream)) {
+                                                                is ParseResult.Success -> {
+                                                                    operations.add(op.value)
+                                                                    currentStream = skipNewlines(op.remaining)
+                                                                }
+                                                                is ParseResult.Failure -> {
+                                                                    return op  // Return error from operation parsing
+                                                                }
+                                                            }
                                                         }
                                                         is ParseResult.Failure -> {
-                                                            // No comma, that's fine - continue to next operation or end
+                                                            // No comma - check if there's another operation (error) or }
+                                                            val next = currentStream.current()
+                                                            if (next?.type == TokenType.IDENTIFIER) {
+                                                                return currentStream.failure(
+                                                                    "Missing ',' between ability methods. " +
+                                                                    "Ability methods must be comma-separated."
+                                                                )
+                                                            }
+                                                            break  // No comma and no identifier, done
                                                         }
                                                     }
                                                 }
-                                                is ParseResult.Failure -> break
+                                            }
+                                            is ParseResult.Failure -> {
+                                                // No operations, that's fine - empty ability
                                             }
                                         }
 
@@ -1147,7 +1225,7 @@ internal val FunkParser.abilityOperationParser: Parser<AbilityOperation> get() =
                                         functionType.remaining
                                     )
                                 } else {
-                                    stream2.failure("Expected function type for ability operation")
+                                    stream2.failure("Ability operation '${name.value.text}' must have a function type like {param: Type} -> ReturnType")
                                 }
                             }
                             is ParseResult.Failure -> functionType
@@ -1226,27 +1304,52 @@ internal fun FunkParser.parseImplAbilityDeclaration(stream: TokenStream): ParseR
                                             is ParseResult.Success -> {
                                                 val stream5 = skipNewlines(lbrace.remaining)
 
-                                                // Parse operations separated by newlines or commas (both supported)
+                                                // Parse operations separated by commas (trailing comma allowed)
                                                 val operations = mutableListOf<ImplAbilityOperation>()
                                                 var currentStream = stream5
 
-                                                while (true) {
-                                                    when (val op = implAbilityOperationParser(currentStream)) {
-                                                        is ParseResult.Success -> {
-                                                            operations.add(op.value)
-                                                            currentStream = skipNewlines(op.remaining)
+                                                // Parse first operation (if any)
+                                                when (val firstOp = implAbilityOperationParser(currentStream)) {
+                                                    is ParseResult.Success -> {
+                                                        operations.add(firstOp.value)
+                                                        currentStream = skipNewlines(firstOp.remaining)
 
-                                                            // Optionally consume a comma
+                                                        // Parse remaining operations, each preceded by comma
+                                                        while (true) {
                                                             when (val comma = tok(TokenType.COMMA)(currentStream)) {
                                                                 is ParseResult.Success -> {
                                                                     currentStream = skipNewlines(comma.remaining)
+                                                                    // Check if this is a trailing comma (next token is })
+                                                                    if (currentStream.current()?.type == TokenType.RBRACE) {
+                                                                        break  // Trailing comma, done
+                                                                    }
+                                                                    // Parse next operation
+                                                                    when (val op = implAbilityOperationParser(currentStream)) {
+                                                                        is ParseResult.Success -> {
+                                                                            operations.add(op.value)
+                                                                            currentStream = skipNewlines(op.remaining)
+                                                                        }
+                                                                        is ParseResult.Failure -> {
+                                                                            return op  // Return error from operation parsing
+                                                                        }
+                                                                    }
                                                                 }
                                                                 is ParseResult.Failure -> {
-                                                                    // No comma, that's fine - continue to next operation or end
+                                                                    // No comma - check if there's another operation (error) or }
+                                                                    val next = currentStream.current()
+                                                                    if (next?.type == TokenType.IDENTIFIER) {
+                                                                        return currentStream.failure(
+                                                                            "Missing ',' between ability impl methods. " +
+                                                                            "Methods must be comma-separated."
+                                                                        )
+                                                                    }
+                                                                    break  // No comma and no identifier, done
                                                                 }
                                                             }
                                                         }
-                                                        is ParseResult.Failure -> break
+                                                    }
+                                                    is ParseResult.Failure -> {
+                                                        // No operations, that's fine - empty impl
                                                     }
                                                 }
 
@@ -1326,7 +1429,7 @@ internal val FunkParser.implAbilityOperationParser: Parser<ImplAbilityOperation>
                                         is ParseResult.Failure -> assign
                                     }
                                 } else {
-                                    stream2.failure("Expected function type for ability operation")
+                                    stream2.failure("Ability impl operation '${name.value.text}' must have a function type like {param: Type} -> ReturnType")
                                 }
                             }
                             is ParseResult.Failure -> functionType

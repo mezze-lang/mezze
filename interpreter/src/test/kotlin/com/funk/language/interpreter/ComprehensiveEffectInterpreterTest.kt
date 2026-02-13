@@ -232,8 +232,8 @@ class ComprehensiveEffectInterpreterTest {
             }
             
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"}
-              error : {msg: String} -> {} = {msg} -> native_print {msg = "[ERROR] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"},
+              error : {msg: String} -> {} = {msg} -> native_print {msg = "[ERROR] $(msg)"},
               debug : {msg: String} -> {} = {msg} -> native_print {msg = "[DEBUG] $(msg)"}
             }
             
@@ -299,7 +299,7 @@ class ComprehensiveEffectInterpreterTest {
             }
             
             impl Math for Calculator where {
-              add : {x: Int, y: Int} -> Int = {x, y} -> x + y
+              add : {x: Int, y: Int} -> Int = {x, y} -> x + y,
               multiply : {x: Int, y: Int} -> Int = {x, y} -> x * y
             }
             
