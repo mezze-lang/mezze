@@ -14,8 +14,19 @@ import java.util.concurrent.CompletableFuture
  */
 object OSThreadImplementations {
 
+    // Semaphore for bounded concurrency (controls how many OS threads can run simultaneously)
+    private val concurrencySemaphores = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.Semaphore>()
+
+    private fun getSemaphore(poolSize: Int): java.util.concurrent.Semaphore? {
+        if (poolSize <= 0) return null  // 0 means unbounded
+        return concurrencySemaphores.computeIfAbsent(poolSize) {
+            java.util.concurrent.Semaphore(it)
+        }
+    }
+
     fun registerAll(context: MutableMap<String, FunkValue>) {
         registerSpawn(context)
+        registerSpawnCfg(context)
         registerAwait(context)
         registerRace(context)
         registerAllPromises(context)
@@ -81,6 +92,79 @@ object OSThreadImplementations {
                 else -> throw NativeFunctionException(
                     "__native_os_spawn",
                     "computation must be a function"
+                )
+            }
+        }
+    }
+
+    /**
+     * __native_os_spawn_cfg - Spawn with configuration.
+     *
+     * Takes: { f: {} -> 'a, pool_size: Int, timeout_ms: Int }
+     * Returns: Promise 'a
+     *
+     * Like spawn but with configuration:
+     * - pool_size: Maximum concurrent OS threads (0 = unbounded)
+     * - timeout_ms: Default timeout in milliseconds (0 = no timeout, currently unused at spawn time)
+     */
+    private fun registerSpawnCfg(context: MutableMap<String, FunkValue>) {
+        context["__native_os_spawn_cfg"] = NativeFunkFunction("__native_os_spawn_cfg") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_os_spawn_cfg", "expects FunkRecord")
+
+            val computation = record.fields["f"]
+                ?: throw NativeFunctionException("__native_os_spawn_cfg", "expects 'f' field")
+
+            val poolSize = (record.fields["pool_size"] as? FunkInt)?.value?.toInt() ?: 0
+            val semaphore = getSemaphore(poolSize)
+
+            when (computation) {
+                is FunkTruffleFunction, is NativeFunkFunction -> {
+                    val future = CompletableFuture<FunkValue>()
+
+                    val env = TruffleContextHolder.getEnv()
+                        ?: throw NativeFunctionException("__native_os_spawn_cfg", "No Truffle environment available")
+
+                    // Use Truffle's thread builder for proper context management
+                    val thread = env.newTruffleThreadBuilder {
+                        try {
+                            // Acquire semaphore permit if bounded
+                            semaphore?.acquire()
+                            try {
+                                val result = when (computation) {
+                                    is FunkTruffleFunction -> {
+                                        val emptyArgs = FunkRecord(emptyMap())
+                                        computation.callTarget.call(
+                                            emptyArgs,
+                                            computation.closureVariables,
+                                            computation.lexicalScope,
+                                            computation.lexicalScopeSlotMap
+                                        ) as FunkValue
+                                    }
+                                    is NativeFunkFunction -> {
+                                        computation.call(emptyList())
+                                    }
+                                    else -> throw FunkException("Unexpected function type")
+                                }
+                                future.complete(result)
+                            } finally {
+                                semaphore?.release()
+                            }
+                        } catch (e: Exception) {
+                            semaphore?.release()
+                            e.printStackTrace()
+                            future.completeExceptionally(e)
+                        }
+                    }
+                        .virtual(false)  // OS platform threads
+                        .build()
+
+                    thread.start()
+                    FunkPromise(future)
+                }
+                else -> throw NativeFunctionException(
+                    "__native_os_spawn_cfg",
+                    "f must be a function"
                 )
             }
         }

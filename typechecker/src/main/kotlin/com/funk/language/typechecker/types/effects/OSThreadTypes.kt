@@ -24,6 +24,19 @@ object OSThreadTypes {
             spawnPromise
         )
 
+        // __native_os_spawn_cfg: {f: {} -> 'a, pool_size: Int, timeout_ms: Int} -> Promise
+        context["__native_os_spawn_cfg"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(TypeVar("a"))
+                ),
+                "pool_size" to FunkType.IntType,
+                "timeout_ms" to FunkType.IntType
+            )),
+            FunkType.VarType(TypeVar("Promise"))
+        )
+
         // __native_os_await: {p: Promise 'a} -> 'a
         val awaitPromise = FunkType.VarType(TypeVar("Promise"))
         val awaitResult = FunkType.VarType(TypeVar("a"))

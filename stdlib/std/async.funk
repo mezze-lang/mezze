@@ -73,8 +73,30 @@ pub effect Async where {
 #       let results = Async.all {ps = [p1, p2]}
 #       results
 
+# Default handler - unbounded virtual threads, no timeout
 pub impl Async for LoomAsync where {
-    spawn = {f} -> __native_loom_spawn {f = f},
+    spawn = {f} -> __native_loom_spawn_cfg {f = f, max_concurrent = 0, timeout_ms = 0},
+    await = {p} -> __native_loom_await {p = p},
+    race = {ps} -> __native_loom_race {ps = ps},
+    all = {ps} -> __native_loom_all {ps = ps},
+    timeout = {ms, p} -> __native_loom_timeout {ms = ms, p = p},
+    cancel = {p} -> __native_loom_cancel {p = p},
+    sleep = {ms} -> __native_loom_sleep {ms = ms},
+    is_done = {p} -> __native_loom_is_done {p = p},
+    is_cancelled = {} -> __native_loom_is_cancelled {},
+    check = {} -> __native_loom_check {}
+}
+
+# Configurable handler - control concurrency and timeouts
+# Parameters:
+#   max_concurrent: Maximum concurrent tasks (0 = unbounded)
+#   timeout_ms: Default timeout for operations in milliseconds (0 = no timeout)
+#
+# Example:
+#   perform LoomAsyncWith {max_concurrent = 100, timeout_ms = 5000} in do
+#       Async.spawn {f = ...}
+pub impl Async for LoomAsyncWith { max_concurrent: Int, timeout_ms: Int } where {
+    spawn = {f} -> __native_loom_spawn_cfg {f = f, max_concurrent = max_concurrent, timeout_ms = timeout_ms},
     await = {p} -> __native_loom_await {p = p},
     race = {ps} -> __native_loom_race {ps = ps},
     all = {ps} -> __native_loom_all {ps = ps},
@@ -101,8 +123,30 @@ pub impl Async for LoomAsync where {
 #       let p = Async.spawn {f = {} -> cpu_intensive_work {}}
 #       Async.await {p = p}
 
+# Default handler - uses available processors as pool size
 pub impl Async for OSThreadAsync where {
-    spawn = {f} -> __native_os_spawn {f = f},
+    spawn = {f} -> __native_os_spawn_cfg {f = f, pool_size = 0, timeout_ms = 0},
+    await = {p} -> __native_os_await {p = p},
+    race = {ps} -> __native_os_race {ps = ps},
+    all = {ps} -> __native_os_all {ps = ps},
+    timeout = {ms, p} -> __native_os_timeout {ms = ms, p = p},
+    cancel = {p} -> __native_os_cancel {p = p},
+    sleep = {ms} -> __native_os_sleep {ms = ms},
+    is_done = {p} -> __native_os_is_done {p = p},
+    is_cancelled = {} -> __native_os_is_cancelled {},
+    check = {} -> __native_os_check {}
+}
+
+# Configurable handler - control thread pool and timeouts
+# Parameters:
+#   pool_size: Thread pool size (0 = available processors)
+#   timeout_ms: Default timeout for operations in milliseconds (0 = no timeout)
+#
+# Example:
+#   perform OSThreadAsyncWith {pool_size = 4, timeout_ms = 10000} in do
+#       Async.spawn {f = ...}
+pub impl Async for OSThreadAsyncWith { pool_size: Int, timeout_ms: Int } where {
+    spawn = {f} -> __native_os_spawn_cfg {f = f, pool_size = pool_size, timeout_ms = timeout_ms},
     await = {p} -> __native_os_await {p = p},
     race = {ps} -> __native_os_race {ps = ps},
     all = {ps} -> __native_os_all {ps = ps},

@@ -33,11 +33,22 @@ import com.oracle.truffle.api.CallTarget
  */
 object LoomImplementations {
 
+    // Semaphore pools for limiting concurrent tasks per max_concurrent value
+    private val concurrencySemaphores = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.Semaphore>()
+
+    private fun getSemaphore(maxConcurrent: Int): java.util.concurrent.Semaphore? {
+        if (maxConcurrent <= 0) return null  // 0 means unbounded
+        return concurrencySemaphores.computeIfAbsent(maxConcurrent) {
+            java.util.concurrent.Semaphore(it)
+        }
+    }
+
     /**
      * Register all Loom-related native functions.
      */
     fun registerAll(context: MutableMap<String, FunkValue>) {
         registerSpawn(context)
+        registerSpawnCfg(context)
         registerAwait(context)
         registerRace(context)
         registerAll_(context)
@@ -137,6 +148,81 @@ object LoomImplementations {
                 else -> throw NativeFunctionException(
                     "__native_loom_spawn",
                     "computation must be a function, got: ${computation::class.simpleName}"
+                )
+            }
+        }
+    }
+
+    /**
+     * __native_loom_spawn_cfg - Spawn with configuration.
+     *
+     * Takes: { f: {} -> 'a, max_concurrent: Int, timeout_ms: Int }
+     * Returns: Promise 'a
+     *
+     * Like spawn but with configuration:
+     * - max_concurrent: Maximum concurrent tasks (0 = unbounded)
+     * - timeout_ms: Default timeout in milliseconds (0 = no timeout, currently unused)
+     */
+    private fun registerSpawnCfg(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_spawn_cfg"] = NativeFunkFunction("__native_loom_spawn_cfg") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_spawn_cfg", "expects FunkRecord")
+
+            val computation = record.fields["f"]
+                ?: throw NativeFunctionException("__native_loom_spawn_cfg", "expects 'f' field")
+
+            val maxConcurrent = (record.fields["max_concurrent"] as? FunkInt)?.value?.toInt() ?: 0
+            // timeout_ms is captured for future use but spawn itself doesn't use it
+            // (timeout is applied at await time via the timeout operation)
+
+            when (computation) {
+                is FunkTruffleFunction, is NativeFunkFunction -> {
+                    val future = CompletableFuture<FunkValue>()
+                    val semaphore = getSemaphore(maxConcurrent)
+
+                    val env = TruffleContextHolder.getEnv()
+                        ?: throw NativeFunctionException("__native_loom_spawn_cfg", "No Truffle environment available")
+
+                    val thread = env.newTruffleThreadBuilder {
+                        try {
+                            // Acquire semaphore permit if bounded
+                            semaphore?.acquire()
+                            try {
+                                val result = when (computation) {
+                                    is FunkTruffleFunction -> {
+                                        val emptyArgs = FunkRecord(emptyMap())
+                                        computation.callTarget.call(
+                                            emptyArgs,
+                                            computation.closureVariables,
+                                            computation.lexicalScope,
+                                            computation.lexicalScopeSlotMap
+                                        ) as FunkValue
+                                    }
+                                    is NativeFunkFunction -> {
+                                        computation.call(emptyList())
+                                    }
+                                    else -> throw FunkException("Unexpected function type")
+                                }
+                                future.complete(result)
+                            } finally {
+                                // Release semaphore permit
+                                semaphore?.release()
+                            }
+                        } catch (e: Exception) {
+                            semaphore?.release()
+                            e.printStackTrace()
+                            future.completeExceptionally(e)
+                        }
+                    }
+                        .virtual(true)
+                        .build()
+
+                    thread.start()
+                    FunkPromise(future)
+                }
+                else -> throw NativeFunctionException(
+                    "__native_loom_spawn_cfg",
+                    "f must be a function, got: ${computation::class.simpleName}"
                 )
             }
         }
