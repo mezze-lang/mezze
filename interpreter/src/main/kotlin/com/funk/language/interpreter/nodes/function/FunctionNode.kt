@@ -45,34 +45,44 @@ class FunctionDefinitionNode(
     }
 
     override fun execute(frame: VirtualFrame): FunkValue {
-        // TRUFFLE BEST PRACTICE: Materialize the frame to capture lexical scope
-        // This stores the entire frame (with all local variables and parameters) on the heap
-        // so it can be accessed by nested functions, even after this function returns.
-        // This is the standard approach used by functional languages like Enso.
+        // CRITICAL FIX: Eagerly capture closure variable VALUES at closure creation time.
+        //
+        // We must NOT just store a reference to the materialized frame, because:
+        // 1. The frame slots may be modified by subsequent code (e.g., tail recursion)
+        // 2. If a closure is executed later (e.g., by a virtual thread), it would see
+        //    the modified values, not the values at the time of closure creation.
+        //
+        // This is especially important for concurrent code where closures may be
+        // executed on different threads after the original function has returned
+        // or modified its local variables.
 
-        val materializedFrame = if (closureVariableNames.isNotEmpty()) {
-            frame.materialize()
-        } else {
-            null
-        }
-
-        // CRITICAL: Build the lexical scope slot map
-        // This maps each closure variable name to its slot number IN THIS FRAME (the one being materialized)
-        // This is different from closureVariableSlots which are relative to the parent
-        val lexicalScopeSlotMap = if (materializedFrame != null) {
-            // The closure variable slots tell us which slots in THIS frame contain the values we need
-            closureVariableSlots
+        val closureVariables = if (closureVariableNames.isNotEmpty()) {
+            // Eagerly copy values from the current frame
+            closureVariableNames.mapIndexed { index, varName ->
+                val slot = closureVariableSlots[varName]
+                val value = if (slot != null && slot < frame.frameDescriptor.numberOfSlots) {
+                    try {
+                        frame.getObject(slot) as? FunkValue ?: FunkNull
+                    } catch (e: Exception) {
+                        FunkNull
+                    }
+                } else {
+                    FunkNull
+                }
+                varName to value
+            }.toMap()
         } else {
             emptyMap()
         }
 
-        // Create function with lexical scope (MaterializedFrame) and slot mapping
+        // Create function with eagerly captured closure variables
+        // We no longer use MaterializedFrame since we've already captured the values
         return FunkTruffleFunction(
             callTarget,
             name,
-            emptyMap(), // No longer needed - lexical scope handles variable lookup
-            materializedFrame,
-            lexicalScopeSlotMap
+            closureVariables,  // Eagerly captured values
+            null,              // No materialized frame needed
+            emptyMap()         // No slot map needed
         )
     }
 }
@@ -234,50 +244,17 @@ class FunkFunctionRootNode(
             frame.setObject(index, value)
         }
 
-        // TRUFFLE BEST PRACTICE: Bind closure variables from lexical scope
-        // Use the lexicalScopeSlotMap to find the correct slot numbers in the lexical scope frame
+        // Bind closure variables from the eagerly captured closureVariables map
+        // These values were captured at closure creation time, ensuring they
+        // reflect the state when the closure was created, not when it's executed.
         val paramCount = parameterNames.size
-        if (lexicalScope != null && lexicalScopeSlotMap.isNotEmpty()) {
-
-
-
-            for ((index, varName) in closureVariableNames.withIndex()) {
-                val slotIndex = paramCount + index
-
-                // Look up the variable in the lexical scope frame using the slot map
-                val lexicalSlot = lexicalScopeSlotMap[varName]
-
-
-                if (lexicalSlot != null && lexicalSlot < lexicalScope.frameDescriptor.numberOfSlots) {
-                    try {
-                        val value = lexicalScope.getObject(lexicalSlot) as? FunkValue
-
-                        if (value != null && value !is FunkNull) {
-                            frame.setObject(slotIndex, value)
-                        } else {
-                            frame.setObject(slotIndex, FunkNull)
-                        }
-                    } catch (e: Exception) {
-
-                        frame.setObject(slotIndex, FunkNull)
-                    }
-                } else {
-                    // No valid slot in lexical scope - will fall back to global lookup
-
-                    frame.setObject(slotIndex, FunkNull)
-                }
-            }
-        } else {
-
-            // Fallback to legacy approach for backward compatibility
-            for ((index, varName) in closureVariableNames.withIndex()) {
-                val slotIndex = paramCount + index
-                val value = closureVariables[varName]
-                if (value != null && value !is FunkNull) {
-                    frame.setObject(slotIndex, value)
-                } else {
-                    frame.setObject(slotIndex, FunkNull)
-                }
+        for ((index, varName) in closureVariableNames.withIndex()) {
+            val slotIndex = paramCount + index
+            val value = closureVariables[varName]
+            if (value != null && value !is FunkNull) {
+                frame.setObject(slotIndex, value)
+            } else {
+                frame.setObject(slotIndex, FunkNull)
             }
         }
 
