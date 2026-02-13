@@ -446,7 +446,11 @@ data class FunctionCall(
     // Example: double = {x} -> x * 2 has type forall a. {x: a} -> a where a: NumMul
     //          At call site double {x = 5}, instantiatedFunctionType is {x: Int} -> Int where Int: NumMul
     // This allows ability resolution to see concrete types instead of type variables
-    val instantiatedFunctionType: FunkType.FunctionType? = null
+    val instantiatedFunctionType: FunkType.FunctionType? = null,
+
+    // TCO: True when this call is a self-recursive tail call
+    // Set by the typechecker when the call is in tail position and calls the enclosing function
+    val isTailCall: Boolean = false
 ) : Expression {
     override fun toString(): String = RecordLiteral.safeToString(
         "FunctionCall",

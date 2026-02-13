@@ -34,7 +34,9 @@ class SubstitutionApplier(
     private val abilityImpls: Map<String, com.funk.language.typechecker.context.TypingContext.AbilityImplInfo> = emptyMap(),
     private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),
     private val effectDeclarations: Map<String, EffectDeclaration> = emptyMap(),
-    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap()
+    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
+    // TCO: Source locations of self-recursive tail calls
+    private val tailCallLocations: Set<SourceLocation> = emptySet()
 ) {
     // Compute variants that must stay open by resolving type vars with substitution
     // This handles the case where per-binding solving created different row vars than global solving
@@ -805,11 +807,15 @@ class SubstitutionApplier(
             resolvedAbilities = resolveDirectAbilityMethodCall(updatedFunction, updatedArguments)
         }
 
+        // TCO: Check if this call is a self-recursive tail call
+        val isTailCall = expr.sourceLocation != null && tailCallLocations.contains(expr.sourceLocation)
+
         return expr.copy(
             function = updatedFunction,
             arguments = updatedArguments,
             inferredType = updatedType,
-            resolvedAbilities = resolvedAbilities
+            resolvedAbilities = resolvedAbilities,
+            isTailCall = isTailCall
         )
     }
 

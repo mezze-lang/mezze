@@ -1578,10 +1578,11 @@ class ExpressionConstraintGenerator {
 
         // Generate constraints for body with extended context
         // Pass expected return type if available (bidirectional typing)
+        // TCO: Lambda body is in tail position (note: enclosingFunctionName is set by ConstraintGenerator)
         val bodyContext = if (expectedFunctionType != null) {
-            extendedContext.withExpectedType(expectedFunctionType.returnType)
+            extendedContext.withExpectedType(expectedFunctionType.returnType).inTailPosition()
         } else {
-            extendedContext
+            extendedContext.inTailPosition()
         }
         val bodyResult = generate(expr.body, bodyContext)
 
@@ -1631,11 +1632,13 @@ class ExpressionConstraintGenerator {
 
         // CRITICAL: Propagate ability constraints from body
         // These will be added to the FunctionType during generalization
+        // TCO: Propagate tail calls from body
         return ConstraintResult(
             type = functionType,
             constraints = bodyResult.constraints,
             abilityConstraints = bodyResult.abilityConstraints,
-            undefinedVariables = bodyResult.undefinedVariables
+            undefinedVariables = bodyResult.undefinedVariables,
+            tailCalls = bodyResult.tailCalls
         )
     }
 
@@ -1684,12 +1687,26 @@ class ExpressionConstraintGenerator {
             }
         }
 
-        val functionResult = generate(expr.function, context)
+        // TCO: The function expression and arguments are NOT in tail position
+        // (only the entire call could be a tail call)
+        val functionResult = generate(expr.function, context.notInTailPosition())
         // CRITICAL: Clear expected type when generating function arguments!
         // The argument's expected type should come from the function's parameter type,
         // not from the outer context. Otherwise, expected types from outer scope
         // (like Continuation) would incorrectly propagate to argument record literals.
-        val argumentResult = generate(expr.arguments, context.clearExpectedType())
+        val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+
+        // TCO: Detect self-recursive tail calls
+        // A call is a self-recursive tail call if:
+        // 1. We're in tail position
+        // 2. The function being called is an identifier matching the enclosing function name
+        val isSelfTailCall = context.inTailPosition &&
+            context.enclosingFunctionName != null &&
+            expr.function is Identifier &&
+            (expr.function as Identifier).name == context.enclosingFunctionName
+
+        // Track tail call location if detected
+        val tailCallLocation = if (isSelfTailCall) expr.sourceLocation else null
 
         // PARTIAL APPLICATION DETECTION
         // If function type is known AND argument is a record, check for partial application
@@ -1816,11 +1833,16 @@ class ExpressionConstraintGenerator {
                 // This allows generatePerform to track which effects are used by the expression
                 val propagatedEffects = effectRow.effects + functionResult.effects + argumentResult.effects
 
+                // TCO: Include tail call if detected (note: effectful tail calls may need special handling)
+                val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls
+                val tailCalls = if (tailCallLocation != null) baseTailCalls + tailCallLocation else baseTailCalls
+
                 return ConstraintResult(
                     type = resultType,
                     constraints = constraints,
                     effects = propagatedEffects,  // Propagate effects from function type
-                    undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables
+                    undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
+                    tailCalls = tailCalls
                 )
             }
         }
@@ -1854,12 +1876,17 @@ class ExpressionConstraintGenerator {
         // CRITICAL: Propagate ability constraints from function and arguments
         val collectedAbilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints
 
+        // TCO: Include tail call if detected
+        val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls
+        val tailCalls = if (tailCallLocation != null) baseTailCalls + tailCallLocation else baseTailCalls
+
         return ConstraintResult(
             type = returnType,
             constraints = constraints,
             effects = collectedEffects,  // Propagate effects from function and arguments
             abilityConstraints = collectedAbilityConstraints,  // Propagate ability constraints
-            undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables
+            undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
+            tailCalls = tailCalls
         )
     }
 
@@ -1870,9 +1897,10 @@ class ExpressionConstraintGenerator {
     private fun generateIf(expr: IfExpression, context: ConstraintContext): ConstraintResult {
         // if condition then thenBranch else elseBranch
 
-        val conditionResult = generate(expr.condition, context)
-        val thenResult = generate(expr.thenBranch, context)
-        val elseResult = generate(expr.elseBranch, context)
+        // TCO: Condition is NOT in tail position, but branches inherit tail position from context
+        val conditionResult = generate(expr.condition, context.notInTailPosition())
+        val thenResult = generate(expr.thenBranch, context)  // Preserves tail position
+        val elseResult = generate(expr.elseBranch, context)  // Preserves tail position
 
         val constraints = mutableListOf<Constraint>()
         constraints.addAll(conditionResult.constraints)
@@ -1908,12 +1936,16 @@ class ExpressionConstraintGenerator {
         val effects = conditionResult.effects + thenResult.effects + elseResult.effects
         val abilityConstraints = conditionResult.abilityConstraints + thenResult.abilityConstraints + elseResult.abilityConstraints
 
+        // TCO: Propagate tail calls from branches
+        val tailCalls = conditionResult.tailCalls + thenResult.tailCalls + elseResult.tailCalls
+
         return ConstraintResult(
             type = thenResult.type,
             constraints = constraints,
             effects = effects,
             abilityConstraints = abilityConstraints,
-            undefinedVariables = conditionResult.undefinedVariables + thenResult.undefinedVariables + elseResult.undefinedVariables
+            undefinedVariables = conditionResult.undefinedVariables + thenResult.undefinedVariables + elseResult.undefinedVariables,
+            tailCalls = tailCalls
         )
     }
 
@@ -1921,7 +1953,8 @@ class ExpressionConstraintGenerator {
         // match scrutinee { pattern1 -> expr1, pattern2 -> expr2 }
 
         // Step 1: Generate constraints for the scrutinee expression
-        val scrutineeResult = generate(expr.expression, context)
+        // TCO: Scrutinee is NOT in tail position
+        val scrutineeResult = generate(expr.expression, context.notInTailPosition())
 
         val constraints = mutableListOf<Constraint>()
         constraints.addAll(scrutineeResult.constraints)
@@ -1933,6 +1966,9 @@ class ExpressionConstraintGenerator {
         effects.addAll(scrutineeResult.effects)
         val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
         duplicateBindings.addAll(scrutineeResult.duplicateBindings)
+        // TCO: Track tail calls from case bodies
+        val tailCalls = mutableSetOf<SourceLocation>()
+        tailCalls.addAll(scrutineeResult.tailCalls)
 
         // Step 2: Check for wildcards - if present, scrutinee must be open variant
         // IMPORTANT: Only check TOP-LEVEL patterns for wildcards/variables.
@@ -1982,9 +2018,10 @@ class ExpressionConstraintGenerator {
             }
 
             // If there's a guard, check it (must be Bool)
+            // TCO: Guard is NOT in tail position
             val guard = matchCase.guard
             if (guard != null) {
-                val guardResult = generate(guard, caseContext)
+                val guardResult = generate(guard, caseContext.notInTailPosition())
                 constraints.addAll(guardResult.constraints)
                 undefinedVars.addAll(guardResult.undefinedVariables)
                 abilityConstraints.addAll(guardResult.abilityConstraints)
@@ -2005,12 +2042,14 @@ class ExpressionConstraintGenerator {
             }
 
             // Generate constraints for case body with extended context
+            // TCO: Case body inherits tail position from context
             val caseBodyResult = generate(matchCase.expression, caseContext)
             constraints.addAll(caseBodyResult.constraints)
             undefinedVars.addAll(caseBodyResult.undefinedVariables)
             abilityConstraints.addAll(caseBodyResult.abilityConstraints)
             effects.addAll(caseBodyResult.effects)
             duplicateBindings.addAll(caseBodyResult.duplicateBindings)
+            tailCalls.addAll(caseBodyResult.tailCalls)
 
             caseResultTypes.add(caseBodyResult.type)
         }
@@ -2037,7 +2076,8 @@ class ExpressionConstraintGenerator {
             effects = effects,
             abilityConstraints = abilityConstraints,
             undefinedVariables = undefinedVars,
-            duplicateBindings = duplicateBindings
+            duplicateBindings = duplicateBindings,
+            tailCalls = tailCalls
         )
     }
 
@@ -2052,11 +2092,14 @@ class ExpressionConstraintGenerator {
         // The expected type should only apply to the final result expression, not
         // intermediate let bindings or expression statements. Otherwise, a type
         // annotation like `{} -> Continuation` would propagate to all sub-expressions.
-        var currentContext = context.clearExpectedType()
+        // TCO: Statements are NOT in tail position
+        var currentContext = context.clearExpectedType().notInTailPosition()
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val effects = mutableSetOf<String>()
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+        // TCO: Track tail calls from result expression (statements are not in tail position)
+        val tailCalls = mutableSetOf<SourceLocation>()
 
         // Create pattern generator for handling destructuring in let statements
         val patternGenerator = PatternConstraintGenerator()
@@ -2121,16 +2164,19 @@ class ExpressionConstraintGenerator {
 
         // Process result expression - restore expected type from the original context
         // The result expression is what should match the expected type (e.g., Continuation)
+        // TCO: Result expression inherits tail position from the outer context
         val resultContext = if (context.expectedType != null) {
-            currentContext.withExpectedType(context.expectedType)
+            currentContext.withExpectedType(context.expectedType).copy(inTailPosition = context.inTailPosition)
         } else {
-            currentContext
+            currentContext.copy(inTailPosition = context.inTailPosition)
         }
         val resultResult = generate(expr.result, resultContext)
         constraints.addAll(resultResult.constraints)
         undefinedVars.addAll(resultResult.undefinedVariables)
         effects.addAll(resultResult.effects)
         abilityConstraints.addAll(resultResult.abilityConstraints)
+        // TCO: Only the result expression can have tail calls
+        tailCalls.addAll(resultResult.tailCalls)
 
         // CRITICAL: If do block has effects, wrap the result in SuspendedType
         // This allows perform expressions to properly detect and handle effects
@@ -2156,7 +2202,8 @@ class ExpressionConstraintGenerator {
             constraints = constraints,
             effects = effects,  // Still track effects for propagation
             abilityConstraints = abilityConstraints,
-            undefinedVariables = undefinedVars
+            undefinedVariables = undefinedVars,
+            tailCalls = tailCalls
         )
     }
 

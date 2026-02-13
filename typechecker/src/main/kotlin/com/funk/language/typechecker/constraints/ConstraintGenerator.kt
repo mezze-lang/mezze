@@ -481,6 +481,12 @@ class ConstraintGenerator(
         // Matches old typechecker's approach (OldTypeChecker.kt line 4055-4169)
         // CRITICAL: Use pre-converted type if available to ensure same TypeVar instances as placeholders!
         val expectedType = preConvertedAnnotationType ?: binding.typeAnnotation?.let { convertTypeAnnotation(it) }
+
+        // TCO: Set enclosing function name if this binding is a function (lambda expression)
+        // This allows tail call detection for self-recursive functions
+        val bindingName = getBindingName(binding)
+        val enclosingFunctionName = if (binding.expression is LambdaExpression) bindingName else null
+
         val constraintContext = ConstraintContext(
             context,
             expectedType = expectedType,
@@ -490,7 +496,8 @@ class ConstraintGenerator(
             abilityDeclarations = abilityDeclarations,
             recordLiteralBindings = recordLiteralBindings,
             typeDeclarations = typeDeclarations,
-            currentBindingName = getBindingName(binding)
+            currentBindingName = bindingName,
+            enclosingFunctionName = enclosingFunctionName
         )
 
         // Generate constraints for the expression with expected type

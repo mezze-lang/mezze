@@ -366,6 +366,12 @@ class TypeChecker(
                     result.copy(type = typeWithAbilities)
                 }
 
+                // TCO: Collect all tail call locations from constraint results
+                val tailCallLocations = constraintResults.values
+                    .flatMap { it.tailCalls }
+                    .filterNotNull()
+                    .toSet()
+
                 // PHASE 4: Apply Substitution (moved before validation so expressions have types)
                 val applier = SubstitutionApplier(
                     substitution,
@@ -377,7 +383,8 @@ class TypeChecker(
                     context.getAllAbilityImpls(),  // Pass ability implementations for resolving calls
                     buildResult.abilityDeclarations,  // For resolving ability references
                     allEffectDeclarations,  // For resolving effect references
-                    allTypeDeclarations  // For resolving variant constructors
+                    allTypeDeclarations,  // For resolving variant constructors
+                    tailCallLocations  // TCO: Locations of self-recursive tail calls
                 )
                 val typedProgram = applier.applyToProgram(program)
 

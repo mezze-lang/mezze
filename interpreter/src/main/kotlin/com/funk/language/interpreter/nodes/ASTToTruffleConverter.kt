@@ -864,9 +864,15 @@ class ASTToTruffleConverter(
         }
 
         // Default: Dynamic dispatch through FunctionCallNode
-        val functionNode = convertExpression(funcCall.function)
         val argumentsNode = convertExpression(funcCall.arguments)
 
+        // TCO: If this is a self-recursive tail call, generate TailCallNode instead
+        // TailCallNode throws TailCallException which is caught by TailCallLoopNode
+        if (funcCall.isTailCall) {
+            return TailCallNode(argumentsNode)
+        }
+
+        val functionNode = convertExpression(funcCall.function)
         return createFunctionCallNode(functionNode, argumentsNode)
     }
 
@@ -1447,7 +1453,16 @@ class ASTToTruffleConverter(
             functionConverter.getOrCreateSlot(varName)
         }
 
-        val bodyNode = functionConverter.convertExpression(lambda.body)
+        val rawBodyNode = functionConverter.convertExpression(lambda.body)
+
+        // TCO: If the lambda body contains tail calls, wrap it in TailCallLoopNode
+        val hasTailCalls = containsTailCalls(lambda.body)
+        val bodyNode = if (hasTailCalls) {
+            TailCallLoopNode(paramNames, rawBodyNode)
+        } else {
+            rawBodyNode
+        }
+
         val functionFrameDescriptor = functionConverter.getFrameDescriptor()
 
         // CRITICAL FIX: Build slot mappings for closure variables
@@ -1480,6 +1495,40 @@ class ASTToTruffleConverter(
         // Pass closure variable names AND their CURRENT frame slots to function definition node
 
         return FunctionDefinitionNode("lambda", paramNames, bodyNode, functionFrameDescriptor, freeVariables, closureVariableSlots)
+    }
+
+    /**
+     * TCO: Check if an expression contains any tail calls.
+     * Used to determine if we need to wrap a function body in TailCallLoopNode.
+     */
+    private fun containsTailCalls(expr: Expression): Boolean {
+        fun visit(e: Expression): Boolean {
+            return when (e) {
+                is FunctionCall -> e.isTailCall || visit(e.function) || visit(e.arguments)
+                is IfExpression -> visit(e.condition) || visit(e.thenBranch) || visit(e.elseBranch)
+                is MatchExpression -> visit(e.expression) || e.cases.any { visit(it.expression) }
+                is DoExpression -> e.statements.any { stmt ->
+                    when (stmt) {
+                        is LetStatement -> visit(stmt.expression)
+                        is ExpressionStatement -> visit(stmt.expression)
+                    }
+                } || visit(e.result)
+                is LambdaExpression -> false // Nested lambdas have their own TCO
+                is RecordLiteral -> e.getFieldEntries().any { it.value?.let { v -> visit(v) } == true }
+                is ArrayLiteral -> e.elements.any { element ->
+                    when (element) {
+                        is ArrayRegularElement -> visit(element.expression)
+                        is ArraySpreadElement -> visit(element.expression)
+                    }
+                }
+                is MemberAccess -> visit(e.receiver)
+                is ArrayAccess -> visit(e.array) || visit(e.index)
+                is VariantConstruction -> e.value?.let { visit(it) } == true
+                is PerformExpression -> visit(e.expression)
+                else -> false
+            }
+        }
+        return visit(expr)
     }
 
     /**

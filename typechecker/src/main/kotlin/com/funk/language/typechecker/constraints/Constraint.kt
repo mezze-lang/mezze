@@ -155,7 +155,8 @@ data class ConstraintResult(
     val effects: Set<String> = emptySet(),  // Effects used in this expression
     val abilityConstraints: List<Constraint.AbilityRequired> = emptyList(),  // Ability requirements
     val undefinedVariables: List<UndefinedVariable> = emptyList(),  // Undefined variables found during constraint generation
-    val duplicateBindings: List<DuplicateBinding> = emptyList()  // Duplicate bindings found during constraint generation
+    val duplicateBindings: List<DuplicateBinding> = emptyList(),  // Duplicate bindings found during constraint generation
+    val tailCalls: Set<SourceLocation> = emptySet()  // TCO: Source locations of self-recursive tail calls
 ) {
     /**
      * Information about an undefined variable.
@@ -193,7 +194,8 @@ data class ConstraintResult(
                 effects = results.flatMap { it.effects }.toSet(),
                 abilityConstraints = results.flatMap { it.abilityConstraints },
                 undefinedVariables = results.flatMap { it.undefinedVariables },
-                duplicateBindings = results.flatMap { it.duplicateBindings }
+                duplicateBindings = results.flatMap { it.duplicateBindings },
+                tailCalls = results.flatMap { it.tailCalls }.toSet()
             )
         }
 
@@ -223,6 +225,15 @@ data class ConstraintResult(
         ): ConstraintResult {
             return copy(abilityConstraints = abilityConstraints + newAbilities)
         }
+
+        /**
+         * TCO: Add a tail call location to a result
+         */
+        fun ConstraintResult.withTailCall(
+            location: SourceLocation
+        ): ConstraintResult {
+            return copy(tailCalls = tailCalls + location)
+        }
     }
 }
 
@@ -246,7 +257,12 @@ data class ConstraintContext(
     val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),  // All ability declarations for method type lookup
     val recordLiteralBindings: Set<String> = emptySet(),  // Variables bound to explicit record literals (for field access validation)
     val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),  // Type declarations for validation only (NOT for general type resolution)
-    val currentBindingName: String? = null  // The name of the binding being generated (for per-binding open variant tracking)
+    val currentBindingName: String? = null,  // The name of the binding being generated (for per-binding open variant tracking)
+
+    // TCO: Name of the enclosing function for self-recursion detection
+    val enclosingFunctionName: String? = null,
+    // TCO: True when current expression is in tail position
+    val inTailPosition: Boolean = false
 ) {
     /**
      * Extend context with new variable binding
@@ -289,5 +305,26 @@ data class ConstraintContext(
      */
     fun withRecordLiteralBinding(name: String): ConstraintContext {
         return copy(recordLiteralBindings = recordLiteralBindings + name)
+    }
+
+    /**
+     * TCO: Set the enclosing function name for self-recursion detection
+     */
+    fun withEnclosingFunction(name: String): ConstraintContext {
+        return copy(enclosingFunctionName = name)
+    }
+
+    /**
+     * TCO: Mark current position as tail position
+     */
+    fun inTailPosition(): ConstraintContext {
+        return copy(inTailPosition = true)
+    }
+
+    /**
+     * TCO: Mark current position as NOT tail position
+     */
+    fun notInTailPosition(): ConstraintContext {
+        return copy(inTailPosition = false)
     }
 }
