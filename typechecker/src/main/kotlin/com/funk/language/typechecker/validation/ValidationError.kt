@@ -48,16 +48,31 @@ sealed interface ValidationError {
         val sourceLocation: SourceLocation? = null
     ) : ValidationError {
         override fun message(): String = buildString {
-            append("Type ${formatType(type)} does not satisfy ability '$abilityName'")
+            val typeName = formatType(type)
+            val friendlyAbility = friendlyAbilityName(abilityName)
+
+            append("$typeName cannot be used here because it doesn't support $friendlyAbility")
             if (requiredBy != null) {
-                append(" (required by $requiredBy)")
+                append(" (needed for $requiredBy)")
             }
-            if (availableAbilities.isNotEmpty()) {
-                append(". Available abilities: ${availableAbilities.joinToString()}")
-            }
+            append(". To enable this, implement: impl $abilityName $typeName where { ... }")
         }
 
         override fun location() = sourceLocation
+
+        private fun friendlyAbilityName(name: String): String = when (name) {
+            "NumAdd" -> "addition (+)"
+            "NumSub" -> "subtraction (-)"
+            "NumMul" -> "multiplication (*)"
+            "NumDiv" -> "division (/)"
+            "NumMod" -> "modulo (%)"
+            "Eq" -> "equality comparison (==)"
+            "Ord" -> "ordering comparison (<, >)"
+            "Show" -> "string conversion"
+            "Hash" -> "hashing"
+            "Default" -> "default values"
+            else -> "the '$name' ability"
+        }
     }
 
     /**
@@ -97,13 +112,12 @@ sealed interface ValidationError {
         val sourceLocation: SourceLocation? = null
     ) : ValidationError {
         override fun message(): String = buildString {
-            append("Non-exhaustive pattern match")
+            append("This match expression doesn't handle all cases")
             if (missingConstructors.isNotEmpty()) {
-                append(". Missing cases: ${missingConstructors.joinToString()}")
+                val cases = if (missingConstructors.size == 1) "case" else "cases"
+                append(". Missing $cases: ${missingConstructors.joinToString(", ")}")
             }
-            if (coveredConstructors.isNotEmpty()) {
-                append(". Covered cases: ${coveredConstructors.joinToString()}")
-            }
+            append(". Add the missing patterns or use `_ ->` as a catch-all.")
         }
 
         override fun location() = sourceLocation
@@ -139,11 +153,12 @@ sealed interface ValidationError {
         val sourceLocation: SourceLocation? = null
     ) : ValidationError {
         override fun message(): String = buildString {
-            append("Non-exhaustive record pattern")
+            append("Record pattern is missing fields")
             if (missingFields.isNotEmpty()) {
-                append(". Missing fields: ${missingFields.joinToString()}")
+                val fields = if (missingFields.size == 1) "field" else "fields"
+                append(": ${missingFields.joinToString(", ")}")
             }
-            append(". Use {...} to explicitly ignore remaining fields")
+            append(". Either add the missing fields or use `{..}` to ignore extra fields.")
         }
 
         override fun location() = sourceLocation
@@ -196,13 +211,43 @@ sealed interface ValidationError {
         val sourceLocation: SourceLocation? = null
     ) : ValidationError {
         override fun message(): String = buildString {
-            append("Field '$fieldName' not found on type ${formatType(recordType)}")
+            append("'$fieldName' is not a field of this record")
             if (availableFields.isNotEmpty()) {
-                append(". Available fields: ${availableFields.joinToString()}")
+                // Find similar field names using simple substring matching
+                val similar = availableFields.filter {
+                    it.contains(fieldName, ignoreCase = true) || fieldName.contains(it, ignoreCase = true) ||
+                    levenshteinDistance(it, fieldName) <= 2
+                }.take(3)
+
+                if (similar.isNotEmpty()) {
+                    append(". Did you mean: ${similar.joinToString(", ") { "'$it'" }}?")
+                } else if (availableFields.size <= 5) {
+                    append(". Available fields: ${availableFields.joinToString(", ") { "'$it'" }}")
+                } else {
+                    append(". Available fields: ${availableFields.take(5).joinToString(", ") { "'$it'" }}, ...")
+                }
             }
         }
 
         override fun location() = sourceLocation
+
+        private fun levenshteinDistance(s1: String, s2: String): Int {
+            val len1 = s1.length
+            val len2 = s2.length
+            val dp = Array(len1 + 1) { IntArray(len2 + 1) }
+            for (i in 0..len1) dp[i][0] = i
+            for (j in 0..len2) dp[0][j] = j
+            for (i in 1..len1) {
+                for (j in 1..len2) {
+                    dp[i][j] = if (s1[i - 1] == s2[j - 1]) {
+                        dp[i - 1][j - 1]
+                    } else {
+                        1 + minOf(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+                    }
+                }
+            }
+            return dp[len1][len2]
+        }
     }
 
     /**
@@ -217,13 +262,43 @@ sealed interface ValidationError {
         val sourceLocation: SourceLocation? = null
     ) : ValidationError {
         override fun message(): String = buildString {
-            append("Constructor '$constructorName' not found on type ${formatType(variantType)}")
+            append("'$constructorName' is not a valid constructor for this type")
             if (availableConstructors.isNotEmpty()) {
-                append(". Available constructors: ${availableConstructors.joinToString()}")
+                // Find similar constructor names using Levenshtein distance
+                val similar = availableConstructors.filter {
+                    it.equals(constructorName, ignoreCase = true) ||
+                    levenshteinDistance(it, constructorName) <= 2
+                }.take(3)
+
+                if (similar.isNotEmpty()) {
+                    append(". Did you mean: ${similar.joinToString(", ")}?")
+                } else if (availableConstructors.size <= 5) {
+                    append(". Valid constructors: ${availableConstructors.joinToString(", ")}")
+                } else {
+                    append(". Valid constructors: ${availableConstructors.take(5).joinToString(", ")}, ...")
+                }
             }
         }
 
         override fun location() = sourceLocation
+
+        private fun levenshteinDistance(s1: String, s2: String): Int {
+            val len1 = s1.length
+            val len2 = s2.length
+            val dp = Array(len1 + 1) { IntArray(len2 + 1) }
+            for (i in 0..len1) dp[i][0] = i
+            for (j in 0..len2) dp[0][j] = j
+            for (i in 1..len1) {
+                for (j in 1..len2) {
+                    dp[i][j] = if (s1[i - 1] == s2[j - 1]) {
+                        dp[i - 1][j - 1]
+                    } else {
+                        1 + minOf(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+                    }
+                }
+            }
+            return dp[len1][len2]
+        }
     }
 
     /**
@@ -237,9 +312,12 @@ sealed interface ValidationError {
         val sourceLocation: SourceLocation? = null
     ) : ValidationError {
         override fun message(): String = buildString {
-            append("Undefined variable or function: $variableName")
+            append("'$variableName' is not defined")
             if (similarNames.isNotEmpty()) {
-                append(". Did you mean: ${similarNames.joinToString()}")
+                val suggestions = similarNames.take(3).joinToString(", ") { "'$it'" }
+                append(". Did you mean $suggestions?")
+            } else {
+                append(". Check the spelling or make sure it's declared before use.")
             }
         }
 

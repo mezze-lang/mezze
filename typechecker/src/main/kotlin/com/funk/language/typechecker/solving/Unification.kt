@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Example:
  *   unify(List α, List Int) = Success({α -> Int})
- *   unify(Int, String) = Failure("Cannot unify Int with String")
+ *   unify(Int, String) = Failure("Type mismatch: Int is not compatible with String")
  *   unify(α, List α) = Failure("Occurs check: α occurs in List α")
  *
  * Design:
@@ -127,7 +127,7 @@ private fun unifyImpl(type1: FunkType, type2: FunkType, typeDeclarations: Map<St
             } else {
                 // Can't expand - fall through to error
                 UnificationResult.Failure(
-                    message = "Cannot unify ${formatType(type1)} with ${formatType(type2)} (type expansion failed)",
+                    message = "Type mismatch: ${formatType(type1)} is not compatible with ${formatType(type2)}",
                     type1 = type1,
                     type2 = type2
                 )
@@ -140,7 +140,7 @@ private fun unifyImpl(type1: FunkType, type2: FunkType, typeDeclarations: Map<St
             } else {
                 // Can't expand - fall through to error
                 UnificationResult.Failure(
-                    message = "Cannot unify ${formatType(type1)} with ${formatType(type2)} (type expansion failed)",
+                    message = "Type mismatch: ${formatType(type1)} is not compatible with ${formatType(type2)}",
                     type1 = type1,
                     type2 = type2
                 )
@@ -164,7 +164,7 @@ private fun unifyImpl(type1: FunkType, type2: FunkType, typeDeclarations: Map<St
             }
             // Can't expand - error
             return UnificationResult.Failure(
-                message = "Cannot unify ${formatType(type1)} with ${formatType(type2)} (type expansion failed)",
+                message = "Type mismatch: ${formatType(type1)} is not compatible with ${formatType(type2)}",
                 type1 = type1,
                 type2 = type2
             )
@@ -185,7 +185,7 @@ private fun unifyImpl(type1: FunkType, type2: FunkType, typeDeclarations: Map<St
             }
             // Can't expand - error
             return UnificationResult.Failure(
-                message = "Cannot unify ${formatType(type1)} with ${formatType(type2)} (type expansion failed)",
+                message = "Type mismatch: ${formatType(type1)} is not compatible with ${formatType(type2)}",
                 type1 = type1,
                 type2 = type2
             )
@@ -204,7 +204,7 @@ private fun unifyImpl(type1: FunkType, type2: FunkType, typeDeclarations: Map<St
             }
             // Multi-constructor variants or no payload - can't unify with record
             return UnificationResult.Failure(
-                message = "Cannot unify ${formatType(type1)} with ${formatType(type2)}",
+                message = "Type mismatch: expected ${formatType(type2)}, but got ${formatType(type1)}",
                 type1 = type1,
                 type2 = type2
             )
@@ -220,7 +220,7 @@ private fun unifyImpl(type1: FunkType, type2: FunkType, typeDeclarations: Map<St
             }
             // Multi-constructor variants or no payload - can't unify with record
             return UnificationResult.Failure(
-                message = "Cannot unify ${formatType(type1)} with ${formatType(type2)}",
+                message = "Type mismatch: expected ${formatType(type2)}, but got ${formatType(type1)}",
                 type1 = type1,
                 type2 = type2
             )
@@ -397,7 +397,7 @@ private fun unifyImpl(type1: FunkType, type2: FunkType, typeDeclarations: Map<St
         // CASE 14: Type mismatch
         else -> {
             UnificationResult.Failure(
-                message = "Cannot unify ${formatType(type1)} with ${formatType(type2)}",
+                message = "Type mismatch: expected ${formatType(type2)}, but got ${formatType(type1)}",
                 type1 = type1,
                 type2 = type2
             )

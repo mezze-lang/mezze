@@ -232,7 +232,7 @@ class TypeValidator(
                                 type = type,
                                 abilityName = constraint.abilityName,
                                 requiredBy = constraint.context,
-                                sourceLocation = null
+                                sourceLocation = constraint.sourceLocation
                             )
                         )
                     }
@@ -285,7 +285,7 @@ class TypeValidator(
                                     variantType = variantType,
                                     constructorName = constraint.constructorName,
                                     availableConstructors = validConstructors,
-                                    sourceLocation = null
+                                    sourceLocation = constraint.sourceLocation
                                 )
                             )
                         }
@@ -1146,7 +1146,7 @@ class TypeValidator(
                     expression = matchExpr,
                     coveredConstructors = coveredConstructors.toList(),
                     missingConstructors = uncoveredConstructors.toList(),
-                    sourceLocation = null
+                    sourceLocation = matchExpr.sourceLocation
                 )
             )
         }
@@ -1705,7 +1705,7 @@ class TypeValidator(
                         variantType = variantType,
                         constructorName = constructorName,
                         availableConstructors = validConstructors,
-                        sourceLocation = null
+                        sourceLocation = variantExpr.sourceLocation
                     )
                 )
             }

@@ -119,7 +119,7 @@ class MatchExhaustivenessTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("doesn't handle all cases") || exception.message!!.contains("Non-exhaustive"))
         kotlin.test.assertTrue(exception.message!!.contains("Green"))
     }
 
@@ -137,7 +137,7 @@ class MatchExhaustivenessTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("doesn't handle all cases") || exception.message!!.contains("Non-exhaustive"))
         kotlin.test.assertTrue(exception.message!!.contains("Yellow"))
     }
 
@@ -154,7 +154,7 @@ class MatchExhaustivenessTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("doesn't handle all cases") || exception.message!!.contains("Non-exhaustive"))
     }
 
     @Test
@@ -171,7 +171,7 @@ class MatchExhaustivenessTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("doesn't handle all cases") || exception.message!!.contains("Non-exhaustive"))
     }
 
     @Test
@@ -188,7 +188,7 @@ class MatchExhaustivenessTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("doesn't handle all cases") || exception.message!!.contains("Non-exhaustive"))
     }
 
     // ========== OPEN VARIANTS (SHOULD ALLOW WILDCARDS) ==========
@@ -223,7 +223,7 @@ class MatchExhaustivenessTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("doesn't handle all cases") || exception.message!!.contains("Non-exhaustive"))
         kotlin.test.assertTrue(exception.message!!.contains("Green"))
     }
 
@@ -281,7 +281,7 @@ class MatchExhaustivenessTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("doesn't handle all cases") || exception.message!!.contains("Non-exhaustive"))
     }
 
     @Test
@@ -350,7 +350,7 @@ class MatchExhaustivenessTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive"))
+        kotlin.test.assertTrue(exception.message!!.contains("doesn't handle all cases") || exception.message!!.contains("Non-exhaustive"))
         kotlin.test.assertTrue(exception.message!!.contains("Only"))
     }
 
@@ -403,7 +403,7 @@ class MatchExhaustivenessTest {
         }
         // Should mention either non-exhaustive or undefined constructor
         kotlin.test.assertTrue(
-            exception.message!!.contains("Non-exhaustive") ||
+            exception.message!!.contains("doesn't handle all cases") || exception.message!!.contains("Non-exhaustive") ||
             exception.message!!.contains("Yellow") ||
             exception.message!!.contains("Undefined")
         )

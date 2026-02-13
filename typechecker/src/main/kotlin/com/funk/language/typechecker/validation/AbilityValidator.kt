@@ -97,16 +97,21 @@ object AbilityValidator {
         val missingOps = declaredOps - implementedOps
 
         if (missingOps.isNotEmpty()) {
+            val missing = missingOps.joinToString(", ")
+            val example = missingOps.first()
             throw TypeCheckError(
-                "Missing operations in implementation of ability '${impl.abilityName}': ${missingOps.joinToString(", ")}"
+                "Implementation of '${impl.abilityName}' is missing required ${if (missingOps.size == 1) "method" else "methods"}: $missing. " +
+                "Add: $example = {args} -> ..."
             )
         }
 
         // Rule 7: Check no extra operations (OldTypeChecker.kt:13140-13146)
         val extraOps = implementedOps - declaredOps
         if (extraOps.isNotEmpty()) {
+            val extra = extraOps.joinToString(", ")
             throw TypeCheckError(
-                "Extra operations in implementation of ability '${impl.abilityName}' not declared in ability: ${extraOps.joinToString(", ")}"
+                "Implementation of '${impl.abilityName}' has extra ${if (extraOps.size == 1) "method" else "methods"} not in ability: $extra. " +
+                "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the ability declaration."
             )
         }
 
@@ -160,18 +165,18 @@ object AbilityValidator {
             // Check parameter type matches
             if (!typeAnnotationsMatch(actualParamType, expectedParamType)) {
                 throw TypeCheckError(
-                    "Parameter type mismatch in ability '${impl.abilityName}' operation '${implOp.name}': " +
-                    "expected ${typeAnnotationToString(expectedParamType)} (after substitution), " +
-                    "got ${typeAnnotationToString(actualParamType)}"
+                    "Wrong parameter type for '${implOp.name}' in impl ${impl.abilityName}: " +
+                    "expected ${typeAnnotationToString(expectedParamType)}, " +
+                    "but got ${typeAnnotationToString(actualParamType)}."
                 )
             }
 
             // Check return type matches
             if (!typeAnnotationsMatch(actualReturnType, expectedReturnType)) {
                 throw TypeCheckError(
-                    "Return type mismatch in ability '${impl.abilityName}' operation '${implOp.name}': " +
-                    "expected ${typeAnnotationToString(expectedReturnType)} (after substitution), " +
-                    "got ${typeAnnotationToString(actualReturnType)}"
+                    "Wrong return type for '${implOp.name}' in impl ${impl.abilityName}: " +
+                    "expected ${typeAnnotationToString(expectedReturnType)}, " +
+                    "but got ${typeAnnotationToString(actualReturnType)}."
                 )
             }
         }

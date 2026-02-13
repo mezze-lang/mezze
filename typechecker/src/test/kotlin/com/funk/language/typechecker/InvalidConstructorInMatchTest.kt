@@ -311,7 +311,8 @@ class InvalidConstructorInMatchTest {
             parseAndTypeCheck(code)
         }
         assertTrue(exception.message?.contains("type mismatch") == true ||
-                   exception.message?.contains("cannot unify") == true ||
+                   exception.message?.contains("Type mismatch") == true ||
+                   exception.message?.contains("not compatible") == true ||
                    exception.message?.contains("Int") == true ||
                    exception.message?.contains("String") == true)
     }

@@ -200,11 +200,11 @@ class OperatorErrorMessageTest {
         """.trimIndent()
 
         val error = getErrorMessage(source)
-        // With strict Nat type checking, Int cannot unify with Nat
-        assertNotNull(error, "Expected type error: Int cannot unify with Nat")
+        // With strict Nat type checking, Int is not compatible with Nat
+        assertNotNull(error, "Expected type error: Int not compatible with Nat")
         assertTrue(
-            error!!.contains("Cannot unify") && (error.contains("Int") || error.contains("Nat")),
-            "Error should mention Int/Nat unification conflict: $error"
+            (error!!.contains("Type mismatch") || error.contains("not compatible")) && (error.contains("Int") || error.contains("Nat")),
+            "Error should mention Int/Nat type conflict: $error"
         )
     }
 

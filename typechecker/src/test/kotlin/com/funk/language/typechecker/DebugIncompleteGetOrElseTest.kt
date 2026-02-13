@@ -41,7 +41,8 @@ class DebugIncompleteGetOrElseTest {
         println("CORRECTLY FAILED with: ${exception.message}")
         assertTrue(
             exception.message?.contains("Non-exhaustive") == true ||
-            exception.message?.contains("Missing cases") == true,
+            exception.message?.contains("Missing cases") == true ||
+            exception.message?.contains("doesn't handle all cases") == true,
             "Expected exhaustiveness error, got: ${exception.message}"
         )
     }

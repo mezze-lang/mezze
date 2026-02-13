@@ -1004,35 +1004,52 @@ class ConstraintSolver(
     private fun generateAbilityErrorMessage(abilityName: String, typeArgs: List<FunkType>): String {
         // Check if any type argument is a function type
         val hasFunctionType = typeArgs.any { it is FunkType.FunctionType }
+        val typeNames = typeArgs.map { formatType(it) }.joinToString(", ")
+
+        // Get the primary type for impl suggestion
+        val primaryType = typeArgs.firstOrNull()?.let { formatType(it) } ?: typeNames
 
         if (hasFunctionType) {
-            // Generate special error message for arithmetic with function types
+            // Functions cannot implement abilities
             val operatorName = when (abilityName) {
-                "NumAdd" -> "(+)"
-                "NumSub" -> "(-)"
-                "NumMul" -> "(*)"
-                "NumDiv" -> "(/)"
-                "NumMod" -> "(%)"
-                "NumNeg" -> "(-)"
-                else -> abilityName
+                "NumAdd" -> "+"
+                "NumSub" -> "-"
+                "NumMul" -> "*"
+                "NumDiv" -> "/"
+                "NumMod" -> "%"
+                "NumNeg" -> "-"
+                else -> null
             }
 
-            val functionType = typeArgs.find { it is FunkType.FunctionType }
-            val functionTypeStr = functionType?.let { formatType(it) } ?: "function"
-
-            return when (abilityName) {
-                "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "NumNeg" ->
-                    "Cannot apply arithmetic operator '$operatorName' to a function type $functionTypeStr - functions don't implement the $abilityName ability"
-                else -> {
-                    val typeNames = typeArgs.map { formatType(it) }.joinToString(", ")
-                    "No implementation of $abilityName for types: $typeNames (function types don't implement abilities)"
-                }
+            return if (operatorName != null) {
+                "Cannot use '$operatorName' with a function. Functions cannot implement $abilityName."
+            } else {
+                "Functions cannot implement '$abilityName'."
             }
         }
 
-        // Default error message
-        val typeNames = typeArgs.map { formatType(it) }.joinToString(", ")
-        return "No implementation of $abilityName for types: $typeNames"
+        // Provide helpful messages with impl suggestion
+        return when (abilityName) {
+            "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod" -> {
+                val operator = when (abilityName) {
+                    "NumAdd" -> "+"
+                    "NumSub" -> "-"
+                    "NumMul" -> "*"
+                    "NumDiv" -> "/"
+                    "NumMod" -> "%"
+                    else -> abilityName
+                }
+                "Cannot use '$operator' with $typeNames. To enable this, implement: impl $abilityName $primaryType where { ... }"
+            }
+            "Eq" -> "Cannot compare $typeNames for equality. To enable this, implement: impl Eq $primaryType where { ... }"
+            "Ord" -> "Cannot compare $typeNames for ordering. To enable this, implement: impl Ord $primaryType where { ... } (requires Eq)"
+            "Show" -> "Cannot convert $typeNames to String. To enable this, implement: impl Show $primaryType where { ... }"
+            "Hash" -> "Cannot hash $typeNames. To enable this, implement: impl Hash $primaryType where { ... }"
+            "Default" -> "No default value for $typeNames. To enable this, implement: impl Default $primaryType where { ... }"
+            "Parse" -> "Cannot parse into $typeNames. To enable this, implement: impl Parse $primaryType where { ... }"
+            "Convert" -> "Cannot convert between the given types. To enable this, implement: impl Convert $typeNames where { ... }"
+            else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName $primaryType where { ... }"
+        }
     }
 
     private fun isBoolVariant(type: FunkType): Boolean {

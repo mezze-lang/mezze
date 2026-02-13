@@ -184,7 +184,7 @@ class LetDestructuringTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive record pattern"))
+        kotlin.test.assertTrue(exception.message!!.contains("missing fields") || exception.message!!.contains("Non-exhaustive record pattern"))
         kotlin.test.assertTrue(exception.message!!.contains("z"))
     }
 
@@ -227,7 +227,7 @@ class LetDestructuringTest {
         val exception = assertThrows<TypeCheckError> {
             parseAndTypeCheck(code)
         }
-        kotlin.test.assertTrue(exception.message!!.contains("Non-exhaustive record pattern"))
+        kotlin.test.assertTrue(exception.message!!.contains("missing fields") || exception.message!!.contains("Non-exhaustive record pattern"))
     }
 
     @Test

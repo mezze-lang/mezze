@@ -250,7 +250,7 @@ object SuggestionGenerator {
         val message = error.message.lowercase()
 
         when {
-            "cannot unify" in message || "unification failed" in message -> {
+            "type mismatch" in message || "not compatible" in message -> {
                 suggestions.add("Ensure both sides of the expression have compatible types")
                 suggestions.add("Add explicit type annotations to clarify intent")
             }

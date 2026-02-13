@@ -997,8 +997,8 @@ class ConstraintGenerator(
                                 when (unificationResult) {
                                     is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
                                         throw com.funk.language.typechecker.TypeCheckError(
-                                            "Implementation body type mismatch in ability '${impl.abilityName}' operation '${implOp.name}': " +
-                                            "body has type $actualTypeStr but operation signature requires $expectedTypeStr"
+                                            "Method '${implOp.name}' in impl ${impl.abilityName} returns wrong type: " +
+                                            "expected $expectedTypeStr, but body returns $actualTypeStr."
                                         )
                                     }
                                     is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
@@ -1008,8 +1008,8 @@ class ConstraintGenerator(
                             } else {
                                 // Concrete types that don't match - strict error
                                 throw com.funk.language.typechecker.TypeCheckError(
-                                    "Implementation body type mismatch in ability '${impl.abilityName}' operation '${implOp.name}': " +
-                                    "body has type $actualTypeStr but operation signature requires $expectedTypeStr"
+                                    "Method '${implOp.name}' in impl ${impl.abilityName} returns wrong type: " +
+                                    "expected $expectedTypeStr, but body returns $actualTypeStr."
                                 )
                             }
                         }
@@ -1143,8 +1143,8 @@ class ConstraintGenerator(
                                 val actualTypeStr = com.funk.language.ast.prettyPrintType(actualBodyType)
                                 val expectedTypeStr = com.funk.language.ast.prettyPrintType(expectedReturnType)
                                 throw com.funk.language.typechecker.TypeCheckError(
-                                    "Implementation body type mismatch in effect '${impl.effectName}' operation '${implOp.name}': " +
-                                    "body has type $actualTypeStr but operation signature requires $expectedTypeStr"
+                                    "Operation '${implOp.name}' in impl ${impl.effectName} returns wrong type: " +
+                                    "expected $expectedTypeStr, but body returns $actualTypeStr."
                                 )
                             }
                             is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {

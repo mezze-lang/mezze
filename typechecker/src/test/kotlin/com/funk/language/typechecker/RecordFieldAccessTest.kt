@@ -84,6 +84,7 @@ class RecordFieldAccessTest {
             typeChecker.typeCheck(program).program
         }
         assertTrue(error.message?.contains("Field 'substract' not found") == true, "Error should mention missing field")
+        assertTrue(error.message?.contains("Did you mean 'subtract'?") == true, "Error should suggest similar field name")
     }
 
     @Test

@@ -525,10 +525,11 @@ class ExpressionConstraintGenerator {
                 // Expected type is a closed record - validate fields match exactly
                 val missingFields = resolvedType.fields.keys - explicitFieldNames
                 if (missingFields.isNotEmpty()) {
+                    val missingList = missingFields.joinToString(", ")
+                    val example = missingFields.take(2).joinToString(", ") { "$it = ..." }
                     throw TypeCheckError(
-                        message = "Record literal missing required fields from type annotation: ${missingFields.joinToString(", ")}. " +
-                                "Expected: ${prettyPrintType(expectedType)}, " +
-                                "Got fields: ${explicitFieldNames.joinToString(", ")}",
+                        message = "Record is missing ${if (missingFields.size == 1) "field" else "fields"}: $missingList. " +
+                                "Add: { ${explicitFieldNames.joinToString(", ") { "$it = ..." }}, $example }",
                         expression = expr,
                         errorType = ErrorType.MISSING_FIELD,
                         metadata = mapOf(
@@ -540,10 +541,11 @@ class ExpressionConstraintGenerator {
 
                 val extraFields = explicitFieldNames - resolvedType.fields.keys
                 if (extraFields.isNotEmpty()) {
+                    val extraList = extraFields.joinToString(", ")
+                    val expectedList = resolvedType.fields.keys.sorted().joinToString(", ")
                     throw TypeCheckError(
-                        message = "Record literal has extra fields not in type annotation: ${extraFields.joinToString(", ")}. " +
-                                "Expected: ${prettyPrintType(expectedType)}, " +
-                                "Got extra fields: ${extraFields.joinToString(", ")}",
+                        message = "Record has extra ${if (extraFields.size == 1) "field" else "fields"}: $extraList. " +
+                                "Remove ${if (extraFields.size == 1) "it" else "them"}. Expected fields: $expectedList",
                         expression = expr,
                         errorType = ErrorType.TYPE_MISMATCH,
                         metadata = mapOf(
@@ -613,10 +615,12 @@ class ExpressionConstraintGenerator {
                         abilityConstraints = listOf(abilityConstraint)
                     )
                 } else {
-                    // Method not found on built-in ability - throw error
-                    val availableMethods = BuiltInAbilities.getAvailableMethods(receiverName).joinToString(", ")
+                    // Method not found on built-in ability - throw error with suggestion
+                    val availableMethods = BuiltInAbilities.getAvailableMethods(receiverName)
+                    val suggestion = findClosestMatch(expr.member, availableMethods.toSet())
+                    val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
                     throw TypeCheckError(
-                        message = "Method '${expr.member}' not found in ability '$receiverName'. Available methods: $availableMethods",
+                        message = "Method '${expr.member}' not found in ability '$receiverName'.$didYouMean Available methods: ${availableMethods.joinToString(", ")}",
                         expression = expr,
                         errorType = ErrorType.MISSING_FIELD
                     )
@@ -707,10 +711,13 @@ class ExpressionConstraintGenerator {
             // Check if field exists
             if (fieldNames.isNotEmpty() && !fieldNames.contains(expr.member)) {
                 // Field doesn't exist - check if record is closed or open
+                val suggestion = findClosestMatch(expr.member, fieldNames)
+                val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
+
                 if (!isOpen) {
                     // Closed record - field must exist, throw error
                     throw TypeCheckError(
-                        message = "Field '${expr.member}' not found in record type. Available fields: ${fieldNames.joinToString()}",
+                        message = "Field '${expr.member}' not found in record.$didYouMean Available fields: ${fieldNames.joinToString()}",
                         expression = expr,
                         errorType = ErrorType.MISSING_FIELD,
                         metadata = mapOf(
@@ -722,7 +729,7 @@ class ExpressionConstraintGenerator {
                     // Open record with explicit literal - still fail
                     // OldTypeChecker validates this too (line 6285-6300)
                     throw TypeCheckError(
-                        message = "Field '${expr.member}' not found in open record. Explicitly declared fields: ${fieldNames.joinToString()}",
+                        message = "Field '${expr.member}' not found in open record.$didYouMean Explicitly declared fields: ${fieldNames.joinToString()}",
                         expression = expr,
                         errorType = ErrorType.MISSING_FIELD,
                         metadata = mapOf(
@@ -799,10 +806,12 @@ class ExpressionConstraintGenerator {
         val methodType = abilityType.fields[methodName]
 
         if (methodType == null) {
-            // Method not found
-            val availableMethods = abilityType.fields.keys.joinToString(", ")
+            // Method not found - suggest similar method names
+            val availableMethods = abilityType.fields.keys
+            val suggestion = findClosestMatch(methodName, availableMethods)
+            val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
             throw TypeCheckError(
-                message = "Method '$methodName' not found in ability '$abilityName'. Available methods: $availableMethods",
+                message = "Method '$methodName' not found in ability '$abilityName'.$didYouMean Available methods: ${availableMethods.joinToString(", ")}",
                 expression = expr,
                 errorType = ErrorType.MISSING_FIELD
             )
@@ -889,10 +898,12 @@ class ExpressionConstraintGenerator {
         val operationType = effectType.fields[operationName]
 
         if (operationType == null) {
-            // Operation not found
-            val availableOperations = effectType.fields.keys.joinToString(", ")
+            // Operation not found - suggest similar operation names
+            val availableOps = effectType.fields.keys
+            val suggestion = findClosestMatch(operationName, availableOps)
+            val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
             throw TypeCheckError(
-                message = "Operation '$operationName' not found in effect '$effectName'. Available operations: $availableOperations",
+                message = "Operation '$operationName' not found in effect '$effectName'.$didYouMean Available operations: ${availableOps.joinToString(", ")}",
                 expression = expr,
                 errorType = ErrorType.MISSING_FIELD
             )
@@ -2480,9 +2491,11 @@ class ExpressionConstraintGenerator {
         // Look up operation in effect
         val operationType = effectType.fields[operationName]
         if (operationType == null) {
-            val availableOperations = effectType.fields.keys.joinToString(", ")
+            val availableOps = effectType.fields.keys
+            val suggestion = findClosestMatch(operationName, availableOps)
+            val didYouMean = if (suggestion != null) " Did you mean '$suggestion'?" else ""
             throw TypeCheckError(
-                message = "Operation '$operationName' not found in effect '$effectName'. Available operations: $availableOperations",
+                message = "Operation '$operationName' not found in effect '$effectName'.$didYouMean Available operations: ${availableOps.joinToString(", ")}",
                 expression = expr,
                 errorType = ErrorType.MISSING_FIELD
             )
@@ -2715,5 +2728,43 @@ class ExpressionConstraintGenerator {
             is MemberAccess -> isRecordLiteralAccess(expr.receiver, context)
             else -> false
         }
+    }
+
+    /**
+     * Find the closest matching name from a set of candidates using Levenshtein distance.
+     * Returns null if no close match is found (distance > threshold).
+     */
+    private fun findClosestMatch(name: String, candidates: Set<String>, threshold: Int = 3): String? {
+        if (candidates.isEmpty()) return null
+
+        val closest = candidates.minByOrNull { levenshteinDistance(name, it) }
+        return if (closest != null && levenshteinDistance(name, closest) <= threshold) {
+            closest
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Calculate Levenshtein distance between two strings.
+     */
+    private fun levenshteinDistance(s1: String, s2: String): Int {
+        val m = s1.length
+        val n = s2.length
+        val dp = Array(m + 1) { IntArray(n + 1) }
+
+        for (i in 0..m) dp[i][0] = i
+        for (j in 0..n) dp[0][j] = j
+
+        for (i in 1..m) {
+            for (j in 1..n) {
+                dp[i][j] = if (s1[i - 1] == s2[j - 1]) {
+                    dp[i - 1][j - 1]
+                } else {
+                    1 + minOf(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+                }
+            }
+        }
+        return dp[m][n]
     }
 }

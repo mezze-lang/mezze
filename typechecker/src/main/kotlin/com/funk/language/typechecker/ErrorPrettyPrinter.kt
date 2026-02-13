@@ -173,9 +173,9 @@ object ErrorPrettyPrinter {
                         sb.appendLine("   - For custom types, you need to provide implementations")
                     }
 
-                    message.contains("Type unification failed") -> {
+                    message.contains("Type mismatch") || message.contains("not compatible") -> {
                         sb.appendLine()
-                        sb.appendLine("💡 Type Unification Help:")
+                        sb.appendLine("💡 Type Compatibility Help:")
                         sb.appendLine("   - Ensure both sides of an expression have compatible types")
                         sb.appendLine("   - Built-in types: ${BuiltinTypes.allBuiltinTypeNames.take(5).joinToString(", ")}...")
                     }

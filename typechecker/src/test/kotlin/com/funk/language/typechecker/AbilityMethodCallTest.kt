@@ -401,4 +401,23 @@ class AbilityMethodCallTest {
             typeChecker.typeCheck(program).program
         }
     }
+
+    @Test
+    fun `test typo in ability method name gives did you mean suggestion`() {
+        val source = """
+            ability Show 'a where {
+                show: {val: 'a} -> String
+            }
+
+            let test = Show.shwo {val = True}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val error = assertThrows(TypeCheckError::class.java) {
+            typeChecker.typeCheck(program).program
+        }
+
+        assertTrue(error.message?.contains("not found in ability") == true, "Error should mention method not found")
+        assertTrue(error.message?.contains("Did you mean 'show'?") == true, "Error should suggest similar method name")
+    }
 }

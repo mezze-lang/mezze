@@ -237,7 +237,7 @@ class EffectValidator(
                 ValidationError.TypeMismatch(
                     expected = FunkType.IntType,  // Placeholder
                     actual = FunkType.IntType,     // Placeholder
-                    context = "Duplicate operation '$name' in effect '${effectDecl.name}' (defined $count times)",
+                    context = "Operation '$name' is defined $count times in effect '${effectDecl.name}'. Each operation must have a unique name.",
                     sourceLocation = null
                 )
             )
@@ -321,11 +321,15 @@ class EffectValidator(
         // Check for missing operations
         val missingOps = requiredOps - implementedOps
         if (missingOps.isNotEmpty()) {
+            val missing = missingOps.joinToString(", ")
+            val example = missingOps.first()
             errors.add(
                 ValidationError.TypeMismatch(
                     expected = FunkType.IntType,  // Placeholder
                     actual = FunkType.IntType,     // Placeholder
-                    context = "Effect implementation missing operations: ${missingOps.joinToString()}",
+                    context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effectName}' " +
+                            "is missing required ${if (missingOps.size == 1) "operation" else "operations"}: $missing. " +
+                            "Add: $example = {args} -> ...",
                     sourceLocation = null
                 )
             )
@@ -334,8 +338,17 @@ class EffectValidator(
         // Check for extra operations (not in effect declaration)
         val extraOps = implementedOps - requiredOps
         if (extraOps.isNotEmpty()) {
-            // This is a warning, not an error
-            // errors.add(...) - skipping for now
+            val extra = extraOps.joinToString(", ")
+            errors.add(
+                ValidationError.TypeMismatch(
+                    expected = FunkType.IntType,  // Placeholder
+                    actual = FunkType.IntType,     // Placeholder
+                    context = "Implementation '${implDecl.performerName}' for effect '${implDecl.effectName}' " +
+                            "has extra ${if (extraOps.size == 1) "operation" else "operations"} not in effect: $extra. " +
+                            "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the effect declaration.",
+                    sourceLocation = null
+                )
+            )
         }
 
         return errors
