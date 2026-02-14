@@ -1,0 +1,158 @@
+# std/json.funk - JSON serialization format implementation
+#
+# This module provides a Json variant type and functions for
+# serializing/deserializing JSON data.
+#
+# Example:
+#   use std::json
+#
+#   let data = json::JObject {fields = [
+#       {key = "name", val = json::JString {val = "Alice"}},
+#       {key = "age", val = json::JInt {val = 30}}
+#   ]}
+#
+#   let bytes = json::serialize {json = data}
+
+use std::collections::list
+use std::collections::set
+use std::collections::map
+use std::collections::bytes
+use std::string
+use std::float
+use std::int
+
+# ============================================================================
+# JSON INTERMEDIATE REPRESENTATION
+# ============================================================================
+
+# Entry type for JSON object fields
+pub type Entry 'k 'v = {key: 'k, val: 'v}
+
+# The Json type represents any JSON value
+pub type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: List Json }, JObject { fields: List (Entry String Json) } |
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+# Field name transformation strategies
+pub type FieldTransform = | Identity, SnakeCase, CamelCase, KebabCase, ScreamingSnakeCase |
+
+# JSON encoding configuration
+pub type JsonConfig = {
+    pretty: Bool,
+    indent: Int,
+    field_transform: FieldTransform,
+    skip_null: Bool
+}
+
+# Default JSON configuration
+pub let default_config: JsonConfig = {
+    pretty = False,
+    indent = 2,
+    field_transform = Identity,
+    skip_null = False
+}
+
+# Create a config with custom settings
+pub let config = {pretty: Bool, indent: Int, field_transform: FieldTransform, skip_null: Bool} -> {
+    pretty = pretty,
+    indent = indent,
+    field_transform = field_transform,
+    skip_null = skip_null
+}
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+# Get the type name of a Json value (for error messages)
+let json_type_name: {json: Json} -> String = {json} ->
+    match json is
+        JNull -> "null"
+        JBool {val} -> "boolean"
+        JInt {val} -> "integer"
+        JFloat {val} -> "float"
+        JString {val} -> "string"
+        JArray {items} -> "array"
+        JObject {fields} -> "object"
+
+# ============================================================================
+# SERIALIZATION (Json -> Bytes)
+# ============================================================================
+
+# Serialize Json to string with config
+pub let serialize_to_string: {json: Json, config: JsonConfig} -> String = {json, config} ->
+    if config.pretty then
+        serialize_pretty {json = json, indent = 0, indent_size = config.indent}
+    else
+        serialize_compact {json = json}
+
+# Serialize with default config
+pub let to_string: {json: Json} -> String = {json} ->
+    serialize_compact {json = json}
+
+# Compact serialization (no whitespace)
+let serialize_compact: {json: Json} -> String = {json} ->
+    match json is
+        JNull -> "null"
+        JBool {val} -> if val then "true" else "false"
+        JInt {val} -> int::to_string {n = val}
+        JFloat {val} -> float::to_string {n = val}
+        JString {val} -> "\"$(escape_string {s = val})\""
+        JArray {items} -> do
+            let inner = list::map {xs = items, f = {x} -> serialize_compact {json = x}}
+            "[$(string::join {strings = list::to_array {xs = inner}, separator = ","})]"
+        JObject {fields} -> do
+            let inner = list::map {
+                xs = fields,
+                f = {x} -> "\"$(escape_string {s = x.key})\":$(serialize_compact {json = x.val})"
+            }
+            "{$(string::join {strings = list::to_array {xs = inner}, separator = ","})}"
+
+# Pretty serialization (with indentation)
+let serialize_pretty: {json: Json, indent: Int, indent_size: Int} -> String = {json, indent, indent_size} -> do
+    let indent_str = string::repeat {s = " ", n = indent}
+    let next_indent = indent + indent_size
+    let next_indent_str = string::repeat {s = " ", n = next_indent}
+    match json is
+        JNull -> "null"
+        JBool {val} -> if val then "true" else "false"
+        JInt {val} -> int::to_string {n = val}
+        JFloat {val} -> float::to_string {n = val}
+        JString {val} -> "\"$(escape_string {s = val})\""
+        JArray {items} ->
+            if list::is_empty {xs = items} then
+                "[]"
+            else do
+                let inner = list::map {
+                    xs = items,
+                    f = {x} -> "$(next_indent_str)$(serialize_pretty {json = x, indent = next_indent, indent_size = indent_size})"
+                }
+                "[\n$(string::join {strings = list::to_array {xs = inner}, separator = ",\n"})\n$(indent_str)]"
+        JObject {fields} ->
+            if list::is_empty {xs = fields} then
+                "{}"
+            else do
+                let inner = list::map {
+                    xs = fields,
+                    f = {x} -> do
+                        let val_str = serialize_pretty {json = x.val, indent = next_indent, indent_size = indent_size}
+                        "$(next_indent_str)\"$(escape_string {s = x.key})\": $(val_str)"
+                }
+                "{\n$(string::join {strings = list::to_array {xs = inner}, separator = ",\n"})\n$(indent_str)}"
+
+# Escape special characters in JSON strings
+# TODO: Implement proper escape when string::replace is available
+# For now, return string as-is (not correct for strings with special chars)
+let escape_string: {s: String} -> String = {s} ->
+    s
+
+# ============================================================================
+# PARSING (Bytes -> Json)
+# ============================================================================
+
+# Parse Bytes to Json
+# Note: This uses a native function for actual JSON parsing
+pub let parse = {bytes} ->
+    __native_json_from_bytes {bytes = bytes}

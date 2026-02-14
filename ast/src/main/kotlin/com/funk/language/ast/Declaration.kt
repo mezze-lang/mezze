@@ -276,12 +276,16 @@ data class AbilityOperation(
 @Serializable
 data class ImplAbilityDeclaration(
     val abilityName: String,
+    val abilityModulePath: List<String> = emptyList(), // Module path for qualified ability names like codec::EncodeFormat
     val targetTypes: List<TypeAnnotation>,       // Multiple concrete types like [String, Int]
     val forallVars: List<String> = emptyList(),  // Type variables from 'forall 'a 'b.' quantification
     val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'item = Int, 'iter = MyIter'
     val operations: List<ImplAbilityOperation>,
     val inferredType: FunkType? = null           // From typechecker
 ) : ProgramItem {
+    // Full qualified ability name
+    val qualifiedAbilityName: String
+        get() = if (abilityModulePath.isEmpty()) abilityName else "${abilityModulePath.joinToString("::")}::$abilityName"
     // Backward compatibility
     val associatedTypeBinding: Pair<String, TypeAnnotation>?
         get() = associatedTypeBindings.entries.firstOrNull()?.let { it.key to it.value }

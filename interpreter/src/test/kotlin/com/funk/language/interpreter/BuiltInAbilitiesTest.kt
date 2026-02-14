@@ -393,9 +393,7 @@ class BuiltInAbilitiesTest {
     @DisplayName("Variant equality is derived automatically - equal variants")
     fun testVariantEqualityTrue() {
         val source = """
-            type Option 'a =
-                | Some { val: 'a }
-                | None
+            type Option 'a = | Some { val: 'a }, None |
 
             let opt1 = Some { val = 42 }
             let opt2 = Some { val = 42 }
@@ -415,9 +413,7 @@ class BuiltInAbilitiesTest {
     @DisplayName("Variant equality is derived automatically - different values")
     fun testVariantEqualityDifferentValues() {
         val source = """
-            type Option 'a =
-                | Some { val: 'a }
-                | None
+            type Option 'a = | Some { val: 'a }, None |
 
             let opt1 = Some { val = 42 }
             let opt2 = Some { val = 99 }
@@ -437,9 +433,7 @@ class BuiltInAbilitiesTest {
     @DisplayName("Variant equality is derived automatically - different constructors")
     fun testVariantEqualityDifferentConstructors() {
         val source = """
-            type Option 'a =
-                | Some { val: 'a }
-                | None
+            type Option 'a = | Some { val: 'a }, None |
 
             let opt1 = Some { val = 42 }
             let opt2 = None
@@ -459,9 +453,7 @@ class BuiltInAbilitiesTest {
     @DisplayName("Variant equality for None values")
     fun testVariantEqualityNone() {
         val source = """
-            type Option 'a =
-                | Some { val: 'a }
-                | None
+            type Option 'a = | Some { val: 'a }, None |
 
             let opt1 = None
             let opt2 = None
@@ -481,9 +473,7 @@ class BuiltInAbilitiesTest {
     @DisplayName("Complex nested structure equality")
     fun testComplexNestedEquality() {
         val source = """
-            type Option 'a =
-                | Some { val: 'a }
-                | None
+            type Option 'a = | Some { val: 'a }, None |
 
             let person1 = { name = "Alice", age = 30 }
             let person2 = { name = "Alice", age = 30 }

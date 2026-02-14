@@ -39,6 +39,7 @@ import com.funk.language.interpreter.stdlib.conversion.TruffleConversionImplemen
 import com.funk.language.interpreter.stdlib.io.TruffleIOImplementations
 import com.funk.language.interpreter.stdlib.system.TruffleSystemImplementations
 import com.funk.language.interpreter.stdlib.logic.TruffleLogicImplementations
+import com.funk.language.interpreter.stdlib.codec.JsonImplementations
 
 
 /**
@@ -108,6 +109,9 @@ object TruffleNativeImplementations {
 
         // Register logic implementations (boolean operations, comparisons)
         TruffleLogicImplementations.registerAll(context)
+
+        // Register codec implementations (JSON serialization/deserialization)
+        JsonImplementations.registerAll(context)
 
         // Register legacy implementations (for backward compatibility)
         TruffleConversionImplementations.registerAll(context)

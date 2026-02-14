@@ -1315,6 +1315,13 @@ class SubstitutionApplier(
             is EffectRowAnnotation -> {
                 FunkType.VarType(TypeVar.fresh())
             }
+            is QualifiedTypeAnnotation -> {
+                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                FunkType.TypeApplication(
+                    constructor = qualifiedName,
+                    args = annotation.args.map { convertTypeAnnotation(it) }
+                )
+            }
         }
     }
 

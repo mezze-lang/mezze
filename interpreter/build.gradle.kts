@@ -25,6 +25,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.7.3")
 
+    // JSON serialization (for std/json codec)
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+
     // Vavr - persistent functional data structures with O(1) structural sharing
     // Used for Array (Vector), Map (HashMap), Set (HashSet), SortedMap (TreeMap), SortedSet (TreeSet)
     implementation("io.vavr:vavr:0.10.4")

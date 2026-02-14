@@ -159,9 +159,14 @@ graalvmNative {
                 // Initialize our language classes at build time
                 "--initialize-at-build-time=com.funk.language.interpreter.FunkLanguageProvider",
                 "--initialize-at-build-time=com.funk.language.interpreter.FunkValueGen\$InteropLibraryExports",
-                
+
                 // Initialize all our interpreter classes at build time (safer approach)
-                "--initialize-at-build-time=com.funk.language.interpreter"
+                "--initialize-at-build-time=com.funk.language.interpreter",
+
+                // Initialize kotlin and kotlinx classes at build time
+                // Required for AST serialization and related static initializers
+                "--initialize-at-build-time=kotlin",
+                "--initialize-at-build-time=kotlinx"
             ))
 
             buildArgs.addAll(args)

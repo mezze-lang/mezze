@@ -808,6 +808,8 @@ class ConstraintGenerator(
                     "Nat" -> FunkType.NatType
                     "Frac" -> FunkType.FracType
                     "Ordering" -> FunkType.OrderingType
+                    "Bytes" -> FunkType.BytesType
+                    "ByteBuffer" -> FunkType.ByteBufferType
                     "Unit" -> FunkType.RecordType(emptyMap())  // Unit is an empty record type
                     else -> {
                         // Type variable or type constructor
@@ -880,6 +882,13 @@ class ConstraintGenerator(
             is EffectRowAnnotation -> {
                 FunkType.EffectRow(annotation.effects.toSet())
             }
+            is QualifiedTypeAnnotation -> {
+                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                FunkType.TypeApplication(
+                    constructor = qualifiedName,
+                    args = annotation.args.map { convertTypeAnnotationInternal(it) }
+                )
+            }
         }
     }
 
@@ -896,9 +905,11 @@ class ConstraintGenerator(
      */
     private fun validateAbilityImplementation(impl: ImplAbilityDeclaration, context: TypingContext) {
         // Find the ability declaration
+        // Support both simple name (EncodeFormat) and qualified name (codec::EncodeFormat)
         val abilityDeclaration = abilityDeclarations[impl.abilityName]
+            ?: abilityDeclarations[impl.qualifiedAbilityName]
             ?: throw com.funk.language.typechecker.TypeCheckError(
-                "Ability '${impl.abilityName}' not found - cannot validate implementation"
+                "Ability '${impl.qualifiedAbilityName}' not found - cannot validate implementation"
             )
 
         // Build substitution map: 'a -> Int, etc. (type parameters from target types)
@@ -979,38 +990,24 @@ class ConstraintGenerator(
                         val actualBodyType = substitution.apply(bodyResult.type)
 
                         // Check that actual body type matches expected return type
-                        // Use pretty printing for comparison (catches Int vs String mismatches)
-                        val actualTypeStr = com.funk.language.ast.prettyPrintType(actualBodyType)
-                        val expectedTypeStr = com.funk.language.ast.prettyPrintType(expectedReturnType)
+                        // Always use unification to properly handle type aliases like Result
+                        // which need to be expanded to their variant form for comparison
+                        val unificationSolver = com.funk.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
+                        val unificationResult = unificationSolver.solve(
+                            listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Ability body validation"))
+                        )
 
-                        if (actualTypeStr != expectedTypeStr) {
-                            // Types differ - check if this is due to polymorphism
-                            val hasTypeVariables = actualTypeStr.contains("'") || expectedTypeStr.contains("'")
-
-                            if (hasTypeVariables) {
-                                // Try unification for polymorphic types
-                                val unificationSolver = com.funk.language.typechecker.solving.ConstraintSolver(bodyContext, typeDeclarations, abilityDeclarations)
-                                val unificationResult = unificationSolver.solve(
-                                    listOf(Constraint.Equality(actualBodyType, expectedReturnType, "Ability body validation"))
-                                )
-
-                                when (unificationResult) {
-                                    is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
-                                        throw com.funk.language.typechecker.TypeCheckError(
-                                            "Method '${implOp.name}' in impl ${impl.abilityName} returns wrong type: " +
-                                            "expected $expectedTypeStr, but body returns $actualTypeStr."
-                                        )
-                                    }
-                                    is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
-                                        // Unification succeeded - types are compatible
-                                    }
-                                }
-                            } else {
-                                // Concrete types that don't match - strict error
+                        when (unificationResult) {
+                            is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
+                                val actualTypeStr = com.funk.language.ast.prettyPrintType(actualBodyType)
+                                val expectedTypeStr = com.funk.language.ast.prettyPrintType(expectedReturnType)
                                 throw com.funk.language.typechecker.TypeCheckError(
                                     "Method '${implOp.name}' in impl ${impl.abilityName} returns wrong type: " +
                                     "expected $expectedTypeStr, but body returns $actualTypeStr."
                                 )
+                            }
+                            is com.funk.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
+                                // Unification succeeded - types are compatible
                             }
                         }
                     }

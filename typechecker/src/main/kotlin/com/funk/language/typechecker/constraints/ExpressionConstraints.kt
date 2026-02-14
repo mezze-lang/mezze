@@ -2709,6 +2709,13 @@ class ExpressionConstraintGenerator {
             is EffectRowAnnotation -> {
                 FunkType.EffectRow(annotation.effects.toSet())
             }
+            is QualifiedTypeAnnotation -> {
+                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                FunkType.TypeApplication(
+                    constructor = qualifiedName,
+                    args = annotation.args.map { convertFieldType(it) }
+                )
+            }
         }
     }
 

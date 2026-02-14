@@ -46,11 +46,13 @@ class ContextBuilder {
      * @param program The program to build context from
      * @param parentContext Optional parent context (for nested scopes/modules)
      * @param importedImpls Optional imported effect implementations (from module imports)
+     * @param importedAbilities Optional imported ability declarations (for validating ability impls with qualified names)
      */
     fun build(
         program: Program,
         parentContext: TypingContext = TypingContext.empty,
-        importedImpls: Map<String, com.funk.language.ast.ImplDeclaration> = emptyMap()
+        importedImpls: Map<String, com.funk.language.ast.ImplDeclaration> = emptyMap(),
+        importedAbilities: Map<String, AbilityDeclaration> = emptyMap()
     ): BuildResult {
         // VALIDATION PHASE 1: Check for duplicate declarations BEFORE building context
         // This catches errors early and provides clear error messages
@@ -133,10 +135,13 @@ class ContextBuilder {
         }
 
         // 3. Validate ability implementations (associated types, etc.)
+        // CRITICAL: Merge local and imported abilities to support qualified ability names
+        // e.g., `impl codec::EncodeFormat MyType where { ... }` needs access to imported abilities
+        val allAbilityDecls = abilityDecls + importedAbilities
         for (abilityImplDecl in abilityImplDecls) {
             AbilityValidator.validateAbilityImplementation(
                 impl = abilityImplDecl,
-                abilityDeclarations = abilityDecls
+                abilityDeclarations = allAbilityDecls
             )
         }
 
@@ -401,6 +406,16 @@ class ContextBuilder {
                 // Shouldn't happen, but handle gracefully
                 "EffectRow"
             }
+            is QualifiedTypeAnnotation -> {
+                // codec::Entry String Json → "codec_Entry_String_Json"
+                val modulePart = annotation.modulePath.joinToString("_")
+                val argNames = annotation.args.map { getTypeName(it) }
+                if (argNames.isEmpty()) {
+                    "${modulePart}_${annotation.typeName}"
+                } else {
+                    "${modulePart}_${annotation.typeName}_${argNames.joinToString("_")}"
+                }
+            }
         }
     }
 
@@ -436,6 +451,8 @@ class ContextBuilder {
                     "Nat" -> FunkType.NatType
                     "Frac" -> FunkType.FracType
                     "Ordering" -> FunkType.OrderingType
+                    "Bytes" -> FunkType.BytesType
+                    "ByteBuffer" -> FunkType.ByteBufferType
                     else -> {
                         // Type variable or type constructor
                         if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
@@ -538,6 +555,13 @@ class ContextBuilder {
                 // Effect rows shouldn't appear as standalone types in well-formed programs
                 // But handle gracefully
                 FunkType.VarType(TypeVar.fresh())
+            }
+            is QualifiedTypeAnnotation -> {
+                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                FunkType.TypeApplication(
+                    constructor = qualifiedName,
+                    args = annotation.args.map { convertTypeAnnotationInternal(it) }
+                )
             }
         }
     }

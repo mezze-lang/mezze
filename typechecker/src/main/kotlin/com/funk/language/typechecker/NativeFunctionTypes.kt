@@ -30,6 +30,7 @@ import com.funk.language.typechecker.types.concurrent.MutexTypes
 import com.funk.language.typechecker.types.concurrent.SemaphoreTypes
 import com.funk.language.typechecker.types.concurrent.LatchTypes
 import com.funk.language.typechecker.types.concurrent.WaitGroupTypes
+import com.funk.language.typechecker.types.codec.JsonTypes
 
 /**
  * Helper function to create Option type (as TypeApplication)
@@ -87,6 +88,9 @@ object NativeFunctionTypes {
         SemaphoreTypes.registerAll(context)
         LatchTypes.registerAll(context)
         WaitGroupTypes.registerAll(context)
+
+        // Codec types (JSON serialization/deserialization)
+        JsonTypes.registerAll(context)
 
         context["crash"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("msg" to FunkType.StringType)),

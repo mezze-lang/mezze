@@ -1248,18 +1248,46 @@ internal val FunkParser.additiveExpression: Parser<Expression>
 
             if (op?.type == TokenType.PLUS || op?.type == TokenType.MINUS) {
                 val opStream = currentStream.advance()
-                val right = multiplicativeExpression(opStream)
-                result = when (right) {
-                    is ParseResult.Success -> ParseResult.Success(
-                        desugarBinaryOperator(
-                            op.text,
-                            result.value,
-                            right.value,
-                            result.value.sourceLocation  // Use left operand's location
-                        ),
-                        right.remaining
+                val nextToken = opStream.current()
+
+                // Check for repeated SAME operators like ++ or -- which are not valid in Funk
+                // But allow +- or -+ which mean "add negative" or "subtract negative"
+                if (nextToken?.type == op.type) {
+                    val doubleOp = op.text + nextToken.text
+                    result = ParseResult.Failure(
+                        "'$doubleOp' is not a valid operator in Funk. " +
+                        if (doubleOp == "++") "For string concatenation, use string interpolation: \"\$(s1)\$(s2)\""
+                        else "Use '${op.text}' with two operands instead",
+                        opStream.position,
+                        nextToken.line,
+                        nextToken.column
                     )
-                    is ParseResult.Failure -> result // Keep left side on error
+                    break
+                }
+
+                val right = multiplicativeExpression(opStream)
+                when (right) {
+                    is ParseResult.Success -> {
+                        result = ParseResult.Success(
+                            desugarBinaryOperator(
+                                op.text,
+                                result.value,
+                                right.value,
+                                result.value.sourceLocation  // Use left operand's location
+                            ),
+                            right.remaining
+                        )
+                    }
+                    is ParseResult.Failure -> {
+                        // Right side failed - give a better error message
+                        result = ParseResult.Failure(
+                            "Expected expression after '${op.text}' operator",
+                            opStream.position,
+                            op.line,
+                            op.column
+                        )
+                        break
+                    }
                 }
             } else {
                 break
@@ -1279,18 +1307,46 @@ internal val FunkParser.multiplicativeExpression: Parser<Expression>
 
             if (op?.type == TokenType.STAR || op?.type == TokenType.SLASH || op?.type == TokenType.PERCENT) {
                 val opStream = currentStream.advance()
-                val right = unaryExpression(opStream)
-                result = when (right) {
-                    is ParseResult.Success -> ParseResult.Success(
-                        desugarBinaryOperator(
-                            op.text,
-                            result.value,
-                            right.value,
-                            result.value.sourceLocation  // Use left operand's location
-                        ),
-                        right.remaining
+                val nextToken = opStream.current()
+
+                // Check for repeated SAME operators like ** or // which are not valid in Funk
+                // Note: // is valid for fractions (e.g., 1//2), but that's handled by the lexer
+                if (nextToken?.type == op.type) {
+                    val doubleOp = op.text + nextToken.text
+                    result = ParseResult.Failure(
+                        "'$doubleOp' is not a valid operator in Funk" +
+                        if (doubleOp == "**") ". For exponentiation, use a function like math::pow"
+                        else "",
+                        opStream.position,
+                        nextToken.line,
+                        nextToken.column
                     )
-                    is ParseResult.Failure -> result // Keep left side on error
+                    break
+                }
+
+                val right = unaryExpression(opStream)
+                when (right) {
+                    is ParseResult.Success -> {
+                        result = ParseResult.Success(
+                            desugarBinaryOperator(
+                                op.text,
+                                result.value,
+                                right.value,
+                                result.value.sourceLocation  // Use left operand's location
+                            ),
+                            right.remaining
+                        )
+                    }
+                    is ParseResult.Failure -> {
+                        // Right side failed - give a better error message
+                        result = ParseResult.Failure(
+                            "Expected expression after '${op.text}' operator",
+                            opStream.position,
+                            op.line,
+                            op.column
+                        )
+                        break
+                    }
                 }
             } else {
                 break

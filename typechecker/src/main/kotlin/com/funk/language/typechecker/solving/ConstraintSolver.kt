@@ -2,6 +2,7 @@ package com.funk.language.typechecker.solving
 
 import com.funk.language.ast.*
 import com.funk.language.typechecker.abilities.BuiltInAbilities
+import com.funk.language.typechecker.codec.CodecGenerator
 import com.funk.language.typechecker.constraints.Constraint
 import com.funk.language.typechecker.context.TypingContext
 import com.funk.language.typechecker.debug.DebugLogger
@@ -31,6 +32,19 @@ class ConstraintSolver(
     private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
     private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap()
 ) {
+    /**
+     * CodecGenerator for auto-deriving Encode/Decode implementations.
+     */
+    private val codecGenerator = CodecGenerator()
+
+    /**
+     * Track generated codec implementations.
+     *
+     * When we see an Encode or Decode ability constraint for a serializable type
+     * that doesn't have an explicit impl, we generate one and store it here.
+     * Key format: "${abilityName}_${formatType}_${dataType}"
+     */
+    private val generatedCodecImpls = mutableMapOf<String, ImplAbilityDeclaration>()
     /**
      * Track ability constraints on type variables.
      *
@@ -909,6 +923,16 @@ class ConstraintSolver(
             }
         }
 
+        // Check codec abilities (Encode, Decode, StreamEncode, StreamDecode)
+        // These take two type arguments: format type and data type
+        if (typeArgs.size == 2 && isCodecAbility(abilityName)) {
+            val formatType = typeArgs[0]
+            val dataType = typeArgs[1]
+            if (checkCodecAbilityImplementation(abilityName, formatType, dataType)) {
+                return true
+            }
+        }
+
         // Build implementation key: "NumAdd_Int", "Convert_Int_String", etc.
         val typeNames = typeArgs.map { getTypeName(it) }
         val implKey = "${abilityName}_${typeNames.joinToString("_")}"
@@ -917,6 +941,63 @@ class ConstraintSolver(
         val hasImpl = context.getAbilityImpl(implKey) != null
 
         return hasImpl
+    }
+
+    /**
+     * Check if an ability name is a codec ability.
+     */
+    private fun isCodecAbility(abilityName: String): Boolean {
+        return abilityName in listOf("Encode", "Decode", "StreamEncode", "StreamDecode")
+    }
+
+    /**
+     * Check and possibly generate a codec ability implementation.
+     *
+     * Returns true if the data type is serializable and an implementation
+     * can be auto-derived for the given format type.
+     */
+    private fun checkCodecAbilityImplementation(
+        abilityName: String,
+        formatType: FunkType,
+        dataType: FunkType
+    ): Boolean {
+        // Check if the data type is serializable
+        if (!codecGenerator.isSerializable(dataType)) {
+            return false
+        }
+
+        // Build the impl key
+        val formatName = getTypeName(formatType)
+        val dataName = getTypeName(dataType)
+        val implKey = "${abilityName}_${formatName}_${dataName}"
+
+        // Check if we've already generated this impl
+        if (generatedCodecImpls.containsKey(implKey)) {
+            return true
+        }
+
+        // Generate the implementation based on ability type
+        val generatedImpl = when (abilityName) {
+            "Encode" -> codecGenerator.generateEncodeImpl(formatType, dataType)
+            "Decode" -> codecGenerator.generateDecodeImpl(formatType, dataType)
+            "StreamEncode" -> codecGenerator.generateStreamEncodeImpl(formatType, dataType)
+            "StreamDecode" -> codecGenerator.generateStreamDecodeImpl(formatType, dataType)
+            else -> return false
+        }
+
+        // Store the generated impl
+        generatedCodecImpls[implKey] = generatedImpl
+        return true
+    }
+
+    /**
+     * Get all generated codec implementations.
+     *
+     * Called after constraint solving to retrieve auto-derived implementations
+     * that need to be added to the program.
+     */
+    fun getGeneratedCodecImpls(): Map<String, ImplAbilityDeclaration> {
+        return generatedCodecImpls.toMap()
     }
 
     /**
@@ -1656,7 +1737,99 @@ class ConstraintSolver(
                 return ConstraintResult.Success(resultSubst)
             }
 
+            // EXPRESSION CONTEXT: Look up type declaration for BUILT-IN types only
+            // Built-in types (Result, Option) have constructors that should resolve to the full type
+            // because closed variant unification would otherwise incorrectly merge them with other types.
+            // User-defined types should still use open variants so unification can properly check
+            // against type annotations.
+            //
+            // IMPORTANT: Only use built-in type resolution when:
+            // 1. The constructor has a payload that matches the expected pattern
+            // 2. There is NO user-defined type that contains this constructor
+            //    (i.e., the constructor belongs to the truly built-in Result/Option)
+            if (!isPatternContext) {
+                // First check if there's a user-defined type with this constructor
+                // If so, use the normal open variant logic
+                val userDefinedType = findTypeDeclarationForConstructor(constructorName)
+                val isUserDefinedConstructor = userDefinedType != null
+
+                // Only apply built-in resolution if there's no user-defined type
+                if (!isUserDefinedConstructor) {
+                    // Check if this is a built-in constructor WITH the expected payload pattern
+                    val shouldUseBuiltInType = when (constructorName) {
+                        "Ok" -> expectedPayloadType != null && hasFieldNamed(expectedPayloadType, "val")
+                        "Err" -> expectedPayloadType != null && hasFieldNamed(expectedPayloadType, "error")
+                        "Some" -> expectedPayloadType != null && hasFieldNamed(expectedPayloadType, "val")
+                        "None" -> true  // None never has a payload
+                        else -> false
+                    }
+
+                    if (shouldUseBuiltInType) {
+                        // Use the built-in Result/Option type
+                        // These are registered in ContextBuilder as implicit type declarations
+                        val builtInTypeName = when (constructorName) {
+                            "Ok", "Err" -> "Result"
+                            "Some", "None" -> "Option"
+                            else -> null
+                        }
+
+                        if (builtInTypeName != null) {
+                            // Create the built-in variant type with fresh type parameters
+                            val resultVariant = when (builtInTypeName) {
+                                "Result" -> {
+                                    val valTypeVar = FunkType.VarType(TypeVar.fresh())
+                                    val errTypeVar = FunkType.VarType(TypeVar.fresh())
+                                    FunkType.VariantType(
+                                        constructors = mapOf(
+                                            "Ok" to FunkType.RecordType(mapOf("val" to valTypeVar)),
+                                            "Err" to FunkType.RecordType(mapOf("error" to errTypeVar))
+                                        ),
+                                        rowVar = null  // Closed
+                                    )
+                                }
+                                "Option" -> {
+                                    val valTypeVar = FunkType.VarType(TypeVar.fresh())
+                                    FunkType.VariantType(
+                                        constructors = mapOf(
+                                            "Some" to FunkType.RecordType(mapOf("val" to valTypeVar)),
+                                            "None" to null
+                                        ),
+                                        rowVar = null  // Closed
+                                    )
+                                }
+                                else -> null
+                            }
+
+                            if (resultVariant != null) {
+                                var resultSubst = Substitution.single(variantType.variable, resultVariant)
+
+                                // Unify the expected payload type with the declared constructor's payload type
+                                if (expectedPayloadType != null) {
+                                    val declaredPayload = resultVariant.constructors[constructorName]
+                                    if (declaredPayload != null) {
+                                        val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
+                                        when (unifyResult) {
+                                            is UnificationResult.Success -> {
+                                                resultSubst = resultSubst.compose(unifyResult.substitution)
+                                            }
+                                            is UnificationResult.Failure -> {
+                                                return ConstraintResult.Failure(
+                                                    "Constructor payload type mismatch for '$constructorName': ${unifyResult.message}"
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                return ConstraintResult.Success(resultSubst)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Create an open variant during constraint solving
+            // This is only for constructors that don't belong to any known type declaration
             // The variant will be closed later if it came from pattern matching without wildcard
             val newRowVar = RowVar.fresh()
             val newVariant = FunkType.VariantType(
@@ -2187,6 +2360,19 @@ class ConstraintSolver(
     }
 
     /**
+     * Check if a type is a record type that has a field with the given name.
+     * Used to determine if a constructor payload matches the expected pattern
+     * for built-in types like Result (Ok {val}, Err {error}) and Option (Some {val}).
+     */
+    private fun hasFieldNamed(type: FunkType, fieldName: String): Boolean {
+        return when (type) {
+            is FunkType.RecordType -> type.fields.containsKey(fieldName)
+            is FunkType.VarType -> false // Can't know at constraint solving time
+            else -> false
+        }
+    }
+
+    /**
      * Convert a type annotation to FunkType for solver use.
      * Creates fresh type variables for declared type parameters.
      */
@@ -2272,6 +2458,13 @@ class ConstraintSolver(
             }
             is EffectRowAnnotation -> {
                 FunkType.EffectRow(annotation.effects.toSet())
+            }
+            is QualifiedTypeAnnotation -> {
+                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                FunkType.TypeApplication(
+                    constructor = qualifiedName,
+                    args = annotation.args.map { convertTypeAnnotation(it, typeParamSubst) }
+                )
             }
         }
     }

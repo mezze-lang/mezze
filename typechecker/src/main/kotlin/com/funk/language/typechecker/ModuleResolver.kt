@@ -541,8 +541,24 @@ class ModuleResolver(
                         originalName = performerName
                     )
                 }
+                is AbilityDeclaration -> {
+                    // Export ability declarations so they can be imported by other modules
+                    // This enables qualified ability names like `codec::EncodeFormat` in impl blocks
+                    if (item.visibility == Visibility.PUBLIC) {
+                        val fromContext = typeContext?.get(item.name)
+                        val fromInferred = item.inferredType
+                        val funkType = fromContext ?: fromInferred ?: FunkType.VarType(TypeVar.fresh())
+
+                        exports[item.name] = ExportedItem(
+                            name = item.name,
+                            type = ExportedItemType.ABILITY,
+                            funkType = funkType,
+                            originalName = item.name
+                        )
+                    }
+                }
                 else -> {
-                    // Other items are not exported for now
+                    // Other items (ImplAbilityDeclaration, TopLevelExpression, etc.) are not exported
                 }
             }
         }

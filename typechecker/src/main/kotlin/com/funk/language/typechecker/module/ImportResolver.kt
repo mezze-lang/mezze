@@ -376,7 +376,20 @@ class ImportResolver(
                     )
                 }
                 ExportedItemType.ABILITY -> {
-                    // Track abilities separately
+                    // CRITICAL: Extract actual AbilityDeclaration from the module
+                    // This allows ability lookup by qualified name (e.g., codec::EncodeFormat)
+                    val abilityDecl = module?.program?.items
+                        ?.filterIsInstance<AbilityDeclaration>()
+                        ?.find { it.name == export.originalName }
+
+                    if (abilityDecl != null) {
+                        // Store under the qualified name for lookup
+                        abilities[localName] = abilityDecl
+                        // Also store under original name for unqualified lookup
+                        abilities[export.originalName] = abilityDecl
+                    }
+
+                    // Also add as a binding for name resolution
                     bindings[localName] = ImportedBinding(
                         name = localName,
                         originalName = export.originalName,
@@ -386,7 +399,19 @@ class ImportResolver(
                     )
                 }
                 ExportedItemType.EFFECT -> {
-                    // Track effects separately
+                    // CRITICAL: Extract actual EffectDeclaration from the module
+                    val effectDecl = module?.program?.items
+                        ?.filterIsInstance<EffectDeclaration>()
+                        ?.find { it.name == export.originalName }
+
+                    if (effectDecl != null) {
+                        // Store under the qualified name for lookup
+                        effects[localName] = effectDecl
+                        // Also store under original name for unqualified lookup
+                        effects[export.originalName] = effectDecl
+                    }
+
+                    // Also add as a binding for name resolution
                     bindings[localName] = ImportedBinding(
                         name = localName,
                         originalName = export.originalName,

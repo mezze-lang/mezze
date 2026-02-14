@@ -183,12 +183,14 @@ class TypeChecker(
         }
 
         // PHASE 1: Build Context
-        // Pass imported impls to ContextBuilder so performerToEffect map includes them
+        // Pass imported impls and abilities to ContextBuilder
+        // so performerToEffect map includes them and ability impl validation works with qualified names
         val contextBuilder = ContextBuilder()
         val buildResult = contextBuilder.build(
             program = program,
             parentContext = enhancedContext,
-            importedImpls = importContext?.importedImpls ?: emptyMap()
+            importedImpls = importContext?.importedImpls ?: emptyMap(),
+            importedAbilities = importContext?.importedAbilities ?: emptyMap()
         )
         val context = buildResult.context
 
@@ -219,12 +221,17 @@ class TypeChecker(
         val allTypeDeclarations = buildResult.typeDeclarations +
             (importContext?.importedTypes ?: emptyMap())
 
+        // CRITICAL: Merge local ability declarations with imported abilities
+        // Include imported abilities with both simple names and qualified names (module::Ability)
+        val importedAbilities = importContext?.importedAbilities ?: emptyMap()
+        val allAbilityDeclarations = buildResult.abilityDeclarations + importedAbilities
+
         val constraintGenerator = ConstraintGenerator.create(
             typeDeclarations = allTypeDeclarations,
             performerToEffect = buildResult.performerToEffect,
             abilityNames = abilityNames,
             effectNames = effectNames,
-            abilityDeclarations = buildResult.abilityDeclarations,
+            abilityDeclarations = allAbilityDeclarations,
             effectDeclarations = allEffectDeclarations
         )
         val programConstraintResult = constraintGenerator.generateProgram(program, context)
@@ -329,6 +336,9 @@ class TypeChecker(
                 val substitution = solveResult.substitution
                 val warnings = solveResult.warnings.toMutableList()
 
+                // Retrieve generated codec implementations (auto-derived Encode/Decode)
+                val generatedCodecImpls = solver.getGeneratedCodecImpls()
+
                 val resolvedAbilities = solveResult.resolvedAbilityConstraints
                 // CRITICAL: Merge per-binding mustBeOpenRowVars with global solver's results
                 // The per-binding solves resolved MustBeOpen constraints to row variables,
@@ -386,7 +396,14 @@ class TypeChecker(
                     allTypeDeclarations,  // For resolving variant constructors
                     tailCallLocations  // TCO: Locations of self-recursive tail calls
                 )
-                val typedProgram = applier.applyToProgram(program)
+                val typedProgramBase = applier.applyToProgram(program)
+
+                // Add generated codec implementations to the program
+                val typedProgram = if (generatedCodecImpls.isNotEmpty()) {
+                    Program(items = typedProgramBase.items + generatedCodecImpls.values.toList())
+                } else {
+                    typedProgramBase
+                }
 
                 // PHASE 5: Validate Types (moved after substitution so we can check inferred types)
                 val validator = TypeValidator(context, allTypeDeclarations)

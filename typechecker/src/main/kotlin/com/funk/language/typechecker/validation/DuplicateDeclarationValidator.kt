@@ -274,6 +274,11 @@ object DuplicateDeclarationValidator {
             is VariantTypeAnnotation -> "Variant"
             is ArrayTypeAnnotation -> "Array_${typeAnnotationToString(annotation.elementType)}"
             is EffectRowAnnotation -> "EffectRow"
+            is QualifiedTypeAnnotation -> {
+                val modulePart = annotation.modulePath.joinToString("_")
+                val args = annotation.args.joinToString("_") { typeAnnotationToString(it) }
+                if (args.isEmpty()) "${modulePart}_${annotation.typeName}" else "${modulePart}_${annotation.typeName}_$args"
+            }
         }
     }
 }

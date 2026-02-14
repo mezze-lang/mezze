@@ -32,9 +32,11 @@ object AbilityValidator {
         abilityDeclarations: Map<String, AbilityDeclaration>
     ) {
         // Find the ability declaration
+        // Support both simple name (EncodeFormat) and qualified name (codec::EncodeFormat)
         val abilityDeclaration = abilityDeclarations[impl.abilityName]
+            ?: abilityDeclarations[impl.qualifiedAbilityName]
             ?: throw TypeCheckError(
-                "Ability '${impl.abilityName}' not found - cannot validate implementation"
+                "Ability '${impl.qualifiedAbilityName}' not found - cannot validate implementation"
             )
 
         // Rule 1: Check type parameter count matches
@@ -236,6 +238,13 @@ object AbilityValidator {
                 )
             }
             is EffectRowAnnotation -> annotation // No substitution needed
+            is QualifiedTypeAnnotation -> {
+                QualifiedTypeAnnotation(
+                    modulePath = annotation.modulePath,
+                    typeName = annotation.typeName,
+                    args = annotation.args.map { substituteTypeParameters(it, substitution) }
+                )
+            }
         }
     }
 
@@ -261,6 +270,7 @@ object AbilityValidator {
             }
             is ArrayTypeAnnotation -> hasTypeVariables(annotation.elementType)
             is EffectRowAnnotation -> false
+            is QualifiedTypeAnnotation -> annotation.args.any { hasTypeVariables(it) }
         }
     }
 
@@ -289,6 +299,12 @@ object AbilityValidator {
             }
             a is ArrayTypeAnnotation && b is ArrayTypeAnnotation -> {
                 typeAnnotationsMatch(a.elementType, b.elementType)
+            }
+            a is QualifiedTypeAnnotation && b is QualifiedTypeAnnotation -> {
+                a.modulePath == b.modulePath &&
+                a.typeName == b.typeName &&
+                a.args.size == b.args.size &&
+                a.args.zip(b.args).all { (aArg, bArg) -> typeAnnotationsMatch(aArg, bArg) }
             }
             else -> false
         }
@@ -321,6 +337,11 @@ object AbilityValidator {
             }
             is ArrayTypeAnnotation -> "[${typeAnnotationToString(annotation.elementType)}]"
             is EffectRowAnnotation -> "<${annotation.effects.joinToString(", ")}>"
+            is QualifiedTypeAnnotation -> {
+                val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                if (annotation.args.isEmpty()) qualifiedName
+                else "$qualifiedName ${annotation.args.joinToString(" ") { typeAnnotationToString(it) }}"
+            }
         }
     }
 
