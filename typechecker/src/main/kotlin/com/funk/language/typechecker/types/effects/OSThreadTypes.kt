@@ -126,5 +126,111 @@ object OSThreadTypes {
             FunkType.RecordType(mapOf("thread" to unparkThread)),
             FunkType.RecordType(emptyMap())
         )
+
+        // === Structured Concurrency ===
+
+        // __native_os_join: {left: {} -> 'a, right: {} -> 'b} -> {left: 'a, right: 'b}
+        context["__native_os_join"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "left" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(TypeVar("a"))
+                ),
+                "right" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(TypeVar("b"))
+                )
+            )),
+            FunkType.RecordType(mapOf(
+                "left" to FunkType.VarType(TypeVar("a")),
+                "right" to FunkType.VarType(TypeVar("b"))
+            ))
+        )
+
+        // __native_os_join3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c} -> {a: 'a, b: 'b, c: 'c}
+        context["__native_os_join3"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "a" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(TypeVar("a"))
+                ),
+                "b" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(TypeVar("b"))
+                ),
+                "c" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(TypeVar("c"))
+                )
+            )),
+            FunkType.RecordType(mapOf(
+                "a" to FunkType.VarType(TypeVar("a")),
+                "b" to FunkType.VarType(TypeVar("b")),
+                "c" to FunkType.VarType(TypeVar("c"))
+            ))
+        )
+
+        // === Collection Operations ===
+
+        // __native_os_map: {xs: ['a], f: {x: 'a} -> 'b} -> ['b]
+        context["__native_os_map"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "xs" to FunkType.ArrayType(FunkType.VarType(TypeVar("a"))),
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf("x" to FunkType.VarType(TypeVar("a")))),
+                    FunkType.VarType(TypeVar("b"))
+                )
+            )),
+            FunkType.ArrayType(FunkType.VarType(TypeVar("b")))
+        )
+
+        // __native_os_for_each: {xs: ['a], f: {x: 'a} -> {}} -> {}
+        context["__native_os_for_each"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "xs" to FunkType.ArrayType(FunkType.VarType(TypeVar("a"))),
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf("x" to FunkType.VarType(TypeVar("a")))),
+                    FunkType.RecordType(emptyMap())
+                )
+            )),
+            FunkType.RecordType(emptyMap())
+        )
+
+        // __native_os_filter: {xs: ['a], f: {x: 'a} -> Bool} -> ['a]
+        context["__native_os_filter"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "xs" to FunkType.ArrayType(FunkType.VarType(TypeVar("a"))),
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf("x" to FunkType.VarType(TypeVar("a")))),
+                    FunkType.BooleanType
+                )
+            )),
+            FunkType.ArrayType(FunkType.VarType(TypeVar("a")))
+        )
+
+        // === Error Handling ===
+
+        // __native_os_any: {ps: [Promise 'a]} -> 'a
+        val anyPromise = FunkType.VarType(TypeVar("Promise"))
+        context["__native_os_any"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "ps" to FunkType.ArrayType(anyPromise)
+            )),
+            FunkType.VarType(TypeVar("a"))
+        )
+
+        // __native_os_settle: {ps: [Promise 'a]} -> [Result 'a AsyncError]
+        val settlePromise = FunkType.VarType(TypeVar("Promise"))
+        val asyncErrorType = FunkType.VarType(TypeVar("AsyncError"))
+        val resultType = FunkType.TypeApplication("Result", listOf(
+            FunkType.VarType(TypeVar("a")),
+            asyncErrorType
+        ))
+        context["__native_os_settle"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "ps" to FunkType.ArrayType(settlePromise)
+            )),
+            FunkType.ArrayType(resultType)
+        )
     }
 }

@@ -146,5 +146,110 @@ object LoomTypes {
             )),
             FunkType.BooleanType
         )
+
+        // === Structured Concurrency ===
+
+        // __native_loom_join: {left: {} -> 'a, right: {} -> 'b} -> {left: 'a, right: 'b}
+        context["__native_loom_join"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "left" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+                ),
+                "right" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(com.funk.language.ast.TypeVar("b"))
+                )
+            )),
+            FunkType.RecordType(mapOf(
+                "left" to FunkType.VarType(com.funk.language.ast.TypeVar("a")),
+                "right" to FunkType.VarType(com.funk.language.ast.TypeVar("b"))
+            ))
+        )
+
+        // __native_loom_join3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c} -> {a: 'a, b: 'b, c: 'c}
+        context["__native_loom_join3"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "a" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+                ),
+                "b" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(com.funk.language.ast.TypeVar("b"))
+                ),
+                "c" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(com.funk.language.ast.TypeVar("c"))
+                )
+            )),
+            FunkType.RecordType(mapOf(
+                "a" to FunkType.VarType(com.funk.language.ast.TypeVar("a")),
+                "b" to FunkType.VarType(com.funk.language.ast.TypeVar("b")),
+                "c" to FunkType.VarType(com.funk.language.ast.TypeVar("c"))
+            ))
+        )
+
+        // === Collection Operations ===
+
+        // __native_loom_map: {xs: ['a], f: {x: 'a} -> 'b} -> ['b]
+        context["__native_loom_map"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "xs" to FunkType.ArrayType(FunkType.VarType(com.funk.language.ast.TypeVar("a"))),
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf("x" to FunkType.VarType(com.funk.language.ast.TypeVar("a")))),
+                    FunkType.VarType(com.funk.language.ast.TypeVar("b"))
+                )
+            )),
+            FunkType.ArrayType(FunkType.VarType(com.funk.language.ast.TypeVar("b")))
+        )
+
+        // __native_loom_for_each: {xs: ['a], f: {x: 'a} -> {}} -> {}
+        context["__native_loom_for_each"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "xs" to FunkType.ArrayType(FunkType.VarType(com.funk.language.ast.TypeVar("a"))),
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf("x" to FunkType.VarType(com.funk.language.ast.TypeVar("a")))),
+                    FunkType.RecordType(emptyMap())
+                )
+            )),
+            FunkType.RecordType(emptyMap())
+        )
+
+        // __native_loom_filter: {xs: ['a], f: {x: 'a} -> Bool} -> ['a]
+        context["__native_loom_filter"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "xs" to FunkType.ArrayType(FunkType.VarType(com.funk.language.ast.TypeVar("a"))),
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf("x" to FunkType.VarType(com.funk.language.ast.TypeVar("a")))),
+                    FunkType.BooleanType
+                )
+            )),
+            FunkType.ArrayType(FunkType.VarType(com.funk.language.ast.TypeVar("a")))
+        )
+
+        // === Error Handling ===
+
+        // __native_loom_any: {ps: [Promise 'a]} -> 'a
+        context["__native_loom_any"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "ps" to FunkType.ArrayType(promiseType)
+            )),
+            FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+        )
+
+        // __native_loom_settle: {ps: [Promise 'a]} -> [Result 'a AsyncError]
+        // AsyncError is a variant: Failed {message: String} | Cancelled | TimedOut {ms: Int}
+        val asyncErrorType = FunkType.VarType(com.funk.language.ast.TypeVar("AsyncError"))
+        val resultType = FunkType.TypeApplication("Result", listOf(
+            FunkType.VarType(com.funk.language.ast.TypeVar("a")),
+            asyncErrorType
+        ))
+        context["__native_loom_settle"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "ps" to FunkType.ArrayType(promiseType)
+            )),
+            FunkType.ArrayType(resultType)
+        )
     }
 }

@@ -61,6 +61,16 @@ object LoomImplementations {
         registerCurrentThread(context)
         registerPark(context)
         registerUnpark(context)
+        // New structured concurrency operations
+        registerJoin(context)
+        registerJoin3(context)
+        // New collection operations
+        registerMap(context)
+        registerForEach(context)
+        registerFilter(context)
+        // New error handling operations
+        registerAny(context)
+        registerSettle(context)
     }
 
     /**
@@ -490,6 +500,399 @@ object LoomImplementations {
                     "thread must be a FunkThread, got: ${threadValue::class.simpleName}"
                 )
             }
+        }
+    }
+
+    // =========================================================================
+    // Structured Concurrency Operations
+    // =========================================================================
+
+    /**
+     * __native_loom_join - Run two computations concurrently, return both results.
+     * If either fails, the error propagates.
+     */
+    private fun registerJoin(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_join"] = NativeFunkFunction("__native_loom_join") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_join", "expects FunkRecord")
+
+            val leftFn = record.fields["left"]
+                ?: throw NativeFunctionException("__native_loom_join", "expects 'left' field")
+            val rightFn = record.fields["right"]
+                ?: throw NativeFunctionException("__native_loom_join", "expects 'right' field")
+
+            val env = TruffleContextHolder.getEnv()
+                ?: throw NativeFunctionException("__native_loom_join", "No Truffle environment available")
+
+            val leftFuture = CompletableFuture<FunkValue>()
+            val rightFuture = CompletableFuture<FunkValue>()
+
+            // Spawn left computation
+            val leftThread = env.newTruffleThreadBuilder {
+                try {
+                    val result = callFunction(leftFn)
+                    leftFuture.complete(result)
+                } catch (e: Exception) {
+                    leftFuture.completeExceptionally(e)
+                }
+            }.virtual(true).build()
+
+            // Spawn right computation
+            val rightThread = env.newTruffleThreadBuilder {
+                try {
+                    val result = callFunction(rightFn)
+                    rightFuture.complete(result)
+                } catch (e: Exception) {
+                    rightFuture.completeExceptionally(e)
+                }
+            }.virtual(true).build()
+
+            leftThread.start()
+            rightThread.start()
+
+            // Wait for both and return results
+            val leftResult = leftFuture.get()
+            val rightResult = rightFuture.get()
+
+            FunkRecord(mapOf(
+                "left" to leftResult,
+                "right" to rightResult
+            ))
+        }
+    }
+
+    /**
+     * __native_loom_join3 - Run three computations concurrently.
+     */
+    private fun registerJoin3(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_join3"] = NativeFunkFunction("__native_loom_join3") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_join3", "expects FunkRecord")
+
+            val aFn = record.fields["a"]
+                ?: throw NativeFunctionException("__native_loom_join3", "expects 'a' field")
+            val bFn = record.fields["b"]
+                ?: throw NativeFunctionException("__native_loom_join3", "expects 'b' field")
+            val cFn = record.fields["c"]
+                ?: throw NativeFunctionException("__native_loom_join3", "expects 'c' field")
+
+            val env = TruffleContextHolder.getEnv()
+                ?: throw NativeFunctionException("__native_loom_join3", "No Truffle environment available")
+
+            val aFuture = CompletableFuture<FunkValue>()
+            val bFuture = CompletableFuture<FunkValue>()
+            val cFuture = CompletableFuture<FunkValue>()
+
+            val aThread = env.newTruffleThreadBuilder {
+                try { aFuture.complete(callFunction(aFn)) }
+                catch (e: Exception) { aFuture.completeExceptionally(e) }
+            }.virtual(true).build()
+
+            val bThread = env.newTruffleThreadBuilder {
+                try { bFuture.complete(callFunction(bFn)) }
+                catch (e: Exception) { bFuture.completeExceptionally(e) }
+            }.virtual(true).build()
+
+            val cThread = env.newTruffleThreadBuilder {
+                try { cFuture.complete(callFunction(cFn)) }
+                catch (e: Exception) { cFuture.completeExceptionally(e) }
+            }.virtual(true).build()
+
+            aThread.start()
+            bThread.start()
+            cThread.start()
+
+            FunkRecord(mapOf(
+                "a" to aFuture.get(),
+                "b" to bFuture.get(),
+                "c" to cFuture.get()
+            ))
+        }
+    }
+
+    // =========================================================================
+    // Collection Operations
+    // =========================================================================
+
+    /**
+     * __native_loom_map - Apply function to each element concurrently.
+     * Results are returned in the same order as input.
+     */
+    private fun registerMap(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_map"] = NativeFunkFunction("__native_loom_map") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_map", "expects FunkRecord")
+
+            val xs = record.fields["xs"]
+                ?: throw NativeFunctionException("__native_loom_map", "expects 'xs' field")
+            val f = record.fields["f"]
+                ?: throw NativeFunctionException("__native_loom_map", "expects 'f' field")
+
+            val list = when (xs) {
+                is FunkArrayList -> xs.toList()
+                else -> throw NativeFunctionException("__native_loom_map", "xs must be a list")
+            }
+
+            if (list.isEmpty()) {
+                return@NativeFunkFunction FunkArrayList(emptyList())
+            }
+
+            val env = TruffleContextHolder.getEnv()
+                ?: throw NativeFunctionException("__native_loom_map", "No Truffle environment available")
+
+            // Create futures for each element
+            val futures = list.map { element ->
+                val future = CompletableFuture<FunkValue>()
+                val thread = env.newTruffleThreadBuilder {
+                    try {
+                        val result = callFunctionWithArg(f, element)
+                        future.complete(result)
+                    } catch (e: Exception) {
+                        future.completeExceptionally(e)
+                    }
+                }.virtual(true).build()
+                thread.start()
+                future
+            }
+
+            // Wait for all and collect results in order
+            val results = futures.map { it.get() }
+            FunkArrayList(results)
+        }
+    }
+
+    /**
+     * __native_loom_for_each - Run function on each element for side effects.
+     */
+    private fun registerForEach(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_for_each"] = NativeFunkFunction("__native_loom_for_each") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_for_each", "expects FunkRecord")
+
+            val xs = record.fields["xs"]
+                ?: throw NativeFunctionException("__native_loom_for_each", "expects 'xs' field")
+            val f = record.fields["f"]
+                ?: throw NativeFunctionException("__native_loom_for_each", "expects 'f' field")
+
+            val list = when (xs) {
+                is FunkArrayList -> xs.toList()
+                else -> throw NativeFunctionException("__native_loom_for_each", "xs must be a list")
+            }
+
+            if (list.isEmpty()) {
+                return@NativeFunkFunction FunkRecord(emptyMap())
+            }
+
+            val env = TruffleContextHolder.getEnv()
+                ?: throw NativeFunctionException("__native_loom_for_each", "No Truffle environment available")
+
+            val futures = list.map { element ->
+                val future = CompletableFuture<FunkValue>()
+                val thread = env.newTruffleThreadBuilder {
+                    try {
+                        callFunctionWithArg(f, element)
+                        future.complete(FunkRecord(emptyMap()))
+                    } catch (e: Exception) {
+                        future.completeExceptionally(e)
+                    }
+                }.virtual(true).build()
+                thread.start()
+                future
+            }
+
+            // Wait for all to complete
+            futures.forEach { it.get() }
+            FunkRecord(emptyMap())
+        }
+    }
+
+    /**
+     * __native_loom_filter - Filter elements with predicate evaluated concurrently.
+     */
+    private fun registerFilter(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_filter"] = NativeFunkFunction("__native_loom_filter") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_filter", "expects FunkRecord")
+
+            val xs = record.fields["xs"]
+                ?: throw NativeFunctionException("__native_loom_filter", "expects 'xs' field")
+            val f = record.fields["f"]
+                ?: throw NativeFunctionException("__native_loom_filter", "expects 'f' field")
+
+            val list = when (xs) {
+                is FunkArrayList -> xs.toList()
+                else -> throw NativeFunctionException("__native_loom_filter", "xs must be a list")
+            }
+
+            if (list.isEmpty()) {
+                return@NativeFunkFunction FunkArrayList(emptyList())
+            }
+
+            val env = TruffleContextHolder.getEnv()
+                ?: throw NativeFunctionException("__native_loom_filter", "No Truffle environment available")
+
+            // Evaluate predicate for each element concurrently
+            val futures = list.map { element ->
+                val future = CompletableFuture<Pair<FunkValue, Boolean>>()
+                val thread = env.newTruffleThreadBuilder {
+                    try {
+                        val result = callFunctionWithArg(f, element)
+                        val keep = (result as? FunkBool)?.value ?: false
+                        future.complete(Pair(element, keep))
+                    } catch (e: Exception) {
+                        future.completeExceptionally(e)
+                    }
+                }.virtual(true).build()
+                thread.start()
+                future
+            }
+
+            // Collect results, keeping only elements where predicate returned true
+            val results = futures.map { it.get() }
+                .filter { it.second }
+                .map { it.first }
+            FunkArrayList(results)
+        }
+    }
+
+    // =========================================================================
+    // Error Handling Operations
+    // =========================================================================
+
+    /**
+     * __native_loom_any - Return first successful result, fail only if ALL fail.
+     */
+    private fun registerAny(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_any"] = NativeFunkFunction("__native_loom_any") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_any", "expects FunkRecord")
+
+            val ps = record.fields["ps"]
+                ?: throw NativeFunctionException("__native_loom_any", "expects 'ps' field")
+
+            val promises = when (ps) {
+                is FunkArrayList -> ps.toList().map { it as FunkPromise }
+                else -> throw NativeFunctionException("__native_loom_any", "ps must be a list")
+            }
+
+            if (promises.isEmpty()) {
+                throw NativeFunctionException("__native_loom_any", "cannot get any from empty list")
+            }
+
+            // Try to get first successful result
+            val errors = mutableListOf<Throwable>()
+
+            // Create a future that completes with first success
+            val resultFuture = CompletableFuture<FunkValue>()
+            val remaining = java.util.concurrent.atomic.AtomicInteger(promises.size)
+
+            for (promise in promises) {
+                promise.future.whenComplete { result, error ->
+                    if (error == null && !resultFuture.isDone) {
+                        resultFuture.complete(result)
+                    } else if (error != null) {
+                        synchronized(errors) {
+                            errors.add(error)
+                        }
+                        if (remaining.decrementAndGet() == 0 && !resultFuture.isDone) {
+                            resultFuture.completeExceptionally(
+                                RuntimeException("All promises failed: ${errors.map { it.message }}")
+                            )
+                        }
+                    } else {
+                        remaining.decrementAndGet()
+                    }
+                }
+            }
+
+            resultFuture.get()
+        }
+    }
+
+    /**
+     * __native_loom_settle - Wait for all promises, return list of Results.
+     * Never throws - collects Ok/Err for each promise.
+     */
+    private fun registerSettle(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_settle"] = NativeFunkFunction("__native_loom_settle") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_settle", "expects FunkRecord")
+
+            val ps = record.fields["ps"]
+                ?: throw NativeFunctionException("__native_loom_settle", "expects 'ps' field")
+
+            val promises = when (ps) {
+                is FunkArrayList -> ps.toList().map { it as FunkPromise }
+                else -> throw NativeFunctionException("__native_loom_settle", "ps must be a list")
+            }
+
+            // Collect results as Result variants
+            val results = promises.map { promise ->
+                try {
+                    val value = promise.future.get()
+                    // Ok {val = value}
+                    FunkVariant("Ok", FunkRecord(mapOf("val" to value)))
+                } catch (e: java.util.concurrent.CancellationException) {
+                    // Err {error = AsyncCancelled}
+                    FunkVariant("Err", FunkRecord(mapOf(
+                        "error" to FunkVariant("AsyncCancelled", FunkRecord(emptyMap()))
+                    )))
+                } catch (e: Exception) {
+                    // Err {error = AsyncFailed {msg = ...}}
+                    val message = e.cause?.message ?: e.message ?: "Unknown error"
+                    FunkVariant("Err", FunkRecord(mapOf(
+                        "error" to FunkVariant("AsyncFailed", FunkRecord(mapOf(
+                            "msg" to FunkString(message)
+                        )))
+                    )))
+                }
+            }
+
+            FunkArrayList(results)
+        }
+    }
+
+    // =========================================================================
+    // Helper Functions
+    // =========================================================================
+
+    /**
+     * Call a function with no arguments.
+     */
+    private fun callFunction(fn: FunkValue): FunkValue {
+        return when (fn) {
+            is FunkTruffleFunction -> {
+                val emptyArgs = FunkRecord(emptyMap())
+                fn.callTarget.call(
+                    emptyArgs,
+                    fn.closureVariables,
+                    fn.lexicalScope,
+                    fn.lexicalScopeSlotMap
+                ) as FunkValue
+            }
+            is NativeFunkFunction -> fn.call(emptyList())
+            else -> throw FunkException("Expected function, got: ${fn::class.simpleName}")
+        }
+    }
+
+    /**
+     * Call a function with a single argument wrapped in a record {x = arg}.
+     * This is the Funk convention for functions taking a single argument.
+     */
+    private fun callFunctionWithArg(fn: FunkValue, arg: FunkValue): FunkValue {
+        // Wrap the argument in a record with field "x"
+        val recordArg = FunkRecord(mapOf("x" to arg))
+        return when (fn) {
+            is FunkTruffleFunction -> {
+                fn.callTarget.call(
+                    recordArg,
+                    fn.closureVariables,
+                    fn.lexicalScope,
+                    fn.lexicalScopeSlotMap
+                ) as FunkValue
+            }
+            is NativeFunkFunction -> fn.call(listOf(recordArg))
+            else -> throw FunkException("Expected function, got: ${fn::class.simpleName}")
         }
     }
 }

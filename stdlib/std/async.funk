@@ -24,6 +24,12 @@ use std::control::continuation::{Continuation}
 # Promise type - opaque wrapper around native promise/future
 pub newtype Promise 'a = Promise __NativePromise
 
+# Error type for async operations
+# - AsyncFailed: Task failed with an exception
+# - AsyncCancelled: Task was cancelled
+# - AsyncTimedOut: Task timed out after ms milliseconds
+pub type AsyncError = | AsyncFailed { msg: String }, AsyncCancelled, AsyncTimedOut { ms: Int } |
+
 # Async effect - unified async operations
 pub effect Async where {
     # Spawn a computation, returns immediately with Promise
@@ -54,7 +60,36 @@ pub effect Async where {
     is_cancelled: {} -> Bool <Async>,
 
     # Cancellation checkpoint - throws if cancelled
-    check: {} -> {} <Async>
+    check: {} -> {} <Async>,
+
+    # === Structured Concurrency ===
+
+    # Run two computations concurrently, return both results
+    # If either fails, the other is cancelled
+    join: {left: {} -> 'a, right: {} -> 'b} -> {left: 'a, right: 'b} <Async>,
+
+    # Run three computations concurrently
+    join3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c} -> {a: 'a, b: 'b, c: 'c} <Async>,
+
+    # === Collection Operations ===
+
+    # Apply function to each element concurrently, results in input order
+    map: {xs: ['a], f: {x: 'a} -> 'b} -> ['b] <Async>,
+
+    # Run function on each element concurrently for side effects
+    for_each: {xs: ['a], f: {x: 'a} -> {}} -> {} <Async>,
+
+    # Filter elements with predicate evaluated concurrently
+    filter: {xs: ['a], f: {x: 'a} -> Bool} -> ['a] <Async>,
+
+    # === Error Handling ===
+
+    # Return first successful result, fail only if ALL fail
+    any: {ps: [Promise 'a]} -> 'a <Async>,
+
+    # Wait for all promises, return list of Results
+    # Never throws - each result is either Ok or Err
+    settle: {ps: [Promise 'a]} -> [Result 'a AsyncError] <Async>
 }
 
 # =============================================================================
@@ -84,7 +119,14 @@ pub impl Async for LoomAsync where {
     sleep = {ms} -> __native_loom_sleep {ms = ms},
     is_done = {p} -> __native_loom_is_done {p = p},
     is_cancelled = {} -> __native_loom_is_cancelled {},
-    check = {} -> __native_loom_check {}
+    check = {} -> __native_loom_check {},
+    join = {left, right} -> __native_loom_join {left = left, right = right},
+    join3 = {a, b, c} -> __native_loom_join3 {a = a, b = b, c = c},
+    map = {xs, f} -> __native_loom_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_loom_filter {xs = xs, f = f},
+    any = {ps} -> __native_loom_any {ps = ps},
+    settle = {ps} -> __native_loom_settle {ps = ps}
 }
 
 # Configurable handler - control concurrency limit
@@ -104,7 +146,14 @@ pub impl Async for LoomAsyncWith { max_concurrent: Int } where {
     sleep = {ms} -> __native_loom_sleep {ms = ms},
     is_done = {p} -> __native_loom_is_done {p = p},
     is_cancelled = {} -> __native_loom_is_cancelled {},
-    check = {} -> __native_loom_check {}
+    check = {} -> __native_loom_check {},
+    join = {left, right} -> __native_loom_join {left = left, right = right},
+    join3 = {a, b, c} -> __native_loom_join3 {a = a, b = b, c = c},
+    map = {xs, f} -> __native_loom_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_loom_filter {xs = xs, f = f},
+    any = {ps} -> __native_loom_any {ps = ps},
+    settle = {ps} -> __native_loom_settle {ps = ps}
 }
 
 # =============================================================================
@@ -133,7 +182,14 @@ pub impl Async for OSThreadAsync where {
     sleep = {ms} -> __native_os_sleep {ms = ms},
     is_done = {p} -> __native_os_is_done {p = p},
     is_cancelled = {} -> __native_os_is_cancelled {},
-    check = {} -> __native_os_check {}
+    check = {} -> __native_os_check {},
+    join = {left, right} -> __native_os_join {left = left, right = right},
+    join3 = {a, b, c} -> __native_os_join3 {a = a, b = b, c = c},
+    map = {xs, f} -> __native_os_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_os_filter {xs = xs, f = f},
+    any = {ps} -> __native_os_any {ps = ps},
+    settle = {ps} -> __native_os_settle {ps = ps}
 }
 
 # Configurable handler - control thread pool size
@@ -153,7 +209,14 @@ pub impl Async for OSThreadAsyncWith { pool_size: Int } where {
     sleep = {ms} -> __native_os_sleep {ms = ms},
     is_done = {p} -> __native_os_is_done {p = p},
     is_cancelled = {} -> __native_os_is_cancelled {},
-    check = {} -> __native_os_check {}
+    check = {} -> __native_os_check {},
+    join = {left, right} -> __native_os_join {left = left, right = right},
+    join3 = {a, b, c} -> __native_os_join3 {a = a, b = b, c = c},
+    map = {xs, f} -> __native_os_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_os_filter {xs = xs, f = f},
+    any = {ps} -> __native_os_any {ps = ps},
+    settle = {ps} -> __native_os_settle {ps = ps}
 }
 
 # =============================================================================
@@ -184,7 +247,14 @@ pub impl Async for CoopAsync { cont: Continuation } where {
     sleep = {ms} -> __native_coop_sleep { ms = ms, cont = cont },
     is_done = {p} -> __native_coop_is_done { p = p },
     is_cancelled = {} -> False,
-    check = {} -> {}
+    check = {} -> {},
+    join = {left, right} -> __native_coop_join { left = left, right = right, cont = cont },
+    join3 = {a, b, c} -> __native_coop_join3 { a = a, b = b, c = c, cont = cont },
+    map = {xs, f} -> __native_coop_map { xs = xs, f = f, cont = cont },
+    for_each = {xs, f} -> __native_coop_for_each { xs = xs, f = f, cont = cont },
+    filter = {xs, f} -> __native_coop_filter { xs = xs, f = f, cont = cont },
+    any = {ps} -> __native_coop_any { ps = ps, cont = cont },
+    settle = {ps} -> __native_coop_settle { ps = ps, cont = cont }
 }
 
 # =============================================================================

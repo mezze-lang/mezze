@@ -36,6 +36,17 @@ object CoopImplementations {
         registerIsCancelled(context)
         registerCheck(context)
 
+        // New structured concurrency operations
+        registerJoin(context)
+        registerJoin3(context)
+        // New collection operations
+        registerMap(context)
+        registerForEach(context)
+        registerFilter(context)
+        // New error handling operations
+        registerAny(context)
+        registerSettle(context)
+
         // Keep legacy functions for compatibility
         registerWrapPromise(context)
         registerUnwrapPromise(context)
@@ -281,6 +292,253 @@ object CoopImplementations {
             else -> throw NativeFunctionException(
                 functionName,
                 "computation must be a function, got: ${f::class.simpleName}"
+            )
+        }
+    }
+
+    // =========================================================================
+    // Structured Concurrency Operations
+    // =========================================================================
+
+    /**
+     * __native_coop_join - Run two computations sequentially (Coop is single-threaded).
+     */
+    private fun registerJoin(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_join"] = NativeFunkFunction("__native_coop_join") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_coop_join", "expects FunkRecord")
+
+            val leftFn = record.fields["left"]
+                ?: throw NativeFunctionException("__native_coop_join", "expects 'left' field")
+            val rightFn = record.fields["right"]
+                ?: throw NativeFunctionException("__native_coop_join", "expects 'right' field")
+
+            // In Coop, execute sequentially (single-threaded)
+            val leftResult = executeFunction(leftFn, "__native_coop_join")
+            val rightResult = executeFunction(rightFn, "__native_coop_join")
+
+            FunkRecord(mapOf(
+                "left" to leftResult,
+                "right" to rightResult
+            ))
+        }
+    }
+
+    /**
+     * __native_coop_join3 - Run three computations sequentially.
+     */
+    private fun registerJoin3(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_join3"] = NativeFunkFunction("__native_coop_join3") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_coop_join3", "expects FunkRecord")
+
+            val aFn = record.fields["a"]
+                ?: throw NativeFunctionException("__native_coop_join3", "expects 'a' field")
+            val bFn = record.fields["b"]
+                ?: throw NativeFunctionException("__native_coop_join3", "expects 'b' field")
+            val cFn = record.fields["c"]
+                ?: throw NativeFunctionException("__native_coop_join3", "expects 'c' field")
+
+            // In Coop, execute sequentially
+            val aResult = executeFunction(aFn, "__native_coop_join3")
+            val bResult = executeFunction(bFn, "__native_coop_join3")
+            val cResult = executeFunction(cFn, "__native_coop_join3")
+
+            FunkRecord(mapOf(
+                "a" to aResult,
+                "b" to bResult,
+                "c" to cResult
+            ))
+        }
+    }
+
+    // =========================================================================
+    // Collection Operations
+    // =========================================================================
+
+    /**
+     * __native_coop_map - Apply function to each element sequentially.
+     */
+    private fun registerMap(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_map"] = NativeFunkFunction("__native_coop_map") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_coop_map", "expects FunkRecord")
+
+            val xs = record.fields["xs"]
+                ?: throw NativeFunctionException("__native_coop_map", "expects 'xs' field")
+            val f = record.fields["f"]
+                ?: throw NativeFunctionException("__native_coop_map", "expects 'f' field")
+
+            val list = when (xs) {
+                is FunkArrayList -> xs.toList()
+                else -> throw NativeFunctionException("__native_coop_map", "xs must be a list")
+            }
+
+            // In Coop, map sequentially
+            val results = list.map { element ->
+                executeFunctionWithArg(f, element, "__native_coop_map")
+            }
+
+            FunkArrayList(results)
+        }
+    }
+
+    /**
+     * __native_coop_for_each - Run function on each element for side effects.
+     */
+    private fun registerForEach(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_for_each"] = NativeFunkFunction("__native_coop_for_each") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_coop_for_each", "expects FunkRecord")
+
+            val xs = record.fields["xs"]
+                ?: throw NativeFunctionException("__native_coop_for_each", "expects 'xs' field")
+            val f = record.fields["f"]
+                ?: throw NativeFunctionException("__native_coop_for_each", "expects 'f' field")
+
+            val list = when (xs) {
+                is FunkArrayList -> xs.toList()
+                else -> throw NativeFunctionException("__native_coop_for_each", "xs must be a list")
+            }
+
+            // In Coop, execute sequentially
+            for (element in list) {
+                executeFunctionWithArg(f, element, "__native_coop_for_each")
+            }
+
+            FunkRecord(emptyMap())
+        }
+    }
+
+    /**
+     * __native_coop_filter - Filter elements with predicate.
+     */
+    private fun registerFilter(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_filter"] = NativeFunkFunction("__native_coop_filter") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_coop_filter", "expects FunkRecord")
+
+            val xs = record.fields["xs"]
+                ?: throw NativeFunctionException("__native_coop_filter", "expects 'xs' field")
+            val f = record.fields["f"]
+                ?: throw NativeFunctionException("__native_coop_filter", "expects 'f' field")
+
+            val list = when (xs) {
+                is FunkArrayList -> xs.toList()
+                else -> throw NativeFunctionException("__native_coop_filter", "xs must be a list")
+            }
+
+            // In Coop, filter sequentially
+            val results = list.filter { element ->
+                val result = executeFunctionWithArg(f, element, "__native_coop_filter")
+                (result as? FunkBool)?.value ?: false
+            }
+
+            FunkArrayList(results)
+        }
+    }
+
+    // =========================================================================
+    // Error Handling Operations
+    // =========================================================================
+
+    /**
+     * __native_coop_any - Return first successful result from promises.
+     * In Coop, executes promises in order, returns first success.
+     */
+    private fun registerAny(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_any"] = NativeFunkFunction("__native_coop_any") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_coop_any", "expects FunkRecord")
+
+            val ps = record.fields["ps"]
+                ?: throw NativeFunctionException("__native_coop_any", "expects 'ps' field")
+
+            val promises = when (ps) {
+                is FunkArrayList -> ps.toList()
+                else -> throw NativeFunctionException("__native_coop_any", "ps must be a list")
+            }
+
+            if (promises.isEmpty()) {
+                throw NativeFunctionException("__native_coop_any", "cannot get any from empty list")
+            }
+
+            // In Coop, try each promise in order, return first success
+            val errors = mutableListOf<Exception>()
+            for (promise in promises) {
+                try {
+                    return@NativeFunkFunction executePromise(promise, "__native_coop_any")
+                } catch (e: Exception) {
+                    errors.add(e)
+                }
+            }
+
+            throw NativeFunctionException(
+                "__native_coop_any",
+                "All promises failed: ${errors.map { it.message }}"
+            )
+        }
+    }
+
+    /**
+     * __native_coop_settle - Execute all promises, return Results.
+     */
+    private fun registerSettle(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_settle"] = NativeFunkFunction("__native_coop_settle") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_coop_settle", "expects FunkRecord")
+
+            val ps = record.fields["ps"]
+                ?: throw NativeFunctionException("__native_coop_settle", "expects 'ps' field")
+
+            val promises = when (ps) {
+                is FunkArrayList -> ps.toList()
+                else -> throw NativeFunctionException("__native_coop_settle", "ps must be a list")
+            }
+
+            // Execute all and collect as Results
+            val results = promises.map { promise ->
+                try {
+                    val value = executePromise(promise, "__native_coop_settle")
+                    FunkVariant("Ok", FunkRecord(mapOf("val" to value)))
+                } catch (e: java.util.concurrent.CancellationException) {
+                    FunkVariant("Err", FunkRecord(mapOf(
+                        "error" to FunkVariant("AsyncCancelled", FunkRecord(emptyMap()))
+                    )))
+                } catch (e: Exception) {
+                    val message = e.cause?.message ?: e.message ?: "Unknown error"
+                    FunkVariant("Err", FunkRecord(mapOf(
+                        "error" to FunkVariant("AsyncFailed", FunkRecord(mapOf(
+                            "msg" to FunkString(message)
+                        )))
+                    )))
+                }
+            }
+
+            FunkArrayList(results)
+        }
+    }
+
+    /**
+     * Helper: Execute a Funk function with a single argument wrapped in a record {x = arg}.
+     * This is the Funk convention for functions taking a single argument.
+     */
+    private fun executeFunctionWithArg(f: FunkValue, arg: FunkValue, functionName: String): FunkValue {
+        // Wrap the argument in a record with field "x"
+        val recordArg = FunkRecord(mapOf("x" to arg))
+        return when (f) {
+            is FunkTruffleFunction -> {
+                f.callTarget.call(
+                    recordArg,
+                    f.closureVariables,
+                    f.lexicalScope,
+                    f.lexicalScopeSlotMap
+                ) as FunkValue
+            }
+            is NativeFunkFunction -> f.call(listOf(recordArg))
+            else -> throw NativeFunctionException(
+                functionName,
+                "f must be a function, got: ${f::class.simpleName}"
             )
         }
     }
