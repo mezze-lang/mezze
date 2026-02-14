@@ -160,7 +160,7 @@ internal fun FunkParser.parseConstrainedLambda(stream: TokenStream): ParseResult
                         // Check that it's actually a lambda
                         val lambdaExpr = lambda.value
                         if (lambdaExpr !is LambdaExpression) {
-                            return stream2.failure("Expected lambda expression after '=', but got ${lambdaExpr::class.simpleName}")
+                            return stream2.failure("Expected lambda expression like {x} -> x + 1 after '='")
                         }
 
                         // Create lambda with ability constraints attached
@@ -678,7 +678,7 @@ internal val FunkParser.recordTypeParser: Parser<TypeDefinition> get() = { strea
                         recordType.remaining
                     )
                 } else {
-                    stream.failure("Expected record type like { field: Type }, but got ${value::class.simpleName}")
+                    stream.failure("Expected record type like { field: Type }")
                 }
             }
             is ParseResult.Failure -> recordType
