@@ -207,8 +207,7 @@ internal fun FunkParser.parseEffectDeclaration(stream: TokenStream, visibility: 
                                         // Validate it's a type variable (starts with ')
                                         if (!typeVar.value.text.startsWith("'")) {
                                             return ParseResult.Failure(
-                                                "Associated type must be a type variable starting with '. " +
-                                                "Expected something like 'state, but got: ${typeVar.value.text}",
+                                                "Type variable must start with ' (e.g., 'a, 'state). Got: ${typeVar.value.text}",
                                                 typeVar.value.position,
                                                 typeVar.value.line,
                                                 typeVar.value.column
@@ -226,8 +225,7 @@ internal fun FunkParser.parseEffectDeclaration(stream: TokenStream, visibility: 
                                                         is ParseResult.Success -> {
                                                             if (!nextTypeVar.value.text.startsWith("'")) {
                                                                 return ParseResult.Failure(
-                                                                    "Associated type must be a type variable starting with '. " +
-                                                                    "Expected something like 'error, but got: ${nextTypeVar.value.text}",
+                                                                    "Type variable must start with ' (e.g., 'a, 'state). Got: ${nextTypeVar.value.text}",
                                                                     nextTypeVar.value.position,
                                                                     nextTypeVar.value.line,
                                                                     nextTypeVar.value.column
@@ -549,8 +547,14 @@ internal val FunkParser.typeDefinitionParser: Parser<TypeDefinition> get() = { s
         when (variantResult) {
             is ParseResult.Success -> variantResult
             is ParseResult.Failure -> {
-                // Try record type
-                recordTypeParser(stream)
+                // If the error indicates invalid variant syntax, don't try record parsing
+                // This catches cases like: | Constructor1 | Constructor2 (missing commas)
+                if (variantResult.message.startsWith("Invalid variant syntax:")) {
+                    variantResult
+                } else {
+                    // Try record type
+                    recordTypeParser(stream)
+                }
             }
         }
     }
@@ -594,10 +598,33 @@ internal val FunkParser.variantTypeParser: Parser<TypeDefinition> get() = { stre
                             val pipe2 = tok(TokenType.PIPE)(streamAfterEllipsis)
 
                             when (pipe2) {
-                                is ParseResult.Success -> ParseResult.Success(
-                                    VariantDefinition(constructors.value, isOpen),
-                                    pipe2.remaining
-                                )
+                                is ParseResult.Success -> {
+                                    // Check for invalid syntax: | Constructor1 | Constructor2
+                                    // This happens when user forgets comma between constructors
+                                    // and writes each on its own line with |
+                                    // We only flag this as invalid if the identifier appears on the SAME line
+                                    // (i.e., no newlines between closing | and the identifier)
+                                    // If there are newlines, it's likely a valid separate expression
+                                    val afterPipe = pipe2.remaining
+                                    val nextToken = afterPipe.current()
+                                    if (nextToken != null &&
+                                        nextToken.type == TokenType.IDENTIFIER &&
+                                        nextToken.text.first().isUpperCase()) {
+                                        // There's a constructor name immediately after the closing |
+                                        // This is invalid - they probably meant to use comma separation
+                                        ParseResult.Failure(
+                                            "Invalid variant syntax: found '${nextToken.text}' after closing '|'. " +
+                                            "Variant constructors must be comma-separated within | ... |. " +
+                                            "Example: type Option 'a = | Some { val: 'a }, None |",
+                                            afterPipe.position
+                                        )
+                                    } else {
+                                        ParseResult.Success(
+                                            VariantDefinition(constructors.value, isOpen),
+                                            pipe2.remaining
+                                        )
+                                    }
+                                }
                                 is ParseResult.Failure -> pipe2
                             }
                         }
@@ -985,8 +1012,7 @@ internal fun FunkParser.parseAbilityDeclaration(stream: TokenStream, visibility:
                                         // Validate it's a type variable (starts with ')
                                         if (!typeVar.value.text.startsWith("'")) {
                                             return ParseResult.Failure(
-                                                "Associated type must be a type variable starting with '. " +
-                                                "Expected something like 'item, but got: ${typeVar.value.text}",
+                                                "Type variable must start with ' (e.g., 'a, 'item). Got: ${typeVar.value.text}",
                                                 typeVar.value.position,
                                                 typeVar.value.line,
                                                 typeVar.value.column
@@ -1004,8 +1030,7 @@ internal fun FunkParser.parseAbilityDeclaration(stream: TokenStream, visibility:
                                                         is ParseResult.Success -> {
                                                             if (!nextTypeVar.value.text.startsWith("'")) {
                                                                 return ParseResult.Failure(
-                                                                    "Associated type must be a type variable starting with '. " +
-                                                                    "Expected something like 'iter, but got: ${nextTypeVar.value.text}",
+                                                                    "Type variable must start with ' (e.g., 'a, 'item). Got: ${nextTypeVar.value.text}",
                                                                     nextTypeVar.value.position,
                                                                     nextTypeVar.value.line,
                                                                     nextTypeVar.value.column
@@ -1242,15 +1267,40 @@ internal val FunkParser.abilityOperationParser: Parser<AbilityOperation> get() =
 
 internal fun FunkParser.parseImplAbilityDeclaration(stream: TokenStream): ParseResult<ProgramItem> {
         // Parse: impl Encoder Int where { operations }
+        // Also supports: impl module::Encoder Int where { operations }
         val implToken = tok(TokenType.IMPL)(stream)
         return when (implToken) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(implToken.remaining)
-                val abilityName = identifierParser(stream1)
 
-                when (abilityName) {
+                // Parse ability name, possibly qualified (e.g., codec::EncodeFormat)
+                val firstIdent = identifierParser(stream1)
+
+                when (firstIdent) {
                     is ParseResult.Success -> {
-                        val stream2 = skipNewlines(abilityName.remaining)
+                        // Check for qualified path (module::Ability)
+                        var pathStream = firstIdent.remaining
+                        val pathSegments = mutableListOf(firstIdent.value.text)
+
+                        while (true) {
+                            val doubleColon = tok(TokenType.DOUBLE_COLON)(pathStream)
+                            if (doubleColon is ParseResult.Success) {
+                                val nextIdent = identifierParser(doubleColon.remaining)
+                                if (nextIdent is ParseResult.Success) {
+                                    pathSegments.add(nextIdent.value.text)
+                                    pathStream = nextIdent.remaining
+                                } else {
+                                    break
+                                }
+                            } else {
+                                break
+                            }
+                        }
+
+                        val abilityModulePath = if (pathSegments.size > 1) pathSegments.dropLast(1) else emptyList()
+                        val abilityName = pathSegments.last()
+
+                        val stream2 = skipNewlines(pathStream)
 
                         // Parse target types (one or more)
                         // Use simpleTypeArgument to avoid type applications consuming multiple types
@@ -1286,7 +1336,7 @@ internal fun FunkParser.parseImplAbilityDeclaration(stream: TokenStream): ParseR
                                 val stream3 = skipNewlines(currentStream)
 
                                 // Parse optional 'having' clause with associated type bindings
-                                val bindingsResult = parseAssociatedTypeBindings(stream3, abilityName.value.text, "impl")
+                                val bindingsResult = parseAssociatedTypeBindings(stream3, abilityName, "impl")
                                 val (associatedTypeBindings, streamAfterHaving) = when (bindingsResult) {
                                     is ParseResult.Success -> Pair(bindingsResult.value.bindings, bindingsResult.value.stream)
                                     is ParseResult.Failure -> return bindingsResult
@@ -1306,28 +1356,28 @@ internal fun FunkParser.parseImplAbilityDeclaration(stream: TokenStream): ParseR
 
                                                 // Parse operations separated by commas (trailing comma allowed)
                                                 val operations = mutableListOf<ImplAbilityOperation>()
-                                                var currentStream = stream5
+                                                var opStream = stream5
 
                                                 // Parse first operation (if any)
-                                                when (val firstOp = implAbilityOperationParser(currentStream)) {
+                                                when (val firstOp = implAbilityOperationParser(opStream)) {
                                                     is ParseResult.Success -> {
                                                         operations.add(firstOp.value)
-                                                        currentStream = skipNewlines(firstOp.remaining)
+                                                        opStream = skipNewlines(firstOp.remaining)
 
                                                         // Parse remaining operations, each preceded by comma
                                                         while (true) {
-                                                            when (val comma = tok(TokenType.COMMA)(currentStream)) {
+                                                            when (val comma = tok(TokenType.COMMA)(opStream)) {
                                                                 is ParseResult.Success -> {
-                                                                    currentStream = skipNewlines(comma.remaining)
+                                                                    opStream = skipNewlines(comma.remaining)
                                                                     // Check if this is a trailing comma (next token is })
-                                                                    if (currentStream.current()?.type == TokenType.RBRACE) {
+                                                                    if (opStream.current()?.type == TokenType.RBRACE) {
                                                                         break  // Trailing comma, done
                                                                     }
                                                                     // Parse next operation
-                                                                    when (val op = implAbilityOperationParser(currentStream)) {
+                                                                    when (val op = implAbilityOperationParser(opStream)) {
                                                                         is ParseResult.Success -> {
                                                                             operations.add(op.value)
-                                                                            currentStream = skipNewlines(op.remaining)
+                                                                            opStream = skipNewlines(op.remaining)
                                                                         }
                                                                         is ParseResult.Failure -> {
                                                                             return op  // Return error from operation parsing
@@ -1336,9 +1386,9 @@ internal fun FunkParser.parseImplAbilityDeclaration(stream: TokenStream): ParseR
                                                                 }
                                                                 is ParseResult.Failure -> {
                                                                     // No comma - check if there's another operation (error) or }
-                                                                    val next = currentStream.current()
+                                                                    val next = opStream.current()
                                                                     if (next?.type == TokenType.IDENTIFIER) {
-                                                                        return currentStream.failure(
+                                                                        return opStream.failure(
                                                                             "Missing ',' between ability impl methods. " +
                                                                             "Methods must be comma-separated."
                                                                         )
@@ -1353,13 +1403,14 @@ internal fun FunkParser.parseImplAbilityDeclaration(stream: TokenStream): ParseR
                                                     }
                                                 }
 
-                                                val stream6 = skipNewlines(currentStream)
+                                                val stream6 = skipNewlines(opStream)
                                                 val rbrace = tok(TokenType.RBRACE)(stream6)
 
                                                 when (rbrace) {
                                                     is ParseResult.Success -> ParseResult.Success(
                                                         ImplAbilityDeclaration(
-                                                            abilityName.value.text,
+                                                            abilityName,
+                                                            abilityModulePath,
                                                             targetTypes,
                                                             emptyList(),  // forallVars - deferred for later
                                                             associatedTypeBindings,
@@ -1379,7 +1430,7 @@ internal fun FunkParser.parseImplAbilityDeclaration(stream: TokenStream): ParseR
                             is ParseResult.Failure -> firstType
                         }
                     }
-                    is ParseResult.Failure -> abilityName
+                    is ParseResult.Failure -> firstIdent
                 }
             }
             is ParseResult.Failure -> implToken

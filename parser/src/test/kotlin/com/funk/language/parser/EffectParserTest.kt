@@ -185,7 +185,7 @@ class EffectParserTest {
             parser.parse(source)
             fail("Should have thrown ParseException for non-type-variable in having")
         } catch (e: ParseException) {
-            assertTrue(e.message?.contains("must be a type variable starting with '") == true)
+            assertTrue(e.message?.contains("Type variable must start with '") == true)
         }
     }
 
@@ -283,7 +283,7 @@ class EffectParserTest {
             parser.parse(source)
             fail("Should have thrown ParseException for non-type-variable in impl having")
         } catch (e: ParseException) {
-            assertTrue(e.message?.contains("must be a type variable starting with '") == true)
+            assertTrue(e.message?.contains("Type variable must start with '") == true)
         }
     }
 }

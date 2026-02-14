@@ -51,8 +51,7 @@ internal fun FunkParser.parseAssociatedTypeBindings(
                     // Validate it's a type variable (starts with ')
                     if (!firstTypeVar.value.text.startsWith("'")) {
                         return currentStream.failure(
-                            "Associated type must be a type variable starting with '. " +
-                            "Expected something like 'state, but got: ${firstTypeVar.value.text}"
+                            "Type variable must start with ' (e.g., 'a, 'item). Got: ${firstTypeVar.value.text}"
                         )
                     }
 
@@ -100,8 +99,7 @@ internal fun FunkParser.parseAssociatedTypeBindings(
                                                     is ParseResult.Success -> {
                                                         if (!nextTypeVar.value.text.startsWith("'")) {
                                                             return streamAfterComma.failure(
-                                                                "Associated type must be a type variable starting with '. " +
-                                                                "Expected something like 'error, but got: ${nextTypeVar.value.text}"
+                                                                "Type variable must start with ' (e.g., 'a, 'item). Got: ${nextTypeVar.value.text}"
                                                             )
                                                         }
 
