@@ -270,7 +270,45 @@ let find_field_value = {fields, key} ->
     match list::head {xs = fields} is
         Some {val = entry} ->
             if entry.key == key then
-                Some {val = entry.val}
+                Some {val = entry.value}
             else
                 find_field_value {fields = list::tail {xs = fields}, key = key}
         None -> None
+
+# ============================================================================
+# PUBLIC WRAPPER FUNCTIONS
+# ============================================================================
+# These functions provide direct access to encoding/decoding without ability dispatch.
+# Useful for testing and when the ability system isn't needed.
+
+pub let encode_int = {value: Int, path: List String} ->
+    Ok {val = JInt {val = value}}
+
+pub let encode_float = {value: Float, path: List String} ->
+    Ok {val = JFloat {val = value}}
+
+pub let encode_string = {value: String, path: List String} ->
+    Ok {val = JString {val = value}}
+
+pub let encode_bool = {value: Bool, path: List String} ->
+    Ok {val = JBool {val = value}}
+
+pub let decode_int = {repr: Json, path: List String} ->
+    match repr is
+        JInt {val} -> Ok {val = val}
+        _ -> Err {error = {
+            path = path,
+            message = "Expected integer",
+            expected = "Int",
+            found = Some {val = json_type_name {json = repr}}
+        }}
+
+pub let decode_string = {repr: Json, path: List String} ->
+    match repr is
+        JString {val} -> Ok {val = val}
+        _ -> Err {error = {
+            path = path,
+            message = "Expected string",
+            expected = "String",
+            found = Some {val = json_type_name {json = repr}}
+        }}

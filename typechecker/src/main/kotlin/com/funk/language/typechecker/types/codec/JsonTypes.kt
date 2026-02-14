@@ -94,6 +94,34 @@ object JsonTypes {
             FunkType.StringType
         )
 
+        // __native_frac_to_float: {f: Frac} -> Float
+        // Converts a fraction to a float
+        context["__native_frac_to_float"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("f" to FunkType.FracType)),
+            FunkType.FloatType
+        )
+
+        // __native_float_to_frac: {f: Float} -> Frac
+        // Converts a float to a fraction
+        context["__native_float_to_frac"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("f" to FunkType.FloatType)),
+            FunkType.FracType
+        )
+
+        // __native_int_to_frac: {n: Int} -> Frac
+        // Converts an integer to a fraction
+        context["__native_int_to_frac"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("n" to FunkType.IntType)),
+            FunkType.FracType
+        )
+
+        // __native_int_to_float: {n: Int} -> Float
+        // Converts an integer to a float
+        context["__native_int_to_float"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("n" to FunkType.IntType)),
+            FunkType.FloatType
+        )
+
         // =====================================================================
         // STREAMING DECODE NATIVE FUNCTIONS
         // =====================================================================
