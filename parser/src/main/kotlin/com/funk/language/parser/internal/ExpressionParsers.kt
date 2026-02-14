@@ -514,18 +514,26 @@ internal val FunkParser.arrayElementParser: Parser<ArrayElement>
 
 internal val FunkParser.primaryExpression: Parser<Expression>
     get() = { stream ->
-        Parsers.oneOf(
-            performExpression,
-            doExpression,
-            matchExpression,
-            ifExpression,
-            literalExpression,
-            atPlaceholderExpression,  // @ placeholder for pipe operator
-            identifierExpression,
-            arrayLiteral,
-            lambdaOrRecordExpression,  // <-- THIS IS THE KEY!
-            parenExpression
-        )(stream)
+        // Check for common mistakes and provide helpful error messages
+        val current = stream.current()
+        if (current?.type == TokenType.LET) {
+            stream.failure(
+                "Cannot use 'let' here. To sequence multiple statements, wrap them in a 'do' block"
+            )
+        } else {
+            Parsers.oneOf(
+                performExpression,
+                doExpression,
+                matchExpression,
+                ifExpression,
+                literalExpression,
+                atPlaceholderExpression,  // @ placeholder for pipe operator
+                identifierExpression,
+                arrayLiteral,
+                lambdaOrRecordExpression,  // <-- THIS IS THE KEY!
+                parenExpression
+            )(stream)
+        }
     }
 
 // ===== IF EXPRESSION =====
