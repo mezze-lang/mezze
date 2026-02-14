@@ -325,6 +325,7 @@ internal val FunkParser.constructorPattern: Parser<Pattern>
         // Parse: Constructor { field1 = pattern1, field2 = pattern2 }
         // or: Constructor variableName (shorthand for single-field constructors)
         // or: Constructor (no pattern)
+        // Note: Constructors are globally available (not module-qualified) once the type is imported
         val ident = identifierParser(stream)
         when (ident) {
             is ParseResult.Success -> {

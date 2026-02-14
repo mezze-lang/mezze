@@ -284,6 +284,43 @@ class FunkParser(
 
     internal val identifierParser: Parser<Token> = tok(TokenType.IDENTIFIER)
 
+    /**
+     * Parse a qualified name: module::name or just name
+     * Returns the full qualified name as a String
+     */
+    internal fun parseQualifiedName(stream: TokenStream): ParseResult<String> {
+        val first = identifierParser(stream)
+        return when (first) {
+            is ParseResult.Success -> {
+                var name = first.value.text
+                var currentStream = first.remaining
+
+                // Check for :: to build qualified name
+                while (true) {
+                    val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
+                    if (doubleColon is ParseResult.Success) {
+                        val next = identifierParser(doubleColon.remaining)
+                        when (next) {
+                            is ParseResult.Success -> {
+                                name += "::" + next.value.text
+                                currentStream = next.remaining
+                            }
+                            is ParseResult.Failure -> {
+                                // Found :: but no identifier after it - return error
+                                return next
+                            }
+                        }
+                    } else {
+                        break
+                    }
+                }
+
+                ParseResult.Success(name, currentStream)
+            }
+            is ParseResult.Failure -> first
+        }
+    }
+
 
     // ===== STRING INTERPOLATION HELPERS =====
 

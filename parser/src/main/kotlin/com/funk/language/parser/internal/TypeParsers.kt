@@ -86,12 +86,13 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
                 // Skip the 'with' keyword
                 var abilityStream = skipNewlines(streamBeforeWith.advance())
 
-                // Parse ability constraints: AbilityName TypeArg1 TypeArg2...
+                // Parse ability constraints: AbilityName TypeArg1 TypeArg2... or module::AbilityName TypeArg1...
                 while (true) {
-                    val abilityNameToken = abilityStream.current() ?: break
-                    if (abilityNameToken.type != TokenType.IDENTIFIER) break
-                    val abilityName = abilityNameToken.text
-                    abilityStream = skipNewlines(abilityStream.advance())
+                    // Parse qualified ability name (e.g., module::MyAbility or just MyAbility)
+                    val abilityNameResult = parseQualifiedName(abilityStream)
+                    if (abilityNameResult !is ParseResult.Success) break
+                    val abilityName = abilityNameResult.value
+                    abilityStream = skipNewlines(abilityNameResult.remaining)
 
                     // Parse type arguments (space-separated types)
                     // CRITICAL FIX: Use atomicTypeAnnotation instead of primaryTypeAnnotation
@@ -163,17 +164,18 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
                                         Triple(emptyList<String>(), false, returnType.remaining)  // Invalid, keep original
                                     }
                                 } else {
-                                    // Has effect names <Effect1, Effect2> or <Effect1, ...>
+                                    // Has effect names <Effect1, Effect2> or <module::Effect1, ...>
                                     val effectNames = mutableListOf<String>()
                                     var current = skipNewlines(afterLt)
                                     var foundEllipsis = false
 
-                                    // Parse comma-separated effect names
+                                    // Parse comma-separated effect names (potentially qualified)
                                     while (true) {
-                                        val effectToken = current.current() ?: break
-                                        if (effectToken.type != TokenType.IDENTIFIER) break
-                                        effectNames.add(effectToken.text)
-                                        current = skipNewlines(current.advance())
+                                        // Parse qualified effect name (e.g., module::Log or just Log)
+                                        val effectNameResult = parseQualifiedName(current)
+                                        if (effectNameResult !is ParseResult.Success) break
+                                        effectNames.add(effectNameResult.value)
+                                        current = skipNewlines(effectNameResult.remaining)
 
                                         // Check for comma
                                         if (current.current()?.type == TokenType.COMMA) {
@@ -210,12 +212,13 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
                             // Skip the 'with' keyword
                             var abilityStreamAfter = skipNewlines(streamBeforeWithAfter.advance())
 
-                            // Parse ability constraints: AbilityName TypeArg1 TypeArg2...
+                            // Parse ability constraints: AbilityName TypeArg1 TypeArg2... or module::AbilityName TypeArg1...
                             while (true) {
-                                val abilityNameToken = abilityStreamAfter.current() ?: break
-                                if (abilityNameToken.type != TokenType.IDENTIFIER) break
-                                val abilityName = abilityNameToken.text
-                                abilityStreamAfter = skipNewlines(abilityStreamAfter.advance())
+                                // Parse qualified ability name (e.g., module::MyAbility or just MyAbility)
+                                val abilityNameResult = parseQualifiedName(abilityStreamAfter)
+                                if (abilityNameResult !is ParseResult.Success) break
+                                val abilityName = abilityNameResult.value
+                                abilityStreamAfter = skipNewlines(abilityNameResult.remaining)
 
                                 // Parse type arguments (space-separated types)
                                 // CRITICAL FIX: Use atomicTypeAnnotation instead of primaryTypeAnnotation
