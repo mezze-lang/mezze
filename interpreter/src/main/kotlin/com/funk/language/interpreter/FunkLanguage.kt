@@ -491,7 +491,21 @@ class FunkTruffleRootNode(
                 .map { it.performerName }
                 .toSet()
 
-            val allExports = publicExports + publicPerformers
+            // ALSO export ability impl declarations (e.g., impl EncodeFormat Json)
+            // These are stored with mangled names like "EncodeFormat$Json"
+            val abilityImpls = typedModule.items.filterIsInstance<ImplAbilityDeclaration>()
+                .map { impl ->
+                    val targetTypeNames = impl.targetTypes.joinToString("$") { typeAnnotation ->
+                        when (typeAnnotation) {
+                            is IdentifierTypeAnnotation -> typeAnnotation.name
+                            else -> typeAnnotation.toString()
+                        }
+                    }
+                    "${impl.abilityName}\$$targetTypeNames"
+                }
+                .toSet()
+
+            val allExports = publicExports + publicPerformers + abilityImpls
 
             // Register public exports with qualified names
             for (exportName in allExports) {

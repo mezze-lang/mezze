@@ -614,7 +614,30 @@ class TypeChecker(
             context = tempBuildResult.context
         }
 
+        // Add imported ability implementations
+        // These are needed for ability method dispatch (e.g., EncodeFormat.encode_int)
+        for ((implKey, implDecl) in importContext.importedAbilityImpls) {
+            val implInfo = TypingContext.AbilityImplInfo(
+                abilityName = implDecl.abilityName,
+                targetTypes = implDecl.targetTypes.map { typeAnnotationToString(it) },
+                sourceModule = null  // TODO: Track source module
+            )
+            context = context.extendWithImpl(implKey, implInfo)
+        }
+
         return context
+    }
+
+    /**
+     * Convert a TypeAnnotation to a string for ability impl key.
+     */
+    private fun typeAnnotationToString(typeAnnotation: TypeAnnotation): String {
+        return when (typeAnnotation) {
+            is IdentifierTypeAnnotation -> typeAnnotation.name
+            is TypeApplicationAnnotation -> typeAnnotation.constructor
+            is QualifiedTypeAnnotation -> typeAnnotation.typeName
+            else -> typeAnnotation.toString()
+        }
     }
 
     // ========================================================================
