@@ -310,7 +310,11 @@ internal val FunkParser.variablePattern: Parser<Pattern>
                 // Check if next token is LBRACE - if so, it's a constructor pattern
                 val next = ident.remaining.current()
                 if (next?.type == TokenType.LBRACE) {
-                    stream.failure("'${ident.value.text}' looks like a constructor pattern (followed by '{'), not a variable")
+                    // User likely meant a constructor pattern - guide them to use uppercase
+                    val suggestion = if (ident.value.text.firstOrNull()?.isLowerCase() == true) {
+                        " Constructor names must start with uppercase (e.g., Some, None)"
+                    } else ""
+                    stream.failure("'${ident.value.text} {...}' is a constructor pattern, not a variable pattern.$suggestion")
                 } else {
                     ParseResult.Success(VariablePattern(ident.value.text), ident.remaining)
                 }
