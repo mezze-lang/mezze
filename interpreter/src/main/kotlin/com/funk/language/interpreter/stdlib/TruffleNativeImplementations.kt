@@ -28,7 +28,9 @@ import com.funk.language.interpreter.stdlib.effects.EnvironmentImplementations
 import com.funk.language.interpreter.stdlib.effects.ContinuationImplementations
 import com.funk.language.interpreter.stdlib.effects.LoomImplementations
 import com.funk.language.interpreter.stdlib.effects.OSThreadImplementations
+import com.funk.language.interpreter.stdlib.effects.ForkJoinParallelImplementations
 import com.funk.language.interpreter.stdlib.effects.CoopImplementations
+import com.funk.language.interpreter.stdlib.effects.ParallelImplementations
 import com.funk.language.interpreter.stdlib.concurrent.AtomImplementations
 import com.funk.language.interpreter.stdlib.concurrent.ChannelImplementations
 import com.funk.language.interpreter.stdlib.concurrent.MutexImplementations
@@ -98,6 +100,8 @@ object TruffleNativeImplementations {
         LoomImplementations.registerAll(context)  // Project Loom virtual threads
         OSThreadImplementations.registerAll(context)  // OS platform threads
         CoopImplementations.registerAll(context)  // Cooperative async (single-threaded)
+        ParallelImplementations.registerAll(context)  // Data parallelism (Virtual threads)
+        ForkJoinParallelImplementations.registerAll(context)  // True ForkJoin work-stealing
 
         // Register concurrent primitives (Atom, Channel, Mutex, Semaphore, Latch, WaitGroup)
         AtomImplementations.registerAll(context)

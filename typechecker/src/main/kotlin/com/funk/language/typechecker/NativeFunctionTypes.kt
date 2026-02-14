@@ -24,6 +24,7 @@ import com.funk.language.typechecker.types.effects.ContinuationTypes
 import com.funk.language.typechecker.types.effects.LoomTypes
 import com.funk.language.typechecker.types.effects.OSThreadTypes
 import com.funk.language.typechecker.types.effects.CoopTypes
+import com.funk.language.typechecker.types.effects.ParallelTypes
 import com.funk.language.typechecker.types.concurrent.AtomTypes
 import com.funk.language.typechecker.types.concurrent.ChannelTypes
 import com.funk.language.typechecker.types.concurrent.MutexTypes
@@ -80,6 +81,7 @@ object NativeFunctionTypes {
         LoomTypes.registerAll(context)
         OSThreadTypes.registerAll(context)
         CoopTypes.registerAll(context)
+        ParallelTypes.registerAll(context)
 
         // Concurrent primitives (Atom, Channel, Mutex, Semaphore, Latch, WaitGroup)
         AtomTypes.registerAll(context)
