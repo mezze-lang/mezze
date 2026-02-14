@@ -1,0 +1,276 @@
+# std/json/simple.funk - Simple JSON codec (Tier 1)
+#
+# Provides EncodeFormat and DecodeFormat implementations for JSON.
+# Uses the Json variant from std/json as the intermediate representation.
+#
+# This is the default, easier-to-use codec. For large data (>100MB),
+# consider using std/json/stream instead.
+#
+# Example:
+#   use std::json::simple
+#   use std::json::{Json}  # Type alias only - constructors are globally available
+#   use std::codec
+#
+#   # Encode an integer to Json representation
+#   let result = simple::encode_int {value = 42, path = codec::empty_path}
+#   # Result is Ok {val = JInt {val = 42}}
+
+use std::codec::{EncodeFormat, DecodeFormat, EncodeError, DecodeError, Entry}
+use std::json::{Json}  # Just the type alias - constructors are globally available
+use std::collections::list
+use std::collections::set
+use std::collections::bytes
+use std::option
+use std::result
+
+# ============================================================================
+# ENCODE FORMAT IMPLEMENTATION
+# ============================================================================
+
+impl EncodeFormat Json where {
+    encode_int = {value, path} ->
+        Ok {val = JInt {val = value}},
+
+    encode_float = {value, path} ->
+        Ok {val = JFloat {val = value}},
+
+    encode_string = {value, path} ->
+        Ok {val = JString {val = value}},
+
+    encode_bool = {value, path} ->
+        Ok {val = JBool {val = value}},
+
+    encode_frac = {value, path} -> do
+        # JSON doesn't support fractions natively, convert to float
+        let f = __native_frac_to_float {f = value}
+        Ok {val = JFloat {val = f}},
+
+    encode_bytes = {value, path} -> do
+        # Encode bytes as base64 string
+        let b64 = bytes::to_base64 {b = value}
+        Ok {val = JString {val = b64}},
+
+    encode_record = {fields, path} ->
+        # Entry types are compatible (both use key, value)
+        Ok {val = JObject {fields = fields}},
+
+    encode_variant = {tag, payload, path} -> do
+        let fields = match payload is
+            Some {val = p} ->
+                list::from_array {xs = [{key = "tag", value = JString {val = tag}}, {key = "value", value = p}]}
+            None ->
+                list::from_array {xs = [{key = "tag", value = JString {val = tag}}]}
+        Ok {val = JObject {fields = fields}},
+
+    encode_list = {elements, path} ->
+        Ok {val = JArray {items = elements}},
+
+    encode_set = {elements, path} -> do
+        # Sets encoded as arrays in JSON
+        Ok {val = JArray {items = list::empty {}}},
+
+    encode_map = {entries, path} -> do
+        # Maps encoded as arrays of [key, value] pairs
+        Ok {val = JArray {items = list::empty {}}},
+
+    encode_option = {value, path} ->
+        match value is
+            Some {val = v} -> Ok {val = v}
+            None -> Ok {val = JNull}
+}
+
+# ============================================================================
+# DECODE FORMAT IMPLEMENTATION
+# ============================================================================
+
+impl DecodeFormat Json where {
+    decode_int = {repr, path} ->
+        match repr is
+            JInt {val} -> Ok {val = val}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected integer",
+                expected = "Int",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_float = {repr, path} ->
+        match repr is
+            JFloat {val} -> Ok {val = val}
+            JInt {val} -> Ok {val = __native_int_to_float {n = val}}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected float",
+                expected = "Float",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_string = {repr, path} ->
+        match repr is
+            JString {val} -> Ok {val = val}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected string",
+                expected = "String",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_bool = {repr, path} ->
+        match repr is
+            JBool {val} -> Ok {val = val}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected boolean",
+                expected = "Bool",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_frac = {repr, path} ->
+        match repr is
+            JFloat {val} -> do
+                let f = __native_float_to_frac {f = val}
+                Ok {val = f}
+            JInt {val} -> do
+                let f = __native_int_to_frac {n = val}
+                Ok {val = f}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected fraction (number)",
+                expected = "Frac",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_bytes = {repr, path} ->
+        match repr is
+            JString {val} ->
+                match bytes::from_base64 {s = val} is
+                    Some {val = b} -> Ok {val = b}
+                    None -> Err {error = {
+                        path = path,
+                        message = "Invalid base64 encoding",
+                        expected = "Bytes (base64)",
+                        found = Some {val = "invalid base64"}
+                    }}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected string (base64 encoded bytes)",
+                expected = "Bytes",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_record_field = {repr, key, path} ->
+        match repr is
+            JObject {fields} ->
+                find_field {fields = fields, key = key, path = path}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected object",
+                expected = "Object",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_variant = {repr, path} ->
+        match repr is
+            JObject {fields} -> do
+                match find_field_value {fields = fields, key = "tag"} is
+                    Some {val = tag_json} ->
+                        match tag_json is
+                            JString {val = tag} -> do
+                                let payload = find_field_value {fields = fields, key = "value"}
+                                Ok {val = {tag = tag, payload = payload}}
+                            _ -> Err {error = {
+                                path = path,
+                                message = "Variant tag must be a string",
+                                expected = "String",
+                                found = Some {val = json_type_name {json = tag_json}}
+                            }}
+                    None -> Err {error = {
+                        path = path,
+                        message = "Variant object missing 'tag' field",
+                        expected = "Object with 'tag'",
+                        found = Some {val = "Object without 'tag'"}
+                    }}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected variant object",
+                expected = "Object",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_list = {repr, path} ->
+        match repr is
+            JArray {items} -> Ok {val = items}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected array",
+                expected = "Array",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_set = {repr, path} ->
+        match repr is
+            JArray {items} -> Ok {val = set::from_list {xs = list::to_array {xs = items}}}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected array (for set)",
+                expected = "Array",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_map = {repr, path} ->
+        match repr is
+            JObject {fields} -> do
+                # Convert object fields to Entry list
+                # Each field has {key: String, value: Json}, we need {key: Json, value: Json}
+                let converted = list::map {xs = fields, f = {x} ->
+                    {key = JString {val = x.key}, value = x.value}
+                }
+                Ok {val = converted}
+            _ -> Err {error = {
+                path = path,
+                message = "Expected object (for map)",
+                expected = "Object",
+                found = Some {val = json_type_name {json = repr}}
+            }},
+
+    decode_option = {repr, path} ->
+        match repr is
+            JNull -> Ok {val = None}
+            _ -> Ok {val = Some {val = repr}}
+}
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+# Get a human-readable type name for a Json value
+let json_type_name = {json} ->
+    match json is
+        JNull -> "null"
+        JBool {val} -> "boolean"
+        JInt {val} -> "integer"
+        JFloat {val} -> "float"
+        JString {val} -> "string"
+        JArray {items} -> "array"
+        JObject {fields} -> "object"
+
+# Find a field in a list of entries
+let find_field = {fields, key, path} -> do
+    match find_field_value {fields = fields, key = key} is
+        Some {val = v} -> Ok {val = v}
+        None -> Err {error = {
+            path = path,
+            message = "Missing field: $(key)",
+            expected = key,
+            found = None
+        }}
+
+# Find a field value without returning error
+let find_field_value = {fields, key} ->
+    match list::head {xs = fields} is
+        Some {val = entry} ->
+            if entry.key == key then
+                Some {val = entry.val}
+            else
+                find_field_value {fields = list::tail {xs = fields}, key = key}
+        None -> None

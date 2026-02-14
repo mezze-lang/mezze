@@ -7,8 +7,8 @@
 #   use std::json
 #
 #   let data = json::JObject {fields = [
-#       {key = "name", val = json::JString {val = "Alice"}},
-#       {key = "age", val = json::JInt {val = 30}}
+#       {key = "name", value = json::JString {val = "Alice"}},
+#       {key = "age", value = json::JInt {val = 30}}
 #   ]}
 #
 #   let bytes = json::serialize {json = data}
@@ -25,8 +25,8 @@ use std::int
 # JSON INTERMEDIATE REPRESENTATION
 # ============================================================================
 
-# Entry type for JSON object fields
-pub type Entry 'k 'v = {key: 'k, val: 'v}
+# Entry type for JSON object fields (same as codec::Entry for compatibility)
+pub type Entry 'k 'v = {key: 'k, value: 'v}
 
 # The Json type represents any JSON value
 pub type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: List Json }, JObject { fields: List (Entry String Json) } |
@@ -106,7 +106,7 @@ let serialize_compact: {json: Json} -> String = {json} ->
         JObject {fields} -> do
             let inner = list::map {
                 xs = fields,
-                f = {x} -> "\"$(escape_string {s = x.key})\":$(serialize_compact {json = x.val})"
+                f = {x} -> "\"$(escape_string {s = x.key})\":$(serialize_compact {json = x.value})"
             }
             "{$(string::join {strings = list::to_array {xs = inner}, separator = ","})}"
 
@@ -137,7 +137,7 @@ let serialize_pretty: {json: Json, indent: Int, indent_size: Int} -> String = {j
                 let inner = list::map {
                     xs = fields,
                     f = {x} -> do
-                        let val_str = serialize_pretty {json = x.val, indent = next_indent, indent_size = indent_size}
+                        let val_str = serialize_pretty {json = x.value, indent = next_indent, indent_size = indent_size}
                         "$(next_indent_str)\"$(escape_string {s = x.key})\": $(val_str)"
                 }
                 "{\n$(string::join {strings = list::to_array {xs = inner}, separator = ",\n"})\n$(indent_str)}"

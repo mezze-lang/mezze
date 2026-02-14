@@ -499,6 +499,7 @@ class ModuleResolver(
                 }
                 is TypeDeclaration -> {
                     if (item.visibility == Visibility.PUBLIC) {
+                        // Export the type alias - constructors are globally available (Roc-style)
                         exports[item.name] = ExportedItem(
                             name = item.name,
                             type = ExportedItemType.TYPE,
