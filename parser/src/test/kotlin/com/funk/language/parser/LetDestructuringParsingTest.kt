@@ -160,13 +160,9 @@ class LetDestructuringParsingTest {
     }
 
     @Test
-    fun `constructor patterns are irrefutable at parse time`() {
-        // Constructor patterns are treated as irrefutable at parse time to allow
-        // newtype destructuring in let bindings: let UserId {value = x} = expr
-        // The typechecker validates that the pattern is actually irrefutable
-        // (i.e., the type has only one constructor like newtypes).
+    fun `constructor patterns are refutable`() {
         val pattern = ConstructorPattern("Some", null)
-        assertTrue(pattern.isIrrefutable())
+        assertTrue(!pattern.isIrrefutable())
     }
 
     @Test
