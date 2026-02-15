@@ -12,7 +12,10 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Tests for Channel implementations used by the Chan effect.
+ * Tests for Channel implementations used by the Channel effect.
+ *
+ * Chan is the value type (like TVar for STM)
+ * Channel is the effect (like STM)
  *
  * Channels provide typed communication between virtual threads using
  * Java's LinkedBlockingQueue for thread-safe blocking operations.
@@ -221,6 +224,23 @@ class ChannelTest {
     }
 
     @Test
+    fun `test is_closed returns correct value`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val close = context["__native_channel_close"] as NativeFunkFunction
+        val isClosed = context["__native_channel_is_closed"] as NativeFunkFunction
+
+        val channel = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        val beforeClose = isClosed.implementation(listOf(FunkRecord(mapOf("ch" to channel))))
+        assertEquals(FunkBool(false), beforeClose)
+
+        close.implementation(listOf(FunkRecord(mapOf("ch" to channel))))
+
+        val afterClose = isClosed.implementation(listOf(FunkRecord(mapOf("ch" to channel))))
+        assertEquals(FunkBool(true), afterClose)
+    }
+
+    @Test
     fun `test close is idempotent`() {
         val makeChannel = context["__native_channel_make"] as NativeFunkFunction
         val close = context["__native_channel_close"] as NativeFunkFunction
@@ -254,6 +274,170 @@ class ChannelTest {
         // Should still be able to receive the queued values
         assertEquals(FunkInt(1), recv.implementation(listOf(FunkRecord(mapOf("ch" to channel)))))
         assertEquals(FunkInt(2), recv.implementation(listOf(FunkRecord(mapOf("ch" to channel)))))
+    }
+
+    // =============================================================================
+    // Select Operations (recv_any) Tests
+    // =============================================================================
+
+    @Test
+    fun `test recv_any returns first available value`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val send = context["__native_channel_send"] as NativeFunkFunction
+        val recvAny = context["__native_channel_recv_any"] as NativeFunkFunction
+
+        val ch1 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+        val ch2 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        // Send to second channel only
+        send.implementation(listOf(FunkRecord(mapOf("ch" to ch2, "value" to FunkInt(42)))))
+
+        val result = recvAny.implementation(listOf(FunkRecord(mapOf(
+            "channels" to FunkArrayList(mutableListOf(ch1, ch2))
+        )))) as FunkRecord
+
+        assertEquals(FunkInt(1), result.fields["index"])  // Index 1 = ch2
+        assertEquals(FunkInt(42), result.fields["value"])
+    }
+
+    @Test
+    fun `test recv_any with multiple channels having data`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val send = context["__native_channel_send"] as NativeFunkFunction
+        val recvAny = context["__native_channel_recv_any"] as NativeFunkFunction
+
+        val ch1 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+        val ch2 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        // Send to both channels
+        send.implementation(listOf(FunkRecord(mapOf("ch" to ch1, "value" to FunkInt(1)))))
+        send.implementation(listOf(FunkRecord(mapOf("ch" to ch2, "value" to FunkInt(2)))))
+
+        // Should return first channel's value (index 0)
+        val result = recvAny.implementation(listOf(FunkRecord(mapOf(
+            "channels" to FunkArrayList(mutableListOf(ch1, ch2))
+        )))) as FunkRecord
+
+        assertEquals(FunkInt(0), result.fields["index"])
+        assertEquals(FunkInt(1), result.fields["value"])
+    }
+
+    @Test
+    fun `test recv_any throws on empty channel list`() {
+        val recvAny = context["__native_channel_recv_any"] as NativeFunkFunction
+
+        assertThrows(FunkException::class.java) {
+            recvAny.implementation(listOf(FunkRecord(mapOf(
+                "channels" to FunkArrayList(mutableListOf())
+            ))))
+        }
+    }
+
+    @Test
+    fun `test recv_any_timeout returns None on timeout`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val recvAnyTimeout = context["__native_channel_recv_any_timeout"] as NativeFunkFunction
+
+        val ch1 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+        val ch2 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        // Both channels empty, should timeout
+        val result = recvAnyTimeout.implementation(listOf(FunkRecord(mapOf(
+            "channels" to FunkArrayList(mutableListOf(ch1, ch2)),
+            "ms" to FunkInt(50)  // 50ms timeout
+        )))) as FunkVariant
+
+        assertEquals("None", result.constructor)
+    }
+
+    @Test
+    fun `test recv_any_timeout returns Some when data available`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val send = context["__native_channel_send"] as NativeFunkFunction
+        val recvAnyTimeout = context["__native_channel_recv_any_timeout"] as NativeFunkFunction
+
+        val ch1 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+        val ch2 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        send.implementation(listOf(FunkRecord(mapOf("ch" to ch2, "value" to FunkInt(99)))))
+
+        val result = recvAnyTimeout.implementation(listOf(FunkRecord(mapOf(
+            "channels" to FunkArrayList(mutableListOf(ch1, ch2)),
+            "ms" to FunkInt(1000)
+        )))) as FunkVariant
+
+        assertEquals("Some", result.constructor)
+        val inner = (result.value as FunkRecord).fields["val"] as FunkRecord
+        assertEquals(FunkInt(1), inner.fields["index"])
+        assertEquals(FunkInt(99), inner.fields["value"])
+    }
+
+    // =============================================================================
+    // MockChannel Tests
+    // =============================================================================
+
+    @Test
+    fun `test mock channel send and recv`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val mockSend = context["__native_mock_channel_send"] as NativeFunkFunction
+        val mockRecv = context["__native_mock_channel_recv"] as NativeFunkFunction
+
+        val channel = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        mockSend.implementation(listOf(FunkRecord(mapOf(
+            "ch" to channel,
+            "value" to FunkInt(42)
+        ))))
+
+        val result = mockRecv.implementation(listOf(FunkRecord(mapOf("ch" to channel))))
+        assertEquals(FunkInt(42), result)
+    }
+
+    @Test
+    fun `test mock channel recv throws on empty`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val mockRecv = context["__native_mock_channel_recv"] as NativeFunkFunction
+
+        val channel = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        val exception = assertThrows(FunkException::class.java) {
+            mockRecv.implementation(listOf(FunkRecord(mapOf("ch" to channel))))
+        }
+
+        assertTrue(exception.message?.contains("would block") == true)
+    }
+
+    @Test
+    fun `test mock recv_any throws when all empty`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val mockRecvAny = context["__native_mock_channel_recv_any"] as NativeFunkFunction
+
+        val ch1 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+        val ch2 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        val exception = assertThrows(FunkException::class.java) {
+            mockRecvAny.implementation(listOf(FunkRecord(mapOf(
+                "channels" to FunkArrayList(mutableListOf(ch1, ch2))
+            ))))
+        }
+
+        assertTrue(exception.message?.contains("would block") == true)
+    }
+
+    @Test
+    fun `test mock recv_any_timeout returns None when empty`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val mockRecvAnyTimeout = context["__native_mock_channel_recv_any_timeout"] as NativeFunkFunction
+
+        val ch1 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+        val ch2 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        val result = mockRecvAnyTimeout.implementation(listOf(FunkRecord(mapOf(
+            "channels" to FunkArrayList(mutableListOf(ch1, ch2)),
+            "ms" to FunkInt(100)
+        )))) as FunkVariant
+
+        assertEquals("None", result.constructor)
     }
 
     // =============================================================================
@@ -343,6 +527,57 @@ class ChannelTest {
         assertTrue(consumerDone.await(5, TimeUnit.SECONDS), "Consumer should complete")
 
         assertEquals(totalItems, received.get())
+    }
+
+    @Test
+    fun `test recv_any with concurrent producers`() {
+        val makeChannel = context["__native_channel_make"] as NativeFunkFunction
+        val send = context["__native_channel_send"] as NativeFunkFunction
+        val recvAny = context["__native_channel_recv_any"] as NativeFunkFunction
+
+        val ch1 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+        val ch2 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+        val ch3 = makeChannel.implementation(listOf(FunkRecord(emptyMap()))) as FunkChannel
+
+        val received = AtomicInteger(0)
+        val producersDone = CountDownLatch(3)
+        val consumerDone = CountDownLatch(1)
+
+        // Producers on different channels
+        Thread.startVirtualThread {
+            for (i in 1..10) {
+                send.implementation(listOf(FunkRecord(mapOf("ch" to ch1, "value" to FunkInt(i.toLong())))))
+            }
+            producersDone.countDown()
+        }
+        Thread.startVirtualThread {
+            for (i in 11..20) {
+                send.implementation(listOf(FunkRecord(mapOf("ch" to ch2, "value" to FunkInt(i.toLong())))))
+            }
+            producersDone.countDown()
+        }
+        Thread.startVirtualThread {
+            for (i in 21..30) {
+                send.implementation(listOf(FunkRecord(mapOf("ch" to ch3, "value" to FunkInt(i.toLong())))))
+            }
+            producersDone.countDown()
+        }
+
+        // Consumer using recv_any
+        Thread.startVirtualThread {
+            for (i in 1..30) {
+                recvAny.implementation(listOf(FunkRecord(mapOf(
+                    "channels" to FunkArrayList(mutableListOf(ch1, ch2, ch3))
+                ))))
+                received.incrementAndGet()
+            }
+            consumerDone.countDown()
+        }
+
+        assertTrue(producersDone.await(5, TimeUnit.SECONDS), "All producers should complete")
+        assertTrue(consumerDone.await(5, TimeUnit.SECONDS), "Consumer should complete")
+
+        assertEquals(30, received.get())
     }
 
     @Test
