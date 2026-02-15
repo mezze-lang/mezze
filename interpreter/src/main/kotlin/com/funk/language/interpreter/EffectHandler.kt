@@ -8,14 +8,18 @@ import com.funk.language.ast.*
  */
 class EffectHandler {
     // Global effect registry - effects are program-wide declarations
-    private val globalEffects = mutableMapOf<String, FunkRecord>()
+    // Thread-safe: ConcurrentHashMap for concurrent access from virtual threads
+    private val globalEffects = java.util.concurrent.ConcurrentHashMap<String, FunkRecord>()
 
     // Handler stack - maintains active handlers for nested perform expressions
-    private val handlerStack = mutableListOf<FunkRecord>()
+    // CRITICAL: Must be thread-local to prevent race conditions between virtual threads
+    // Each thread gets its own handler stack for proper effect scoping
+    private val handlerStack = ThreadLocal.withInitial { mutableListOf<FunkRecord>() }
 
     // Performer to effect mapping - tracks which performers implement which effects
     // e.g., "Console" -> "Log", "ToResult" -> "Exception"
-    private val performerToEffect = mutableMapOf<String, String>()
+    // Thread-safe: ConcurrentHashMap for concurrent access
+    private val performerToEffect = java.util.concurrent.ConcurrentHashMap<String, String>()
     
     /**
      * Register a global effect declaration
@@ -67,23 +71,24 @@ class EffectHandler {
      * Push handlers onto the stack when entering a perform expression
      */
     fun pushHandlers(handlers: FunkRecord) {
-        handlerStack.add(handlers)
+        handlerStack.get().add(handlers)
     }
-    
+
     /**
      * Pop handlers from the stack when exiting a perform expression
      */
     fun popHandlers() {
-        if (handlerStack.isNotEmpty()) {
-            handlerStack.removeAt(handlerStack.size - 1)
+        val stack = handlerStack.get()
+        if (stack.isNotEmpty()) {
+            stack.removeAt(stack.size - 1)
         }
     }
-    
+
     /**
      * Get the current active handlers
      */
     fun getCurrentHandlers(): FunkRecord? {
-        return handlerStack.lastOrNull()
+        return handlerStack.get().lastOrNull()
     }
     
     /**
@@ -113,7 +118,7 @@ class EffectHandler {
         // 1. Check handler stack first (for nested perform expressions)
         // 2. Fall back to context (for captured handlers in closures)
         // 3. If no handlers available, return FunkSuspended with deferred computation
-        val handlersRecord = handlerStack.lastOrNull()
+        val handlersRecord = handlerStack.get().lastOrNull()
             ?: (context["__handlers"] as? FunkRecord)
 
         // No handlers available - create deferred computation (LAZY EFFECTS)
@@ -353,7 +358,7 @@ class EffectHandler {
      */
     fun clear() {
         globalEffects.clear()
-        handlerStack.clear()
+        handlerStack.get().clear()
         performerToEffect.clear()
     }
 }
