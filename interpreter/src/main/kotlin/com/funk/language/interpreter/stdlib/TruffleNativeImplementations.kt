@@ -37,6 +37,7 @@ import com.funk.language.interpreter.stdlib.concurrent.MutexImplementations
 import com.funk.language.interpreter.stdlib.concurrent.SemaphoreImplementations
 import com.funk.language.interpreter.stdlib.concurrent.LatchImplementations
 import com.funk.language.interpreter.stdlib.concurrent.WaitGroupImplementations
+import com.funk.language.interpreter.stdlib.concurrent.STMImplementations
 import com.funk.language.interpreter.stdlib.conversion.TruffleConversionImplementations
 import com.funk.language.interpreter.stdlib.io.TruffleIOImplementations
 import com.funk.language.interpreter.stdlib.system.TruffleSystemImplementations
@@ -103,13 +104,14 @@ object TruffleNativeImplementations {
         ParallelImplementations.registerAll(context)  // Data parallelism (Virtual threads)
         ForkJoinParallelImplementations.registerAll(context)  // True ForkJoin work-stealing
 
-        // Register concurrent primitives (Atom, Channel, Mutex, Semaphore, Latch, WaitGroup)
+        // Register concurrent primitives (Atom, Channel, Mutex, Semaphore, Latch, WaitGroup, STM)
         AtomImplementations.registerAll(context)
         ChannelImplementations.registerAll(context)
         MutexImplementations.registerAll(context)
         SemaphoreImplementations.registerAll(context)
         LatchImplementations.registerAll(context)
         WaitGroupImplementations.registerAll(context)
+        STMImplementations.registerAll(context)  // Software Transactional Memory
 
         // Register logic implementations (boolean operations, comparisons)
         TruffleLogicImplementations.registerAll(context)
