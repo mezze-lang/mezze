@@ -1,0 +1,239 @@
+# std/stm.funk - Software Transactional Memory
+#
+# STM provides composable, lock-free concurrent programming with transactions.
+# All reads and writes to shared memory happen atomically within transactions.
+#
+# Key features:
+# - Optimistic concurrency: transactions run in parallel, retry on conflict
+# - Composability: transactions can be nested and combined
+# - No deadlocks: no locks means no deadlock cycles
+# - Retry: block until watched TVars change
+# - OrElse: try alternatives if first transaction retries
+#
+# Implementation uses:
+# - Multi-Version Concurrency Control (MVCC) for snapshot isolation
+# - Bloom filters for fast conflict detection
+# - Optimistic reads with validation at commit time
+#
+# Available implementations:
+# - OptimisticSTM: Default, uses virtual threads for blocking operations
+# - SequentialSTM: Single-threaded, for testing/debugging
+#
+# Usage:
+#   use std::stm::{STM, OptimisticSTM, TVar, tvar}
+#
+#   let account = tvar {init = 1000}
+#
+#   perform OptimisticSTM in do
+#       let balance = STM.read {var = account}
+#       STM.write {var = account, val = balance - 100}
+
+# TVar - Transactional Variable
+# A mutable reference that can only be read/written inside transactions.
+# Outside transactions, use tvar to create and deref to read (without consistency).
+pub newtype TVar 'a = TVar __NativeTVar
+
+# Create a new TVar with an initial value
+#
+# Example:
+#   let counter = tvar {init = 0}
+#   let accounts = tvar {init = {alice = 1000, bob = 500}}
+pub let tvar: {init: 'a} -> TVar 'a =
+    {init} -> __native_tvar_new {init = init}
+
+# Read TVar value outside of transaction (non-transactional)
+# WARNING: This read is NOT part of any transaction!
+# Use only for debugging or when you don't need consistency.
+#
+# Example:
+#   let current = deref {var = account}  # Non-transactional read
+pub let deref: {var: TVar 'a} -> 'a =
+    {var} -> __native_tvar_deref {var = var}
+
+# STM effect - Transactional operations
+pub effect STM where {
+    # Read a TVar's value within the transaction
+    # Tracked for conflict detection at commit time
+    #
+    # Example:
+    #   let balance = STM.read {var = account}
+    read: {var: TVar 'a} -> 'a <STM>,
+
+    # Write a value to a TVar within the transaction
+    # Buffered until commit, visible to subsequent reads in same transaction
+    #
+    # Example:
+    #   STM.write {var = account, val = 500}
+    write: {var: TVar 'a, val: 'a} -> {} <STM>,
+
+    # Read, apply function, write back - all atomically
+    # Equivalent to: let v = read; write {val = f {val = v}}
+    #
+    # Example:
+    #   STM.modify {var = counter, f = {val} -> val + 1}
+    modify: {var: TVar 'a, f: {val: 'a} -> 'a} -> {} <STM>,
+
+    # Write new value, return old value
+    # Equivalent to: let old = read; write {val = new}; old
+    #
+    # Example:
+    #   let old_balance = STM.swap {var = account, val = 0}
+    swap: {var: TVar 'a, val: 'a} -> 'a <STM>,
+
+    # Mark TVar as protected from outside modification
+    # If another transaction modifies this TVar, current transaction retries.
+    # Returns current value. Use when you need strong consistency on reads.
+    #
+    # Example:
+    #   let balance = STM.ensure {var = account}  # Protected read
+    ensure: {var: TVar 'a} -> 'a <STM>,
+
+    # Retry current transaction until a watched TVar changes
+    # All TVars read so far are "watched" - transaction restarts when any changes.
+    #
+    # Example:
+    #   let balance = STM.read {var = account}
+    #   match balance < amount is
+    #       True -> STM.retry {}  # Wait for more funds
+    #       False -> STM.write {var = account, val = balance - amount}
+    retry: {} -> 'a <STM>,
+
+    # Try first alternative, if it retries, run second
+    # Combines two STM computations with fallback semantics.
+    #
+    # Example:
+    #   STM.or_else {
+    #       primary = {} -> withdraw {from = checking, amount = 100},
+    #       fallback = {} -> withdraw {from = savings, amount = 100}
+    #   }
+    or_else: {primary: {} -> 'a <STM>, fallback: {} -> 'a <STM>} -> 'a <STM>,
+
+    # Retry if condition is false
+    # Equivalent to: match cond is True -> {} | False -> retry {}
+    #
+    # Example:
+    #   STM.check {cond = balance >= amount}
+    check: {cond: Bool} -> {} <STM>
+}
+
+# =============================================================================
+# OptimisticSTM Implementation - Default
+# =============================================================================
+#
+# Uses optimistic concurrency with MVCC and bloom filter conflict detection.
+# Transactions run in parallel and validate at commit time.
+# On conflict, transactions automatically retry with fresh data.
+#
+# Blocking operations (retry) use virtual threads to wait efficiently.
+#
+# Example:
+#   perform OptimisticSTM in do
+#       let balance = STM.read {var = account}
+#       STM.write {var = account, val = balance + deposit}
+
+pub impl STM for OptimisticSTM where {
+    read = {var} -> __native_stm_read {var = var},
+    write = {var, val} -> __native_stm_write {var = var, val = val},
+    modify = {var, f} -> __native_stm_modify {var = var, f = f},
+    swap = {var, val} -> __native_stm_swap {var = var, val = val},
+    ensure = {var} -> __native_stm_ensure {var = var},
+    retry = {} -> __native_stm_retry {},
+    or_else = {primary, fallback} -> __native_stm_or_else {primary = primary, fallback = fallback},
+    check = {cond} -> __native_stm_check {cond = cond}
+}
+
+# =============================================================================
+# OptimisticSTMWith Implementation - Configurable
+# =============================================================================
+#
+# Like OptimisticSTM but with tuning parameters.
+#
+# Parameters:
+#   max_retries: Maximum automatic retries before failing (0 = unlimited)
+#   spin_count: Spins before parking thread on retry (higher = more CPU, lower latency)
+#
+# Example:
+#   perform OptimisticSTMWith {max_retries = 100, spin_count = 10} in do
+#       STM.read {var = account}
+
+pub impl STM for OptimisticSTMWith { max_retries: Int, spin_count: Int } where {
+    read = {var} -> __native_stm_read_cfg {var = var, max_retries = max_retries, spin_count = spin_count},
+    write = {var, val} -> __native_stm_write_cfg {var = var, val = val, max_retries = max_retries, spin_count = spin_count},
+    modify = {var, f} -> __native_stm_modify_cfg {var = var, f = f, max_retries = max_retries, spin_count = spin_count},
+    swap = {var, val} -> __native_stm_swap_cfg {var = var, val = val, max_retries = max_retries, spin_count = spin_count},
+    ensure = {var} -> __native_stm_ensure_cfg {var = var, max_retries = max_retries, spin_count = spin_count},
+    retry = {} -> __native_stm_retry_cfg {max_retries = max_retries, spin_count = spin_count},
+    or_else = {primary, fallback} -> __native_stm_or_else_cfg {primary = primary, fallback = fallback, max_retries = max_retries, spin_count = spin_count},
+    check = {cond} -> __native_stm_check_cfg {cond = cond, max_retries = max_retries, spin_count = spin_count}
+}
+
+# =============================================================================
+# SequentialSTM Implementation - Single-Threaded
+# =============================================================================
+#
+# Executes transactions sequentially, no parallelism.
+# Useful for testing and debugging STM code.
+#
+# Example:
+#   perform SequentialSTM in do
+#       STM.read {var = account}
+
+pub impl STM for SequentialSTM where {
+    read = {var} -> __native_stm_seq_read {var = var},
+    write = {var, val} -> __native_stm_seq_write {var = var, val = val},
+    modify = {var, f} -> __native_stm_seq_modify {var = var, f = f},
+    swap = {var, val} -> __native_stm_seq_swap {var = var, val = val},
+    ensure = {var} -> __native_stm_seq_ensure {var = var},
+    retry = {} -> __native_stm_seq_retry {},
+    or_else = {primary, fallback} -> __native_stm_seq_or_else {primary = primary, fallback = fallback},
+    check = {cond} -> __native_stm_seq_check {cond = cond}
+}
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+# Run a transaction and return the result
+# Convenience wrapper that runs perform automatically
+#
+# Example:
+#   let balance = atomically {f = {} -> STM.read {var = account}}
+pub let atomically: {f: {} -> 'a <STM>} -> 'a =
+    {f} -> perform OptimisticSTM in f {}
+
+# Transfer amount from one TVar to another
+# Returns True if successful, False if insufficient funds
+#
+# Example:
+#   let success = transfer {from = alice, to = bob, amount = 100}
+pub let transfer: {from: TVar Int, to: TVar Int, amount: Int} -> Bool <STM> =
+    {from, to, amount} -> do
+        let from_balance = STM.read {var = from}
+        match from_balance >= amount is
+            True -> do
+                STM.write {var = from, val = from_balance - amount}
+                let to_balance = STM.read {var = to}
+                STM.write {var = to, val = to_balance + amount}
+                True
+            False -> False
+
+# Transfer or block until sufficient funds
+# Uses retry to wait for funds if insufficient
+#
+# Example:
+#   transfer_or_wait {from = alice, to = bob, amount = 100}
+pub let transfer_or_wait: {from: TVar Int, to: TVar Int, amount: Int} -> {} <STM> =
+    {from, to, amount} -> do
+        let from_balance = STM.read {var = from}
+        STM.check {cond = from_balance >= amount}
+        STM.write {var = from, val = from_balance - amount}
+        let to_balance = STM.read {var = to}
+        STM.write {var = to, val = to_balance + amount}
+
+# Read multiple TVars atomically, returns list
+pub let read_all: {vars: [TVar 'a]} -> ['a] <STM> =
+    {vars} -> __native_stm_read_all {vars = vars}
+
+# Write to multiple TVars atomically
+pub let write_all: {pairs: [{var: TVar 'a, val: 'a}]} -> {} <STM> =
+    {pairs} -> __native_stm_write_all {pairs = pairs}
