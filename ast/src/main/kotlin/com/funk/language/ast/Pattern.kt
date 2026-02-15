@@ -123,7 +123,11 @@ fun Pattern.isIrrefutable(): Boolean = when (this) {
     is RecordPattern -> entries.all { entry ->
         entry.pattern?.isIrrefutable() ?: true  // null pattern = shorthand binding, always irrefutable
     }
-    is ConstructorPattern -> false  // Variant constructors can fail to match
+    // Constructor patterns are considered irrefutable at parse time.
+    // For newtypes (single constructor), they ARE truly irrefutable.
+    // For variants (multiple constructors), the typechecker will catch refutable usage.
+    // This allows newtype destructuring in let bindings: let UserId {value = x} = expr
+    is ConstructorPattern -> recordPattern?.let { it.isIrrefutable() } ?: true
     is LiteralPattern -> false      // Literal values can fail to match
     is ArrayPattern -> false        // Array patterns can fail to match (length mismatch)
 }

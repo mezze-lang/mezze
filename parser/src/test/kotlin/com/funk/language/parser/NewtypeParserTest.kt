@@ -221,4 +221,45 @@ class NewtypeParserTest {
 
         println("✅ Newtype with effects in wrapped type parsed successfully!")
     }
+
+    @Test
+    fun `test newtype followed by impl declaration`() {
+        val source = """
+            newtype UserId = UserId Int
+
+            impl Encode Json UserId where {
+                encode = {val} -> "test"
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(2, program.items.size, "Expected 2 items: newtype and impl")
+
+        val typeDecl = program.items[0] as TypeDeclaration
+        assertEquals("UserId", typeDecl.name)
+
+        val implDecl = program.items[1] as ImplAbilityDeclaration
+        assertEquals("Encode", implDecl.abilityName)
+        assertEquals(2, implDecl.targetTypes.size)
+
+        println("✅ Newtype followed by impl declaration parsed successfully!")
+    }
+
+    @Test
+    fun `test newtype destructuring with constructor pattern in let`() {
+        // Test that let with a constructor pattern works for newtype destructuring
+        // This enables patterns like: let UserId {value = inner} = userId
+        val source = """
+            newtype UserId = UserId Int
+
+            impl Encode Json UserId where {
+                encode = {val} -> do
+                    let UserId {value = inner} = val
+                    inner
+            }
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(2, program.items.size, "Expected 2 items")
+    }
 }

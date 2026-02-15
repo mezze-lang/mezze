@@ -15,6 +15,7 @@ import com.funk.language.interpreter.FunkFloat
 import com.funk.language.interpreter.FunkString
 import com.funk.language.interpreter.FunkBool
 import com.funk.language.interpreter.FunkRecord
+import com.funk.language.interpreter.FunkVariant
 
 /**
  * Converts Funk AST nodes to optimized Truffle nodes
@@ -397,19 +398,59 @@ class ASTToTruffleConverter(
         // Create a mangled name using $ to prevent user namespace conflicts: "Show$Int"
         // Dollar signs are reserved for compiler/runtime use and cannot appear in user identifiers
         val targetTypeNames = impl.targetTypes.joinToString("$") { typeAnnotation ->
-            // Simple type name extraction - just use the type annotation's name
-            when (typeAnnotation) {
-                is IdentifierTypeAnnotation -> typeAnnotation.name
-                else -> typeAnnotation.toString()
-            }
+            getTypeAnnotationName(typeAnnotation)
         }
         val implName = "${impl.abilityName}\$$targetTypeNames"
 
         // Store the implementation record with the mangled name
         val slot = getOrCreateSlot(implName)
-        return SimpleWriteVariableNode(slot, recordNode, implName)
+
+        // CRITICAL: Also register the impl in globals so it can be looked up at runtime
+        // SimpleWriteVariableNode only writes to frame slots, but ability impls need global access
+        return object : FunkNode() {
+            @field:Child private var recordChild = recordNode
+
+            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
+                val value = recordChild.execute(frame)
+                // Write to frame slot
+                frame.setObject(slot, value)
+                // CRITICAL: Also register globally for ability impl lookup
+                val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
+                context.defineGlobal(implName, value)
+                return value
+            }
+        }
     }
-    
+
+    /**
+     * Get a stable, deterministic name for a type annotation.
+     * This must match the naming scheme used in SubstitutionApplier.getCodecImplName.
+     */
+    private fun getTypeAnnotationName(typeAnnotation: TypeAnnotation): String {
+        return when (typeAnnotation) {
+            is IdentifierTypeAnnotation -> typeAnnotation.name
+            is TypeApplicationAnnotation -> {
+                // For type applications like Option<Int> or Json (with no args)
+                if (typeAnnotation.args.isEmpty()) {
+                    typeAnnotation.constructor
+                } else {
+                    "${typeAnnotation.constructor}_${typeAnnotation.args.map { getTypeAnnotationName(it) }.joinToString("_")}"
+                }
+            }
+            is RecordTypeAnnotation -> {
+                // Create a deterministic name for record types: "Record_field1_field2_..."
+                val fieldNames = typeAnnotation.entries.map { it.name }.sorted().joinToString("_")
+                "Record_$fieldNames"
+            }
+            is VariantTypeAnnotation -> {
+                // Create a deterministic name for variant types: "Variant_Con1_Con2_..."
+                val constructorNames = typeAnnotation.constructors.map { it.name }.sorted().joinToString("_")
+                "Variant_$constructorNames"
+            }
+            else -> typeAnnotation.toString()
+        }
+    }
+
     /**
      * Convert a let binding to a Truffle node
      * Supports pattern destructuring for records
@@ -492,6 +533,94 @@ class ASTToTruffleConverter(
                 }
 
                 // Return empty record (unit value)
+                return FunkRecord(emptyMap())
+            }
+        }
+    }
+
+    /**
+     * Convert a constructor pattern binding (for newtype destructuring)
+     * Example: let UserId {value = inner} = expr
+     *
+     * This:
+     * 1. Evaluates the expression
+     * 2. Verifies the result is a variant with the expected constructor
+     * 3. Extracts the payload (which is a record)
+     * 4. Destructures the record according to the inner record pattern
+     */
+    private fun convertConstructorPatternBinding(pattern: ConstructorPattern, valueExpr: Expression): FunkNode {
+        val valueNode = convertExpression(valueExpr)
+        val constructorName = pattern.constructor
+        val recordPattern = pattern.recordPattern
+
+        // If there's no record pattern, we just need to verify the constructor matches
+        if (recordPattern == null) {
+            return object : FunkNode() {
+                @field:Child private var valueChild = valueNode
+
+                override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
+                    val value = valueChild.execute(frame)
+                    if (value !is FunkVariant) {
+                        throw RuntimeException("Cannot destructure non-variant value with constructor pattern: ${value::class.simpleName}")
+                    }
+                    if (value.constructor != constructorName) {
+                        throw RuntimeException("Constructor mismatch: expected $constructorName, got ${value.constructor}")
+                    }
+                    return FunkRecord(emptyMap())
+                }
+            }
+        }
+
+        // Collect all bindings from the record pattern
+        val bindings = collectRecordPatternBindings(recordPattern)
+
+        // Pre-allocate frame slots
+        val slots = bindings.map { (_, varName) ->
+            varName to getOrCreateSlot(varName)
+        }.toMap()
+
+        return object : FunkNode() {
+            @field:Child private var valueChild = valueNode
+
+            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
+                val value = valueChild.execute(frame)
+
+                // Verify it's the expected variant
+                if (value !is FunkVariant) {
+                    throw RuntimeException("Cannot destructure non-variant value with constructor pattern: ${value::class.simpleName}")
+                }
+                if (value.constructor != constructorName) {
+                    throw RuntimeException("Constructor mismatch: expected $constructorName, got ${value.constructor}")
+                }
+
+                // Extract the payload (should be a record)
+                val payload = value.value
+                if (payload !is FunkRecord) {
+                    throw RuntimeException("Variant payload is not a record: ${payload?.let { it::class.simpleName } ?: "null"}")
+                }
+
+                // Get context for defining local variables
+                val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
+
+                // Perform each binding
+                for ((fieldPath, varName) in bindings) {
+                    var currentValue: FunkValue = payload
+
+                    // Navigate the field path (for nested patterns)
+                    for (fieldName in fieldPath) {
+                        if (currentValue !is FunkRecord) {
+                            throw RuntimeException("Cannot access field '$fieldName' on non-record value: ${currentValue::class.simpleName}")
+                        }
+                        currentValue = currentValue.fields[fieldName]
+                            ?: throw RuntimeException("Field '$fieldName' not found in record")
+                    }
+
+                    // Bind the value to the variable in both frame and context
+                    val slot = slots[varName]!!
+                    frame.setObject(slot, currentValue)
+                    context.defineLocal(varName, currentValue)
+                }
+
                 return FunkRecord(emptyMap())
             }
         }
@@ -1918,6 +2047,9 @@ class ASTToTruffleConverter(
                     }
                     is RecordPattern -> {
                         convertRecordPatternBinding(pattern, stmt.expression)
+                    }
+                    is ConstructorPattern -> {
+                        convertConstructorPatternBinding(pattern, stmt.expression)
                     }
                     is WildcardPattern -> {
                         convertExpression(stmt.expression)

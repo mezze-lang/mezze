@@ -24,11 +24,13 @@ import com.funk.language.parser.internal.lib.*
  */
 
 // Let binding pattern parser (for irrefutable patterns in let bindings)
+// Includes constructor patterns to support newtype destructuring like: let UserId {value = x} = expr
 internal val FunkParser.letBindingPattern: Parser<Pattern>
     get() = { stream ->
         Parsers.oneOf(
             wildcardPattern,
             standaloneRecordPattern,
+            constructorPattern,  // Support constructor patterns for newtype destructuring
             variablePatternForLet
         )(stream)
     }

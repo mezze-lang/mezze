@@ -155,6 +155,10 @@ class ParallelDoExpressionNode(
                             // For now, duplicate the logic
                             convertRecordPatternBindingHelper(converter, pattern, statement.expression)
                         }
+                        is com.funk.language.ast.ConstructorPattern -> {
+                            // Constructor pattern for newtype destructuring
+                            convertConstructorPatternBindingHelper(converter, pattern, statement.expression)
+                        }
                         is com.funk.language.ast.WildcardPattern -> {
                             converter.convertExpression(statement.expression)
                         }
@@ -239,6 +243,83 @@ class ParallelDoExpressionNode(
             }
 
             return bindings
+        }
+
+        /**
+         * Helper to convert constructor pattern bindings (for newtype destructuring)
+         */
+        fun convertConstructorPatternBindingHelper(
+            converter: com.funk.language.interpreter.nodes.ASTToTruffleConverter,
+            pattern: com.funk.language.ast.ConstructorPattern,
+            valueExpr: com.funk.language.ast.Expression
+        ): FunkNode {
+            val valueNode = converter.convertExpression(valueExpr)
+            val constructorName = pattern.constructor
+            val recordPattern = pattern.recordPattern
+
+            // If there's no record pattern, just verify the constructor matches
+            if (recordPattern == null) {
+                return object : FunkNode() {
+                    @field:Child private var valueChild = valueNode
+
+                    override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): com.funk.language.interpreter.FunkValue {
+                        val value = valueChild.execute(frame)
+                        if (value !is com.funk.language.interpreter.FunkVariant) {
+                            throw RuntimeException("Cannot destructure non-variant value: ${value::class.simpleName}")
+                        }
+                        if (value.constructor != constructorName) {
+                            throw RuntimeException("Constructor mismatch: expected $constructorName, got ${value.constructor}")
+                        }
+                        return com.funk.language.interpreter.FunkRecord(emptyMap())
+                    }
+                }
+            }
+
+            // Collect bindings and pre-allocate slots
+            val bindings = collectRecordPatternBindingsHelper(recordPattern)
+            val slots = bindings.map { (_, varName) ->
+                varName to converter.getOrCreateSlot(varName)
+            }.toMap()
+
+            return object : FunkNode() {
+                @field:Child private var valueChild = valueNode
+
+                override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): com.funk.language.interpreter.FunkValue {
+                    val value = valueChild.execute(frame)
+
+                    if (value !is com.funk.language.interpreter.FunkVariant) {
+                        throw RuntimeException("Cannot destructure non-variant value: ${value::class.simpleName}")
+                    }
+                    if (value.constructor != constructorName) {
+                        throw RuntimeException("Constructor mismatch: expected $constructorName, got ${value.constructor}")
+                    }
+
+                    val payload = value.value
+                    if (payload !is com.funk.language.interpreter.FunkRecord) {
+                        throw RuntimeException("Variant payload is not a record: ${payload?.let { it::class.simpleName } ?: "null"}")
+                    }
+
+                    val context = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
+
+                    for ((fieldPath, varName) in bindings) {
+                        var currentValue: com.funk.language.interpreter.FunkValue = payload
+
+                        for (fieldName in fieldPath) {
+                            if (currentValue !is com.funk.language.interpreter.FunkRecord) {
+                                throw RuntimeException("Cannot access field '$fieldName' on non-record value")
+                            }
+                            currentValue = currentValue.fields[fieldName]
+                                ?: throw RuntimeException("Field '$fieldName' not found in record")
+                        }
+
+                        val slot = slots[varName]!!
+                        frame.setObject(slot, currentValue)
+                        context.defineLocal(varName, currentValue)
+                    }
+
+                    return com.funk.language.interpreter.FunkRecord(emptyMap())
+                }
+            }
         }
     }
 }
