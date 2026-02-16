@@ -966,6 +966,12 @@ class ConstraintSolver(
             return false
         }
 
+        // Check if the types contain any unresolved type variables
+        // We can't generate code for unknown types
+        if (containsVarType(formatType) || containsVarType(dataType)) {
+            return false
+        }
+
         // Build the impl key
         val formatName = getTypeName(formatType)
         val dataName = getTypeName(dataType)
@@ -988,6 +994,26 @@ class ConstraintSolver(
         // Store the generated impl
         generatedCodecImpls[implKey] = generatedImpl
         return true
+    }
+
+    /**
+     * Check if a type contains any unresolved type variables.
+     */
+    private fun containsVarType(type: FunkType): Boolean {
+        return when (type) {
+            is FunkType.VarType -> true
+            is FunkType.RecordType -> type.fields.values.any { containsVarType(it) }
+            is FunkType.VariantType -> type.constructors.values.any { it != null && containsVarType(it) }
+            is FunkType.ListType -> containsVarType(type.elementType)
+            is FunkType.ArrayType -> containsVarType(type.elementType)
+            is FunkType.SetType -> containsVarType(type.elementType)
+            is FunkType.SortedSetType -> containsVarType(type.elementType)
+            is FunkType.MapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
+            is FunkType.SortedMapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
+            is FunkType.TypeApplication -> type.args.any { containsVarType(it) }
+            is FunkType.FunctionType -> containsVarType(type.paramType) || containsVarType(type.returnType)
+            else -> false
+        }
     }
 
     /**
@@ -1129,6 +1155,31 @@ class ConstraintSolver(
             "Default" -> "No default value for $typeNames. To enable this, implement: impl Default $primaryType where { ... }"
             "Parse" -> "Cannot parse into $typeNames. To enable this, implement: impl Parse $primaryType where { ... }"
             "Convert" -> "Cannot convert between the given types. To enable this, implement: impl Convert $typeNames where { ... }"
+            "Decode" -> {
+                // Special handling for Decode - check if the data type is a type variable
+                val dataType = typeArgs.getOrNull(1)
+                if (dataType is FunkType.VarType) {
+                    """Cannot infer decode target type for Decode.decode call.
+  The result type 'a in Result 'a DecodeError could not be determined from context.
+
+  Hint: Add a type annotation to specify the expected type:
+    let person: {name: String, age: Int} = json::decode {val = json}
+
+  Or use the result in a way that constrains its type:
+    let person = json::decode {val = json}
+    person.name  # This would constrain person to have a 'name' field"""
+                } else {
+                    "Cannot decode $typeNames. Ensure the format implements DecodeFormat and the data type is serializable."
+                }
+            }
+            "Encode" -> {
+                val dataType = typeArgs.getOrNull(1)
+                if (dataType is FunkType.VarType) {
+                    "Cannot infer encode source type for Encode.encode call. Add a type annotation to the value being encoded."
+                } else {
+                    "Cannot encode $typeNames. Ensure the format implements EncodeFormat and the data type is serializable."
+                }
+            }
             else -> "$typeNames does not implement '$abilityName'. To enable this, implement: impl $abilityName $primaryType where { ... }"
         }
     }
@@ -1212,11 +1263,46 @@ class ConstraintSolver(
      * When we have an ability constraint with some concrete types and some type variables,
      * we can look for matching implementations and infer the type variables.
      *
+     * Special handling for Decode:
+     * - For Decode Json 'a, we look at generated impls to find matching types
+     * - If only one impl exists for the given format, we can infer the data type
+     *
      * @param abilityName The ability name (e.g., "NumAdd")
      * @param typeArgs The type arguments (may contain type variables)
      * @return Substitution binding type variables to concrete types, or null if inference failed
      */
     private fun tryBidirectionalInference(abilityName: String, typeArgs: List<FunkType>): Substitution? {
+        // Special handling for Decode with concrete format but unknown data type
+        // This enables: let person = json::decode {val = json_data}
+        // where the result type is inferred from downstream usage
+        if (abilityName == "Decode" && typeArgs.size == 2) {
+            val formatType = typeArgs[0]
+            val dataType = typeArgs[1]
+
+            // If format is concrete and data is a type variable, try to infer from generated impls
+            if (formatType !is FunkType.VarType && dataType is FunkType.VarType) {
+                val formatTypeName = getTypeName(formatType)
+
+                // Look for generated Decode impls for this format
+                val matchingImpls = generatedCodecImpls.filter { (key, _) ->
+                    key.startsWith("Decode_${formatTypeName}_")
+                }
+
+                if (matchingImpls.size == 1) {
+                    // Exactly one impl - we can infer the data type!
+                    val (implKey, impl) = matchingImpls.entries.first()
+                    val dataTypeName = implKey.removePrefix("Decode_${formatTypeName}_")
+                    val inferredType = parseTypeName(dataTypeName)
+
+                    if (inferredType != null) {
+                        return Substitution.single(dataType.variable, inferredType)
+                    }
+                }
+                // Multiple impls or none found - cannot infer unambiguously
+                // This will result in an error asking for type annotation
+            }
+        }
+
         // Get all implementations for this ability from the context
         val allImpls = context.getAbilityImpls(abilityName)
 
@@ -1290,17 +1376,133 @@ class ConstraintSolver(
     /**
      * Parse a type name string back to a FunkType.
      * Used for bidirectional inference.
+     *
+     * Supports:
+     * - Primitive types: Int, Float, String, Bool, etc.
+     * - Record types: Record_field1_field2 (field types looked up from impls)
+     * - List/Array/Set: List_ElementType, Array_ElementType, etc.
+     * - Map: Map_KeyType_ValueType
+     * - Option/Result: Option_InnerType, Result_OkType_ErrType
      */
     private fun parseTypeName(typeName: String): FunkType? {
-        return when (typeName) {
-            "Int" -> FunkType.IntType
-            "Float" -> FunkType.FloatType
-            "String" -> FunkType.StringType
-            "Bool" -> FunkType.BooleanType
-            "Nat" -> FunkType.NatType
-            "Frac" -> FunkType.FracType
-            "Ordering" -> FunkType.OrderingType
-            else -> null  // For now, only handle primitive types
+        return when {
+            typeName == "Int" -> FunkType.IntType
+            typeName == "Float" -> FunkType.FloatType
+            typeName == "String" -> FunkType.StringType
+            typeName == "Bool" -> FunkType.BooleanType
+            typeName == "Nat" -> FunkType.NatType
+            typeName == "Frac" -> FunkType.FracType
+            typeName == "Ordering" -> FunkType.OrderingType
+            typeName == "Bytes" -> FunkType.BytesType
+            typeName == "Char" -> FunkType.CharType
+
+            // Record types: Record_age_name -> look up the impl for field types
+            typeName.startsWith("Record_") -> parseRecordTypeName(typeName)
+
+            // List types: List_Int -> List[Int]
+            typeName.startsWith("List_") -> {
+                val elementTypeName = typeName.removePrefix("List_")
+                parseTypeName(elementTypeName)?.let { FunkType.ListType(it) }
+            }
+
+            // Array types: Array_Int -> Array[Int]
+            typeName.startsWith("Array_") -> {
+                val elementTypeName = typeName.removePrefix("Array_")
+                parseTypeName(elementTypeName)?.let { FunkType.ArrayType(it) }
+            }
+
+            // Set types: Set_Int -> Set[Int]
+            typeName.startsWith("Set_") -> {
+                val elementTypeName = typeName.removePrefix("Set_")
+                parseTypeName(elementTypeName)?.let { FunkType.SetType(it) }
+            }
+
+            // Option types: Option_Int -> Option[Int]
+            typeName.startsWith("Option_") -> {
+                val innerTypeName = typeName.removePrefix("Option_")
+                parseTypeName(innerTypeName)?.let {
+                    FunkType.TypeApplication("Option", listOf(it))
+                }
+            }
+
+            // Type applications (like Json, Person, etc.)
+            else -> {
+                // Check if this is a known type alias in type declarations
+                if (typeDeclarations.containsKey(typeName)) {
+                    FunkType.TypeApplication(typeName, emptyList())
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
+    /**
+     * Parse a record type name like "Record_age_name" back to a record type.
+     *
+     * We look up the generated Decode impl to find the actual field types.
+     * The impl key format is: "Decode_FormatType_Record_field1_field2"
+     */
+    private fun parseRecordTypeName(typeName: String): FunkType.RecordType? {
+        // Extract field names from the type name
+        val fieldPart = typeName.removePrefix("Record_")
+        if (fieldPart.isEmpty()) {
+            return FunkType.RecordType(emptyMap())
+        }
+
+        // Look for a generated impl that matches this record type
+        // We need to find the data type (second type arg) for any Decode impl with this pattern
+        for ((implKey, impl) in generatedCodecImpls) {
+            if (implKey.contains("_$typeName") && implKey.startsWith("Decode_")) {
+                // Found a matching impl - extract the data type from the target types
+                val dataTypeAnnotation = impl.targetTypes.getOrNull(1)
+                if (dataTypeAnnotation is RecordTypeAnnotation) {
+                    // Convert the annotation back to FunkType.RecordType
+                    val fields = dataTypeAnnotation.entries.associate { entry ->
+                        entry.name to annotationToFunkType(entry.type)
+                    }.filterValues { it != null }.mapValues { it.value!! }
+                    return FunkType.RecordType(fields)
+                }
+            }
+        }
+
+        // If no impl found, we can't reconstruct the field types
+        // Return null to indicate inference failed
+        return null
+    }
+
+    /**
+     * Convert a TypeAnnotation back to a FunkType.
+     * Used for extracting types from generated impls during bidirectional inference.
+     */
+    private fun annotationToFunkType(annotation: TypeAnnotation): FunkType? {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> when (annotation.name) {
+                "Int" -> FunkType.IntType
+                "Float" -> FunkType.FloatType
+                "String" -> FunkType.StringType
+                "Bool" -> FunkType.BooleanType
+                "Nat" -> FunkType.NatType
+                "Frac" -> FunkType.FracType
+                "Char" -> FunkType.CharType
+                "Ordering" -> FunkType.OrderingType
+                "Bytes" -> FunkType.BytesType
+                else -> FunkType.TypeApplication(annotation.name, emptyList())
+            }
+            is RecordTypeAnnotation -> {
+                val fields = annotation.entries.associate { entry ->
+                    entry.name to annotationToFunkType(entry.type)
+                }.filterValues { it != null }.mapValues { it.value!! }
+                FunkType.RecordType(fields)
+            }
+            is TypeApplicationAnnotation -> {
+                val args = annotation.args.mapNotNull { annotationToFunkType(it) }
+                FunkType.TypeApplication(annotation.constructor, args)
+            }
+            is ArrayTypeAnnotation -> {
+                annotationToFunkType(annotation.elementType)?.let { FunkType.ArrayType(it) }
+            }
+            else -> null
         }
     }
 
@@ -1788,19 +1990,27 @@ class ConstraintSolver(
                                     )
                                 }
                                 "Option" -> {
+                                    // For built-in Option, we need to return a TypeApplication
+                                    // to match the type annotation form (Option Int)
                                     val valTypeVar = FunkType.VarType(TypeVar.fresh())
-                                    FunkType.VariantType(
-                                        constructors = mapOf(
-                                            "Some" to FunkType.RecordType(mapOf("val" to valTypeVar)),
-                                            "None" to null
-                                        ),
-                                        rowVar = null  // Closed
+
+                                    // If there's an expected payload, extract the val type from it
+                                    val innerType = if (expectedPayloadType != null && expectedPayloadType is FunkType.RecordType) {
+                                        expectedPayloadType.fields["val"] ?: valTypeVar
+                                    } else {
+                                        valTypeVar
+                                    }
+
+                                    // Return TypeApplication to match Option Int form
+                                    val optionType = FunkType.TypeApplication("Option", listOf(innerType))
+                                    return ConstraintResult.Success(
+                                        Substitution.single(variantType.variable, optionType)
                                     )
                                 }
                                 else -> null
                             }
 
-                            if (resultVariant != null) {
+                            if (resultVariant != null && resultVariant is FunkType.VariantType) {
                                 var resultSubst = Substitution.single(variantType.variable, resultVariant)
 
                                 // Unify the expected payload type with the declared constructor's payload type

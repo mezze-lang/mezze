@@ -555,6 +555,24 @@ object BasicTypes {
             FunkType.StringType
         )
 
+        // Case conversion functions (for codec field transforms)
+        context["__native_string_to_snake_case"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("s" to FunkType.StringType)),
+            FunkType.StringType
+        )
+        context["__native_string_to_camel_case"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("s" to FunkType.StringType)),
+            FunkType.StringType
+        )
+        context["__native_string_to_kebab_case"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("s" to FunkType.StringType)),
+            FunkType.StringType
+        )
+        context["__native_string_to_screaming_snake_case"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf("s" to FunkType.StringType)),
+            FunkType.StringType
+        )
+
         // Module-qualified functions for string
         context["string::concat"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("l" to FunkType.StringType, "r" to FunkType.StringType)),

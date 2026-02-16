@@ -101,6 +101,42 @@ class CodecGenerator {
     }
 
     /**
+     * Generate a normalized cache key for a type.
+     * This ensures that record types with different field orders produce the same key.
+     */
+    private fun normalizedCacheKey(formatType: FunkType, dataType: FunkType): String {
+        val normalizedData = normalizeType(dataType)
+        return "${normalizeType(formatType)}_$normalizedData"
+    }
+
+    /**
+     * Normalize a type for consistent cache key generation.
+     * Record fields are sorted alphabetically.
+     */
+    private fun normalizeType(type: FunkType): String {
+        return when (type) {
+            is FunkType.RecordType -> {
+                val sortedFields = type.fields.entries.sortedBy { it.key }
+                    .joinToString(",") { "${it.key}:${normalizeType(it.value)}" }
+                "{$sortedFields}"
+            }
+            is FunkType.VariantType -> {
+                val sortedCtors = type.constructors.entries.sortedBy { it.key }
+                    .joinToString(",") { "${it.key}:${it.value?.let { v -> normalizeType(v) } ?: "()"}" }
+                "|$sortedCtors|"
+            }
+            is FunkType.ListType -> "List[${normalizeType(type.elementType)}]"
+            is FunkType.ArrayType -> "Array[${normalizeType(type.elementType)}]"
+            is FunkType.SetType -> "Set[${normalizeType(type.elementType)}]"
+            is FunkType.SortedSetType -> "SortedSet[${normalizeType(type.elementType)}]"
+            is FunkType.MapType -> "Map[${normalizeType(type.keyType)},${normalizeType(type.valueType)}]"
+            is FunkType.SortedMapType -> "SortedMap[${normalizeType(type.keyType)},${normalizeType(type.valueType)}]"
+            is FunkType.TypeApplication -> "${type.constructor}[${type.args.joinToString(",") { normalizeType(it) }}]"
+            else -> type.toString()
+        }
+    }
+
+    /**
      * Generate an Encode implementation for the given format and data type.
      *
      * @param formatType The format type (e.g., Json, Csv)
@@ -108,26 +144,38 @@ class CodecGenerator {
      * @return The generated ImplAbilityDeclaration
      */
     fun generateEncodeImpl(formatType: FunkType, dataType: FunkType): ImplAbilityDeclaration {
-        val cacheKey = "${formatType}_${dataType}"
+        val cacheKey = normalizedCacheKey(formatType, dataType)
         encodeCache[cacheKey]?.let { return it }
 
-        val impl = when (dataType) {
-            is FunkType.IntType -> generatePrimitiveEncode(formatType, dataType, "encode_int", "value")
-            is FunkType.FloatType -> generatePrimitiveEncode(formatType, dataType, "encode_float", "value")
-            is FunkType.StringType -> generatePrimitiveEncode(formatType, dataType, "encode_string", "value")
-            is FunkType.BooleanType -> generatePrimitiveEncode(formatType, dataType, "encode_bool", "value")
-            is FunkType.NatType -> generateNatEncode(formatType)
-            is FunkType.FracType -> generatePrimitiveEncode(formatType, dataType, "encode_frac", "value")
-            is FunkType.CharType -> generateCharEncode(formatType)
-            is FunkType.RecordType -> generateRecordEncode(formatType, dataType)
-            is FunkType.VariantType -> generateVariantEncode(formatType, dataType)
-            is FunkType.ListType -> generateListEncode(formatType, dataType)
-            is FunkType.ArrayType -> generateArrayEncode(formatType, dataType)
-            is FunkType.SetType -> generateSetEncode(formatType, dataType)
-            is FunkType.SortedSetType -> generateSortedSetEncode(formatType, dataType)
-            is FunkType.MapType -> generateMapEncode(formatType, dataType)
-            is FunkType.SortedMapType -> generateSortedMapEncode(formatType, dataType)
-            is FunkType.TypeApplication -> generateTypeApplicationEncode(formatType, dataType)
+        val impl = when {
+            // Primitives
+            dataType is FunkType.IntType -> generatePrimitiveEncode(formatType, dataType, "encode_int", "val")
+            dataType is FunkType.FloatType -> generatePrimitiveEncode(formatType, dataType, "encode_float", "val")
+            dataType is FunkType.StringType -> generatePrimitiveEncode(formatType, dataType, "encode_string", "val")
+            dataType is FunkType.BooleanType -> generatePrimitiveEncode(formatType, dataType, "encode_bool", "val")
+            dataType is FunkType.NatType -> generateNatEncode(formatType)
+            dataType is FunkType.FracType -> generatePrimitiveEncode(formatType, dataType, "encode_frac", "val")
+            dataType is FunkType.CharType -> generateCharEncode(formatType)
+
+            // CRITICAL: Check for Bool variant pattern BEFORE generic variant handling
+            // Bool is internally represented as VariantType({True -> null, False -> null})
+            isBoolVariant(dataType) -> generateBoolEncode(formatType)
+
+            // Records and variants
+            dataType is FunkType.RecordType -> generateRecordEncode(formatType, dataType)
+            dataType is FunkType.VariantType -> generateVariantEncode(formatType, dataType)
+
+            // Collections
+            dataType is FunkType.ListType -> generateListEncode(formatType, dataType)
+            dataType is FunkType.ArrayType -> generateArrayEncode(formatType, dataType)
+            dataType is FunkType.SetType -> generateSetEncode(formatType, dataType)
+            dataType is FunkType.SortedSetType -> generateSortedSetEncode(formatType, dataType)
+            dataType is FunkType.MapType -> generateMapEncode(formatType, dataType)
+            dataType is FunkType.SortedMapType -> generateSortedMapEncode(formatType, dataType)
+
+            // Type applications (Option, Result, etc.)
+            dataType is FunkType.TypeApplication -> generateTypeApplicationEncode(formatType, dataType)
+
             else -> throw IllegalArgumentException("Cannot generate Encode for type: $dataType")
         }
 
@@ -136,34 +184,87 @@ class CodecGenerator {
     }
 
     /**
+     * Check if a type is the Bool variant pattern: | True, False |
+     */
+    private fun isBoolVariant(type: FunkType): Boolean {
+        return type is FunkType.VariantType &&
+               type.constructors.keys == setOf("True", "False") &&
+               type.constructors["True"] == null &&
+               type.constructors["False"] == null
+    }
+
+    /**
+     * Generate encode for Bool (which is internally a variant | True, False |).
+     * Uses encode_bool hook which expects a Bool value.
+     */
+    private fun generateBoolEncode(formatType: FunkType): ImplAbilityDeclaration {
+        // Convert the variant to a Bool value using pattern matching, then encode
+        val body = call(
+            member(encodeFormatImpl(formatType), "encode_bool"),
+            record("val" to id("val"), "path" to id("path"))
+        )
+        // Use BooleanType for the impl to ensure proper dispatch
+        return createEncodeImpl(formatType, FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        ), body)
+    }
+
+    /**
      * Generate a Decode implementation for the given format and data type.
      */
     fun generateDecodeImpl(formatType: FunkType, dataType: FunkType): ImplAbilityDeclaration {
-        val cacheKey = "${formatType}_${dataType}"
+        val cacheKey = normalizedCacheKey(formatType, dataType)
         decodeCache[cacheKey]?.let { return it }
 
-        val impl = when (dataType) {
-            is FunkType.IntType -> generatePrimitiveDecode(formatType, dataType, "decode_int")
-            is FunkType.FloatType -> generatePrimitiveDecode(formatType, dataType, "decode_float")
-            is FunkType.StringType -> generatePrimitiveDecode(formatType, dataType, "decode_string")
-            is FunkType.BooleanType -> generatePrimitiveDecode(formatType, dataType, "decode_bool")
-            is FunkType.NatType -> generateNatDecode(formatType)
-            is FunkType.FracType -> generatePrimitiveDecode(formatType, dataType, "decode_frac")
-            is FunkType.CharType -> generateCharDecode(formatType)
-            is FunkType.RecordType -> generateRecordDecode(formatType, dataType)
-            is FunkType.VariantType -> generateVariantDecode(formatType, dataType)
-            is FunkType.ListType -> generateListDecode(formatType, dataType)
-            is FunkType.ArrayType -> generateArrayDecode(formatType, dataType)
-            is FunkType.SetType -> generateSetDecode(formatType, dataType)
-            is FunkType.SortedSetType -> generateSortedSetDecode(formatType, dataType)
-            is FunkType.MapType -> generateMapDecode(formatType, dataType)
-            is FunkType.SortedMapType -> generateSortedMapDecode(formatType, dataType)
-            is FunkType.TypeApplication -> generateTypeApplicationDecode(formatType, dataType)
+        val impl = when {
+            // Primitives
+            dataType is FunkType.IntType -> generatePrimitiveDecode(formatType, dataType, "decode_int")
+            dataType is FunkType.FloatType -> generatePrimitiveDecode(formatType, dataType, "decode_float")
+            dataType is FunkType.StringType -> generatePrimitiveDecode(formatType, dataType, "decode_string")
+            dataType is FunkType.BooleanType -> generatePrimitiveDecode(formatType, dataType, "decode_bool")
+            dataType is FunkType.NatType -> generateNatDecode(formatType)
+            dataType is FunkType.FracType -> generatePrimitiveDecode(formatType, dataType, "decode_frac")
+            dataType is FunkType.CharType -> generateCharDecode(formatType)
+
+            // CRITICAL: Check for Bool variant pattern BEFORE generic variant handling
+            isBoolVariant(dataType) -> generateBoolDecode(formatType)
+
+            // Records and variants
+            dataType is FunkType.RecordType -> generateRecordDecode(formatType, dataType)
+            dataType is FunkType.VariantType -> generateVariantDecode(formatType, dataType)
+
+            // Collections
+            dataType is FunkType.ListType -> generateListDecode(formatType, dataType)
+            dataType is FunkType.ArrayType -> generateArrayDecode(formatType, dataType)
+            dataType is FunkType.SetType -> generateSetDecode(formatType, dataType)
+            dataType is FunkType.SortedSetType -> generateSortedSetDecode(formatType, dataType)
+            dataType is FunkType.MapType -> generateMapDecode(formatType, dataType)
+            dataType is FunkType.SortedMapType -> generateSortedMapDecode(formatType, dataType)
+
+            // Type applications (Option, Result, etc.)
+            dataType is FunkType.TypeApplication -> generateTypeApplicationDecode(formatType, dataType)
+
             else -> throw IllegalArgumentException("Cannot generate Decode for type: $dataType")
         }
 
         decodeCache[cacheKey] = impl
         return impl
+    }
+
+    /**
+     * Generate decode for Bool (which is internally a variant | True, False |).
+     * Uses decode_bool hook which returns a Bool value.
+     */
+    private fun generateBoolDecode(formatType: FunkType): ImplAbilityDeclaration {
+        val body = call(
+            member(decodeFormatImpl(formatType), "decode_bool"),
+            record("val" to id("val"), "path" to id("path"))
+        )
+        return createDecodeImpl(formatType, FunkType.VariantType(
+            constructors = mapOf("True" to null, "False" to null),
+            rowVar = null
+        ), body)
     }
 
     // ========================================================================
@@ -235,9 +336,31 @@ class CodecGenerator {
         )
     }
 
+    /** Create a do expression with a let statement followed by a result */
+    private fun doWithLet(varName: String, varValue: Expression, result: Expression): DoExpression {
+        return DoExpression(
+            statements = listOf(
+                LetStatement(
+                    pattern = VariablePattern(name = varName),
+                    typeAnnotation = null,
+                    expression = varValue
+                )
+            ),
+            result = result
+        )
+    }
+
     /** Create an array literal from expressions */
     private fun array(elements: List<Expression>): ArrayLiteral {
         return ArrayLiteral(elements = elements.map { ArrayRegularElement(it) })
+    }
+
+    /** Create a list from an array expression using __native_list_from_array */
+    private fun listFromArray(elements: List<Expression>): Expression {
+        return call(
+            id("__native_list_from_array"),
+            record("xs" to array(elements))
+        )
     }
 
     /** Create Ok variant */
@@ -280,19 +403,86 @@ class CodecGenerator {
         return constructorPat("None", null)
     }
 
-    /** Call codec::append_path */
+    /** Get the format name from a format type (e.g., Json from TypeApplication("Json")) */
+    private fun getFormatName(formatType: FunkType): String {
+        return when (formatType) {
+            is FunkType.TypeApplication -> formatType.constructor
+            is FunkType.VarType -> formatType.variable.name
+            else -> formatType.toString()
+        }
+    }
+
+    /** Get the EncodeFormat impl record identifier for a format type */
+    private fun encodeFormatImpl(formatType: FunkType): Identifier {
+        val formatName = getFormatName(formatType)
+        return id("EncodeFormat\$$formatName")
+    }
+
+    /** Get the DecodeFormat impl record identifier for a format type */
+    private fun decodeFormatImpl(formatType: FunkType): Identifier {
+        val formatName = getFormatName(formatType)
+        return id("DecodeFormat\$$formatName")
+    }
+
+    /** Get the StreamEncodeFormat impl record identifier for a format type */
+    private fun streamEncodeFormatImpl(formatType: FunkType): Identifier {
+        val formatName = getFormatName(formatType)
+        return id("StreamEncodeFormat\$$formatName")
+    }
+
+    /** Get the StreamDecodeFormat impl record identifier for a format type */
+    private fun streamDecodeFormatImpl(formatType: FunkType): Identifier {
+        val formatName = getFormatName(formatType)
+        return id("StreamDecodeFormat\$$formatName")
+    }
+
+    /** Call append_path using native list operations directly */
     private fun appendPath(pathExpr: Expression, fieldName: String): Expression {
+        // Use native functions since they're always available
+        // Inline: __native_list_append {xs = path, ys = __native_list_cons {head = field, tail = __native_list_empty {}}}
         return call(
-            member(id("codec"), "append_path"),
-            record("path" to pathExpr, "field" to str(fieldName))
+            id("__native_list_append"),
+            record(
+                "xs" to pathExpr,
+                "ys" to call(
+                    id("__native_list_cons"),
+                    record("head" to str(fieldName), "tail" to call(id("__native_list_empty"), record()))
+                )
+            )
         )
     }
 
-    /** Call codec::append_index */
-    private fun appendIndex(pathExpr: Expression, indexExpr: Expression): Expression {
+    /** Transform a field name using EncodeFormat.transform_field (e.g., camelCase -> snake_case) */
+    private fun transformFieldName(formatType: FunkType, fieldName: String, configExpr: Expression = id("config")): Expression {
         return call(
-            member(id("codec"), "append_index"),
-            record("path" to pathExpr, "index" to indexExpr)
+            member(encodeFormatImpl(formatType), "transform_field"),
+            record("name" to str(fieldName), "config" to configExpr)
+        )
+    }
+
+    /** Transform a field name for decoding using DecodeFormat.transform_field (e.g., snake_case -> camelCase) */
+    private fun transformFieldNameForDecode(formatType: FunkType, fieldName: String, configExpr: Expression = id("config")): Expression {
+        return call(
+            member(decodeFormatImpl(formatType), "transform_field"),
+            record("name" to str(fieldName), "config" to configExpr)
+        )
+    }
+
+    /** Call append_index using native list operations directly */
+    private fun appendIndex(pathExpr: Expression, indexExpr: Expression): Expression {
+        // Use native functions since they're always available
+        return call(
+            id("__native_list_append"),
+            record(
+                "xs" to pathExpr,
+                "ys" to call(
+                    id("__native_list_cons"),
+                    record(
+                        "head" to call(id("__native_int_to_string"), record("n" to indexExpr)),
+                        "tail" to call(id("__native_list_empty"), record())
+                    )
+                )
+            )
         )
     }
 
@@ -310,8 +500,8 @@ class CodecGenerator {
         paramName: String
     ): ImplAbilityDeclaration {
         val body = call(
-            member(id("EncodeFormat"), hookName),
-            record(paramName to id("value"), "path" to id("path"))
+            member(encodeFormatImpl(formatType), hookName),
+            record(paramName to id("val"), "path" to id("path"))
         )
         return createEncodeImpl(formatType, dataType, body)
     }
@@ -321,12 +511,12 @@ class CodecGenerator {
      */
     private fun generateNatEncode(formatType: FunkType): ImplAbilityDeclaration {
         val toIntCall = call(
-            member(id("nat"), "to_int"),
-            record("n" to id("value"))
+            id("__native_nat_to_int"),
+            record("n" to id("val"))
         )
         val body = call(
-            member(id("EncodeFormat"), "encode_int"),
-            record("value" to toIntCall, "path" to id("path"))
+            member(encodeFormatImpl(formatType), "encode_int"),
+            record("val" to toIntCall, "path" to id("path"))
         )
         return createEncodeImpl(formatType, FunkType.NatType, body)
     }
@@ -336,12 +526,12 @@ class CodecGenerator {
      */
     private fun generateCharEncode(formatType: FunkType): ImplAbilityDeclaration {
         val toStringCall = call(
-            member(id("char"), "to_string"),
-            record("c" to id("value"))
+            id("__native_char_to_string"),
+            record("c" to id("val"))
         )
         val body = call(
-            member(id("EncodeFormat"), "encode_string"),
-            record("value" to toStringCall, "path" to id("path"))
+            member(encodeFormatImpl(formatType), "encode_string"),
+            record("val" to toStringCall, "path" to id("path"))
         )
         return createEncodeImpl(formatType, FunkType.CharType, body)
     }
@@ -354,27 +544,30 @@ class CodecGenerator {
 
         if (fields.isEmpty()) {
             val body = call(
-                member(id("EncodeFormat"), "encode_record"),
+                member(encodeFormatImpl(formatType), "encode_record"),
                 record("fields" to array(emptyList()), "path" to id("path"))
             )
             return createEncodeImpl(formatType, recordType, body)
         }
 
-        val body = buildRecordEncodeBody(fields)
+        val body = buildRecordEncodeBody(formatType, fields)
         return createEncodeImpl(formatType, recordType, body)
     }
 
     /**
      * Build the body for record encoding with Result handling.
      */
-    private fun buildRecordEncodeBody(fields: List<Map.Entry<String, FunkType>>): Expression {
+    private fun buildRecordEncodeBody(formatType: FunkType, fields: List<Map.Entry<String, FunkType>>): Expression {
         // Final expression: encode_record call
+        // Field names are transformed via EncodeFormat.transform_field (e.g., camelCase -> snake_case)
+        // NOTE: Entry type uses "key" and "value" fields (not "val")
+        // NOTE: JObject.fields is now Array, so we use array literals directly
         var resultExpr: Expression = call(
-            member(id("EncodeFormat"), "encode_record"),
+            member(encodeFormatImpl(formatType), "encode_record"),
             record(
                 "fields" to array(fields.map { (fieldName, _) ->
                     record(
-                        "key" to str(fieldName),
+                        "key" to transformFieldName(formatType, fieldName),
                         "value" to id("${fieldName}_encoded")
                     )
                 }),
@@ -383,14 +576,9 @@ class CodecGenerator {
         )
 
         // Wrap with match expressions for error handling (in reverse order)
-        for ((fieldName, _) in fields.reversed()) {
-            val encodeCall = call(
-                member(id("Encode"), "encode"),
-                record(
-                    "value" to member(id("value"), fieldName),
-                    "path" to appendPath(id("path"), fieldName)
-                )
-            )
+        for ((fieldName, fieldType) in fields.reversed()) {
+            // Generate direct EncodeFormat.encode_* call based on field type
+            val encodeCall = generateDirectEncodeCall(formatType, fieldType, member(id("val"), fieldName), fieldName)
 
             resultExpr = match(
                 encodeCall,
@@ -400,6 +588,209 @@ class CodecGenerator {
         }
 
         return resultExpr
+    }
+
+    /**
+     * Generate a direct EncodeFormat impl record lookup and method call for a value of the given type.
+     * Uses the impl record name directly (e.g., "EncodeFormat$Json") to avoid ability resolution issues.
+     */
+    private fun generateDirectEncodeCall(formatType: FunkType, type: FunkType, valueExpr: Expression, fieldName: String): Expression {
+        val pathExpr = appendPath(id("path"), fieldName)
+        // Reference the EncodeFormat impl record directly
+        val formatImpl = encodeFormatImpl(formatType)
+
+        // CRITICAL: Check for Bool variant pattern first (before generic VariantType handling)
+        if (isBoolVariant(type)) {
+            return call(
+                member(formatImpl, "encode_bool"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+        }
+
+        return when (type) {
+            is FunkType.IntType -> call(
+                member(formatImpl, "encode_int"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.FloatType -> call(
+                member(formatImpl, "encode_float"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.StringType -> call(
+                member(formatImpl, "encode_string"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.BooleanType -> call(
+                member(formatImpl, "encode_bool"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.NatType -> {
+                // Convert Nat to Int first
+                val toIntCall = call(id("__native_nat_to_int"), record("n" to valueExpr))
+                call(member(formatImpl, "encode_int"), record("val" to toIntCall, "path" to pathExpr))
+            }
+            is FunkType.FracType -> call(
+                member(formatImpl, "encode_frac"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.CharType -> {
+                // Convert Char to String first
+                val toStrCall = call(id("__native_char_to_string"), record("c" to valueExpr))
+                call(member(formatImpl, "encode_string"), record("val" to toStrCall, "path" to pathExpr))
+            }
+            // For complex types, look up the specific Encode impl record
+            // Pass config (not path) - nested encode creates its own path internally
+            is FunkType.RecordType -> {
+                val implName = getEncodeImplName(formatType, type)
+                call(member(id(implName), "encode"), record("val" to valueExpr, "config" to id("config")))
+            }
+            is FunkType.ListType, is FunkType.ArrayType, is FunkType.SetType,
+            is FunkType.MapType, is FunkType.VariantType, is FunkType.TypeApplication -> {
+                val implName = getEncodeImplName(formatType, type)
+                call(member(id(implName), "encode"), record("val" to valueExpr, "config" to id("config")))
+            }
+            else -> {
+                // For other types, assume an impl exists with standard naming
+                val implName = getEncodeImplName(formatType, type)
+                call(member(id(implName), "encode"), record("val" to valueExpr, "config" to id("config")))
+            }
+        }
+    }
+
+    /**
+     * Get the Encode impl record name for a type.
+     */
+    private fun getEncodeImplName(formatType: FunkType, type: FunkType): String {
+        val formatName = getFormatName(formatType)
+        val typeName = when (type) {
+            is FunkType.RecordType -> "Record_" + type.fields.keys.sorted().joinToString("_")
+            is FunkType.VariantType -> "Variant_" + type.constructors.keys.sorted().joinToString("_")
+            is FunkType.ListType -> "List_${getTypeNameForImpl(type.elementType)}"
+            is FunkType.ArrayType -> "Array_${getTypeNameForImpl(type.elementType)}"
+            is FunkType.SetType -> "Set_${getTypeNameForImpl(type.elementType)}"
+            is FunkType.MapType -> "Map_${getTypeNameForImpl(type.keyType)}_${getTypeNameForImpl(type.valueType)}"
+            is FunkType.TypeApplication -> type.constructor
+            else -> type.toString()
+        }
+        return "Encode\$$formatName\$$typeName"
+    }
+
+    private fun getTypeNameForImpl(type: FunkType): String {
+        return when (type) {
+            is FunkType.IntType -> "Int"
+            is FunkType.FloatType -> "Float"
+            is FunkType.StringType -> "String"
+            is FunkType.BooleanType -> "Bool"
+            is FunkType.NatType -> "Nat"
+            is FunkType.FracType -> "Frac"
+            is FunkType.CharType -> "Char"
+            is FunkType.TypeApplication -> type.constructor
+            else -> type.toString().replace(".", "_")
+        }
+    }
+
+    /**
+     * Generate a direct DecodeFormat impl record lookup and method call for a value of the given type.
+     * Similar to generateDirectEncodeCall but for decoding.
+     */
+    private fun generateDirectDecodeCall(formatType: FunkType, type: FunkType, valueExpr: Expression, fieldName: String): Expression {
+        val pathExpr = appendPath(id("path"), fieldName)
+        val formatImpl = decodeFormatImpl(formatType)
+
+        // CRITICAL: Check for Bool variant pattern first
+        if (isBoolVariant(type)) {
+            return call(
+                member(formatImpl, "decode_bool"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+        }
+
+        return when (type) {
+            is FunkType.IntType -> call(
+                member(formatImpl, "decode_int"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.FloatType -> call(
+                member(formatImpl, "decode_float"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.StringType -> call(
+                member(formatImpl, "decode_string"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.BooleanType -> call(
+                member(formatImpl, "decode_bool"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.NatType -> {
+                // Decode as Int, then convert to Nat
+                val decodeIntCall = call(member(formatImpl, "decode_int"), record("val" to valueExpr, "path" to pathExpr))
+                // Wrap the conversion in a match to handle the Result
+                match(
+                    decodeIntCall,
+                    matchCase(okPat("int_val"), ok(call(id("__native_int_to_nat"), record("n" to id("int_val"))))),
+                    matchCase(errPat("e"), err(id("e")))
+                )
+            }
+            is FunkType.FracType -> call(
+                member(formatImpl, "decode_frac"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.CharType -> {
+                // Decode as String, then convert to Char (take first character)
+                val decodeStrCall = call(member(formatImpl, "decode_string"), record("val" to valueExpr, "path" to pathExpr))
+                match(
+                    decodeStrCall,
+                    matchCase(okPat("str_val"), ok(call(id("__native_string_head"), record("s" to id("str_val"))))),
+                    matchCase(errPat("e"), err(id("e")))
+                )
+            }
+            // For complex types, look up the specific Decode impl record
+            // Pass config (not path) - nested decode creates its own path internally
+            is FunkType.RecordType -> {
+                val implName = getDecodeImplName(formatType, type)
+                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+            }
+            is FunkType.ListType, is FunkType.ArrayType, is FunkType.SetType,
+            is FunkType.MapType, is FunkType.VariantType, is FunkType.TypeApplication -> {
+                val implName = getDecodeImplName(formatType, type)
+                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+            }
+            else -> {
+                // For other types, assume an impl exists with standard naming
+                val implName = getDecodeImplName(formatType, type)
+                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+            }
+        }
+    }
+
+    /**
+     * Get the Decode impl record name for a type.
+     */
+    private fun getDecodeImplName(formatType: FunkType, type: FunkType): String {
+        val formatName = getFormatName(formatType)
+        val typeName = when (type) {
+            // Primitives
+            is FunkType.IntType -> "Int"
+            is FunkType.FloatType -> "Float"
+            is FunkType.StringType -> "String"
+            is FunkType.BooleanType -> "Bool"
+            is FunkType.NatType -> "Nat"
+            is FunkType.FracType -> "Frac"
+            is FunkType.CharType -> "Char"
+            // Complex types
+            is FunkType.RecordType -> "Record_" + type.fields.keys.sorted().joinToString("_")
+            is FunkType.VariantType -> "Variant_" + type.constructors.keys.sorted().joinToString("_")
+            is FunkType.ListType -> "List_${getTypeNameForImpl(type.elementType)}"
+            is FunkType.ArrayType -> "Array_${getTypeNameForImpl(type.elementType)}"
+            is FunkType.SetType -> "Set_${getTypeNameForImpl(type.elementType)}"
+            is FunkType.SortedSetType -> "SortedSet_${getTypeNameForImpl(type.elementType)}"
+            is FunkType.MapType -> "Map_${getTypeNameForImpl(type.keyType)}_${getTypeNameForImpl(type.valueType)}"
+            is FunkType.SortedMapType -> "SortedMap_${getTypeNameForImpl(type.keyType)}_${getTypeNameForImpl(type.valueType)}"
+            is FunkType.TypeApplication -> type.constructor
+            else -> type.toString()
+        }
+        return "Decode\$$formatName\$$typeName"
     }
 
     /**
@@ -414,7 +805,7 @@ class CodecGenerator {
                 matchCase(
                     constructorPat(constructorName, null),
                     call(
-                        member(id("EncodeFormat"), "encode_variant"),
+                        member(encodeFormatImpl(formatType), "encode_variant"),
                         record(
                             "tag" to str(constructorName),
                             "payload" to none(),
@@ -423,18 +814,75 @@ class CodecGenerator {
                     )
                 )
             } else {
-                // Has payload
+                // Has payload - need to handle based on payload type
+                generateVariantCaseWithPayload(formatType, constructorName, payloadType)
+            }
+        }
+
+        val body = match(id("val"), *cases.toTypedArray())
+        return createEncodeImpl(formatType, variantType, body)
+    }
+
+    /**
+     * Generate a match case for a variant constructor with a payload.
+     * Handles record payloads by extracting all fields and reconstructing for encoding.
+     */
+    private fun generateVariantCaseWithPayload(formatType: FunkType, constructorName: String, payloadType: FunkType): MatchCase {
+        return when (payloadType) {
+            is FunkType.RecordType -> {
+                // For record payloads, extract each field and reconstruct the record
+                val fieldNames = payloadType.fields.keys.sorted()
+
+                // Create pattern entries: field names mapped to variable patterns
+                val patternEntries = fieldNames.map { fieldName ->
+                    RecordPatternEntry(fieldName, VariablePattern("__payload_$fieldName"))
+                }
+                val recordPattern = RecordPattern(entries = patternEntries)
+
+                // Reconstruct the record for encoding
+                val reconstructedRecord = record(
+                    *fieldNames.map { fieldName -> fieldName to id("__payload_$fieldName") }.toTypedArray()
+                )
+
+                // Use the proper impl name for encoding the payload record
+                val encodeCall = generateDirectEncodeCall(
+                    formatType, payloadType, reconstructedRecord, "__variant_payload"
+                )
+
                 matchCase(
-                    constructorPat(constructorName, recordPat("val" to varPat("payload_val"))),
+                    constructorPat(constructorName, recordPattern),
                     match(
-                        call(
-                            member(id("Encode"), "encode"),
-                            record("value" to id("payload_val"), "path" to id("path"))
-                        ),
+                        encodeCall,
                         matchCase(
                             okPat("encoded_payload"),
                             call(
-                                member(id("EncodeFormat"), "encode_variant"),
+                                member(encodeFormatImpl(formatType), "encode_variant"),
+                                record(
+                                    "tag" to str(constructorName),
+                                    "payload" to some(id("encoded_payload")),
+                                    "path" to id("path")
+                                )
+                            )
+                        ),
+                        matchCase(errPat("e"), err(id("e")))
+                    )
+                )
+            }
+            else -> {
+                // For non-record payloads (like primitives), use the single-field pattern
+                // This handles cases like `Some { val: 'a }` where payload is wrapped in a val field
+                val encodeCall = generateDirectEncodeCall(
+                    formatType, payloadType, id("payload_val"), "__variant_payload"
+                )
+
+                matchCase(
+                    constructorPat(constructorName, recordPat("val" to varPat("payload_val"))),
+                    match(
+                        encodeCall,
+                        matchCase(
+                            okPat("encoded_payload"),
+                            call(
+                                member(encodeFormatImpl(formatType), "encode_variant"),
                                 record(
                                     "tag" to str(constructorName),
                                     "payload" to some(id("encoded_payload")),
@@ -447,85 +895,145 @@ class CodecGenerator {
                 )
             }
         }
-
-        val body = match(id("value"), *cases.toTypedArray())
-        return createEncodeImpl(formatType, variantType, body)
     }
 
     /**
      * Generate encode for List types.
+     * Uses __native_list_fold_left to iterate and encode each element.
      */
     private fun generateListEncode(formatType: FunkType, listType: FunkType.ListType): ImplAbilityDeclaration {
-        val body = match(
-            call(
-                member(id("list"), "try_map_indexed"),
-                record(
-                    "list" to id("value"),
-                    "f" to lambda(listOf("elem", "idx"),
-                        call(
-                            member(id("Encode"), "encode"),
-                            record(
-                                "value" to id("elem"),
-                                "path" to appendIndex(id("path"), id("idx"))
-                            )
-                        )
-                    )
-                )
-            ),
+        // Get the element type and generate the encode call for it
+        val elementType = listType.elementType
+        val elementEncodeCall = generateDirectEncodeCall(formatType, elementType, id("elem"), "__list_elem")
+
+        val foldBody = match(
+            id("acc"),
             matchCase(
-                okPat("encoded_elements"),
-                call(
-                    member(id("EncodeFormat"), "encode_list"),
-                    record("elements" to id("encoded_elements"), "path" to id("path"))
+                okPat("encoded_list"),
+                match(
+                    elementEncodeCall,
+                    matchCase(
+                        okPat("encoded"),
+                        ok(call(
+                            id("__native_list_append"),
+                            record(
+                                "xs" to id("encoded_list"),
+                                "ys" to call(
+                                    id("__native_list_cons"),
+                                    record(
+                                        "head" to id("encoded"),
+                                        "tail" to call(id("__native_list_empty"), record())
+                                    )
+                                )
+                            )
+                        ))
+                    ),
+                    matchCase(errPat("e"), err(id("e")))
                 )
             ),
             matchCase(errPat("e"), err(id("e")))
         )
+
+        val foldCall = call(
+            id("__native_list_fold_left"),
+            record(
+                "xs" to id("val"),
+                "init" to ok(call(id("__native_list_empty"), record())),
+                "f" to lambda(listOf("acc", "elem"), foldBody)
+            )
+        )
+
+        val body = match(
+            foldCall,
+            matchCase(
+                okPat("final_list"),
+                call(
+                    member(encodeFormatImpl(formatType), "encode_list"),
+                    record("elems" to id("final_list"), "path" to id("path"))
+                )
+            ),
+            matchCase(errPat("e"), err(id("e")))
+        )
+
         return createEncodeImpl(formatType, listType, body)
     }
 
     /**
-     * Generate encode for Array - convert to List first.
+     * Generate encode for Array - convert to List first using native function.
      */
     private fun generateArrayEncode(formatType: FunkType, arrayType: FunkType.ArrayType): ImplAbilityDeclaration {
-        val toListCall = call(member(id("array"), "to_list"), record("arr" to id("value")))
-        val body = call(
-            member(id("Encode"), "encode"),
-            record("value" to toListCall, "path" to id("path"))
-        )
+        // Use __native_array_to_list to convert array to list
+        val toListCall = call(id("__native_array_to_list"), record("arr" to id("val")))
+
+        // Create list type for encoding
+        val listType = FunkType.ListType(arrayType.elementType)
+
+        // Generate direct encode call for the list
+        val body = generateDirectEncodeCall(formatType, listType, toListCall, "__array_as_list")
+
         return createEncodeImpl(formatType, arrayType, body)
     }
 
     /**
      * Generate encode for Set types.
+     * Converts set to list, encodes each element, converts back to set.
      */
     private fun generateSetEncode(formatType: FunkType, setType: FunkType.SetType): ImplAbilityDeclaration {
-        val toListCall = call(member(id("set"), "to_list"), record("s" to id("value")))
+        // Convert set to list using native function
+        val toListCall = call(id("__native_set_to_list"), record("s" to id("val")))
 
-        val body = match(
-            call(
-                member(id("list"), "try_map_indexed"),
-                record(
-                    "list" to toListCall,
-                    "f" to lambda(listOf("elem", "idx"),
-                        call(
-                            member(id("Encode"), "encode"),
+        // Generate direct encode call for each element
+        val elementType = setType.elementType
+        val elementEncodeCall = generateDirectEncodeCall(formatType, elementType, id("elem"), "__set_elem")
+
+        // Use same fold pattern as list encoding
+        val foldBody = match(
+            id("acc"),
+            matchCase(
+                okPat("encoded_list"),
+                match(
+                    elementEncodeCall,
+                    matchCase(
+                        okPat("encoded"),
+                        ok(call(
+                            id("__native_list_append"),
                             record(
-                                "value" to id("elem"),
-                                "path" to appendIndex(id("path"), id("idx"))
+                                "xs" to id("encoded_list"),
+                                "ys" to call(
+                                    id("__native_list_cons"),
+                                    record(
+                                        "head" to id("encoded"),
+                                        "tail" to call(id("__native_list_empty"), record())
+                                    )
+                                )
                             )
-                        )
-                    )
+                        ))
+                    ),
+                    matchCase(errPat("e"), err(id("e")))
                 )
             ),
+            matchCase(errPat("e"), err(id("e")))
+        )
+
+        val foldCall = call(
+            id("__native_list_fold_left"),
+            record(
+                "xs" to toListCall,
+                "init" to ok(call(id("__native_list_empty"), record())),
+                "f" to lambda(listOf("acc", "elem"), foldBody)
+            )
+        )
+
+        val body = match(
+            foldCall,
             matchCase(
-                okPat("encoded_elements"),
+                okPat("final_list"),
                 call(
-                    member(id("EncodeFormat"), "encode_set"),
+                    member(encodeFormatImpl(formatType), "encode_set"),
                     record(
-                        "elements" to call(
-                            member(id("set"), "from_list"),
-                            record("list" to id("encoded_elements"))
+                        "elems" to call(
+                            id("__native_set_from_list"),
+                            record("xs" to id("final_list"))
                         ),
                         "path" to id("path")
                     )
@@ -537,61 +1045,141 @@ class CodecGenerator {
     }
 
     /**
-     * Generate encode for SortedSet - same as Set (already sorted).
+     * Generate encode for SortedSet - convert to list and encode as list, then wrap as set.
      */
     private fun generateSortedSetEncode(formatType: FunkType, sortedSetType: FunkType.SortedSetType): ImplAbilityDeclaration {
-        val toListCall = call(member(id("sortedset"), "to_list"), record("s" to id("value")))
-        val body = call(
-            member(id("Encode"), "encode"),
+        // Convert sorted set to list, encode as list
+        val toListCall = call(id("__native_sorted_set_to_list"), record("s" to id("val")))
+
+        // Generate direct encode call for each element
+        val elementType = sortedSetType.elementType
+        val elementEncodeCall = generateDirectEncodeCall(formatType, elementType, id("elem"), "__sorted_set_elem")
+
+        // Use same fold pattern as list encoding
+        val foldBody = match(
+            id("acc"),
+            matchCase(
+                okPat("encoded_list"),
+                match(
+                    elementEncodeCall,
+                    matchCase(
+                        okPat("encoded"),
+                        ok(call(
+                            id("__native_list_append"),
+                            record(
+                                "xs" to id("encoded_list"),
+                                "ys" to call(
+                                    id("__native_list_cons"),
+                                    record(
+                                        "head" to id("encoded"),
+                                        "tail" to call(id("__native_list_empty"), record())
+                                    )
+                                )
+                            )
+                        ))
+                    ),
+                    matchCase(errPat("e"), err(id("e")))
+                )
+            ),
+            matchCase(errPat("e"), err(id("e")))
+        )
+
+        val foldCall = call(
+            id("__native_list_fold_left"),
             record(
-                "value" to call(member(id("set"), "from_list"), record("list" to toListCall)),
-                "path" to id("path")
+                "xs" to toListCall,
+                "init" to ok(call(id("__native_list_empty"), record())),
+                "f" to lambda(listOf("acc", "elem"), foldBody)
             )
+        )
+
+        // Encode as set (sorted sets serialize the same as regular sets)
+        val body = match(
+            foldCall,
+            matchCase(
+                okPat("final_list"),
+                call(
+                    member(encodeFormatImpl(formatType), "encode_set"),
+                    record(
+                        "elems" to call(
+                            id("__native_set_from_list"),
+                            record("xs" to id("final_list"))
+                        ),
+                        "path" to id("path")
+                    )
+                )
+            ),
+            matchCase(errPat("e"), err(id("e")))
         )
         return createEncodeImpl(formatType, sortedSetType, body)
     }
 
     /**
      * Generate encode for Map types.
+     * Uses __native_map_entries to get list of entries, then encodes each key/value.
      */
     private fun generateMapEncode(formatType: FunkType, mapType: FunkType.MapType): ImplAbilityDeclaration {
-        val toListCall = call(member(id("map"), "to_list"), record("m" to id("value")))
+        // Get entries as list using native function
+        val entriesCall = call(id("__native_map_entries"), record("m" to id("val")))
 
-        val body = match(
-            call(
-                member(id("list"), "try_map"),
-                record(
-                    "list" to toListCall,
-                    "f" to lambda(listOf("entry"),
+        // Generate direct encode calls for key and value
+        val keyType = mapType.keyType
+        val valueType = mapType.valueType
+        val keyEncodeCall = generateDirectEncodeCall(formatType, keyType, member(id("entry"), "key"), "__map_key")
+        val valueEncodeCall = generateDirectEncodeCall(formatType, valueType, member(id("entry"), "value"), "__map_value")
+
+        // Fold over entries, encoding each key and value
+        val foldBody = match(
+            id("acc"),
+            matchCase(
+                okPat("encoded_list"),
+                match(
+                    keyEncodeCall,
+                    matchCase(
+                        okPat("encoded_key"),
                         match(
-                            call(
-                                member(id("Encode"), "encode"),
-                                record("value" to member(id("entry"), "key"), "path" to id("path"))
-                            ),
+                            valueEncodeCall,
                             matchCase(
-                                okPat("encoded_key"),
-                                match(
-                                    call(
-                                        member(id("Encode"), "encode"),
-                                        record("value" to member(id("entry"), "value"), "path" to id("path"))
-                                    ),
-                                    matchCase(
-                                        okPat("encoded_value"),
-                                        ok(record("key" to id("encoded_key"), "value" to id("encoded_value")))
-                                    ),
-                                    matchCase(errPat("e"), err(id("e")))
-                                )
+                                okPat("encoded_value"),
+                                ok(call(
+                                    id("__native_list_append"),
+                                    record(
+                                        "xs" to id("encoded_list"),
+                                        "ys" to call(
+                                            id("__native_list_cons"),
+                                            record(
+                                                "head" to record("key" to id("encoded_key"), "value" to id("encoded_value")),
+                                                "tail" to call(id("__native_list_empty"), record())
+                                            )
+                                        )
+                                    )
+                                ))
                             ),
                             matchCase(errPat("e"), err(id("e")))
                         )
-                    )
+                    ),
+                    matchCase(errPat("e"), err(id("e")))
                 )
             ),
+            matchCase(errPat("e"), err(id("e")))
+        )
+
+        val foldCall = call(
+            id("__native_list_fold_left"),
+            record(
+                "xs" to entriesCall,
+                "init" to ok(call(id("__native_list_empty"), record())),
+                "f" to lambda(listOf("acc", "entry"), foldBody)
+            )
+        )
+
+        val body = match(
+            foldCall,
             matchCase(
-                okPat("encoded_entries"),
+                okPat("final_list"),
                 call(
-                    member(id("EncodeFormat"), "encode_map"),
-                    record("entries" to id("encoded_entries"), "path" to id("path"))
+                    member(encodeFormatImpl(formatType), "encode_map"),
+                    record("entries" to id("final_list"), "path" to id("path"))
                 )
             ),
             matchCase(errPat("e"), err(id("e")))
@@ -600,16 +1188,73 @@ class CodecGenerator {
     }
 
     /**
-     * Generate encode for SortedMap - same as Map (already sorted).
+     * Generate encode for SortedMap - same pattern as Map but using sorted map native function.
      */
     private fun generateSortedMapEncode(formatType: FunkType, sortedMapType: FunkType.SortedMapType): ImplAbilityDeclaration {
-        val toListCall = call(member(id("sortedmap"), "to_list"), record("m" to id("value")))
-        val body = call(
-            member(id("Encode"), "encode"),
+        // Get entries as list using native function
+        val entriesCall = call(id("__native_sorted_map_entries"), record("m" to id("val")))
+
+        // Generate direct encode calls for key and value
+        val keyType = sortedMapType.keyType
+        val valueType = sortedMapType.valueType
+        val keyEncodeCall = generateDirectEncodeCall(formatType, keyType, member(id("entry"), "key"), "__sorted_map_key")
+        val valueEncodeCall = generateDirectEncodeCall(formatType, valueType, member(id("entry"), "value"), "__sorted_map_value")
+
+        // Fold over entries, encoding each key and value
+        val foldBody = match(
+            id("acc"),
+            matchCase(
+                okPat("encoded_list"),
+                match(
+                    keyEncodeCall,
+                    matchCase(
+                        okPat("encoded_key"),
+                        match(
+                            valueEncodeCall,
+                            matchCase(
+                                okPat("encoded_value"),
+                                ok(call(
+                                    id("__native_list_append"),
+                                    record(
+                                        "xs" to id("encoded_list"),
+                                        "ys" to call(
+                                            id("__native_list_cons"),
+                                            record(
+                                                "head" to record("key" to id("encoded_key"), "value" to id("encoded_value")),
+                                                "tail" to call(id("__native_list_empty"), record())
+                                            )
+                                        )
+                                    )
+                                ))
+                            ),
+                            matchCase(errPat("e"), err(id("e")))
+                        )
+                    ),
+                    matchCase(errPat("e"), err(id("e")))
+                )
+            ),
+            matchCase(errPat("e"), err(id("e")))
+        )
+
+        val foldCall = call(
+            id("__native_list_fold_left"),
             record(
-                "value" to call(member(id("map"), "from_list"), record("list" to toListCall)),
-                "path" to id("path")
+                "xs" to entriesCall,
+                "init" to ok(call(id("__native_list_empty"), record())),
+                "f" to lambda(listOf("acc", "entry"), foldBody)
             )
+        )
+
+        val body = match(
+            foldCall,
+            matchCase(
+                okPat("final_list"),
+                call(
+                    member(encodeFormatImpl(formatType), "encode_map"),
+                    record("entries" to id("final_list"), "path" to id("path"))
+                )
+            ),
+            matchCase(errPat("e"), err(id("e")))
         )
         return createEncodeImpl(formatType, sortedMapType, body)
     }
@@ -629,27 +1274,30 @@ class CodecGenerator {
      * Generate encode for Option type.
      */
     private fun generateOptionEncode(formatType: FunkType, typeApp: FunkType.TypeApplication): ImplAbilityDeclaration {
+        // Get the inner type (e.g., Int for Option Int)
+        val innerType = typeApp.args.firstOrNull() ?: FunkType.VarType(TypeVar("a", 0))
+
+        // Generate the encode call for the inner value
+        val innerEncodeCall = generateDirectEncodeCall(formatType, innerType, id("inner"), "__option_inner")
+
         val body = match(
-            id("value"),
+            id("val"),
             matchCase(
                 nonePat(),
                 call(
-                    member(id("EncodeFormat"), "encode_option"),
-                    record("value" to none(), "path" to id("path"))
+                    member(encodeFormatImpl(formatType), "encode_option"),
+                    record("val" to none(), "path" to id("path"))
                 )
             ),
             matchCase(
                 somePat("inner"),
                 match(
-                    call(
-                        member(id("Encode"), "encode"),
-                        record("value" to id("inner"), "path" to id("path"))
-                    ),
+                    innerEncodeCall,
                     matchCase(
                         okPat("encoded_inner"),
                         call(
-                            member(id("EncodeFormat"), "encode_option"),
-                            record("value" to some(id("encoded_inner")), "path" to id("path"))
+                            member(encodeFormatImpl(formatType), "encode_option"),
+                            record("val" to some(id("encoded_inner")), "path" to id("path"))
                         )
                     ),
                     matchCase(errPat("e"), err(id("e")))
@@ -663,19 +1311,24 @@ class CodecGenerator {
      * Generate encode for Result type.
      */
     private fun generateResultEncode(formatType: FunkType, typeApp: FunkType.TypeApplication): ImplAbilityDeclaration {
+        // Get the Ok and Err types (Result 'ok 'err)
+        val okType = typeApp.args.getOrNull(0) ?: FunkType.VarType(TypeVar("ok", 0))
+        val errType = typeApp.args.getOrNull(1) ?: FunkType.VarType(TypeVar("err", 0))
+
+        // Generate encode calls for Ok and Err values
+        val okEncodeCall = generateDirectEncodeCall(formatType, okType, id("ok_val"), "__result_ok")
+        val errEncodeCall = generateDirectEncodeCall(formatType, errType, id("err_val"), "__result_err")
+
         val body = match(
-            id("value"),
+            id("val"),
             matchCase(
                 okPat("ok_val"),
                 match(
-                    call(
-                        member(id("Encode"), "encode"),
-                        record("value" to id("ok_val"), "path" to id("path"))
-                    ),
+                    okEncodeCall,
                     matchCase(
                         okPat("encoded_ok"),
                         call(
-                            member(id("EncodeFormat"), "encode_variant"),
+                            member(encodeFormatImpl(formatType), "encode_variant"),
                             record(
                                 "tag" to str("Ok"),
                                 "payload" to some(id("encoded_ok")),
@@ -689,14 +1342,11 @@ class CodecGenerator {
             matchCase(
                 errPat("err_val"),
                 match(
-                    call(
-                        member(id("Encode"), "encode"),
-                        record("value" to id("err_val"), "path" to id("path"))
-                    ),
+                    errEncodeCall,
                     matchCase(
                         okPat("encoded_err"),
                         call(
-                            member(id("EncodeFormat"), "encode_variant"),
+                            member(encodeFormatImpl(formatType), "encode_variant"),
                             record(
                                 "tag" to str("Err"),
                                 "payload" to some(id("encoded_err")),
@@ -724,8 +1374,8 @@ class CodecGenerator {
         hookName: String
     ): ImplAbilityDeclaration {
         val body = call(
-            member(id("DecodeFormat"), hookName),
-            record("repr" to id("repr"), "path" to id("path"))
+            member(decodeFormatImpl(formatType), hookName),
+            record("val" to id("val"), "path" to id("path"))
         )
         return createDecodeImpl(formatType, dataType, body)
     }
@@ -736,8 +1386,8 @@ class CodecGenerator {
     private fun generateNatDecode(formatType: FunkType): ImplAbilityDeclaration {
         val body = match(
             call(
-                member(id("DecodeFormat"), "decode_int"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(decodeFormatImpl(formatType), "decode_int"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("int_val"),
@@ -769,8 +1419,8 @@ class CodecGenerator {
     private fun generateCharDecode(formatType: FunkType): ImplAbilityDeclaration {
         val body = match(
             call(
-                member(id("DecodeFormat"), "decode_string"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(decodeFormatImpl(formatType), "decode_string"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("str_val"),
@@ -816,14 +1466,14 @@ class CodecGenerator {
             return createDecodeImpl(formatType, recordType, body)
         }
 
-        val body = buildRecordDecodeBody(fields)
+        val body = buildRecordDecodeBody(formatType, fields)
         return createDecodeImpl(formatType, recordType, body)
     }
 
     /**
      * Build the body for record decoding with Result handling.
      */
-    private fun buildRecordDecodeBody(fields: List<Map.Entry<String, FunkType>>): Expression {
+    private fun buildRecordDecodeBody(formatType: FunkType, fields: List<Map.Entry<String, FunkType>>): Expression {
         // Final expression: construct the record
         var resultExpr: Expression = ok(
             RecordLiteral(
@@ -834,29 +1484,27 @@ class CodecGenerator {
         )
 
         // Wrap with match expressions for each field (in reverse order)
-        for ((fieldName, _) in fields.reversed()) {
+        for ((fieldName, fieldType) in fields.reversed()) {
             // First get the field repr, then decode it
+            // The key is transformed (e.g., "userName" -> "user_name" for snake_case JSON)
             val getFieldCall = call(
-                member(id("DecodeFormat"), "decode_record_field"),
+                member(decodeFormatImpl(formatType), "decode_record_field"),
                 record(
-                    "repr" to id("repr"),
-                    "key" to str(fieldName),
+                    "val" to id("val"),
+                    "key" to transformFieldNameForDecode(formatType, fieldName),
                     "path" to id("path")
                 )
             )
+
+            // Generate the decode call for this field's type directly using DecodeFormat hooks
+            val decodeCall = generateFieldDecodeCall(formatType, fieldType, id("${fieldName}_repr"), fieldName)
 
             resultExpr = match(
                 getFieldCall,
                 matchCase(
                     okPat("${fieldName}_repr"),
                     match(
-                        call(
-                            member(id("Decode"), "decode"),
-                            record(
-                                "repr" to id("${fieldName}_repr"),
-                                "path" to appendPath(id("path"), fieldName)
-                            )
-                        ),
+                        decodeCall,
                         matchCase(okPat("${fieldName}_val"), resultExpr),
                         matchCase(errPat("e"), err(id("e")))
                     )
@@ -869,83 +1517,105 @@ class CodecGenerator {
     }
 
     /**
+     * Generate decode call for a record field using DecodeFormat hooks directly.
+     * For primitives, use DecodeFormat hooks directly.
+     * For complex types, use Decode.decode (which will be resolved).
+     */
+    private fun generateFieldDecodeCall(formatType: FunkType, type: FunkType, valueExpr: Expression, fieldName: String): Expression {
+        val pathExpr = appendPath(id("path"), fieldName)
+        val formatImpl = decodeFormatImpl(formatType)
+
+        // For Bool variant pattern
+        if (isBoolVariant(type)) {
+            return call(
+                member(formatImpl, "decode_bool"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+        }
+
+        return when (type) {
+            // Primitives - call DecodeFormat hooks directly
+            is FunkType.IntType -> call(
+                member(formatImpl, "decode_int"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.FloatType -> call(
+                member(formatImpl, "decode_float"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.StringType -> call(
+                member(formatImpl, "decode_string"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.BooleanType -> call(
+                member(formatImpl, "decode_bool"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.FracType -> call(
+                member(formatImpl, "decode_frac"),
+                record("val" to valueExpr, "path" to pathExpr)
+            )
+            is FunkType.NatType -> {
+                // Decode as Int, then convert to Nat
+                val decodeIntCall = call(member(formatImpl, "decode_int"), record("val" to valueExpr, "path" to pathExpr))
+                match(
+                    decodeIntCall,
+                    matchCase(okPat("int_val"), ok(call(id("__native_int_to_nat"), record("n" to id("int_val"))))),
+                    matchCase(errPat("e"), err(id("e")))
+                )
+            }
+            is FunkType.CharType -> {
+                // Decode as String, then convert to Char
+                val decodeStrCall = call(member(formatImpl, "decode_string"), record("val" to valueExpr, "path" to pathExpr))
+                match(
+                    decodeStrCall,
+                    matchCase(okPat("str_val"), ok(call(id("__native_string_head"), record("s" to id("str_val"))))),
+                    matchCase(errPat("e"), err(id("e")))
+                )
+            }
+            // For complex types (nested records, variants, collections), call the specific impl directly
+            // We use the same naming scheme as getDecodeImplName to ensure consistency
+            // Pass config (not path) - nested decode creates its own path internally
+            is FunkType.RecordType -> {
+                val implName = getDecodeImplName(formatType, type)
+                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+            }
+            is FunkType.VariantType -> {
+                val implName = getDecodeImplName(formatType, type)
+                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+            }
+            is FunkType.ListType, is FunkType.ArrayType, is FunkType.SetType,
+            is FunkType.MapType -> {
+                val implName = getDecodeImplName(formatType, type)
+                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+            }
+            is FunkType.TypeApplication -> {
+                val implName = getDecodeImplName(formatType, type)
+                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+            }
+            else -> {
+                // For unknown types, fall back to impl naming
+                val implName = getDecodeImplName(formatType, type)
+                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+            }
+        }
+    }
+
+    /**
      * Generate decode for variant types.
      */
     private fun generateVariantDecode(formatType: FunkType, variantType: FunkType.VariantType): ImplAbilityDeclaration {
         val constructors = variantType.constructors.entries.sortedBy { it.key }
 
-        // Build match cases for each constructor tag
-        val tagCases = constructors.map { (constructorName, payloadType) ->
-            if (payloadType == null) {
-                // No payload variant
-                matchCase(
-                    constructorPat("Ok", recordPat(
-                        "val" to varPat("tag_info")
-                    )),
-                    IfExpression(
-                        condition = call(
-                            member(id("string"), "eq"),
-                            record("a" to member(id("tag_info"), "tag"), "b" to str(constructorName))
-                        ),
-                        thenBranch = ok(variant(constructorName, null)),
-                        elseBranch = id("continue_matching") // placeholder - handled by chaining
-                    )
-                )
-            } else {
-                // Has payload
-                matchCase(
-                    constructorPat("Ok", recordPat(
-                        "val" to varPat("tag_info")
-                    )),
-                    IfExpression(
-                        condition = call(
-                            member(id("string"), "eq"),
-                            record("a" to member(id("tag_info"), "tag"), "b" to str(constructorName))
-                        ),
-                        thenBranch = match(
-                            member(id("tag_info"), "payload"),
-                            matchCase(
-                                somePat("payload_repr"),
-                                match(
-                                    call(
-                                        member(id("Decode"), "decode"),
-                                        record("repr" to id("payload_repr"), "path" to id("path"))
-                                    ),
-                                    matchCase(
-                                        okPat("decoded_payload"),
-                                        ok(variant(constructorName, record("val" to id("decoded_payload"))))
-                                    ),
-                                    matchCase(errPat("e"), err(id("e")))
-                                )
-                            ),
-                            matchCase(
-                                nonePat(),
-                                call(
-                                    member(id("codec"), "decode_error"),
-                                    record(
-                                        "path" to id("path"),
-                                        "message" to str("Expected payload for variant $constructorName"),
-                                        "expected" to str("payload"),
-                                        "found" to none()
-                                    )
-                                )
-                            )
-                        ),
-                        elseBranch = id("continue_matching")
-                    )
-                )
-            }
-        }
-
-        // Simplified: use decode_variant and match on tag
+        // Use decode_variant and match on tag
         val body = match(
             call(
-                member(id("DecodeFormat"), "decode_variant"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(decodeFormatImpl(formatType), "decode_variant"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("variant_info"),
-                buildVariantTagMatcher(constructors)
+                buildVariantTagMatcher(formatType, constructors)
             ),
             matchCase(errPat("e"), err(id("e")))
         )
@@ -956,7 +1626,7 @@ class CodecGenerator {
     /**
      * Build nested if-else for variant tag matching.
      */
-    private fun buildVariantTagMatcher(constructors: List<Map.Entry<String, FunkType?>>): Expression {
+    private fun buildVariantTagMatcher(formatType: FunkType, constructors: List<Map.Entry<String, FunkType?>>): Expression {
         if (constructors.isEmpty()) {
             return call(
                 member(id("codec"), "decode_error"),
@@ -975,18 +1645,34 @@ class CodecGenerator {
         val thenBranch = if (payloadType == null) {
             ok(variant(constructorName, null))
         } else {
+            // Determine how to construct the variant based on payload type
+            val variantConstruction = when (payloadType) {
+                is FunkType.RecordType -> {
+                    // For record payloads, pass the decoded record directly
+                    // e.g., Circle {radius = 5} - decoded_payload is already {radius = 5}
+                    variant(constructorName, id("decoded_payload"))
+                }
+                else -> {
+                    // For non-record payloads (like Option's Some {val: 'a}), wrap in {val: ...}
+                    variant(constructorName, record("val" to id("decoded_payload")))
+                }
+            }
+
+            // Use direct impl call instead of ability dispatch
+            val decodeImplName = getDecodeImplName(formatType, payloadType)
+
             match(
                 member(id("variant_info"), "payload"),
                 matchCase(
                     somePat("payload_repr"),
                     match(
                         call(
-                            member(id("Decode"), "decode"),
-                            record("repr" to id("payload_repr"), "path" to id("path"))
+                            member(id(decodeImplName), "decode"),
+                            record("val" to id("payload_repr"), "path" to id("path"))
                         ),
                         matchCase(
                             okPat("decoded_payload"),
-                            ok(variant(constructorName, record("val" to id("decoded_payload"))))
+                            ok(variantConstruction)
                         ),
                         matchCase(errPat("e"), err(id("e")))
                     )
@@ -1012,7 +1698,7 @@ class CodecGenerator {
                 record("a" to member(id("variant_info"), "tag"), "b" to str(constructorName))
             ),
             thenBranch = thenBranch,
-            elseBranch = buildVariantTagMatcher(remaining)
+            elseBranch = buildVariantTagMatcher(formatType, remaining)
         )
     }
 
@@ -1020,10 +1706,13 @@ class CodecGenerator {
      * Generate decode for List types.
      */
     private fun generateListDecode(formatType: FunkType, listType: FunkType.ListType): ImplAbilityDeclaration {
+        // Get the element decoder impl name
+        val elementDecodeImplName = getDecodeImplName(formatType, listType.elementType)
+
         val body = match(
             call(
-                member(id("DecodeFormat"), "decode_list"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(decodeFormatImpl(formatType), "decode_list"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("repr_list"),
@@ -1034,9 +1723,9 @@ class CodecGenerator {
                             "list" to id("repr_list"),
                             "f" to lambda(listOf("elem_repr", "idx"),
                                 call(
-                                    member(id("Decode"), "decode"),
+                                    member(id(elementDecodeImplName), "decode"),
                                     record(
-                                        "repr" to id("elem_repr"),
+                                        "val" to id("elem_repr"),
                                         "path" to appendIndex(id("path"), id("idx"))
                                     )
                                 )
@@ -1056,10 +1745,14 @@ class CodecGenerator {
      * Generate decode for Array - decode as List then convert.
      */
     private fun generateArrayDecode(formatType: FunkType, arrayType: FunkType.ArrayType): ImplAbilityDeclaration {
+        // Decode as List[ElementType] first, then convert to Array
+        val listType = FunkType.ListType(arrayType.elementType)
+        val listDecodeImplName = getDecodeImplName(formatType, listType)
+
         val body = match(
             call(
-                member(id("Decode"), "decode"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(id(listDecodeImplName), "decode"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("decoded_list"),
@@ -1074,10 +1767,12 @@ class CodecGenerator {
      * Generate decode for Set types.
      */
     private fun generateSetDecode(formatType: FunkType, setType: FunkType.SetType): ImplAbilityDeclaration {
+        val elementDecodeImplName = getDecodeImplName(formatType, setType.elementType)
+
         val body = match(
             call(
-                member(id("DecodeFormat"), "decode_set"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(decodeFormatImpl(formatType), "decode_set"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("repr_set"),
@@ -1088,9 +1783,9 @@ class CodecGenerator {
                             "list" to call(member(id("set"), "to_list"), record("s" to id("repr_set"))),
                             "f" to lambda(listOf("elem_repr", "idx"),
                                 call(
-                                    member(id("Decode"), "decode"),
+                                    member(id(elementDecodeImplName), "decode"),
                                     record(
-                                        "repr" to id("elem_repr"),
+                                        "val" to id("elem_repr"),
                                         "path" to appendIndex(id("path"), id("idx"))
                                     )
                                 )
@@ -1113,10 +1808,14 @@ class CodecGenerator {
      * Generate decode for SortedSet.
      */
     private fun generateSortedSetDecode(formatType: FunkType, sortedSetType: FunkType.SortedSetType): ImplAbilityDeclaration {
+        // Decode as Set[ElementType] first, then convert to SortedSet
+        val setType = FunkType.SetType(sortedSetType.elementType)
+        val setDecodeImplName = getDecodeImplName(formatType, setType)
+
         val body = match(
             call(
-                member(id("Decode"), "decode"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(id(setDecodeImplName), "decode"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("decoded_set"),
@@ -1131,10 +1830,13 @@ class CodecGenerator {
      * Generate decode for Map types.
      */
     private fun generateMapDecode(formatType: FunkType, mapType: FunkType.MapType): ImplAbilityDeclaration {
+        val keyDecodeImplName = getDecodeImplName(formatType, mapType.keyType)
+        val valueDecodeImplName = getDecodeImplName(formatType, mapType.valueType)
+
         val body = match(
             call(
-                member(id("DecodeFormat"), "decode_map"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(decodeFormatImpl(formatType), "decode_map"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("repr_entries"),
@@ -1146,19 +1848,19 @@ class CodecGenerator {
                             "f" to lambda(listOf("entry"),
                                 match(
                                     call(
-                                        member(id("Decode"), "decode"),
-                                        record("repr" to member(id("entry"), "key"), "path" to id("path"))
+                                        member(id(keyDecodeImplName), "decode"),
+                                        record("val" to member(id("entry"), "key"), "path" to id("path"))
                                     ),
                                     matchCase(
                                         okPat("decoded_key"),
                                         match(
                                             call(
-                                                member(id("Decode"), "decode"),
-                                                record("repr" to member(id("entry"), "value"), "path" to id("path"))
+                                                member(id(valueDecodeImplName), "decode"),
+                                                record("val" to member(id("entry"), "value"), "path" to id("path"))
                                             ),
                                             matchCase(
                                                 okPat("decoded_value"),
-                                                ok(record("key" to id("decoded_key"), "value" to id("decoded_value")))
+                                                ok(record("key" to id("decoded_key"), "val" to id("decoded_value")))
                                             ),
                                             matchCase(errPat("e"), err(id("e")))
                                         )
@@ -1184,10 +1886,14 @@ class CodecGenerator {
      * Generate decode for SortedMap.
      */
     private fun generateSortedMapDecode(formatType: FunkType, sortedMapType: FunkType.SortedMapType): ImplAbilityDeclaration {
+        // Decode as Map[K, V] first, then convert to SortedMap
+        val mapType = FunkType.MapType(sortedMapType.keyType, sortedMapType.valueType)
+        val mapDecodeImplName = getDecodeImplName(formatType, mapType)
+
         val body = match(
             call(
-                member(id("Decode"), "decode"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(id(mapDecodeImplName), "decode"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("decoded_map"),
@@ -1213,10 +1919,13 @@ class CodecGenerator {
      * Generate decode for Option type.
      */
     private fun generateOptionDecode(formatType: FunkType, typeApp: FunkType.TypeApplication): ImplAbilityDeclaration {
+        val innerType = typeApp.args.firstOrNull() ?: throw IllegalArgumentException("Option requires type argument")
+        val innerDecodeImplName = getDecodeImplName(formatType, innerType)
+
         val body = match(
             call(
-                member(id("DecodeFormat"), "decode_option"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(decodeFormatImpl(formatType), "decode_option"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("opt_repr"),
@@ -1227,8 +1936,8 @@ class CodecGenerator {
                         somePat("inner_repr"),
                         match(
                             call(
-                                member(id("Decode"), "decode"),
-                                record("repr" to id("inner_repr"), "path" to id("path"))
+                                member(id(innerDecodeImplName), "decode"),
+                                record("val" to id("inner_repr"), "path" to id("path"))
                             ),
                             matchCase(okPat("decoded_inner"), ok(some(id("decoded_inner")))),
                             matchCase(errPat("e"), err(id("e")))
@@ -1245,10 +1954,16 @@ class CodecGenerator {
      * Generate decode for Result type.
      */
     private fun generateResultDecode(formatType: FunkType, typeApp: FunkType.TypeApplication): ImplAbilityDeclaration {
+        // Result[Ok, Err] has two type arguments
+        val okType = typeApp.args.getOrNull(0) ?: throw IllegalArgumentException("Result requires Ok type argument")
+        val errType = typeApp.args.getOrNull(1) ?: throw IllegalArgumentException("Result requires Err type argument")
+        val okDecodeImplName = getDecodeImplName(formatType, okType)
+        val errDecodeImplName = getDecodeImplName(formatType, errType)
+
         val body = match(
             call(
-                member(id("DecodeFormat"), "decode_variant"),
-                record("repr" to id("repr"), "path" to id("path"))
+                member(decodeFormatImpl(formatType), "decode_variant"),
+                record("val" to id("val"), "path" to id("path"))
             ),
             matchCase(
                 okPat("variant_info"),
@@ -1263,8 +1978,8 @@ class CodecGenerator {
                             somePat("payload_repr"),
                             match(
                                 call(
-                                    member(id("Decode"), "decode"),
-                                    record("repr" to id("payload_repr"), "path" to id("path"))
+                                    member(id(okDecodeImplName), "decode"),
+                                    record("val" to id("payload_repr"), "path" to id("path"))
                                 ),
                                 matchCase(okPat("decoded_ok"), ok(ok(id("decoded_ok")))),
                                 matchCase(errPat("e"), err(id("e")))
@@ -1294,8 +2009,8 @@ class CodecGenerator {
                                 somePat("payload_repr"),
                                 match(
                                     call(
-                                        member(id("Decode"), "decode"),
-                                        record("repr" to id("payload_repr"), "path" to id("path"))
+                                        member(id(errDecodeImplName), "decode"),
+                                        record("val" to id("payload_repr"), "path" to id("path"))
                                     ),
                                     matchCase(okPat("decoded_err"), ok(err(id("decoded_err")))),
                                     matchCase(errPat("e"), err(id("e")))
@@ -1387,8 +2102,13 @@ class CodecGenerator {
 
     /**
      * Create an Encode impl declaration.
+     * Generates single `encode` method that takes config parameter.
      */
     private fun createEncodeImpl(formatType: FunkType, dataType: FunkType, body: Expression): ImplAbilityDeclaration {
+        // Wrap body in a do block that creates an empty path
+        // config is a parameter from the caller
+        val encodeBody = doWithLet("path", call(id("__native_list_empty"), record()), body)
+
         return ImplAbilityDeclaration(
             abilityName = "Encode",
             targetTypes = listOf(funkTypeToAnnotation(formatType), funkTypeToAnnotation(dataType)),
@@ -1397,7 +2117,7 @@ class CodecGenerator {
                     name = "encode",
                     paramType = null,  // Inferred from ability declaration
                     returnType = null, // Inferred from ability declaration
-                    implementation = lambda(listOf("value", "path"), body)
+                    implementation = lambda(listOf("val", "config"), encodeBody)
                 )
             )
         )
@@ -1405,8 +2125,13 @@ class CodecGenerator {
 
     /**
      * Create a Decode impl declaration.
+     * Generates single `decode` method that takes config parameter.
      */
     private fun createDecodeImpl(formatType: FunkType, dataType: FunkType, body: Expression): ImplAbilityDeclaration {
+        // Wrap body in a do block that creates an empty path
+        // config is a parameter from the caller
+        val decodeBody = doWithLet("path", call(id("__native_list_empty"), record()), body)
+
         return ImplAbilityDeclaration(
             abilityName = "Decode",
             targetTypes = listOf(funkTypeToAnnotation(formatType), funkTypeToAnnotation(dataType)),
@@ -1415,7 +2140,7 @@ class CodecGenerator {
                     name = "decode",
                     paramType = null,
                     returnType = null,
-                    implementation = lambda(listOf("repr", "path"), body)
+                    implementation = lambda(listOf("val", "config"), decodeBody)
                 )
             )
         )
@@ -1490,25 +2215,25 @@ class CodecGenerator {
     ): ImplAbilityDeclaration {
         val body = call(
             member(id("StreamEncodeFormat"), hookName),
-            record("value" to id("value"), "buffer" to id("buffer"), "path" to id("path"))
+            record("val" to id("val"), "buffer" to id("buffer"), "path" to id("path"))
         )
         return createStreamEncodeImpl(formatType, dataType, body)
     }
 
     private fun generateNatStreamEncode(formatType: FunkType): ImplAbilityDeclaration {
-        val toIntCall = call(member(id("nat"), "to_int"), record("n" to id("value")))
+        val toIntCall = call(member(id("nat"), "to_int"), record("n" to id("val")))
         val body = call(
             member(id("StreamEncodeFormat"), "stream_int"),
-            record("value" to toIntCall, "buffer" to id("buffer"), "path" to id("path"))
+            record("val" to toIntCall, "buffer" to id("buffer"), "path" to id("path"))
         )
         return createStreamEncodeImpl(formatType, FunkType.NatType, body)
     }
 
     private fun generateCharStreamEncode(formatType: FunkType): ImplAbilityDeclaration {
-        val toStringCall = call(member(id("char"), "to_string"), record("c" to id("value")))
+        val toStringCall = call(member(id("char"), "to_string"), record("c" to id("val")))
         val body = call(
             member(id("StreamEncodeFormat"), "stream_string"),
-            record("value" to toStringCall, "buffer" to id("buffer"), "path" to id("path"))
+            record("val" to toStringCall, "buffer" to id("buffer"), "path" to id("path"))
         )
         return createStreamEncodeImpl(formatType, FunkType.CharType, body)
     }
@@ -1559,7 +2284,7 @@ class CodecGenerator {
                 call(
                     member(id("StreamEncode"), "stream_encode"),
                     record(
-                        "value" to member(id("value"), fieldName),
+                        "val" to member(id("val"), fieldName),
                         "buffer" to call(member(id("bytebuffer"), "new"), record()),
                         "path" to appendPath(id("path"), fieldName)
                     )
@@ -1571,7 +2296,7 @@ class CodecGenerator {
                             member(id("StreamEncodeFormat"), "stream_record_field"),
                             record(
                                 "key" to str(fieldName),
-                                "value" to id("field_buf"),
+                                "val" to id("field_buf"),
                                 "is_first" to BooleanLiteral(isFirst),
                                 "buffer" to id(bufVarIn),
                                 "path" to id("path")
@@ -1622,7 +2347,7 @@ class CodecGenerator {
                         call(
                             member(id("StreamEncode"), "stream_encode"),
                             record(
-                                "value" to id("payload_val"),
+                                "val" to id("payload_val"),
                                 "buffer" to call(member(id("bytebuffer"), "new"), record()),
                                 "path" to id("path")
                             )
@@ -1645,7 +2370,7 @@ class CodecGenerator {
             }
         }
 
-        val body = match(id("value"), *cases.toTypedArray())
+        val body = match(id("val"), *cases.toTypedArray())
         return createStreamEncodeImpl(formatType, variantType, body)
     }
 
@@ -1662,7 +2387,7 @@ class CodecGenerator {
                     call(
                         member(id("list"), "fold_indexed"),
                         record(
-                            "list" to id("value"),
+                            "list" to id("val"),
                             "init" to ok(record("buffer" to id("buf_start"), "is_first" to BooleanLiteral(true))),
                             "f" to lambda(listOf("acc", "elem", "idx"),
                                 match(
@@ -1673,7 +2398,7 @@ class CodecGenerator {
                                             call(
                                                 member(id("StreamEncode"), "stream_encode"),
                                                 record(
-                                                    "value" to id("elem"),
+                                                    "val" to id("elem"),
                                                     "buffer" to call(member(id("bytebuffer"), "new"), record()),
                                                     "path" to appendIndex(id("path"), id("idx"))
                                                 )
@@ -1684,7 +2409,7 @@ class CodecGenerator {
                                                     call(
                                                         member(id("StreamEncodeFormat"), "stream_list_element"),
                                                         record(
-                                                            "value" to id("elem_buf"),
+                                                            "val" to id("elem_buf"),
                                                             "is_first" to member(id("state"), "is_first"),
                                                             "buffer" to member(id("state"), "buffer"),
                                                             "path" to id("path")
@@ -1730,7 +2455,7 @@ class CodecGenerator {
 
     private fun generateOptionStreamEncode(formatType: FunkType, typeApp: FunkType.TypeApplication): ImplAbilityDeclaration {
         val body = match(
-            id("value"),
+            id("val"),
             matchCase(
                 nonePat(),
                 call(
@@ -1744,7 +2469,7 @@ class CodecGenerator {
                     call(
                         member(id("StreamEncode"), "stream_encode"),
                         record(
-                            "value" to id("inner"),
+                            "val" to id("inner"),
                             "buffer" to call(member(id("bytebuffer"), "new"), record()),
                             "path" to id("path")
                         )
@@ -1753,7 +2478,7 @@ class CodecGenerator {
                         okPat("inner_buf"),
                         call(
                             member(id("StreamEncodeFormat"), "stream_some"),
-                            record("value" to id("inner_buf"), "buffer" to id("buffer"), "path" to id("path"))
+                            record("val" to id("inner_buf"), "buffer" to id("buffer"), "path" to id("path"))
                         )
                     ),
                     matchCase(errPat("e"), err(id("e")))
@@ -1793,7 +2518,7 @@ class CodecGenerator {
                         record("a" to member(id("result"), "value"), "b" to IntLiteral(0))
                     ),
                     thenBranch = ok(record(
-                        "value" to call(member(id("nat"), "from_int"), record("n" to member(id("result"), "value"))),
+                        "val" to call(member(id("nat"), "from_int"), record("n" to member(id("result"), "value"))),
                         "offset" to member(id("result"), "offset")
                     )),
                     elseBranch = call(
@@ -1829,7 +2554,7 @@ class CodecGenerator {
                         )
                     ),
                     thenBranch = ok(record(
-                        "value" to call(
+                        "val" to call(
                             member(id("string"), "char_at"),
                             record("s" to member(id("result"), "value"), "index" to IntLiteral(0))
                         ),
@@ -1863,7 +2588,7 @@ class CodecGenerator {
                 matchCase(
                     okPat("start_result"),
                     ok(record(
-                        "value" to RecordLiteral(entries = emptyList()),
+                        "val" to RecordLiteral(entries = emptyList()),
                         "offset" to member(id("start_result"), "offset")
                     ))
                 ),
@@ -1879,7 +2604,7 @@ class CodecGenerator {
     private fun buildRecordStreamDecodeBody(fields: List<Map.Entry<String, FunkType>>): Expression {
         // Final expression: construct the record
         var resultExpr: Expression = ok(record(
-            "value" to RecordLiteral(
+            "val" to RecordLiteral(
                 entries = fields.map { (fieldName, _) ->
                     RecordFieldEntry(fieldName, id("${fieldName}_val"))
                 }
@@ -1984,7 +2709,7 @@ class CodecGenerator {
 
         val thenBranch = if (payloadType == null) {
             ok(record(
-                "value" to variant(constructorName, null),
+                "val" to variant(constructorName, null),
                 "offset" to member(id(resultVar), "offset")
             ))
         } else {
@@ -2004,7 +2729,7 @@ class CodecGenerator {
                         matchCase(
                             okPat("decoded_payload"),
                             ok(record(
-                                "value" to variant(constructorName, record("val" to member(id("decoded_payload"), "value"))),
+                                "val" to variant(constructorName, record("val" to member(id("decoded_payload"), "value"))),
                                 "offset" to member(id(resultVar), "offset")
                             ))
                         ),
@@ -2083,7 +2808,7 @@ class CodecGenerator {
                     member(id("opt_result"), "value"),
                     matchCase(
                         nonePat(),
-                        ok(record("value" to none(), "offset" to member(id("opt_result"), "offset")))
+                        ok(record("val" to none(), "offset" to member(id("opt_result"), "offset")))
                     ),
                     matchCase(
                         somePat("inner_bytes"),
@@ -2099,7 +2824,7 @@ class CodecGenerator {
                             matchCase(
                                 okPat("decoded_inner"),
                                 ok(record(
-                                    "value" to some(member(id("decoded_inner"), "value")),
+                                    "val" to some(member(id("decoded_inner"), "value")),
                                     "offset" to member(id("opt_result"), "offset")
                                 ))
                             ),

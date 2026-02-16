@@ -2,6 +2,7 @@ package com.funk.language.typechecker.application
 
 import com.funk.language.ast.*
 import com.funk.language.typechecker.abilities.BuiltInAbilities
+import com.funk.language.typechecker.codec.CodecGenerator
 import com.funk.language.typechecker.solving.Substitution
 
 /**
@@ -61,6 +62,12 @@ class SubstitutionApplier(
     // This mimics OldTypeChecker's context map (OldTypeChecker.kt:1900-1910)
     // Maps identifier names to their types
     private val identifierContext = mutableMapOf<String, FunkType>()
+
+    // CodecGenerator for auto-deriving Encode/Decode implementations
+    private val codecGenerator = CodecGenerator()
+
+    // Track generated codec implementations that need to be added to the program
+    private val generatedCodecImpls = mutableListOf<ImplAbilityDeclaration>()
 
     /**
      * Resolve what an uppercase identifier represents.
@@ -133,8 +140,17 @@ class SubstitutionApplier(
             }
         }
 
-        return Program(items = updatedItems)
+        // Add any auto-generated codec implementations to the BEGINNING of the program
+        // This ensures they're registered BEFORE any code that uses them
+        val allItems = generatedCodecImpls + updatedItems
+        return Program(items = allItems)
     }
+
+    /**
+     * Get the list of auto-generated codec implementations.
+     * These need to be registered in the runtime context.
+     */
+    fun getGeneratedCodecImpls(): List<ImplAbilityDeclaration> = generatedCodecImpls.toList()
 
     /**
      * Apply substitution to a program item.
@@ -200,11 +216,17 @@ class SubstitutionApplier(
             substitutedType
         }
 
-        // CRITICAL: If the expression is a lambda, set its inferredType BEFORE processing it
-        // This allows the lambda to extract parameter types and add them to identifierContext
+        // CRITICAL: Set inferredType on the expression BEFORE processing it
+        // This allows nested expressions to know their types:
+        // - Lambda: extract parameter types and add them to identifierContext
+        // - FunctionCall: know the return type for Decode and other abilities
         val expr = binding.expression
-        val expressionWithType = if (expr is LambdaExpression && preExpressionType != null) {
-            expr.copy(inferredType = preExpressionType)
+        val expressionWithType = if (preExpressionType != null) {
+            when (expr) {
+                is LambdaExpression -> expr.copy(inferredType = preExpressionType)
+                is FunctionCall -> expr.copy(inferredType = preExpressionType)
+                else -> expr
+            }
         } else {
             expr
         }
@@ -674,8 +696,97 @@ class SubstitutionApplier(
 
     private fun applyToMemberAccess(expr: MemberAccess): MemberAccess {
         val updatedReceiver = applyToExpression(expr.receiver)
-        val updatedType = expr.inferredType?.let { substitution.apply(it) }
+
+        // First try to use existing inferred type
+        var updatedType = expr.inferredType?.let { substitution.apply(it) }
+
+        // If no type yet and this is an ability method access, compute it
+        if (updatedType == null) {
+            val abilityName = when (val receiver = expr.receiver) {
+                is Identifier -> receiver.name
+                is VariantConstruction -> receiver.constructor
+                else -> null
+            }
+            val methodName = expr.member
+
+            // Look up the ability declaration to get the method type
+            if (abilityName != null) {
+                val abilityDecl = abilityDeclarations[abilityName]
+                if (abilityDecl != null) {
+                    val operation = abilityDecl.operations.find { it.name == methodName }
+                    if (operation != null) {
+                        // Convert the param and return type annotations to FunkType and apply substitution
+                        val paramType = typeAnnotationToFunkType(operation.paramType)
+                        val returnType = typeAnnotationToFunkType(operation.returnType)
+                        val methodType = FunkType.FunctionType(paramType, returnType)
+                        updatedType = substitution.apply(methodType)
+                    }
+                }
+            }
+        }
+
         return expr.copy(receiver = updatedReceiver, inferredType = updatedType)
+    }
+
+    /**
+     * Convert a TypeAnnotation to FunkType.
+     * Used for looking up ability method types.
+     */
+    private fun typeAnnotationToFunkType(annotation: TypeAnnotation): FunkType {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                when (annotation.name) {
+                    "Int" -> FunkType.IntType
+                    "Float" -> FunkType.FloatType
+                    "String" -> FunkType.StringType
+                    "Bool" -> FunkType.BooleanType
+                    "Nat" -> FunkType.NatType
+                    "Frac" -> FunkType.FracType
+                    "Char" -> FunkType.CharType
+                    "Bytes" -> FunkType.BytesType
+                    else -> {
+                        // Could be a type variable or type alias
+                        if (annotation.name.startsWith("'") || annotation.name.all { it.isLowerCase() }) {
+                            // Type variable - create a fresh one (will be unified later)
+                            FunkType.VarType(TypeVar.fresh())
+                        } else {
+                            // Named type - use TypeApplication
+                            FunkType.TypeApplication(annotation.name, emptyList())
+                        }
+                    }
+                }
+            }
+            is FunctionTypeAnnotation -> {
+                val paramType = typeAnnotationToFunkType(annotation.paramType)
+                val returnType = typeAnnotationToFunkType(annotation.returnType)
+                FunkType.FunctionType(paramType, returnType)
+            }
+            is RecordTypeAnnotation -> {
+                val fields = annotation.entries.associate { entry ->
+                    entry.name to typeAnnotationToFunkType(entry.type)
+                }
+                FunkType.RecordType(fields)
+            }
+            is TypeApplicationAnnotation -> {
+                val args = annotation.args.map { typeAnnotationToFunkType(it) }
+                when (annotation.constructor) {
+                    "List" -> if (args.isNotEmpty()) FunkType.ListType(args.first()) else FunkType.TypeApplication("List", args)
+                    "Set" -> if (args.isNotEmpty()) FunkType.SetType(args.first()) else FunkType.TypeApplication("Set", args)
+                    "Map" -> if (args.size >= 2) FunkType.MapType(args[0], args[1]) else FunkType.TypeApplication("Map", args)
+                    "Option" -> FunkType.TypeApplication("Option", args)
+                    "Result" -> FunkType.TypeApplication("Result", args)
+                    else -> FunkType.TypeApplication(annotation.constructor, args)
+                }
+            }
+            is VariantTypeAnnotation -> {
+                val constructors = annotation.constructors.associate { ctor: VariantTypeConstructor ->
+                    val payloadType = ctor.dataType?.let { typeAnnotationToFunkType(it) } ?: FunkType.RecordType(emptyMap())
+                    ctor.name to payloadType
+                }
+                FunkType.VariantType(constructors)
+            }
+            else -> FunkType.VarType(TypeVar.fresh()) // Fallback for unknown annotations
+        }
     }
 
     private fun applyToRecordUpdate(expr: RecordUpdate): RecordUpdate {
@@ -708,7 +819,63 @@ class SubstitutionApplier(
 
     private fun applyToVariantConstruction(expr: VariantConstruction): VariantConstruction {
         val updatedValue = expr.value?.let { applyToExpression(it) }
-        val updatedType = expr.inferredType?.let { substitution.apply(it) }
+
+        // CRITICAL FIX: Compute type for variant constructors when inferredType is null
+        // This is similar to how we handle BooleanLiteral in applyToBooleanLiteral
+        // Without this, True/False constructors would have null inferredType which breaks codec generation
+        val existingType = expr.inferredType
+        val updatedType = if (existingType != null) {
+            substitution.apply(existingType)
+        } else {
+            // Try to compute the type based on the constructor name
+            when (expr.constructor) {
+                "True", "False" -> {
+                    // Bool constructor: | True, False |
+                    FunkType.VariantType(
+                        constructors = mapOf("True" to null, "False" to null),
+                        rowVar = null
+                    )
+                }
+                "None" -> {
+                    // Option None: Option 'a = | Some { val: 'a }, None |
+                    // We create a type application for Option with a fresh type var
+                    FunkType.TypeApplication("Option", listOf(FunkType.VarType(TypeVar.fresh())))
+                }
+                "Some" -> {
+                    // Option Some: Option 'a = | Some { val: 'a }, None |
+                    // The type parameter comes from the payload
+                    val innerType = updatedValue?.inferredType?.let {
+                        when (it) {
+                            is FunkType.RecordType -> it.fields["val"] ?: FunkType.VarType(TypeVar.fresh())
+                            else -> FunkType.VarType(TypeVar.fresh())
+                        }
+                    } ?: FunkType.VarType(TypeVar.fresh())
+                    FunkType.TypeApplication("Option", listOf(innerType))
+                }
+                "Nil" -> {
+                    // List Nil constructor
+                    FunkType.ListType(FunkType.VarType(TypeVar.fresh()))
+                }
+                "Cons" -> {
+                    // List Cons constructor - extract element type from payload
+                    val elemType = updatedValue?.inferredType?.let {
+                        when (it) {
+                            is FunkType.RecordType -> it.fields["head"] ?: FunkType.VarType(TypeVar.fresh())
+                            else -> FunkType.VarType(TypeVar.fresh())
+                        }
+                    } ?: FunkType.VarType(TypeVar.fresh())
+                    FunkType.ListType(elemType)
+                }
+                else -> {
+                    // For other constructors, create an open variant with just this constructor
+                    val payloadType = updatedValue?.inferredType
+                    FunkType.VariantType(
+                        constructors = mapOf(expr.constructor to payloadType),
+                        rowVar = RowVar.fresh()
+                    )
+                }
+            }
+        }
 
         // CRITICAL: Resolve what this uppercase identifier actually represents
         // The parser creates VariantConstruction for ALL uppercase identifiers
@@ -795,7 +962,28 @@ class SubstitutionApplier(
     private fun applyToFunctionCall(expr: FunctionCall): FunctionCall {
         val updatedFunction = applyToExpression(expr.function)
         val updatedArguments = applyToExpression(expr.arguments)
-        val updatedType = expr.inferredType?.let { substitution.apply(it) }
+
+        // Compute the return type from the function's type if not already set on the expression
+        // This is necessary because the constraint generator creates a fresh type variable
+        // for the return type, but doesn't set it on the AST node
+        val updatedType = expr.inferredType?.let { substitution.apply(it) } ?: run {
+            // Extract return type from the function's type
+            val funcType = updatedFunction.inferredType?.let { substitution.apply(it) }
+            when (funcType) {
+                is FunkType.FunctionType -> {
+                    // CRITICAL: If the function has effects, wrap the return type in SuspendedType
+                    // Calling an effectful function produces a suspended computation
+                    val returnType = funcType.returnType
+                    val effects = funcType.effects
+                    if (effects != null && effects.effects.isNotEmpty()) {
+                        FunkType.SuspendedType(returnType, effects)
+                    } else {
+                        returnType
+                    }
+                }
+                else -> null
+            }
+        }
 
         // CRITICAL: Resolve ability constraints for this function call
         // This matches OldTypeChecker.kt:16483-16581 (resolveAbilitiesForFunctionCall)
@@ -804,7 +992,7 @@ class SubstitutionApplier(
         // Also check if this is a direct ability method call (e.g., Show.show {val = 42})
         // In this case, we need to resolve based on the argument types, not the function type constraints
         if (resolvedAbilities.isEmpty() && updatedFunction is MemberAccess) {
-            resolvedAbilities = resolveDirectAbilityMethodCall(updatedFunction, updatedArguments)
+            resolvedAbilities = resolveDirectAbilityMethodCall(updatedFunction, updatedArguments, updatedType)
         }
 
         // TCO: Check if this call is a self-recursive tail call
@@ -823,10 +1011,13 @@ class SubstitutionApplier(
      * Resolve a direct ability method call like Show.show {val = 42}.
      * The receiver (Show) is an ability name, and we need to find the implementation
      * based on the argument types.
+     *
+     * @param returnType The inferred return type of the call (for Decode, contains the target type)
      */
     private fun resolveDirectAbilityMethodCall(
         memberAccess: MemberAccess,
-        arguments: Expression
+        arguments: Expression,
+        returnType: FunkType?
     ): Map<String, ResolvedAbility> {
         val resolvedAbilities = mutableMapOf<String, ResolvedAbility>()
 
@@ -839,9 +1030,10 @@ class SubstitutionApplier(
 
 
         // Check if this is actually an ability (not a regular variable)
-        // Look for implementations of this ability
+        // Look for implementations of this ability, or check if it's auto-derivable
         val hasImpl = abilityImpls.values.any { it.abilityName == abilityName }
-        if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName)) {
+        val isAutoDerivable = (abilityName == "Encode" || abilityName == "Decode")
+        if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName) && !isAutoDerivable) {
             return resolvedAbilities
         }
 
@@ -864,6 +1056,16 @@ class SubstitutionApplier(
         // e.g., for Convert 'a 'b, find impl where first type matches
         if (impl == null) {
             impl = findAbilityImplementationByFirstType(abilityName, primaryType)
+        }
+
+        // If no match found by argument types, try to find the only implementation
+        // This handles format-parameterized abilities like EncodeFormat 'repr
+        // where the type parameter doesn't come from the arguments
+        if (impl == null) {
+            val allImpls = abilityImpls.values.filter { it.abilityName == abilityName }
+            if (allImpls.size == 1) {
+                impl = allImpls.first()
+            }
         }
 
         if (impl != null) {
@@ -898,6 +1100,108 @@ class SubstitutionApplier(
                     typeArgs = listOf(primaryType),
                     implementationRef = implRef,
                     isBuiltin = true
+                )
+            }
+        } else if (abilityName == "Encode" || abilityName == "Decode") {
+            // Auto-derive Encode/Decode for serializable types
+            // First, find the format type from the EncodeFormat/DecodeFormat impl in scope
+            val formatAbility = if (abilityName == "Encode") "EncodeFormat" else "DecodeFormat"
+            val formatImpl = abilityImpls.values.find { it.abilityName == formatAbility }
+
+            // For Encode: primaryType is the data type from the argument (correct)
+            // For Decode: primaryType is the format type from the argument (wrong!)
+            //             We need the return type, which is Result 'a DecodeError
+            //             The 'a is what we need to decode to
+            val dataType = if (abilityName == "Decode") {
+                // The return type may be null on the AST node, but we can compute it
+                // from the function's type. For Decode.decode, the function type is:
+                //   {val: 'repr} -> Result 'a DecodeError
+                // We need to extract 'a after applying the substitution.
+
+                // First, try the passed returnType (may have been computed)
+                val computedReturnType = returnType ?: run {
+                    // Try to compute from the function's type
+                    val funcType = memberAccess.inferredType?.let { substitution.apply(it) }
+                    when (funcType) {
+                        is FunkType.FunctionType -> funcType.returnType
+                        else -> null
+                    }
+                }
+
+                // Extract the target type from Result 'a DecodeError -> 'a
+                val extractedType = when (computedReturnType) {
+                    is FunkType.TypeApplication -> {
+                        if (computedReturnType.constructor == "Result" && computedReturnType.args.isNotEmpty()) {
+                            computedReturnType.args.first() // The 'a in Result 'a DecodeError
+                        } else {
+                            null
+                        }
+                    }
+                    is FunkType.VariantType -> {
+                        // Result is represented as a variant: | Ok {val: 'a} | Err {error: 'e} |
+                        // Look for the Ok constructor's payload type
+                        val okConstructor = computedReturnType.constructors["Ok"]
+                        if (okConstructor is FunkType.RecordType) {
+                            okConstructor.fields["val"]
+                        } else {
+                            null
+                        }
+                    }
+                    else -> null
+                }
+                extractedType ?: primaryType
+            } else {
+                primaryType // For Encode, use the argument type
+            }
+
+            // For built-in parametric types (Option, Result), keep them as TypeApplication
+            // so the codec generator can use the specialized encoders
+            val resolvedPrimaryType = if (dataType is FunkType.TypeApplication &&
+                (dataType.constructor == "Option" || dataType.constructor == "Result")) {
+                dataType // Don't resolve Option/Result - use specialized encoder
+            } else {
+                resolveTypeAlias(dataType)
+            }
+
+            if (formatImpl != null && codecGenerator.isSerializable(resolvedPrimaryType) && !containsVarType(resolvedPrimaryType)) {
+                // Get the format type (e.g., "Json")
+                val formatTypeName = formatImpl.targetTypes.firstOrNull() ?: return resolvedAbilities
+                val formatType = FunkType.TypeApplication(formatTypeName, emptyList())
+
+                // Recursively generate implementations for all nested types
+                // The record/variant encode calls Encode.encode for each field/variant
+                // Filter out VarTypes since we can't generate code for unknown types
+                val allTypesToGenerate = collectNestedTypes(resolvedPrimaryType)
+                    .filter { !containsVarType(it) }
+                for (nestedType in allTypesToGenerate) {
+                    val nestedImpl = if (abilityName == "Encode") {
+                        codecGenerator.generateEncodeImpl(formatType, nestedType)
+                    } else {
+                        codecGenerator.generateDecodeImpl(formatType, nestedType)
+                    }
+                    generatedCodecImpls.add(nestedImpl)
+                }
+
+                // Generate the main implementation using the resolved (structural) type
+                val generatedImpl = if (abilityName == "Encode") {
+                    codecGenerator.generateEncodeImpl(formatType, resolvedPrimaryType)
+                } else {
+                    codecGenerator.generateDecodeImpl(formatType, resolvedPrimaryType)
+                }
+
+                // Track the generated impl for later registration
+                generatedCodecImpls.add(generatedImpl)
+
+                // Create the resolved ability reference
+                // Use a stable name that matches what ASTToTruffleConverter will generate
+                val implRef = getCodecImplName(abilityName, formatTypeName, generatedImpl.targetTypes.drop(1).firstOrNull())
+                val key = "${abilityName}<${formatTypeName}, ${prettyPrintType(primaryType)}>"
+
+                resolvedAbilities[key] = ResolvedAbility(
+                    abilityName = abilityName,
+                    typeArgs = listOf(formatType, resolvedPrimaryType),
+                    implementationRef = implRef,
+                    isBuiltin = false
                 )
             }
         }
@@ -1041,6 +1345,190 @@ class SubstitutionApplier(
             is FunkType.ListType -> "List<${prettyPrintType(type.elementType)}>"
             is FunkType.ArrayType -> "Array<${prettyPrintType(type.elementType)}>"
             else -> type.toString()
+        }
+    }
+
+    /**
+     * Get the impl name that will match what ASTToTruffleConverter generates.
+     * This must be consistent with how the interpreter names ability implementations.
+     */
+    private fun getCodecImplName(abilityName: String, formatTypeName: String, dataTypeAnnotation: TypeAnnotation?): String {
+        val dataTypeName = getTypeAnnotationNameForCodec(dataTypeAnnotation)
+        return "${abilityName}\$${formatTypeName}\$${dataTypeName}"
+    }
+
+    /**
+     * Get a deterministic name for a type annotation for codec impl naming.
+     * This ensures consistent naming between the typechecker and interpreter.
+     */
+    private fun getTypeAnnotationNameForCodec(typeAnnotation: TypeAnnotation?): String {
+        return when (typeAnnotation) {
+            is IdentifierTypeAnnotation -> typeAnnotation.name
+            is RecordTypeAnnotation -> {
+                // Create a deterministic name for record types: "Record_field1_field2_..."
+                val fieldNames = typeAnnotation.entries.map { it.name }.sorted().joinToString("_")
+                "Record_$fieldNames"
+            }
+            is VariantTypeAnnotation -> {
+                // Create a deterministic name for variant types: "Variant_Con1_Con2_..."
+                val constructorNames = typeAnnotation.constructors.map { it.name }.sorted().joinToString("_")
+                "Variant_$constructorNames"
+            }
+            is TypeApplicationAnnotation -> {
+                // For type applications like List Int, Option String
+                if (typeAnnotation.args.isEmpty()) {
+                    typeAnnotation.constructor
+                } else {
+                    "${typeAnnotation.constructor}_${typeAnnotation.args.map { getTypeAnnotationNameForCodec(it) }.joinToString("_")}"
+                }
+            }
+            null -> "Unknown"
+            else -> typeAnnotation.toString()
+        }
+    }
+
+    private fun getTypeAnnotationName(typeAnnotation: TypeAnnotation): String {
+        return when (typeAnnotation) {
+            is IdentifierTypeAnnotation -> typeAnnotation.name
+            is TypeApplicationAnnotation -> {
+                // For type applications like Option<Int> or Json (with no args)
+                if (typeAnnotation.args.isEmpty()) {
+                    typeAnnotation.constructor
+                } else {
+                    "${typeAnnotation.constructor}_${typeAnnotation.args.map { getTypeAnnotationName(it) }.joinToString("_")}"
+                }
+            }
+            is RecordTypeAnnotation -> {
+                val fieldNames = typeAnnotation.entries.map { it.name }.sorted().joinToString("_")
+                "Record_$fieldNames"
+            }
+            is VariantTypeAnnotation -> {
+                val constructorNames = typeAnnotation.constructors.map { it.name }.sorted().joinToString("_")
+                "Variant_$constructorNames"
+            }
+            else -> typeAnnotation.toString()
+        }
+    }
+
+    /**
+     * Collect all nested types that need Encode/Decode implementations.
+     * For a record type {name: String, age: Int}, this returns [String, Int].
+     */
+    private fun collectNestedTypes(type: FunkType): Set<FunkType> {
+        val result = mutableSetOf<FunkType>()
+        collectNestedTypesImpl(type, result)
+        return result
+    }
+
+    private fun collectNestedTypesImpl(type: FunkType, result: MutableSet<FunkType>) {
+        when (type) {
+            is FunkType.RecordType -> {
+                for ((_, fieldType) in type.fields) {
+                    result.add(fieldType)
+                    collectNestedTypesImpl(fieldType, result)
+                }
+            }
+            is FunkType.VariantType -> {
+                for ((_, payloadType) in type.constructors) {
+                    if (payloadType != null) {
+                        result.add(payloadType)
+                        collectNestedTypesImpl(payloadType, result)
+                    }
+                }
+            }
+            is FunkType.ListType -> {
+                result.add(type.elementType)
+                collectNestedTypesImpl(type.elementType, result)
+            }
+            is FunkType.ArrayType -> {
+                result.add(type.elementType)
+                collectNestedTypesImpl(type.elementType, result)
+                // Array encoder converts to List, so we need the List impl too
+                val listType = FunkType.ListType(type.elementType)
+                result.add(listType)
+                collectNestedTypesImpl(listType, result)
+            }
+            is FunkType.SetType -> {
+                result.add(type.elementType)
+                collectNestedTypesImpl(type.elementType, result)
+            }
+            is FunkType.MapType -> {
+                result.add(type.keyType)
+                result.add(type.valueType)
+                collectNestedTypesImpl(type.keyType, result)
+                collectNestedTypesImpl(type.valueType, result)
+            }
+            is FunkType.TypeApplication -> {
+                // For Option, Result, etc.
+                for (arg in type.args) {
+                    result.add(arg)
+                    collectNestedTypesImpl(arg, result)
+                }
+            }
+            // Primitives don't need further recursion
+            else -> {}
+        }
+    }
+
+    /**
+     * Check if a type contains any unresolved type variables.
+     */
+    private fun containsVarType(type: FunkType): Boolean {
+        return when (type) {
+            is FunkType.VarType -> true
+            is FunkType.RecordType -> type.fields.values.any { containsVarType(it) }
+            is FunkType.VariantType -> type.constructors.values.any { it != null && containsVarType(it) }
+            is FunkType.ListType -> containsVarType(type.elementType)
+            is FunkType.ArrayType -> containsVarType(type.elementType)
+            is FunkType.SetType -> containsVarType(type.elementType)
+            is FunkType.SortedSetType -> containsVarType(type.elementType)
+            is FunkType.MapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
+            is FunkType.SortedMapType -> containsVarType(type.keyType) || containsVarType(type.valueType)
+            is FunkType.TypeApplication -> type.args.any { containsVarType(it) }
+            is FunkType.FunctionType -> containsVarType(type.paramType) || containsVarType(type.returnType)
+            else -> false
+        }
+    }
+
+    /**
+     * Resolve a type alias to its underlying structural type.
+     * For example, `Person` -> `{name: String, age: Int}`.
+     */
+    private fun resolveTypeAlias(type: FunkType): FunkType {
+        return when (type) {
+            is FunkType.TypeApplication -> {
+                // Look up the type declaration
+                val typeDecl = typeDeclarations[type.constructor]
+                if (typeDecl != null) {
+                    // Use the existing convertTypeDefinition method
+                    val definitionType = convertTypeDefinition(typeDecl.definition)
+
+                    // CRITICAL: Substitute type parameters with actual args
+                    // e.g., Option Int should substitute 'a with Int in the variant definition
+                    val typeParams = typeDecl.typeParams
+                    val typeArgs = type.args
+
+                    // Create a substitution mapping type params to args
+                    val typeParamSubstitution = if (typeParams.size == typeArgs.size) {
+                        val mapping = typeParams.zip(typeArgs).associate { (param, arg) ->
+                            TypeVar(param) to arg
+                        }
+                        Substitution(mapping)
+                    } else {
+                        Substitution.empty
+                    }
+
+                    // Apply the parameter substitution to the definition type
+                    val substitutedType = typeParamSubstitution.apply(definitionType)
+
+                    // Recursively resolve if the result is also a type application
+                    resolveTypeAlias(substitutedType)
+                } else {
+                    // No resolution available, keep as is
+                    type
+                }
+            }
+            else -> type
         }
     }
 

@@ -87,12 +87,12 @@ object SetTypes {
             FunkType.BooleanType
         )
 
-        context["__native_set_to_list"] = FunkType.FunctionType(
+        context["__native_set_to_array"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("s" to setType)),
             FunkType.ArrayType(FunkType.VarType(setElemTypeVar))
         )
 
-        context["__native_set_from_list"] = FunkType.FunctionType(
+        context["__native_set_from_array"] = FunkType.FunctionType(
             FunkType.RecordType(mapOf("xs" to FunkType.ArrayType(FunkType.VarType(setElemTypeVar)))),
             setType
         )

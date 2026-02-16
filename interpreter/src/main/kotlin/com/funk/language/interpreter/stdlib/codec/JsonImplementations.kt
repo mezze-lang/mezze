@@ -949,22 +949,22 @@ object JsonImplementations {
 
             is JsonPrimitive -> {
                 when {
-                    element.isString -> FunkVariant("JString", FunkRecord(mapOf("value" to FunkString(element.content))))
+                    element.isString -> FunkVariant("JString", FunkRecord(mapOf("val" to FunkString(element.content))))
                     element.content == "true" || element.content == "false" -> {
-                        FunkVariant("JBool", FunkRecord(mapOf("value" to FunkBool(element.boolean))))
+                        FunkVariant("JBool", FunkRecord(mapOf("val" to FunkBool(element.boolean))))
                     }
                     else -> {
                         // Try to parse as Long first, then Double
                         val longVal = element.longOrNull
                         if (longVal != null) {
-                            FunkVariant("JInt", FunkRecord(mapOf("value" to FunkInt(longVal))))
+                            FunkVariant("JInt", FunkRecord(mapOf("val" to FunkInt(longVal))))
                         } else {
                             val doubleVal = element.doubleOrNull
                             if (doubleVal != null) {
-                                FunkVariant("JFloat", FunkRecord(mapOf("value" to FunkFloat(doubleVal))))
+                                FunkVariant("JFloat", FunkRecord(mapOf("val" to FunkFloat(doubleVal))))
                             } else {
                                 // Fallback to string
-                                FunkVariant("JString", FunkRecord(mapOf("value" to FunkString(element.content))))
+                                FunkVariant("JString", FunkRecord(mapOf("val" to FunkString(element.content))))
                             }
                         }
                     }
@@ -973,8 +973,9 @@ object JsonImplementations {
 
             is JsonArray -> {
                 val elements = element.map { kotlinxToFunkJson(it) }
-                val funkList = FunkList.fromKotlinList(elements)
-                FunkVariant("JArray", FunkRecord(mapOf("elements" to funkList)))
+                // JArray.items is now Array, not List
+                val funkArray = FunkArrayList(elements)
+                FunkVariant("JArray", FunkRecord(mapOf("items" to funkArray)))
             }
 
             is JsonObject -> {
@@ -985,8 +986,9 @@ object JsonImplementations {
                         "value" to kotlinxToFunkJson(value)
                     ))
                 }
-                val funkList = FunkList.fromKotlinList(entries)
-                FunkVariant("JObject", FunkRecord(mapOf("fields" to funkList)))
+                // JObject.fields is now Array, not List
+                val funkArray = FunkArrayList(entries)
+                FunkVariant("JObject", FunkRecord(mapOf("fields" to funkArray)))
             }
         }
     }
@@ -1003,40 +1005,40 @@ object JsonImplementations {
                     "JBool" -> {
                         val record = value.value as? FunkRecord
                             ?: throw IllegalArgumentException("JBool expected record payload")
-                        val boolVal = record.fields["value"] as? FunkBool
-                            ?: throw IllegalArgumentException("JBool expected 'value' field")
+                        val boolVal = record.fields["val"] as? FunkBool
+                            ?: throw IllegalArgumentException("JBool expected 'val' field")
                         JsonPrimitive(boolVal.value)
                     }
 
                     "JInt" -> {
                         val record = value.value as? FunkRecord
                             ?: throw IllegalArgumentException("JInt expected record payload")
-                        val intVal = record.fields["value"] as? FunkInt
-                            ?: throw IllegalArgumentException("JInt expected 'value' field")
+                        val intVal = record.fields["val"] as? FunkInt
+                            ?: throw IllegalArgumentException("JInt expected 'val' field")
                         JsonPrimitive(intVal.value)
                     }
 
                     "JFloat" -> {
                         val record = value.value as? FunkRecord
                             ?: throw IllegalArgumentException("JFloat expected record payload")
-                        val floatVal = record.fields["value"] as? FunkFloat
-                            ?: throw IllegalArgumentException("JFloat expected 'value' field")
+                        val floatVal = record.fields["val"] as? FunkFloat
+                            ?: throw IllegalArgumentException("JFloat expected 'val' field")
                         JsonPrimitive(floatVal.value)
                     }
 
                     "JString" -> {
                         val record = value.value as? FunkRecord
                             ?: throw IllegalArgumentException("JString expected record payload")
-                        val strVal = record.fields["value"] as? FunkString
-                            ?: throw IllegalArgumentException("JString expected 'value' field")
+                        val strVal = record.fields["val"] as? FunkString
+                            ?: throw IllegalArgumentException("JString expected 'val' field")
                         JsonPrimitive(strVal.value)
                     }
 
                     "JArray" -> {
                         val record = value.value as? FunkRecord
                             ?: throw IllegalArgumentException("JArray expected record payload")
-                        val elements = record.fields["elements"]
-                            ?: throw IllegalArgumentException("JArray expected 'elements' field")
+                        val elements = record.fields["items"]
+                            ?: throw IllegalArgumentException("JArray expected 'items' field")
 
                         val jsonElements = funkListToKotlinList(elements).map { funkJsonToKotlinx(it) }
                         JsonArray(jsonElements)
@@ -1075,6 +1077,7 @@ object JsonImplementations {
     private fun funkListToKotlinList(list: FunkValue): List<FunkValue> {
         return when (list) {
             is FunkList -> list.toKotlinList()
+            is FunkArrayList -> list.toList()  // Handle arrays (JArray.items and JObject.fields are now Arrays)
             is FunkVariant -> {
                 // Handle Nil and Cons representation
                 if (list.constructor == "Nil") {

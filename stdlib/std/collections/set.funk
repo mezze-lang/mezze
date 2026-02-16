@@ -42,12 +42,19 @@ pub let is_superset: { s1: Set 'a, s2: Set 'a } -> Bool= {s1, s2} ->
 pub let is_disjoint: { s1: Set 'a, s2: Set 'a } -> Bool= {s1, s2} ->
     is_empty { s = intersection { s1 = s1, s2 = s2 } }
 
-# Conversion functions
-pub let to_list: { s: Set 'a } -> ['a] = {s} ->
-    __native_set_to_list { s = s }
+# Conversion functions - Array
+pub let to_array: { s: Set 'a } -> ['a] = {s} ->
+    __native_set_to_array { s = s }
 
-pub let from_list: { xs: ['a] } -> Set 'a=  { xs } ->
-    __native_set_from_list { xs = xs }
+pub let from_array: { xs: ['a] } -> Set 'a = { xs } ->
+    __native_set_from_array { xs = xs }
+
+# Conversion functions - List
+pub let to_list: { s: Set 'a } -> List 'a = {s} ->
+    __native_list_from_array { xs = __native_set_to_array { s = s } }
+
+pub let from_list: { xs: List 'a } -> Set 'a = { xs } ->
+    __native_set_from_array { xs = __native_list_to_array { xs = xs } }
 
 # Higher-order functions
 pub let filter: { s: Set 'a, p: 'a -> Bool } -> Set 'a= {s, p} ->

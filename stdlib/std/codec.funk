@@ -40,6 +40,21 @@ pub type DecodeError = {
 }
 
 # ============================================================================
+# CONFIGURATION TYPES
+# ============================================================================
+
+# Field name transformation strategies
+pub type FieldTransform = | Identity, SnakeCase, CamelCase, KebabCase, ScreamingSnakeCase |
+
+# Codec configuration for runtime customization
+pub type CodecConfig = {
+    field_transform: FieldTransform
+}
+
+# Default codec configuration (identity transform - no changes to field names)
+pub let default_config: CodecConfig = {field_transform = Identity}
+
+# ============================================================================
 # TYPE ALIASES
 # ============================================================================
 
@@ -53,61 +68,74 @@ pub type Entry 'k 'v = {key: 'k, value: 'v}
 # User-facing ability for encoding values to a format's intermediate representation
 # TypeChecker auto-generates implementations for serializable types
 pub ability Encode 'repr 'a where {
-    encode: {value: 'a, path: List String} -> (Result 'repr EncodeError)
+    encode: {val: 'a, config: CodecConfig} -> (Result 'repr EncodeError)
 }
 
 # User-facing ability for decoding values from a format's intermediate representation
 # TypeChecker auto-generates implementations for serializable types
 pub ability Decode 'repr 'a where {
-    decode: {repr: 'repr, path: List String} -> (Result 'a DecodeError)
+    decode: {val: 'repr, config: CodecConfig} -> (Result 'a DecodeError)
 }
 
 # Format author ability - defines how to encode primitive values and structures
 # to the format's intermediate representation (e.g., Json variant)
 pub ability EncodeFormat 'repr where {
     # Atoms (6 hooks)
-    encode_int: {value: Int, path: List String} -> (Result 'repr EncodeError),
-    encode_float: {value: Float, path: List String} -> (Result 'repr EncodeError),
-    encode_string: {value: String, path: List String} -> (Result 'repr EncodeError),
-    encode_bool: {value: Bool, path: List String} -> (Result 'repr EncodeError),
-    encode_frac: {value: Frac, path: List String} -> (Result 'repr EncodeError),
-    encode_bytes: {value: Bytes, path: List String} -> (Result 'repr EncodeError),
+    encode_int: {val: Int, path: List String} -> (Result 'repr EncodeError),
+    encode_float: {val: Float, path: List String} -> (Result 'repr EncodeError),
+    encode_string: {val: String, path: List String} -> (Result 'repr EncodeError),
+    encode_bool: {val: Bool, path: List String} -> (Result 'repr EncodeError),
+    encode_frac: {val: Frac, path: List String} -> (Result 'repr EncodeError),
+    encode_bytes: {val: Bytes, path: List String} -> (Result 'repr EncodeError),
 
     # Structures (2 hooks)
-    encode_record: {fields: List (Entry String 'repr), path: List String} -> (Result 'repr EncodeError),
+    # Note: fields is Array for efficient construction with [...] syntax
+    # Using anonymous record {key: String, value: 'repr} instead of Entry for structural compatibility
+    encode_record: {fields: Array {key: String, value: 'repr}, path: List String} -> (Result 'repr EncodeError),
     encode_variant: {tag: String, payload: Option 'repr, path: List String} -> (Result 'repr EncodeError),
 
     # Collections (3 hooks)
-    encode_list: {elements: List 'repr, path: List String} -> (Result 'repr EncodeError),
-    encode_set: {elements: Set 'repr, path: List String} -> (Result 'repr EncodeError),
-    encode_map: {entries: List (Entry 'repr 'repr), path: List String} -> (Result 'repr EncodeError),
+    encode_list: {elems: List 'repr, path: List String} -> (Result 'repr EncodeError),
+    encode_set: {elems: Set 'repr, path: List String} -> (Result 'repr EncodeError),
+    encode_map: {entries: List {key: 'repr, value: 'repr}, path: List String} -> (Result 'repr EncodeError),
 
     # Nullable (1 hook)
-    encode_option: {value: Option 'repr, path: List String} -> (Result 'repr EncodeError)
+    encode_option: {val: Option 'repr, path: List String} -> (Result 'repr EncodeError),
+
+    # Field name transformation (1 hook)
+    # Transforms field names according to format config (e.g., camelCase -> snake_case)
+    # Uses the CodecConfig to determine the transformation strategy
+    transform_field: {name: String, config: CodecConfig} -> String
 }
 
 # Format author ability - defines how to decode values from the format's
 # intermediate representation back to Funk types
 pub ability DecodeFormat 'repr where {
     # Atoms (6 hooks)
-    decode_int: {repr: 'repr, path: List String} -> (Result Int DecodeError),
-    decode_float: {repr: 'repr, path: List String} -> (Result Float DecodeError),
-    decode_string: {repr: 'repr, path: List String} -> (Result String DecodeError),
-    decode_bool: {repr: 'repr, path: List String} -> (Result Bool DecodeError),
-    decode_frac: {repr: 'repr, path: List String} -> (Result Frac DecodeError),
-    decode_bytes: {repr: 'repr, path: List String} -> (Result Bytes DecodeError),
+    decode_int: {val: 'repr, path: List String} -> (Result Int DecodeError),
+    decode_float: {val: 'repr, path: List String} -> (Result Float DecodeError),
+    decode_string: {val: 'repr, path: List String} -> (Result String DecodeError),
+    decode_bool: {val: 'repr, path: List String} -> (Result Bool DecodeError),
+    decode_frac: {val: 'repr, path: List String} -> (Result Frac DecodeError),
+    decode_bytes: {val: 'repr, path: List String} -> (Result Bytes DecodeError),
 
     # Structures (2 hooks)
-    decode_record_field: {repr: 'repr, key: String, path: List String} -> (Result 'repr DecodeError),
-    decode_variant: {repr: 'repr, path: List String} -> (Result {tag: String, payload: Option 'repr} DecodeError),
+    decode_record_field: {val: 'repr, key: String, path: List String} -> (Result 'repr DecodeError),
+    decode_variant: {val: 'repr, path: List String} -> (Result {tag: String, payload: Option 'repr} DecodeError),
 
     # Collections (3 hooks)
-    decode_list: {repr: 'repr, path: List String} -> (Result (List 'repr) DecodeError),
-    decode_set: {repr: 'repr, path: List String} -> (Result (Set 'repr) DecodeError),
-    decode_map: {repr: 'repr, path: List String} -> (Result (List (Entry 'repr 'repr)) DecodeError),
+    decode_list: {val: 'repr, path: List String} -> (Result (List 'repr) DecodeError),
+    decode_set: {val: 'repr, path: List String} -> (Result (Set 'repr) DecodeError),
+    decode_map: {val: 'repr, path: List String} -> (Result (List {key: 'repr, value: 'repr}) DecodeError),
 
     # Nullable (1 hook)
-    decode_option: {repr: 'repr, path: List String} -> (Result (Option 'repr) DecodeError)
+    decode_option: {val: 'repr, path: List String} -> (Result (Option 'repr) DecodeError),
+
+    # Field name transformation (1 hook)
+    # Transforms field names according to format config (e.g., snake_case -> camelCase)
+    # This is the inverse of EncodeFormat.transform_field
+    # Uses the CodecConfig to determine the transformation strategy
+    transform_field: {name: String, config: CodecConfig} -> String
 }
 
 # ============================================================================
@@ -193,7 +221,7 @@ pub ability StreamDecodeFormat 'format where {
 
     # Map (2 hooks)
     stream_decode_map_start: {bytes: Bytes, offset: Int, path: List String} -> (Result {offset: Int} DecodeError),
-    stream_decode_map_next: {bytes: Bytes, offset: Int, path: List String} -> (Result {entry: Option (Entry Bytes Bytes), offset: Int} DecodeError),
+    stream_decode_map_next: {bytes: Bytes, offset: Int, path: List String} -> (Result {entry: Option {key: Bytes, value: Bytes}, offset: Int} DecodeError),
 
     # Option (1 hook)
     stream_decode_option: {bytes: Bytes, offset: Int, path: List String} -> (Result {value: Option Bytes, offset: Int} DecodeError)

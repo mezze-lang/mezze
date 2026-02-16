@@ -94,10 +94,10 @@ object JsonTypes {
             FunkType.StringType
         )
 
-        // __native_frac_to_float: {f: Frac} -> Float
+        // __native_frac_to_float: {n: Frac} -> Float
         // Converts a fraction to a float
         context["__native_frac_to_float"] = FunkType.FunctionType(
-            FunkType.RecordType(mapOf("f" to FunkType.FracType)),
+            FunkType.RecordType(mapOf("n" to FunkType.FracType)),
             FunkType.FloatType
         )
 
@@ -256,10 +256,13 @@ object JsonTypes {
             )
         )
 
-        // Entry type for map entries - use TypeApplication to match Entry 'k 'v = {key: 'k, value: 'v}
-        val entryBytesBytes = FunkType.TypeApplication("Entry", listOf(FunkType.BytesType, FunkType.BytesType))
+        // Use anonymous record type {key: Bytes, value: Bytes} for structural compatibility
+        val entryBytesBytes = FunkType.RecordType(mapOf(
+            "key" to FunkType.BytesType,
+            "value" to FunkType.BytesType
+        ))
 
-        // stream_decode_map_next: -> Result {entry: Option (Entry Bytes Bytes), offset: Int} DecodeError
+        // stream_decode_map_next: -> Result {entry: Option {key: Bytes, value: Bytes}, offset: Int} DecodeError
         context["__native_json_stream_decode_map_next"] = FunkType.FunctionType(
             streamDecodeParams,
             resultType(

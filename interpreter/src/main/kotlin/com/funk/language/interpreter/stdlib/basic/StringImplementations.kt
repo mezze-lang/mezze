@@ -160,5 +160,75 @@ object StringImplementations {
 
             FunkString(stringValues.joinToString(separator.value))
         }
+
+        // === Case Conversion Functions (for codec field transforms) ===
+
+        // Convert to snake_case: "userName" -> "user_name", "HTTPResponse" -> "http_response"
+        context["__native_string_to_snake_case"] = NativeFunkFunction("__native_string_to_snake_case") { args ->
+            val record = args.firstOrNull() as? FunkRecord ?: throw NativeFunctionException("__native_string_to_snake_case", "expects FunkRecord")
+            val s = record.fields["s"] as? FunkString ?: throw NativeFunctionException("__native_string_to_snake_case", "expects 's' as String")
+            FunkString(toSnakeCase(s.value))
+        }
+
+        // Convert to camelCase: "user_name" -> "userName", "http_response" -> "httpResponse"
+        context["__native_string_to_camel_case"] = NativeFunkFunction("__native_string_to_camel_case") { args ->
+            val record = args.firstOrNull() as? FunkRecord ?: throw NativeFunctionException("__native_string_to_camel_case", "expects FunkRecord")
+            val s = record.fields["s"] as? FunkString ?: throw NativeFunctionException("__native_string_to_camel_case", "expects 's' as String")
+            FunkString(toCamelCase(s.value))
+        }
+
+        // Convert to kebab-case: "userName" -> "user-name"
+        context["__native_string_to_kebab_case"] = NativeFunkFunction("__native_string_to_kebab_case") { args ->
+            val record = args.firstOrNull() as? FunkRecord ?: throw NativeFunctionException("__native_string_to_kebab_case", "expects FunkRecord")
+            val s = record.fields["s"] as? FunkString ?: throw NativeFunctionException("__native_string_to_kebab_case", "expects 's' as String")
+            FunkString(toKebabCase(s.value))
+        }
+
+        // Convert to SCREAMING_SNAKE_CASE: "userName" -> "USER_NAME"
+        context["__native_string_to_screaming_snake_case"] = NativeFunkFunction("__native_string_to_screaming_snake_case") { args ->
+            val record = args.firstOrNull() as? FunkRecord ?: throw NativeFunctionException("__native_string_to_screaming_snake_case", "expects FunkRecord")
+            val s = record.fields["s"] as? FunkString ?: throw NativeFunctionException("__native_string_to_screaming_snake_case", "expects 's' as String")
+            FunkString(toSnakeCase(s.value).uppercase())
+        }
+    }
+
+    // Helper: Convert camelCase/PascalCase to snake_case
+    private fun toSnakeCase(s: String): String {
+        if (s.isEmpty()) return s
+        val result = StringBuilder()
+        for ((i, c) in s.withIndex()) {
+            if (c.isUpperCase()) {
+                if (i > 0) result.append('_')
+                result.append(c.lowercaseChar())
+            } else {
+                result.append(c)
+            }
+        }
+        return result.toString()
+    }
+
+    // Helper: Convert snake_case/kebab-case to camelCase
+    private fun toCamelCase(s: String): String {
+        if (s.isEmpty()) return s
+        val parts = s.split('_', '-')
+        return parts.mapIndexed { i, part ->
+            if (i == 0) part.lowercase()
+            else part.replaceFirstChar { it.uppercase() }
+        }.joinToString("")
+    }
+
+    // Helper: Convert camelCase/PascalCase to kebab-case
+    private fun toKebabCase(s: String): String {
+        if (s.isEmpty()) return s
+        val result = StringBuilder()
+        for ((i, c) in s.withIndex()) {
+            if (c.isUpperCase()) {
+                if (i > 0) result.append('-')
+                result.append(c.lowercaseChar())
+            } else {
+                result.append(c)
+            }
+        }
+        return result.toString()
     }
 }

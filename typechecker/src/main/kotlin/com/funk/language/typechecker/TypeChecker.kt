@@ -391,19 +391,19 @@ class TypeChecker(
                     mustBeOpenBindings,
                     mustBeOpenTypes,
                     context.getAllAbilityImpls(),  // Pass ability implementations for resolving calls
-                    buildResult.abilityDeclarations,  // For resolving ability references
+                    allAbilityDeclarations,  // For resolving ability references (including imported)
                     allEffectDeclarations,  // For resolving effect references
                     allTypeDeclarations,  // For resolving variant constructors
                     tailCallLocations  // TCO: Locations of self-recursive tail calls
                 )
-                val typedProgramBase = applier.applyToProgram(program)
-
-                // Add generated codec implementations to the program
-                val typedProgram = if (generatedCodecImpls.isNotEmpty()) {
-                    Program(items = typedProgramBase.items + generatedCodecImpls.values.toList())
+                // Add generated codec implementations to the program BEFORE applying substitution
+                // This ensures they go through the same processing as user-defined impls
+                val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
+                    Program(items = generatedCodecImpls.values.toList() + program.items)
                 } else {
-                    typedProgramBase
+                    program
                 }
+                val typedProgram = applier.applyToProgram(programWithCodecImpls)
 
                 // PHASE 5: Validate Types (moved after substitution so we can check inferred types)
                 val validator = TypeValidator(context, allTypeDeclarations)

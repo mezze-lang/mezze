@@ -281,6 +281,12 @@ private fun unifyImpl(type1: FunkType, type2: FunkType, typeDeclarations: Map<St
         type1 is FunkType.ArrayType && type2 is FunkType.ArrayType ->
             unify(type1.elementType, type2.elementType, typeDeclarations)
 
+        // CASE 7a: Cross-unification between ArrayType and TypeApplication("Array", ...)
+        type1 is FunkType.ArrayType && type2 is FunkType.TypeApplication && type2.constructor == "Array" && type2.args.size == 1 ->
+            unify(type1.elementType, type2.args[0], typeDeclarations)
+        type1 is FunkType.TypeApplication && type1.constructor == "Array" && type1.args.size == 1 && type2 is FunkType.ArrayType ->
+            unify(type1.args[0], type2.elementType, typeDeclarations)
+
         // CASE 8: List type unification
         type1 is FunkType.ListType && type2 is FunkType.ListType ->
             unify(type1.elementType, type2.elementType, typeDeclarations)
@@ -908,7 +914,7 @@ private fun unifyEffectRows(eff1: FunkType.EffectRow, eff2: FunkType.EffectRow):
  */
 private fun formatType(type: FunkType): String {
     return when (type) {
-        is FunkType.VarType -> type.variable.toString()
+        is FunkType.VarType -> type.variable.name
         is FunkType.IntType -> "Int"
         is FunkType.FloatType -> "Float"
         is FunkType.StringType -> "String"
@@ -920,9 +926,9 @@ private fun formatType(type: FunkType): String {
         is FunkType.ByteBufferType -> "ByteBuffer"
         is FunkType.CharType -> "Char"
         is FunkType.FunctionType -> "{...} -> ..."
-        is FunkType.RecordType -> "{${type.fields.keys.take(3).joinToString()}${if (type.fields.size > 3) ", ..." else ""}}"
+        is FunkType.RecordType -> "{${type.fields.entries.take(3).joinToString { "${it.key}: ${formatType(it.value)}" }}${if (type.fields.size > 3) ", ..." else ""}}"
         is FunkType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}${if (type.constructors.size > 3) ", ..." else ""}]"
-        is FunkType.TypeApplication -> "${type.constructor}${if (type.args.isNotEmpty()) " ..." else ""}"
+        is FunkType.TypeApplication -> "${type.constructor}${if (type.args.isNotEmpty()) " ${type.args.joinToString(" ") { formatType(it) }}" else ""}"
         is FunkType.ArrayType -> "Array ${formatType(type.elementType)}"
         is FunkType.ListType -> "List ${formatType(type.elementType)}"
         is FunkType.SetType -> "Set ${formatType(type.elementType)}"
@@ -1066,8 +1072,20 @@ internal fun expandTypeApplicationToVariant(typeApp: FunkType.TypeApplication, t
     // Look up the type declaration
     val typeDecl = typeDeclarations[typeApp.constructor] ?: return null
 
-    // Only variant definitions can be expanded to variant types
-    val variantDef = typeDecl.definition as? VariantDefinition ?: return null
+    // Handle both variant definitions and newtype definitions
+    // Newtypes are essentially single-constructor variants
+    val variantDef = when (val def = typeDecl.definition) {
+        is VariantDefinition -> def
+        is NewtypeDefinition -> {
+            // Convert newtype to a variant with a single constructor
+            // newtype UserId = UserId Int  =>  type UserId = | UserId { value: Int } |
+            val payloadType = RecordTypeAnnotation(
+                entries = listOf(RecordTypeEntry("value", def.wrappedType))
+            )
+            VariantDefinition(listOf(VariantConstructorDef(def.constructor, payloadType)))
+        }
+        else -> return null
+    }
 
     DebugLogger.debugSection(Category.Unification, "expandTypeApplication") {
         listOf(

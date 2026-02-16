@@ -397,17 +397,43 @@ class ASTToTruffleConverter(
         // Create a mangled name using $ to prevent user namespace conflicts: "Show$Int"
         // Dollar signs are reserved for compiler/runtime use and cannot appear in user identifiers
         val targetTypeNames = impl.targetTypes.joinToString("$") { typeAnnotation ->
-            // Simple type name extraction - just use the type annotation's name
-            when (typeAnnotation) {
-                is IdentifierTypeAnnotation -> typeAnnotation.name
-                else -> typeAnnotation.toString()
-            }
+            getTypeAnnotationNameForImpl(typeAnnotation)
         }
         val implName = "${impl.abilityName}\$$targetTypeNames"
 
         // Store the implementation record with the mangled name
         val slot = getOrCreateSlot(implName)
         return SimpleWriteVariableNode(slot, recordNode, implName)
+    }
+
+    /**
+     * Get a deterministic name for a type annotation for impl naming.
+     * This must match the naming scheme in SubstitutionApplier.getTypeAnnotationNameForCodec()
+     */
+    private fun getTypeAnnotationNameForImpl(typeAnnotation: TypeAnnotation): String {
+        return when (typeAnnotation) {
+            is IdentifierTypeAnnotation -> typeAnnotation.name
+            is RecordTypeAnnotation -> {
+                // Create a deterministic name for record types: "Record_field1_field2_..."
+                val fieldNames = typeAnnotation.entries.map { it.name }.sorted().joinToString("_")
+                "Record_$fieldNames"
+            }
+            is VariantTypeAnnotation -> {
+                // Create a deterministic name for variant types: "Variant_Con1_Con2_..."
+                val constructorNames = typeAnnotation.constructors.map { it.name }.sorted().joinToString("_")
+                "Variant_$constructorNames"
+            }
+            is TypeApplicationAnnotation -> {
+                // For type applications like List Int, Option String
+                if (typeAnnotation.args.isEmpty()) {
+                    typeAnnotation.constructor
+                } else {
+                    "${typeAnnotation.constructor}_${typeAnnotation.args.map { getTypeAnnotationNameForImpl(it) }.joinToString("_")}"
+                }
+            }
+            is ArrayTypeAnnotation -> "Array_${getTypeAnnotationNameForImpl(typeAnnotation.elementType)}"
+            else -> typeAnnotation.toString()
+        }
     }
     
     /**
@@ -637,6 +663,9 @@ class ASTToTruffleConverter(
      * Check if an identifier is a built-in function
      */
     private fun isBuiltinFunction(name: String): Boolean {
+        // Native functions used by generated codec impls and stdlib
+        if (name.startsWith("__native_")) return true
+
         return when (name) {
             "intToString", "floatToString", "boolToString", "stringToInt",
             "print", "debug", "abs", "max", "min", "length", "concat",
@@ -1037,7 +1066,6 @@ class ASTToTruffleConverter(
                         createFunctionCallNode(functionNode, argsNode)
                     }
                 }
-            } else {
             }
             } else {
                 // User-defined ability - look up the implementation directly

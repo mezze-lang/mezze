@@ -46,7 +46,7 @@ class JsonCodecInterpreterTest {
         assertEquals("JString", jsonValue.constructor)
 
         val stringRecord = jsonValue.value as FunkRecord
-        val stringValue = stringRecord.fields["value"] as FunkString
+        val stringValue = stringRecord.fields["val"] as FunkString
         assertEquals("hello", stringValue.value)
     }
 
@@ -68,7 +68,7 @@ class JsonCodecInterpreterTest {
         assertEquals("JInt", jsonValue.constructor)
 
         val intRecord = jsonValue.value as FunkRecord
-        val intValue = intRecord.fields["value"] as FunkInt
+        val intValue = intRecord.fields["val"] as FunkInt
         assertEquals(42L, intValue.value)
     }
 
@@ -90,7 +90,7 @@ class JsonCodecInterpreterTest {
         assertEquals("JFloat", jsonValue.constructor)
 
         val floatRecord = jsonValue.value as FunkRecord
-        val floatValue = floatRecord.fields["value"] as FunkFloat
+        val floatValue = floatRecord.fields["val"] as FunkFloat
         assertEquals(3.14, floatValue.value, 0.001)
     }
 
@@ -112,7 +112,7 @@ class JsonCodecInterpreterTest {
         assertEquals("JBool", jsonValue.constructor)
 
         val boolRecord = jsonValue.value as FunkRecord
-        val boolValue = boolRecord.fields["value"] as FunkBool
+        val boolValue = boolRecord.fields["val"] as FunkBool
         assertTrue(boolValue.value)
     }
 
@@ -134,7 +134,7 @@ class JsonCodecInterpreterTest {
         assertEquals("JBool", jsonValue.constructor)
 
         val boolRecord = jsonValue.value as FunkRecord
-        val boolValue = boolRecord.fields["value"] as FunkBool
+        val boolValue = boolRecord.fields["val"] as FunkBool
         assertFalse(boolValue.value)
     }
 
@@ -175,8 +175,8 @@ class JsonCodecInterpreterTest {
         assertEquals("JArray", jsonValue.constructor)
 
         val arrayRecord = jsonValue.value as FunkRecord
-        val elementsList = arrayRecord.fields["elements"] as FunkList
-        assertEquals(3, elementsList.toKotlinList().size)
+        val elementsList = arrayRecord.fields["items"] as FunkArrayList
+        assertEquals(3, elementsList.toList().size)
     }
 
     @Test
@@ -197,8 +197,8 @@ class JsonCodecInterpreterTest {
         assertEquals("JObject", jsonValue.constructor)
 
         val objRecord = jsonValue.value as FunkRecord
-        val fieldsList = objRecord.fields["fields"] as FunkList
-        assertEquals(2, fieldsList.toKotlinList().size)
+        val fieldsList = objRecord.fields["fields"] as FunkArrayList
+        assertEquals(2, fieldsList.toList().size)
     }
 
     @Test
@@ -228,8 +228,8 @@ class JsonCodecInterpreterTest {
     fun `serialize JString`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { value: Bool }, JInt { value: Int }, JFloat { value: Float }, JString { value: String } |
-            let json: Json = JString {value = "hello"}
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
+            let json: Json = JString {val = "hello"}
             let result = __native_json_serialize {json = json, pretty = False}
             result
         """.trimIndent()
@@ -249,8 +249,8 @@ class JsonCodecInterpreterTest {
     fun `serialize JInt`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { value: Bool }, JInt { value: Int }, JFloat { value: Float }, JString { value: String } |
-            let json: Json = JInt {value = 42}
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
+            let json: Json = JInt {val = 42}
             let result = __native_json_serialize {json = json, pretty = False}
             result
         """.trimIndent()
@@ -270,8 +270,8 @@ class JsonCodecInterpreterTest {
     fun `serialize JFloat`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { value: Bool }, JInt { value: Int }, JFloat { value: Float }, JString { value: String } |
-            let json: Json = JFloat {value = 3.14}
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
+            let json: Json = JFloat {val = 3.14}
             let result = __native_json_serialize {json = json, pretty = False}
             result
         """.trimIndent()
@@ -291,8 +291,8 @@ class JsonCodecInterpreterTest {
     fun `serialize JBool true`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { value: Bool }, JInt { value: Int }, JFloat { value: Float }, JString { value: String } |
-            let json: Json = JBool {value = True}
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
+            let json: Json = JBool {val = True}
             let result = __native_json_serialize {json = json, pretty = False}
             result
         """.trimIndent()
@@ -312,7 +312,7 @@ class JsonCodecInterpreterTest {
     fun `serialize JNull`() {
         val source = """
             # Define Json type locally for testing
-            type Json = | JNull, JBool { value: Bool }, JInt { value: Int }, JFloat { value: Float }, JString { value: String } |
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String } |
             let json: Json = JNull
             let result = __native_json_serialize {json = json, pretty = False}
             result
@@ -332,11 +332,10 @@ class JsonCodecInterpreterTest {
     @Test
     fun `serialize JArray`() {
         val source = """
-            use std::collections::list
-            # Define Json type locally for testing (with Array for elements since [...] syntax creates Array)
-            type Json = | JNull, JBool { value: Bool }, JInt { value: Int }, JFloat { value: Float }, JString { value: String }, JArray { elements: List Json } |
-            let elements: List Json = list::from_array {xs = [JInt {value = 1}, JInt {value = 2}, JInt {value = 3}]}
-            let json: Json = JArray {elements = elements}
+            # Define Json type locally for testing (with Array for items)
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: Array Json } |
+            let items: Array Json = [JInt {val = 1}, JInt {val = 2}, JInt {val = 3}]
+            let json: Json = JArray {items = items}
             let result = __native_json_serialize {json = json, pretty = False}
             result
         """.trimIndent()
@@ -355,13 +354,12 @@ class JsonCodecInterpreterTest {
     @Test
     fun `serialize JObject`() {
         val source = """
-            use std::collections::list
             # Define Json type locally for testing
-            type Json = | JNull, JBool { value: Bool }, JInt { value: Int }, JFloat { value: Float }, JString { value: String }, JArray { elements: List Json }, JObject { fields: List {key: String, value: Json} } |
-            let fields: List {key: String, value: Json} = list::from_array {xs = [
-                {key = "name", value = JString {value = "Alice"}},
-                {key = "age", value = JInt {value = 30}}
-            ]}
+            type Json = | JNull, JBool { val: Bool }, JInt { val: Int }, JFloat { val: Float }, JString { val: String }, JArray { items: Array Json }, JObject { fields: Array {key: String, value: Json} } |
+            let fields: Array {key: String, value: Json} = [
+                {key = "name", value = JString {val = "Alice"}},
+                {key = "age", value = JInt {val = 30}}
+            ]
             let json: Json = JObject {fields = fields}
             let result = __native_json_serialize {json = json, pretty = False}
             result
