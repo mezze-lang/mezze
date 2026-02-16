@@ -635,7 +635,7 @@ class ModuleResolver(
                 val effectRow = annotation.effects?.let { effectRowAnnotation ->
                     // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                     val rowVar = if (effectRowAnnotation.isPolymorphic) RowVar.fresh() else null
-                    FunkType.EffectRow(effectRowAnnotation.effects.toSet(), rowVar)
+                    FunkType.EffectRow(effectRowAnnotation.effects.toSet(), rowVar, effectRowAnnotation.isPerformed)
                 }
                 FunkType.FunctionType(
                     paramType = convertTypeAnnotation(annotation.paramType),

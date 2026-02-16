@@ -286,4 +286,160 @@ class EffectParserTest {
             assertTrue(e.message?.contains("Type variable must start with '") == true)
         }
     }
+
+    // ========================================================================
+    // PERFORMED MARKER <*> TESTS
+    // ========================================================================
+
+    @Test
+    fun testPerformedMarkerOnly() {
+        val source = """
+            let f: {} -> Int <*> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val pattern = letBinding.pattern as VariablePattern
+        assertEquals("f", pattern.name)
+
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        assertNotNull(typeAnnotation.effects)
+        val effectRow = typeAnnotation.effects!!
+        assertTrue(effectRow.effects.isEmpty())
+        assertFalse(effectRow.isPolymorphic)
+        assertTrue(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testPerformedMarkerWithEffects() {
+        val source = """
+            let f: {} -> Int <Log, *> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        assertNotNull(letBinding.typeAnnotation)
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        assertNotNull(typeAnnotation.effects)
+        val effectRow = typeAnnotation.effects!!
+        assertEquals(listOf("Log"), effectRow.effects)
+        assertFalse(effectRow.isPolymorphic)
+        assertTrue(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testPerformedMarkerWithMultipleEffects() {
+        val source = """
+            let f: {} -> Int <Log, State, *> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        assertNotNull(letBinding.typeAnnotation)
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        assertNotNull(typeAnnotation.effects)
+        val effectRow = typeAnnotation.effects!!
+        assertEquals(listOf("Log", "State"), effectRow.effects)
+        assertFalse(effectRow.isPolymorphic)
+        assertTrue(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testEmptyEffectRowNotPerformed() {
+        val source = """
+            let f: {} -> Int <> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        assertNotNull(letBinding.typeAnnotation)
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        // Empty effect row <> should result in null effects (pure function)
+        // since effects.isEmpty() && !isPolymorphic && !isPerformed
+        assertNull(typeAnnotation.effects)
+    }
+
+    @Test
+    fun testEffectsWithoutPerformedMarker() {
+        val source = """
+            let f: {} -> Int <Log> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        assertNotNull(letBinding.typeAnnotation)
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        assertNotNull(typeAnnotation.effects)
+        val effectRow = typeAnnotation.effects!!
+        assertEquals(listOf("Log"), effectRow.effects)
+        assertFalse(effectRow.isPolymorphic)
+        assertFalse(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testPolymorphicEffectRowNotPerformed() {
+        val source = """
+            let f: {} -> Int <...> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        assertNotNull(letBinding.typeAnnotation)
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        assertNotNull(typeAnnotation.effects)
+        val effectRow = typeAnnotation.effects!!
+        assertTrue(effectRow.effects.isEmpty())
+        assertTrue(effectRow.isPolymorphic)
+        assertFalse(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testEffectsWithPolymorphicNotPerformed() {
+        val source = """
+            let f: {} -> Int <Log, ...> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        assertNotNull(letBinding.typeAnnotation)
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        assertNotNull(typeAnnotation.effects)
+        val effectRow = typeAnnotation.effects!!
+        assertEquals(listOf("Log"), effectRow.effects)
+        assertTrue(effectRow.isPolymorphic)
+        assertFalse(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testPerformedMarkerWithQualifiedEffect() {
+        val source = """
+            let f: {} -> Int <console::Log, *> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        assertNotNull(letBinding.typeAnnotation)
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        assertNotNull(typeAnnotation.effects)
+        val effectRow = typeAnnotation.effects!!
+        assertEquals(listOf("console::Log"), effectRow.effects)
+        assertFalse(effectRow.isPolymorphic)
+        assertTrue(effectRow.isPerformed)
+    }
 }

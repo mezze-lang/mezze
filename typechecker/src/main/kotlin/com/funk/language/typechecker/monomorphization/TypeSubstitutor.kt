@@ -364,7 +364,7 @@ class TypeSubstitutor(
                 paramType = convertTypeAnnotationToFunkType(annotation.paramType),
                 returnType = convertTypeAnnotationToFunkType(annotation.returnType),
                 effects = annotation.effects?.let { row ->
-                    FunkType.EffectRow(row.effects.toSet(), if (row.isPolymorphic) RowVar("e") else null)
+                    FunkType.EffectRow(row.effects.toSet(), if (row.isPolymorphic) RowVar("e") else null, row.isPerformed)
                 },
                 abilityConstraints = annotation.abilityConstraints.map { constraint ->
                     FunkType.FunctionAbilityConstraint(

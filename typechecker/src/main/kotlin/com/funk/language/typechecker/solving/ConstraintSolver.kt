@@ -2635,7 +2635,7 @@ class ConstraintSolver(
                     paramType = convertTypeAnnotation(annotation.paramType, typeParamSubst),
                     returnType = convertTypeAnnotation(annotation.returnType, typeParamSubst),
                     effects = annotation.effects?.let { effectRow ->
-                        FunkType.EffectRow(effectRow.effects.toSet())
+                        FunkType.EffectRow(effectRow.effects.toSet(), null, effectRow.isPerformed)
                     },
                     abilityConstraints = emptyList()
                 )

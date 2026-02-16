@@ -23,6 +23,14 @@ import com.funk.language.parser.internal.lib.*
  * Part of the refactored parser module - previously in FunkParser.kt.
  */
 
+// Helper data class for effect row parsing result
+private data class EffectRowParseResult(
+    val effects: List<String>,
+    val isPolymorphic: Boolean,
+    val isPerformed: Boolean,
+    val stream: TokenStream
+)
+
 // Record type entry parser (helper for record type annotations)
 internal val FunkParser.recordTypeEntryParser: Parser<RecordTypeEntry>
     get() = { stream ->
@@ -144,30 +152,39 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
                         val streamAfterReturn = skipNewlines(returnType.remaining)
                         val ltToken = streamAfterReturn.current()
 
-                        val (effects, isPolymorphic, finalStream) = if (ltToken?.type == TokenType.LT) {
+                        val effectRowResult = if (ltToken?.type == TokenType.LT) {
                             // Parse effect row
                             val afterLt = streamAfterReturn.advance()
                             val gtToken = afterLt.current()
 
                             if (gtToken?.type == TokenType.GT) {
                                 // Empty effect row <>
-                                Triple(emptyList<String>(), false, afterLt.advance())
+                                EffectRowParseResult(emptyList(), false, false, afterLt.advance())
                             } else {
                                 // Check for purely polymorphic <...>
-                                val ellipsisToken = skipNewlines(afterLt).current()
-                                if (ellipsisToken?.type == TokenType.ELLIPSIS) {
+                                val firstToken = skipNewlines(afterLt).current()
+                                if (firstToken?.type == TokenType.ELLIPSIS) {
                                     val afterEllipsis = skipNewlines(afterLt.advance())
                                     if (afterEllipsis.current()?.type == TokenType.GT) {
                                         // Polymorphic effect row <...>
-                                        Triple(emptyList<String>(), true, afterEllipsis.advance())
+                                        EffectRowParseResult(emptyList(), true, false, afterEllipsis.advance())
                                     } else {
-                                        Triple(emptyList<String>(), false, returnType.remaining)  // Invalid, keep original
+                                        EffectRowParseResult(emptyList(), false, false, returnType.remaining)  // Invalid, keep original
+                                    }
+                                } else if (firstToken?.type == TokenType.STAR) {
+                                    // Performed marker only <*>
+                                    val afterStar = skipNewlines(afterLt.advance())
+                                    if (afterStar.current()?.type == TokenType.GT) {
+                                        EffectRowParseResult(emptyList(), false, true, afterStar.advance())
+                                    } else {
+                                        EffectRowParseResult(emptyList(), false, false, returnType.remaining)  // Invalid, keep original
                                     }
                                 } else {
-                                    // Has effect names <Effect1, Effect2> or <module::Effect1, ...>
+                                    // Has effect names <Effect1, Effect2> or <module::Effect1, ...> or <Effect1, *>
                                     val effectNames = mutableListOf<String>()
                                     var current = skipNewlines(afterLt)
                                     var foundEllipsis = false
+                                    var foundPerformed = false
 
                                     // Parse comma-separated effect names (potentially qualified)
                                     while (true) {
@@ -187,6 +204,12 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
                                                 current = skipNewlines(current.advance())
                                                 break
                                             }
+                                            // Check if next is * (performed marker) - must be last
+                                            if (current.current()?.type == TokenType.STAR) {
+                                                foundPerformed = true
+                                                current = skipNewlines(current.advance())
+                                                break
+                                            }
                                         } else {
                                             break
                                         }
@@ -194,20 +217,20 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
 
                                     // Expect closing >
                                     if (current.current()?.type == TokenType.GT) {
-                                        Triple(effectNames, foundEllipsis, current.advance())
+                                        EffectRowParseResult(effectNames, foundEllipsis, foundPerformed, current.advance())
                                     } else {
-                                        Triple(emptyList<String>(), false, returnType.remaining)  // No closing >, keep original
+                                        EffectRowParseResult(emptyList(), false, false, returnType.remaining)  // No closing >, keep original
                                     }
                                 }
                             }
                         } else {
-                            Triple(emptyList<String>(), false, returnType.remaining)
+                            EffectRowParseResult(emptyList(), false, false, returnType.remaining)
                         }
 
                         // Also check for 'with' keyword AFTER the return type (for backward compatibility)
                         // Ability constraints can appear either before or after the arrow
-                        var streamAfterWith = finalStream
-                        val streamBeforeWithAfter = skipNewlines(finalStream)
+                        var streamAfterWith = effectRowResult.stream
+                        val streamBeforeWithAfter = skipNewlines(effectRowResult.stream)
                         if (streamBeforeWithAfter.current()?.type == TokenType.WITH) {
                             // Skip the 'with' keyword
                             var abilityStreamAfter = skipNewlines(streamBeforeWithAfter.advance())
@@ -261,7 +284,9 @@ internal val FunkParser.functionTypeAnnotation: Parser<TypeAnnotation>
                             FunctionTypeAnnotation(
                                 result.value,
                                 returnType.value,
-                                if (effects.isNotEmpty() || isPolymorphic) EffectRowAnnotation(effects, isPolymorphic) else null,
+                                if (effectRowResult.effects.isNotEmpty() || effectRowResult.isPolymorphic || effectRowResult.isPerformed) {
+                                    EffectRowAnnotation(effectRowResult.effects, effectRowResult.isPolymorphic, effectRowResult.isPerformed)
+                                } else null,
                                 abilityConstraints
                             ),
                             streamAfterWith

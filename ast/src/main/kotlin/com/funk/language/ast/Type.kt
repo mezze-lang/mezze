@@ -215,17 +215,26 @@ sealed interface FunkType {
     @Serializable
     data class EffectRow(
         val effects: Set<String>,
-        val rowVar: RowVar? = null // null = closed, non-null = open
+        val rowVar: RowVar? = null, // null = closed, non-null = open
+        val performed: Boolean = false // true = effects have been performed via 'perform'
     ) : FunkType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 
+        /** True if this is truly pure - no effects, not open, nothing performed */
+        val isPure: Boolean get() = effects.isEmpty() && rowVar == null && !performed
+
         override fun toString(): String {
             val effectList = effects.take(5).joinToString(", ")
-            val suffix = if (effects.size > 5) ", ..." else ""
+            val suffix = when {
+                performed && effects.isNotEmpty() -> ", *"
+                performed -> "*"
+                effects.size > 5 -> ", ..."
+                else -> ""
+            }
             return safeToString(
                 "EffectRow",
-                truncatedContent = { "${effects.size} effects" },
+                truncatedContent = { if (performed) "${effects.size} effects, *" else "${effects.size} effects" },
                 fullContent = { "$effectList$suffix" }
             )
         }

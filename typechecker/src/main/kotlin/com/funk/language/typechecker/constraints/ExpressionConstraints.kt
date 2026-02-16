@@ -1598,9 +1598,9 @@ class ExpressionConstraintGenerator {
         val bodyResult = generate(expr.body, bodyContext)
 
         // Create function type with effects from body
-        // CRITICAL: If the body has effects, add them to the FunctionType
-        val effectRow = if (bodyResult.effects.isNotEmpty()) {
-            FunkType.EffectRow(bodyResult.effects)
+        // CRITICAL: If the body has effects or performed effects, add them to the FunctionType
+        val effectRow = if (bodyResult.effects.isNotEmpty() || bodyResult.performed) {
+            FunkType.EffectRow(bodyResult.effects, null, bodyResult.performed)
         } else {
             null
         }
@@ -1804,6 +1804,7 @@ class ExpressionConstraintGenerator {
                         type = partialResult,
                         constraints = constraints,
                         effects = functionResult.effects + argumentResult.effects,
+                        performed = functionResult.performed || argumentResult.performed,
                         abilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints,
                         undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables
                     )
@@ -1843,6 +1844,8 @@ class ExpressionConstraintGenerator {
                 // CRITICAL FIX: Propagate effects from the function type to ConstraintResult.effects
                 // This allows generatePerform to track which effects are used by the expression
                 val propagatedEffects = effectRow.effects + functionResult.effects + argumentResult.effects
+                // Propagate performed flag from function type and sub-results
+                val propagatedPerformed = effectRow.performed || functionResult.performed || argumentResult.performed
 
                 // TCO: Include tail call if detected (note: effectful tail calls may need special handling)
                 val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls
@@ -1852,6 +1855,7 @@ class ExpressionConstraintGenerator {
                     type = resultType,
                     constraints = constraints,
                     effects = propagatedEffects,  // Propagate effects from function type
+                    performed = propagatedPerformed,  // Propagate performed flag
                     undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
                     tailCalls = tailCalls
                 )
@@ -1883,6 +1887,7 @@ class ExpressionConstraintGenerator {
         // Collect effects from the function being called (e.g., effect operations)
         // Also collect effects from the arguments
         val collectedEffects = functionResult.effects + argumentResult.effects
+        val collectedPerformed = functionResult.performed || argumentResult.performed
 
         // CRITICAL: Propagate ability constraints from function and arguments
         val collectedAbilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints
@@ -1895,6 +1900,7 @@ class ExpressionConstraintGenerator {
             type = returnType,
             constraints = constraints,
             effects = collectedEffects,  // Propagate effects from function and arguments
+            performed = collectedPerformed,  // Propagate performed flag
             abilityConstraints = collectedAbilityConstraints,  // Propagate ability constraints
             undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
             tailCalls = tailCalls
@@ -1945,6 +1951,7 @@ class ExpressionConstraintGenerator {
         // If the condition has effects, the whole if expression has those effects
         // Example: `if getBool {} then 1 else 2` where getBool has <Log> → result is Int <Log>
         val effects = conditionResult.effects + thenResult.effects + elseResult.effects
+        val performed = conditionResult.performed || thenResult.performed || elseResult.performed
         val abilityConstraints = conditionResult.abilityConstraints + thenResult.abilityConstraints + elseResult.abilityConstraints
 
         // TCO: Propagate tail calls from branches
@@ -1954,6 +1961,7 @@ class ExpressionConstraintGenerator {
             type = thenResult.type,
             constraints = constraints,
             effects = effects,
+            performed = performed,
             abilityConstraints = abilityConstraints,
             undefinedVariables = conditionResult.undefinedVariables + thenResult.undefinedVariables + elseResult.undefinedVariables,
             tailCalls = tailCalls
@@ -1975,6 +1983,7 @@ class ExpressionConstraintGenerator {
         abilityConstraints.addAll(scrutineeResult.abilityConstraints)
         val effects = mutableSetOf<String>()
         effects.addAll(scrutineeResult.effects)
+        var performed = scrutineeResult.performed  // Track performed flag
         val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
         duplicateBindings.addAll(scrutineeResult.duplicateBindings)
         // TCO: Track tail calls from case bodies
@@ -2037,6 +2046,7 @@ class ExpressionConstraintGenerator {
                 undefinedVars.addAll(guardResult.undefinedVariables)
                 abilityConstraints.addAll(guardResult.abilityConstraints)
                 effects.addAll(guardResult.effects)
+                performed = performed || guardResult.performed  // Propagate performed
                 duplicateBindings.addAll(guardResult.duplicateBindings)
 
                 // Guard must be Bool (variant type | True, False |)
@@ -2059,6 +2069,7 @@ class ExpressionConstraintGenerator {
             undefinedVars.addAll(caseBodyResult.undefinedVariables)
             abilityConstraints.addAll(caseBodyResult.abilityConstraints)
             effects.addAll(caseBodyResult.effects)
+            performed = performed || caseBodyResult.performed  // Propagate performed
             duplicateBindings.addAll(caseBodyResult.duplicateBindings)
             tailCalls.addAll(caseBodyResult.tailCalls)
 
@@ -2085,6 +2096,7 @@ class ExpressionConstraintGenerator {
             type = resultType,
             constraints = constraints,
             effects = effects,
+            performed = performed,  // Include performed flag
             abilityConstraints = abilityConstraints,
             undefinedVariables = undefinedVars,
             duplicateBindings = duplicateBindings,
@@ -2108,6 +2120,7 @@ class ExpressionConstraintGenerator {
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val effects = mutableSetOf<String>()
+        var performed = false  // Track performed flag
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         // TCO: Track tail calls from result expression (statements are not in tail position)
         val tailCalls = mutableSetOf<SourceLocation>()
@@ -2124,6 +2137,7 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)
+                    performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
 
                     // CRITICAL: Inside a do block, unwrap SuspendedType for let bindings.
@@ -2168,6 +2182,7 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)
+                    performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
                 }
             }
@@ -2185,23 +2200,25 @@ class ExpressionConstraintGenerator {
         constraints.addAll(resultResult.constraints)
         undefinedVars.addAll(resultResult.undefinedVariables)
         effects.addAll(resultResult.effects)
+        performed = performed || resultResult.performed  // Propagate performed
         abilityConstraints.addAll(resultResult.abilityConstraints)
         // TCO: Only the result expression can have tail calls
         tailCalls.addAll(resultResult.tailCalls)
 
-        // CRITICAL: If do block has effects, wrap the result in SuspendedType
+        // CRITICAL: If do block has effects or performed effects, wrap the result in SuspendedType
         // This allows perform expressions to properly detect and handle effects
         // BUT: Don't double-wrap if the result is already a SuspendedType!
         // Data types (like Result) are orthogonal to effects - we should not nest Suspended types.
-        val resultType = if (effects.isNotEmpty()) {
+        val resultType = if (effects.isNotEmpty() || performed) {
             when (val innerType = resultResult.type) {
                 is FunkType.SuspendedType -> {
-                    // Result is already suspended - merge effects instead of double-wrapping
+                    // Result is already suspended - merge effects and performed flag
                     val mergedEffects = innerType.effects.effects + effects
-                    FunkType.SuspendedType(innerType.valueType, FunkType.EffectRow(mergedEffects))
+                    val mergedPerformed = innerType.effects.performed || performed
+                    FunkType.SuspendedType(innerType.valueType, FunkType.EffectRow(mergedEffects, innerType.effects.rowVar, mergedPerformed))
                 }
                 else -> {
-                    FunkType.SuspendedType(resultResult.type, FunkType.EffectRow(effects))
+                    FunkType.SuspendedType(resultResult.type, FunkType.EffectRow(effects, null, performed))
                 }
             }
         } else {
@@ -2212,6 +2229,7 @@ class ExpressionConstraintGenerator {
             type = resultType,
             constraints = constraints,
             effects = effects,  // Still track effects for propagation
+            performed = performed,  // Include performed flag
             abilityConstraints = abilityConstraints,
             undefinedVariables = undefinedVars,
             tailCalls = tailCalls
@@ -2360,6 +2378,7 @@ class ExpressionConstraintGenerator {
             type = resultType,
             constraints = exprResult.constraints,
             effects = remainingEffects,  // Return remaining unhandled effects
+            performed = true,  // Mark that effects were performed
             undefinedVariables = exprResult.undefinedVariables
         )
     }
@@ -2408,43 +2427,39 @@ class ExpressionConstraintGenerator {
             is FunkType.FunctionType -> {
                 val effects = type.effects
                 if (effects == null) {
-                    // No effects to remove
-                    type
+                    // No effects to remove, but mark as performed since we're in a perform block
+                    FunkType.FunctionType(
+                        paramType = type.paramType,
+                        returnType = type.returnType,
+                        effects = FunkType.EffectRow(emptySet(), null, true),  // Mark as performed
+                        abilityConstraints = type.abilityConstraints
+                    )
                 } else {
-                    // Remove the handled effects
+                    // Remove the handled effects, mark as performed
                     val remainingEffects = effects.effects - effectsToRemove
 
-                    if (remainingEffects.isEmpty()) {
-                        // All effects handled - return pure function
-                        FunkType.FunctionType(
-                            paramType = type.paramType,
-                            returnType = type.returnType,
-                            effects = null,  // Pure function
-                            abilityConstraints = type.abilityConstraints
-                        )
-                    } else {
-                        // Some effects remain
-                        FunkType.FunctionType(
-                            paramType = type.paramType,
-                            returnType = type.returnType,
-                            effects = FunkType.EffectRow(remainingEffects),
-                            abilityConstraints = type.abilityConstraints
-                        )
-                    }
+                    // Always set performed = true since we're handling effects
+                    FunkType.FunctionType(
+                        paramType = type.paramType,
+                        returnType = type.returnType,
+                        effects = FunkType.EffectRow(remainingEffects, effects.rowVar, true),
+                        abilityConstraints = type.abilityConstraints
+                    )
                 }
             }
             is FunkType.SuspendedType -> {
-                // Remove effects from suspended type
+                // Remove effects from suspended type, mark as performed
                 val remainingEffects = type.effects.effects - effectsToRemove
 
                 if (remainingEffects.isEmpty()) {
-                    // All effects handled - return pure value
+                    // All effects handled - return pure value (no longer suspended)
+                    // Note: the perform flag is tracked in ConstraintResult.performed
                     type.valueType
                 } else {
-                    // Some effects remain - still suspended
+                    // Some effects remain - still suspended, but mark as performed
                     FunkType.SuspendedType(
                         valueType = type.valueType,
-                        effects = FunkType.EffectRow(remainingEffects)
+                        effects = FunkType.EffectRow(remainingEffects, type.effects.rowVar, true)
                     )
                 }
             }
@@ -2685,7 +2700,7 @@ class ExpressionConstraintGenerator {
                 FunkType.FunctionType(
                     paramType = convertFieldType(annotation.paramType),
                     returnType = convertFieldType(annotation.returnType),
-                    effects = annotation.effects?.let { FunkType.EffectRow(it.effects.toSet()) }
+                    effects = annotation.effects?.let { FunkType.EffectRow(it.effects.toSet(), null, it.isPerformed) }
                 )
             }
             is TypeApplicationAnnotation -> {

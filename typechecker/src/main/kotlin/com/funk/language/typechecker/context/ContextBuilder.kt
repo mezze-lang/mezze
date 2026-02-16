@@ -476,7 +476,7 @@ class ContextBuilder {
                     effects = annotation.effects?.let { effectRow ->
                         // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                         val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
-                        FunkType.EffectRow(effectRow.effects.toSet(), rowVar)
+                        FunkType.EffectRow(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
                     },
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->
                         FunkType.FunctionAbilityConstraint(

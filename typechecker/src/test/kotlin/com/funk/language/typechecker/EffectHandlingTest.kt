@@ -371,8 +371,10 @@ class EffectHandlingTest {
         assertNotNull(composedType.effects)
         assertEquals(setOf("Log", "Random"), composedType.effects!!.effects)
 
-        // Handled function should have no effects
-        assertNull(handledType.effects)
+        // Handled function should have <*> (performed but no remaining effects)
+        assertNotNull(handledType.effects)
+        assertTrue(handledType.effects!!.effects.isEmpty(), "Should have no concrete effects")
+        assertTrue(handledType.effects!!.performed, "Should be marked as performed")
 
         // Both should have the same parameter and return types
         assertEquals(composedType.paramType, handledType.paramType)

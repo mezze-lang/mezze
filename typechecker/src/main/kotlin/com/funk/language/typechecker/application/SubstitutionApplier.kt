@@ -1653,43 +1653,38 @@ class SubstitutionApplier(
             is FunkType.FunctionType -> {
                 val effects = type.effects
                 if (effects == null) {
-                    // No effects to remove
-                    type
+                    // No effects to remove, but mark as performed since we're in a perform block
+                    FunkType.FunctionType(
+                        paramType = type.paramType,
+                        returnType = type.returnType,
+                        effects = FunkType.EffectRow(emptySet(), null, true),  // Mark as performed
+                        abilityConstraints = type.abilityConstraints
+                    )
                 } else {
-                    // Remove the handled effects
+                    // Remove the handled effects, mark as performed
                     val remainingEffects = effects.effects - effectsToRemove
 
-                    if (remainingEffects.isEmpty()) {
-                        // All effects handled - return pure function
-                        FunkType.FunctionType(
-                            paramType = type.paramType,
-                            returnType = type.returnType,
-                            effects = null,  // Pure function
-                            abilityConstraints = type.abilityConstraints
-                        )
-                    } else {
-                        // Some effects remain
-                        FunkType.FunctionType(
-                            paramType = type.paramType,
-                            returnType = type.returnType,
-                            effects = FunkType.EffectRow(remainingEffects),
-                            abilityConstraints = type.abilityConstraints
-                        )
-                    }
+                    // Always set performed = true since we're handling effects
+                    FunkType.FunctionType(
+                        paramType = type.paramType,
+                        returnType = type.returnType,
+                        effects = FunkType.EffectRow(remainingEffects, effects.rowVar, true),
+                        abilityConstraints = type.abilityConstraints
+                    )
                 }
             }
             is FunkType.SuspendedType -> {
-                // Remove effects from suspended type
+                // Remove effects from suspended type, mark as performed
                 val remainingEffects = type.effects.effects - effectsToRemove
 
                 if (remainingEffects.isEmpty()) {
-                    // All effects handled - return pure value
+                    // All effects handled - return pure value (no longer suspended)
                     type.valueType
                 } else {
-                    // Some effects remain - still suspended
+                    // Some effects remain - still suspended, but mark as performed
                     FunkType.SuspendedType(
                         valueType = type.valueType,
-                        effects = FunkType.EffectRow(remainingEffects)
+                        effects = FunkType.EffectRow(remainingEffects, type.effects.rowVar, true)
                     )
                 }
             }
@@ -1764,7 +1759,7 @@ class SubstitutionApplier(
                     paramType = convertTypeAnnotation(annotation.paramType),
                     returnType = convertTypeAnnotation(annotation.returnType),
                     effects = annotation.effects?.let { effectRow ->
-                        FunkType.EffectRow(effectRow.effects.toSet())
+                        FunkType.EffectRow(effectRow.effects.toSet(), null, effectRow.isPerformed)
                     },
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->
                         FunkType.FunctionAbilityConstraint(

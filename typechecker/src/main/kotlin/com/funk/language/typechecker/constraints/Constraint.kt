@@ -153,6 +153,7 @@ data class ConstraintResult(
     val type: FunkType,
     val constraints: List<Constraint>,
     val effects: Set<String> = emptySet(),  // Effects used in this expression
+    val performed: Boolean = false,  // True if effects were performed via 'perform' expression
     val abilityConstraints: List<Constraint.AbilityRequired> = emptyList(),  // Ability requirements
     val undefinedVariables: List<UndefinedVariable> = emptyList(),  // Undefined variables found during constraint generation
     val duplicateBindings: List<DuplicateBinding> = emptyList(),  // Duplicate bindings found during constraint generation
