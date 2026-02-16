@@ -48,7 +48,8 @@ object DuplicateDeclarationValidator {
         for (item in program.items.filterIsInstance<TypeDeclaration>()) {
             if (declaredTypes.contains(item.name)) {
                 throw TypeCheckError(
-                    "Duplicate type declaration: type '${item.name}' is already declared"
+                    "Duplicate type declaration: type '${item.name}' is already declared",
+                    item.sourceLocation
                 )
             }
             declaredTypes.add(item.name)
@@ -94,7 +95,8 @@ object DuplicateDeclarationValidator {
                         if (builtinType != null && typeDecl.name != builtinType) {
                             throw TypeCheckError(
                                 "Cannot redefine built-in constructor: '$constructorName' is already defined " +
-                                "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name."
+                                "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name.",
+                                typeDecl.sourceLocation
                             )
                         }
 
@@ -102,7 +104,8 @@ object DuplicateDeclarationValidator {
                         if (existingType != null) {
                             throw TypeCheckError(
                                 "Duplicate constructor name: constructor '$constructorName' is already defined " +
-                                "in type '$existingType', cannot reuse in type '${typeDecl.name}'"
+                                "in type '$existingType', cannot reuse in type '${typeDecl.name}'",
+                                typeDecl.sourceLocation
                             )
                         }
                         constructorToTypeMap[constructorName] = typeDecl.name
@@ -116,7 +119,8 @@ object DuplicateDeclarationValidator {
                     if (builtinType != null && typeDecl.name != builtinType) {
                         throw TypeCheckError(
                             "Cannot redefine built-in constructor: '$constructorName' is already defined " +
-                            "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name."
+                            "in built-in type '$builtinType'. Use the built-in '$builtinType' type or choose a different constructor name.",
+                            typeDecl.sourceLocation
                         )
                     }
 
@@ -124,7 +128,8 @@ object DuplicateDeclarationValidator {
                     if (existingType != null) {
                         throw TypeCheckError(
                             "Duplicate constructor name: constructor '$constructorName' is already defined " +
-                            "in type '$existingType', cannot reuse in type '${typeDecl.name}'"
+                            "in type '$existingType', cannot reuse in type '${typeDecl.name}'",
+                            typeDecl.sourceLocation
                         )
                     }
                     constructorToTypeMap[constructorName] = typeDecl.name
@@ -151,14 +156,16 @@ object DuplicateDeclarationValidator {
                 // Validate constructor naming convention (must start with uppercase)
                 if (!constructorName.first().isUpperCase()) {
                     throw TypeCheckError(
-                        "Newtype constructor '$constructorName' must start with an uppercase letter"
+                        "Newtype constructor '$constructorName' must start with an uppercase letter",
+                        typeDecl.sourceLocation
                     )
                 }
 
                 // Validate constructor doesn't collide with built-in ability names
                 if (BuiltInAbilities.isBuiltInAbility(constructorName)) {
                     throw TypeCheckError(
-                        "Newtype constructor '$constructorName' is already used by a built-in ability"
+                        "Newtype constructor '$constructorName' is already used by a built-in ability",
+                        typeDecl.sourceLocation
                     )
                 }
             }
@@ -174,7 +181,8 @@ object DuplicateDeclarationValidator {
         for (effect in program.items.filterIsInstance<EffectDeclaration>()) {
             if (declaredEffects.contains(effect.name)) {
                 throw TypeCheckError(
-                    "Duplicate effect declaration: effect '${effect.name}' is already defined"
+                    "Duplicate effect declaration: effect '${effect.name}' is already defined",
+                    effect.sourceLocation
                 )
             }
             declaredEffects.add(effect.name)
@@ -190,7 +198,8 @@ object DuplicateDeclarationValidator {
         for (impl in program.items.filterIsInstance<ImplDeclaration>()) {
             if (declaredPerformers.contains(impl.performerName)) {
                 throw TypeCheckError(
-                    "Duplicate effect handler declaration: performer '${impl.performerName}' is already defined"
+                    "Duplicate effect handler declaration: performer '${impl.performerName}' is already defined",
+                    impl.sourceLocation
                 )
             }
             declaredPerformers.add(impl.performerName)
@@ -206,7 +215,8 @@ object DuplicateDeclarationValidator {
         for (ability in program.items.filterIsInstance<AbilityDeclaration>()) {
             if (declaredAbilities.contains(ability.name)) {
                 throw TypeCheckError(
-                    "Duplicate ability declaration: ability '${ability.name}' is already defined"
+                    "Duplicate ability declaration: ability '${ability.name}' is already defined",
+                    ability.sourceLocation
                 )
             }
             declaredAbilities.add(ability.name)
@@ -230,7 +240,8 @@ object DuplicateDeclarationValidator {
             if (abilityImplKeys.contains(key)) {
                 throw TypeCheckError(
                     "Duplicate ability implementation: '${impl.abilityName}' is already implemented " +
-                    "for type(s) ${targetTypeNames.joinToString(", ")}"
+                    "for type(s) ${targetTypeNames.joinToString(", ")}",
+                    impl.sourceLocation
                 )
             }
             abilityImplKeys.add(key)

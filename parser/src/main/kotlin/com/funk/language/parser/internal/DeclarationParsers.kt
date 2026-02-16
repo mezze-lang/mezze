@@ -5,6 +5,11 @@ import com.funk.language.parser.*
 import com.funk.language.parser.internal.lib.*
 
 /**
+ * Extension function to convert a Token to SourceLocation.
+ */
+private fun Token.toSourceLocation(): SourceLocation = SourceLocation(line, column, null)
+
+/**
  * Declaration parsers for module-level constructs.
  *
  * This file contains internal extension functions for FunkParser that handle:
@@ -327,7 +332,9 @@ internal fun FunkParser.parseEffectDeclaration(stream: TokenStream, visibility: 
                                                         name.value.text,
                                                         visibility,
                                                         operations,
-                                                        associatedTypes  // Pass the list of associated types
+                                                        associatedTypes,  // Pass the list of associated types
+                                                        inferredType = null,
+                                                        sourceLocation = effectToken.value.toSourceLocation()
                                                     ),
                                                     rbrace.remaining
                                                 )
@@ -456,7 +463,8 @@ internal fun FunkParser.parseTypeDeclaration(stream: TokenStream, visibility: Vi
                                             visibility = visibility,
                                             typeParams = typeParams,
                                             definition = typeDef.value,
-                                            inferredType = null
+                                            inferredType = null,
+                                            sourceLocation = typeToken.value.toSourceLocation()
                                         ),
                                         typeDef.remaining
                                     )
@@ -796,7 +804,8 @@ internal fun FunkParser.parseImplDeclaration(stream: TokenStream): ParseResult<P
                                                                         performerParams = performerParams,
                                                                         associatedTypeBindings = associatedTypeBindings,
                                                                         operations = operations,
-                                                                        inferredType = null
+                                                                        inferredType = null,
+                                                                        sourceLocation = implToken.value.toSourceLocation()
                                                                     ),
                                                                     rbrace.remaining
                                                                 )
@@ -1194,7 +1203,9 @@ internal fun FunkParser.parseAbilityDeclaration(stream: TokenStream, visibility:
                                                     associatedTypes,  // list of associated types from 'having' clause
                                                     emptyList(),  // constraints (for function ability constraints)
                                                     dependencies,  // dependencies from 'with' clause
-                                                    operations
+                                                    operations,
+                                                    inferredType = null,
+                                                    sourceLocation = abilityToken.value.toSourceLocation()
                                                 ),
                                                 rbrace.remaining
                                             )
@@ -1414,7 +1425,9 @@ internal fun FunkParser.parseImplAbilityDeclaration(stream: TokenStream): ParseR
                                                             targetTypes,
                                                             emptyList(),  // forallVars - deferred for later
                                                             associatedTypeBindings,
-                                                            operations
+                                                            operations,
+                                                            inferredType = null,
+                                                            sourceLocation = implToken.value.toSourceLocation()
                                                         ),
                                                         rbrace.remaining
                                                     )

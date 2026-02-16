@@ -119,7 +119,8 @@ data class TypeDeclaration(
     val visibility: Visibility = Visibility.PRIVATE,
     val typeParams: List<String> = emptyList(),
     val definition: TypeDefinition,
-    val inferredType: FunkType? = null           // From typechecker
+    val inferredType: FunkType? = null,           // From typechecker
+    val sourceLocation: SourceLocation? = null    // For error reporting
 ) : ProgramItem
 
 @Serializable
@@ -177,7 +178,8 @@ data class EffectDeclaration(
     val visibility: Visibility = Visibility.PRIVATE,
     val operations: List<EffectOperation>,
     val associatedTypes: List<String> = emptyList(),  // Associated types from 'having 'state, 'error'
-    val inferredType: FunkType? = null           // From typechecker
+    val inferredType: FunkType? = null,           // From typechecker
+    val sourceLocation: SourceLocation? = null    // For error reporting
 ) : ProgramItem {
     // Backward compatibility
     val associatedType: String? get() = associatedTypes.firstOrNull()
@@ -198,7 +200,8 @@ data class ImplDeclaration(
     val performerParams: List<PerformerParameter> = emptyList(), // For parameterized performers like FileLogger {path: String}
     val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'state = Int, 'error = String'
     val operations: List<PerformerOperation>,
-    val inferredType: FunkType? = null           // From typechecker
+    val inferredType: FunkType? = null,           // From typechecker
+    val sourceLocation: SourceLocation? = null    // For error reporting
 ) : ProgramItem {
     // Backward compatibility
     val associatedTypeBinding: Pair<String, TypeAnnotation>?
@@ -233,7 +236,8 @@ data class AbilityDeclaration(
     val constraints: List<AbilityConstraint> = emptyList(),
     val dependencies: List<AbilityDependency> = emptyList(),  // Ability dependencies (e.g., Ord depends on Eq)
     val operations: List<AbilityOperation>,
-    val inferredType: FunkType? = null           // From typechecker
+    val inferredType: FunkType? = null,           // From typechecker
+    val sourceLocation: SourceLocation? = null    // For error reporting
 ) : ProgramItem {
     // Backward compatibility
     val associatedType: String? get() = associatedTypes.firstOrNull()
@@ -281,7 +285,8 @@ data class ImplAbilityDeclaration(
     val forallVars: List<String> = emptyList(),  // Type variables from 'forall 'a 'b.' quantification
     val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'item = Int, 'iter = MyIter'
     val operations: List<ImplAbilityOperation>,
-    val inferredType: FunkType? = null           // From typechecker
+    val inferredType: FunkType? = null,           // From typechecker
+    val sourceLocation: SourceLocation? = null    // For error reporting
 ) : ProgramItem {
     // Full qualified ability name
     val qualifiedAbilityName: String

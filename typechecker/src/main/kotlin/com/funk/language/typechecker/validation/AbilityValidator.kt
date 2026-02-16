@@ -36,7 +36,8 @@ object AbilityValidator {
         val abilityDeclaration = abilityDeclarations[impl.abilityName]
             ?: abilityDeclarations[impl.qualifiedAbilityName]
             ?: throw TypeCheckError(
-                "Ability '${impl.qualifiedAbilityName}' not found - cannot validate implementation"
+                "Ability '${impl.qualifiedAbilityName}' not found - cannot validate implementation",
+                impl.sourceLocation
             )
 
         // Rule 1: Check type parameter count matches
@@ -44,7 +45,8 @@ object AbilityValidator {
             throw TypeCheckError(
                 "Type parameter count mismatch in ability implementation for '${impl.abilityName}': " +
                 "ability expects ${abilityDeclaration.typeParams.size} type parameters, " +
-                "but implementation provides ${impl.targetTypes.size}"
+                "but implementation provides ${impl.targetTypes.size}",
+                impl.sourceLocation
             )
         }
 
@@ -59,7 +61,8 @@ object AbilityValidator {
                 "Ability '${impl.abilityName}' declares associated types [$typesList] " +
                 "but implementation does not provide bindings. " +
                 "Use: impl ${impl.abilityName} ${impl.targetTypes.joinToString(" ")} " +
-                "having ${abilityAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }"
+                "having ${abilityAssociatedTypes.joinToString(", ") { "$it = <Type>" }} where { ... }",
+                impl.sourceLocation
             )
         }
 
@@ -69,7 +72,8 @@ object AbilityValidator {
             throw TypeCheckError(
                 "Implementation provides associated type bindings [$bindingsList] " +
                 "but ability '${impl.abilityName}' does not declare associated types. " +
-                "Remove the 'having' clause or add it to the ability declaration."
+                "Remove the 'having' clause or add it to the ability declaration.",
+                impl.sourceLocation
             )
         }
 
@@ -79,7 +83,8 @@ object AbilityValidator {
             throw TypeCheckError(
                 "Ability '${impl.abilityName}' declares associated types ${abilityAssociatedTypes.joinToString(", ")} " +
                 "but implementation is missing bindings for: ${missingBindings.joinToString(", ")}. " +
-                "All associated types must be bound in the implementation."
+                "All associated types must be bound in the implementation.",
+                impl.sourceLocation
             )
         }
 
@@ -89,7 +94,8 @@ object AbilityValidator {
             throw TypeCheckError(
                 "Implementation provides bindings for ${extraBindings.joinToString(", ")} " +
                 "but ability '${impl.abilityName}' only declares: ${abilityAssociatedTypes.joinToString(", ")}. " +
-                "Remove the extra bindings or add them to the ability declaration."
+                "Remove the extra bindings or add them to the ability declaration.",
+                impl.sourceLocation
             )
         }
 
@@ -103,7 +109,8 @@ object AbilityValidator {
             val example = missingOps.first()
             throw TypeCheckError(
                 "Implementation of '${impl.abilityName}' is missing required ${if (missingOps.size == 1) "method" else "methods"}: $missing. " +
-                "Add: $example = {args} -> ..."
+                "Add: $example = {args} -> ...",
+                impl.sourceLocation
             )
         }
 
