@@ -484,6 +484,46 @@ class TypeChecker(
     }
 
     /**
+     * Check a program for execution.
+     *
+     * This performs normal type-checking AND validates that main has the correct type:
+     * {} -> {} <*>
+     *
+     * Use this when you want to run the program as an executable.
+     * Use checkProgram() for library code or tests that don't require a valid main.
+     *
+     * @param program The program to type-check
+     * @param currentPath Optional path for module resolution (defaults to current directory)
+     */
+    fun checkProgramForExecution(program: Program, currentPath: Path = Paths.get(".")): TypeCheckResult {
+        // First, do normal type-checking
+        val result = checkProgram(program, currentPath)
+
+        // If type-checking failed, return the failure
+        if (result is TypeCheckResult.Failure) {
+            return result
+        }
+
+        val success = result as TypeCheckResult.Success
+
+        // Now validate main for execution
+        val validator = TypeValidator(parentContext)
+        val mainError = validator.validateMainForExecution(success.program, success.substitution)
+
+        return if (mainError != null) {
+            TypeCheckResult.Failure(listOf(
+                TypeCheckError(
+                    phase = "MainValidation",
+                    message = mainError.message(),
+                    sourceLocation = mainError.location()
+                )
+            ))
+        } else {
+            result
+        }
+    }
+
+    /**
      * Check a single expression (useful for REPL).
      *
      * Returns the inferred type and typed expression.

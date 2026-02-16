@@ -96,6 +96,8 @@ object ErrorFormatter {
             is ValidationError.MissingAbilityImplementation -> formatMissingAbilityImplementationError(error, sourceCode)
             is ValidationError.HandlerTypeMismatch -> formatHandlerTypeMismatchError(error, sourceCode)
             is ValidationError.UnitVariantPayloadMismatch -> formatUnitVariantPayloadMismatchError(error, sourceCode)
+            is ValidationError.TopLevelPerformedEffects -> formatTopLevelPerformedEffectsError(error, sourceCode)
+            is ValidationError.MainFunctionTypeError -> formatMainFunctionTypeError(error, sourceCode)
         }
     }
 
@@ -616,6 +618,32 @@ object ErrorFormatter {
             appendLine("   - Remove the payload pattern from the constructor '${error.constructorName}'")
             appendLine("   - If you need to match a payload, add fields to the variant constructor")
         }.trim()
+    }
+
+    private fun formatTopLevelPerformedEffectsError(
+        error: ValidationError.TopLevelPerformedEffects,
+        sourceCode: String?
+    ): String {
+        return SourceContext.formatError(
+            errorType = "Type Error [Validation - Top Level Performed Effects]",
+            message = error.message(),
+            location = error.location(),
+            sourceCode = sourceCode,
+            suggestion = "Wrap this in a function: let ${error.bindingName} = {} -> ..."
+        )
+    }
+
+    private fun formatMainFunctionTypeError(
+        error: ValidationError.MainFunctionTypeError,
+        sourceCode: String?
+    ): String {
+        return SourceContext.formatError(
+            errorType = "Type Error [Validation - Main Function Type]",
+            message = error.message(),
+            location = error.location(),
+            sourceCode = sourceCode,
+            suggestion = "main should be: main = {} -> perform Handler in ... where Handler handles all effects"
+        )
     }
 
     // ========================================================================

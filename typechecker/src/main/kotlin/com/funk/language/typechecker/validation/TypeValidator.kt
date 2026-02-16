@@ -118,6 +118,22 @@ class TypeValidator(
             }
         }
 
+        // Validate top-level effect restrictions:
+        // 1. Top-level VALUES cannot have <*> (performed effects)
+        // 2. Top-level FUNCTIONS can return <*> (they're just definitions)
+        // 3. 'main' must have type {} -> {} <*>
+        for (item in program.items) {
+            when (item) {
+                is LetBinding -> {
+                    val topLevelErrors = validateTopLevelEffects(item, substitution)
+                    errors.addAll(topLevelErrors)
+                }
+                else -> {
+                    // Other items don't have effect restrictions
+                }
+            }
+        }
+
         // Validate let binding patterns (both top-level and in expressions)
         for (item in program.items) {
             when (item) {
@@ -675,6 +691,138 @@ class TypeValidator(
         }
 
         return emptyList()
+    }
+
+    /**
+     * Validate top-level effect restrictions.
+     *
+     * Note: We intentionally do NOT restrict:
+     * 1. Top-level values from having <*> - useful for tests and scripts
+     * 2. The 'main' function type - validation happens at runtime when executing
+     *
+     * The runtime/CLI should validate main type before execution.
+     * This keeps type-checking working for tests and library code that use
+     * 'main' as a regular binding name.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    private fun validateTopLevelEffects(
+        binding: LetBinding,
+        substitution: Substitution
+    ): List<ValidationError> {
+        // No validation currently - main type is checked at runtime
+        return emptyList()
+    }
+
+    /**
+     * Validate the main function for execution.
+     *
+     * Call this AFTER type-checking when you want to run the program as an executable.
+     * This validates that main exists and has type {} -> {} <*>.
+     *
+     * @param program The type-checked program
+     * @param substitution The substitution from constraint solving
+     * @return ValidationError if main is invalid, null if valid
+     */
+    fun validateMainForExecution(
+        program: Program,
+        substitution: Substitution
+    ): ValidationError? {
+        // Find the main binding
+        val mainBinding = program.items.filterIsInstance<LetBinding>()
+            .find { binding ->
+                binding.isSimpleBinding && binding.variableName == "main"
+            }
+
+        if (mainBinding == null) {
+            return ValidationError.MainFunctionTypeError(
+                actualType = FunkType.RecordType(emptyMap()),  // placeholder
+                reason = "no 'main' function found. Define main = {} -> perform Handler in ...",
+                sourceLocation = null
+            )
+        }
+
+        val inferredType = mainBinding.inferredType ?: return null
+        val finalType = substitution.apply(inferredType)
+
+        return validateMainType(finalType, mainBinding.expression.sourceLocation)
+    }
+
+    /**
+     * Validate that main has the correct type: {} -> {} <*>
+     */
+    private fun validateMainType(type: FunkType, sourceLocation: SourceLocation?): ValidationError? {
+        // main must be a function
+        if (type !is FunkType.FunctionType) {
+            return ValidationError.MainFunctionTypeError(
+                actualType = type,
+                reason = "it is not a function (got ${prettyPrintType(type)})",
+                sourceLocation = sourceLocation
+            )
+        }
+
+        // Check parameter type is {} (empty record)
+        val paramType = type.paramType
+        if (paramType !is FunkType.RecordType || paramType.fields.isNotEmpty()) {
+            return ValidationError.MainFunctionTypeError(
+                actualType = type,
+                reason = "parameter type is ${prettyPrintType(paramType)}, expected {}",
+                sourceLocation = sourceLocation
+            )
+        }
+
+        // Check return type is {} (empty record)
+        val returnType = type.returnType
+        if (returnType !is FunkType.RecordType || returnType.fields.isNotEmpty()) {
+            return ValidationError.MainFunctionTypeError(
+                actualType = type,
+                reason = "return type is ${prettyPrintType(returnType)}, expected {}",
+                sourceLocation = sourceLocation
+            )
+        }
+
+        // Check effects are <*> (performed, no unhandled effects)
+        val effectRow = type.effects
+        if (effectRow == null) {
+            return ValidationError.MainFunctionTypeError(
+                actualType = type,
+                reason = "it is pure (no effects). main should perform effects using 'perform'",
+                sourceLocation = sourceLocation
+            )
+        }
+
+        if (!effectRow.performed) {
+            // Has unhandled effects but not performed
+            val unhandledEffects = effectRow.effects.joinToString(", ")
+            return ValidationError.MainFunctionTypeError(
+                actualType = type,
+                reason = "it has unhandled effects <$unhandledEffects>. Use 'perform' to handle all effects in main",
+                sourceLocation = sourceLocation
+            )
+        }
+
+        if (effectRow.effects.isNotEmpty()) {
+            // Has performed but also has remaining unhandled effects
+            val unhandledEffects = effectRow.effects.joinToString(", ")
+            return ValidationError.MainFunctionTypeError(
+                actualType = type,
+                reason = "it has unhandled effects <$unhandledEffects, *>. All effects must be handled in main",
+                sourceLocation = sourceLocation
+            )
+        }
+
+        // All checks passed - main is {} -> {} <*>
+        return null
+    }
+
+    /**
+     * Extract effect row from a type if present.
+     */
+    private fun extractEffectRowFromType(type: FunkType): FunkType.EffectRow? {
+        return when (type) {
+            is FunkType.FunctionType -> type.effects
+            is FunkType.SuspendedType -> type.effects
+            else -> null
+        }
     }
 
     /**

@@ -265,12 +265,20 @@ private fun showCommandHelp(command: String) {
             println("Execute Funk source code directly without compilation")
             println("Fast startup, direct execution with full Truffle JIT optimization")
             println()
+            println("REQUIREMENTS:")
+            println("  Program must define 'main' with type: {} -> {} <*>")
+            println("  - Takes no arguments: {}")
+            println("  - Returns unit: {}")
+            println("  - Performs effects: <*> (use 'perform Handler in')")
+            println()
             println("OPTIONS:")
             println("  -h, --help         Show this help message")
             println()
-            println("EXAMPLES:")
-            println("  funk exec program.funk              # Execute a file")
-            println("  echo 'let x = 5 + 10' | funk exec   # Execute from stdin")
+            println("EXAMPLE:")
+            println("  use std::effects::log::{println, Log, Console}")
+            println()
+            println("  let main = {} -> perform Console in")
+            println("    println { msg = \"Hello, World!\" }")
         }
         
         "compile" -> {
@@ -726,7 +734,7 @@ private fun handleExecCommand(args: List<String>) {
         }
     }
 
-    // First, type-check to ensure program returns {} with no unhandled effects
+    // Parse the source
     val parser = FunkParser()
     val fileName = filePath?.fileName?.toString()
     val ast = parser.parse(source, file = fileName)
@@ -740,79 +748,52 @@ private fun handleExecCommand(args: List<String>) {
         java.nio.file.Paths.get(".")
     }
 
+    // Type-check with main validation: main must be {} -> {} <*>
     val typeChecker = TypeChecker()
-    val typeCheckResult = typeChecker.typeCheck(ast, typeCheckProjectRoot)
+    val typeCheckResult = typeChecker.checkProgramForExecution(ast, typeCheckProjectRoot)
 
-    // Check if program has a 'main' function and auto-call it
-    val mainBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()
-        .find { it.variableName == "main" }
+    // Handle type-check failure
+    if (typeCheckResult is TypeChecker.TypeCheckResult.Failure) {
+        val error = typeCheckResult.errors.first()
+        println("❌ Type Error: ${error.message}")
+        println("━".repeat(50))
 
-    val programToExecute = if (mainBinding != null) {
-        // Validate that main has type {} -> {}
-        val mainType = mainBinding.inferredType
-        val isValidMainType = mainType is FunkType.FunctionType &&
-                              mainType.paramType is FunkType.RecordType &&
-                              (mainType.paramType as FunkType.RecordType).fields.isEmpty() &&
-                              !(mainType.paramType as FunkType.RecordType).isOpen &&
-                              mainType.returnType is FunkType.RecordType &&
-                              (mainType.returnType as FunkType.RecordType).fields.isEmpty() &&
-                              !(mainType.returnType as FunkType.RecordType).isOpen
-
-        if (!isValidMainType) {
-            println("❌ Type Error: 'main' must have type {} -> {}")
-            println("━".repeat(50))
-            println("Expected: {} -> {}")
-            println("Actual:   ${prettyPrintType(mainType!!)}")
+        // Provide helpful suggestions based on error
+        if (error.message.contains("pure", ignoreCase = true)) {
             println()
-            println("💡 The main function must:")
-            println("   - Take no arguments: {}")
-            println("   - Return nothing: {}")
-            println("   - Perform side effects (like printing) instead of returning values")
-            kotlin.system.exitProcess(1)
-        }
-
-        // Add a call to main() at the end of the program
-        val mainCall = com.funk.language.ast.FunctionCall(
-            function = com.funk.language.ast.Identifier("main", null, null),
-            arguments = com.funk.language.ast.RecordLiteral(emptyList(), null, null),
-            inferredType = null,
-            sourceLocation = null
-        )
-        typeCheckResult.program.copy(
-            items = typeCheckResult.program.items + listOf(com.funk.language.ast.TopLevelExpression(mainCall))
-        )
-    } else {
-        // No main function - check that the last expression returns {}
-        val lastItem = typeCheckResult.program.items.lastOrNull()
-        val programType = when (lastItem) {
-            is LetBinding -> lastItem.inferredType
-            is TopLevelExpression -> lastItem.expression.inferredType
-            else -> null
-        }
-
-        val isValidType = programType is FunkType.RecordType &&
-                          programType.fields.isEmpty() &&
-                          !programType.isOpen
-
-        if (!isValidType && programType != null) {
-            println("❌ Type Error: Program must return {} with no unhandled effects")
-            println("━".repeat(50))
-            println("Expected: {}")
-            println("Actual:   ${prettyPrintType(programType)}")
+            println("💡 The main function must perform effects using 'perform':")
             println()
-
-            if (programType is FunkType.SuspendedType) {
-                println("💡 You have unhandled effects: <${programType.effects.effects.joinToString(", ")}>")
-                println("   Use 'perform <Handler> in' to handle all effects before the program ends")
-            } else {
-                println("💡 Tip: Programs executed with 'funk exec' must return {}")
-                println("   Define a 'main' function or end your program with {}")
-            }
-            kotlin.system.exitProcess(1)
+            println("   use std::effects::log::{println, Log, Console}")
+            println()
+            println("   let main = {} -> perform Console in")
+            println("     println { msg = \"Hello, World!\" }")
+        } else if (error.message.contains("unhandled", ignoreCase = true)) {
+            println()
+            println("💡 Use 'perform <Handler> in' to handle all effects in main")
+        } else if (error.message.contains("no 'main' function", ignoreCase = true)) {
+            println()
+            println("💡 Define a main function:")
+            println()
+            println("   use std::effects::log::{println, Log, Console}")
+            println()
+            println("   let main = {} -> perform Console in")
+            println("     println { msg = \"Hello, World!\" }")
         }
-
-        typeCheckResult.program
+        kotlin.system.exitProcess(1)
     }
+
+    val successResult = typeCheckResult as TypeChecker.TypeCheckResult.Success
+
+    // Add a call to main() at the end of the program
+    val mainCall = com.funk.language.ast.FunctionCall(
+        function = com.funk.language.ast.Identifier("main", null, null),
+        arguments = com.funk.language.ast.RecordLiteral(emptyList(), null, null),
+        inferredType = null,
+        sourceLocation = null
+    )
+    val programToExecute = successResult.program.copy(
+        items = successResult.program.items + listOf(com.funk.language.ast.TopLevelExpression(mainCall))
+    )
 
     try {
         // Suppress Truffle warnings for native binary (interpreter-only mode is expected)
@@ -831,7 +812,7 @@ private fun handleExecCommand(args: List<String>) {
             java.nio.file.Paths.get(".")
         }
 
-        val result = interpreter.execute(programToExecute, projectRootPath, typeCheckResult.monomorphicInstances)
+        val result = interpreter.execute(programToExecute, projectRootPath, successResult.monomorphicInstances)
 
         // Program should return {}, so we don't print the result
         // Execution completed silently
@@ -863,7 +844,7 @@ private fun handleCompileCommand(args: List<String>) {
         showCommandHelp("compile")
         return
     }
-    
+
     // Parse arguments (simplified - no more -o flag)
     if (args.isEmpty()) {
         println("❌ Error: compile command requires an input file")
@@ -872,16 +853,16 @@ private fun handleCompileCommand(args: List<String>) {
         println("Use 'funk compile --help' for more information")
         return
     }
-    
+
     val inputFileName = args[0]
     val outputFileName = if (args.size > 1) args[1] else ""
-    
+
     val inputFile = File(inputFileName)
     if (!inputFile.exists()) {
         println("❌ Error: Input file not found at '$inputFileName'")
         return
     }
-    
+
     // Determine output file name
     val outputFile = if (outputFileName.isNotEmpty()) {
         File(outputFileName)
@@ -897,68 +878,53 @@ private fun handleCompileCommand(args: List<String>) {
     try {
         val startTime = System.nanoTime()
 
-        // Parse and type check the source
+        // Parse the source
         val parseStart = System.nanoTime()
         val parser = FunkParser()
         val ast = parser.parse(source)
         val parseTime = (System.nanoTime() - parseStart) / 1_000_000.0
 
+        // Type-check with main validation: main must be {} -> {} <*>
         val typeCheckStart = System.nanoTime()
         val typeChecker = TypeChecker()
-        val typeCheckResult = typeChecker.typeCheck(ast, inputFile.toPath().parent ?: inputFile.toPath())
+        val typeCheckResult = typeChecker.checkProgramForExecution(ast, inputFile.toPath().parent ?: inputFile.toPath())
         val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
 
-        // Validate that program has a 'main' function with type {} -> {}
-        val mainBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()
-            .find { it.variableName == "main" }
-
-        if (mainBinding == null) {
-            println("❌ Compilation Error: Missing 'main' function")
+        // Handle type-check failure
+        if (typeCheckResult is TypeChecker.TypeCheckResult.Failure) {
+            val error = typeCheckResult.errors.first()
+            println("❌ Compilation Error: ${error.message}")
             println("━".repeat(50))
-            println("Compiled programs must define a 'main' function")
-            println()
-            println("Example:")
-            println("  use std::effects::log::{println, Log, Console}")
-            println()
-            println("  let main = {} -> perform Console in do")
-            println("    println { msg = \"Hello, World!\" }")
-            println()
+
+            // Provide helpful suggestions based on error
+            if (error.message.contains("pure", ignoreCase = true)) {
+                println()
+                println("💡 The main function must perform effects using 'perform':")
+                println()
+                println("   use std::effects::log::{println, Log, Console}")
+                println()
+                println("   let main = {} -> perform Console in")
+                println("     println { msg = \"Hello, World!\" }")
+            } else if (error.message.contains("unhandled", ignoreCase = true)) {
+                println()
+                println("💡 Use 'perform <Handler> in' to handle all effects in main")
+            } else if (error.message.contains("no 'main' function", ignoreCase = true)) {
+                println()
+                println("💡 Compiled programs must define a 'main' function:")
+                println()
+                println("   use std::effects::log::{println, Log, Console}")
+                println()
+                println("   let main = {} -> perform Console in")
+                println("     println { msg = \"Hello, World!\" }")
+            }
             kotlin.system.exitProcess(1)
         }
 
-        // Check that main has type {} -> {}
-        val mainType = mainBinding.inferredType
-        val isValidMainType = mainType is FunkType.FunctionType &&
-                              mainType.paramType is FunkType.RecordType &&
-                              (mainType.paramType as FunkType.RecordType).fields.isEmpty() &&
-                              !(mainType.paramType as FunkType.RecordType).isOpen &&
-                              mainType.returnType is FunkType.RecordType &&
-                              (mainType.returnType as FunkType.RecordType).fields.isEmpty() &&
-                              !(mainType.returnType as FunkType.RecordType).isOpen
-
-        if (!isValidMainType) {
-            println("❌ Type Error: 'main' must have type {} -> {}")
-            println("━".repeat(50))
-            println("Expected: {} -> {}")
-            println("Actual:   ${prettyPrintType(mainType!!)}")
-            println()
-            println("💡 The main function must:")
-            println("   - Take no arguments: {}")
-            println("   - Return nothing: {}")
-            println("   - Perform side effects (like printing) instead of returning values")
-            println()
-            println("Example:")
-            println("  use std::effects::log::{println, Log, Console}")
-            println()
-            println("  let main = {} -> perform Console in do")
-            println("    println { msg = \"Hello, World!\" }")
-            println()
-            kotlin.system.exitProcess(1)
-        }
+        val successResult = typeCheckResult as TypeChecker.TypeCheckResult.Success
 
         // Always create standalone JAR (AST + Interpreter + Truffle)
         val jarStart = System.nanoTime()
-        createStandaloneJar(inputFile, outputFile, source, typeCheckResult.program)
+        createStandaloneJar(inputFile, outputFile, source, successResult.program)
         val jarTime = (System.nanoTime() - jarStart) / 1_000_000.0
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
@@ -967,7 +933,7 @@ private fun handleCompileCommand(args: List<String>) {
         println("Parse: ${String.format("%.2f", parseTime)}ms  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  JAR build: ${String.format("%.2f", jarTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
         println()
         println("Run: java -jar ${outputFile.name}")
-        
+
     } catch (e: TypeCheckError) {
         // Pass source code and file for enhanced error messages with code snippets
         println(ErrorPrettyPrinter.prettyPrint(e, source, inputFile.name))

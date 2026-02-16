@@ -1816,11 +1816,8 @@ class ExpressionConstraintGenerator {
         // Check if the function type has effects (concrete or polymorphic)
         if (functionType is FunkType.FunctionType) {
             val effectRow = functionType.effects
-            // Handle effects if: has concrete effects OR has a row variable (polymorphic <...>)
-            if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.rowVar != null)) {
-                // Calling an effectful function produces a SuspendedType
-                // The return value is suspended with the function's effects
-
+            // Handle effects if: has concrete effects OR has a row variable (polymorphic <...>) OR is performed
+            if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.rowVar != null || effectRow.performed)) {
                 val constraints = mutableListOf<Constraint>()
                 constraints.addAll(functionResult.constraints)
                 constraints.addAll(argumentResult.constraints)
@@ -1835,12 +1832,6 @@ class ExpressionConstraintGenerator {
                     )
                 )
 
-                // Result is return type wrapped in SuspendedType with effects
-                val resultType = FunkType.SuspendedType(
-                    valueType = functionType.returnType,
-                    effects = effectRow
-                )
-
                 // CRITICAL FIX: Propagate effects from the function type to ConstraintResult.effects
                 // This allows generatePerform to track which effects are used by the expression
                 val propagatedEffects = effectRow.effects + functionResult.effects + argumentResult.effects
@@ -1850,6 +1841,22 @@ class ExpressionConstraintGenerator {
                 // TCO: Include tail call if detected (note: effectful tail calls may need special handling)
                 val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls
                 val tailCalls = if (tailCallLocation != null) baseTailCalls + tailCallLocation else baseTailCalls
+
+                // If the function has unhandled effects (suspended), wrap in SuspendedType
+                // If only performed (no suspended effects), return the value directly
+                val hasUnhandledEffects = effectRow.effects.isNotEmpty() || effectRow.rowVar != null
+                val resultType = if (hasUnhandledEffects) {
+                    // Calling an effectful function produces a SuspendedType
+                    // The return value is suspended with the function's effects
+                    FunkType.SuspendedType(
+                        valueType = functionType.returnType,
+                        effects = effectRow
+                    )
+                } else {
+                    // Function has only performed effects (<*>), no suspension needed
+                    // The result is the return type directly, with performed flag tracked
+                    functionType.returnType
+                }
 
                 return ConstraintResult(
                     type = resultType,

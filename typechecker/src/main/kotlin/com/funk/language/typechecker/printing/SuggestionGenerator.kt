@@ -130,6 +130,17 @@ object SuggestionGenerator {
                 "Remove the payload pattern from constructor '${error.constructorName}'",
                 "If you need to match a payload, add fields to the variant constructor definition"
             )
+
+            is ValidationError.TopLevelPerformedEffects -> listOf(
+                "Wrap the value in a function: let ${error.bindingName} = {} -> ...",
+                "Move the effectful computation inside main or another function"
+            )
+
+            is ValidationError.MainFunctionTypeError -> listOf(
+                "main must be: main = {} -> perform Handler in ...",
+                "Use 'perform' to handle all effects in main",
+                "Ensure main returns {} (empty record)"
+            )
         }
     }
 

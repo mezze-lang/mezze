@@ -503,6 +503,51 @@ sealed interface ValidationError {
 
         override fun location() = sourceLocation
     }
+
+    /**
+     * Top-level value has performed effects (<*>).
+     *
+     * Top-level values (non-functions) cannot have performed effects because
+     * that would mean executing effects at module load time.
+     *
+     * Example: let x: Int <*> = perform Console in ... (NOT ALLOWED)
+     */
+    data class TopLevelPerformedEffects(
+        val bindingName: String,
+        val effectRow: FunkType.EffectRow,
+        val sourceLocation: SourceLocation? = null
+    ) : ValidationError {
+        override fun message(): String = buildString {
+            append("Top-level value '$bindingName' cannot have performed effects <*>. ")
+            append("Effects can only be performed inside 'main' or inside functions. ")
+            append("Consider wrapping this in a function: let $bindingName = {} -> ...")
+        }
+
+        override fun location() = sourceLocation
+    }
+
+    /**
+     * main function has wrong type.
+     *
+     * main must have type {} -> {} <*> (takes unit, returns unit with performed effects).
+     *
+     * Example: main = {} -> 42 (returns Int, not {})
+     * Example: main = {} -> {} (pure, should have <*>)
+     * Example: main = {} -> Log.println {...} (has <Log>, should use perform)
+     */
+    data class MainFunctionTypeError(
+        val actualType: FunkType,
+        val reason: String,
+        val sourceLocation: SourceLocation? = null
+    ) : ValidationError {
+        override fun message(): String = buildString {
+            append("'main' must have type {} -> {} <*>, but ")
+            append(reason)
+            append(". The main function should perform all effects using 'perform'.")
+        }
+
+        override fun location() = sourceLocation
+    }
 }
 
 /**
