@@ -123,9 +123,9 @@ object TypeDiffPrinter {
         val params = formatType(type.paramType, indent)
         val result = formatType(type.returnType, indent)
 
-        // Format effect row if present
+        // Format effect row if present (including performed marker)
         val effectRow = type.effects
-        val effects = if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.rowVar != null)) {
+        val effects = if (effectRow != null && (effectRow.effects.isNotEmpty() || effectRow.rowVar != null || effectRow.performed)) {
             " ${formatEffectRow(effectRow)}"
         } else ""
 
@@ -181,17 +181,21 @@ object TypeDiffPrinter {
     }
 
     private fun formatEffectRow(type: FunkType.EffectRow): String {
-        if (type.effects.isEmpty() && type.rowVar == null) {
+        val rowVar = type.rowVar
+        if (type.effects.isEmpty() && rowVar == null && !type.performed) {
             return "<>"
         }
 
-        val effects = type.effects.joinToString(", ")
-        val rowVar = type.rowVar
-        val row = if (rowVar != null) {
-            if (type.effects.isNotEmpty()) ", ...${rowVar.name}" else "...${rowVar.name}"
-        } else ""
+        val parts = mutableListOf<String>()
+        parts.addAll(type.effects.sorted())
+        if (rowVar != null) {
+            parts.add("...${rowVar.name}")
+        }
+        if (type.performed) {
+            parts.add("*")
+        }
 
-        return "<$effects$row>"
+        return "<${parts.joinToString(", ")}>"
     }
 
     /**

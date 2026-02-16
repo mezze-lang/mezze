@@ -2667,7 +2667,8 @@ class ConstraintSolver(
                 )
             }
             is EffectRowAnnotation -> {
-                FunkType.EffectRow(annotation.effects.toSet())
+                val rowVar = if (annotation.isPolymorphic) RowVar.fresh() else null
+                FunkType.EffectRow(annotation.effects.toSet(), rowVar, annotation.isPerformed)
             }
             is QualifiedTypeAnnotation -> {
                 val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")

@@ -122,9 +122,10 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): FunkType {
             val paramType = convertTypeAnnotation(annotation.paramType)
             val returnType = convertTypeAnnotation(annotation.returnType)
 
-            // Convert effect annotations
+            // Convert effect annotations (including polymorphic and performed flags)
             val effects = annotation.effects?.let { effectRow ->
-                FunkType.EffectRow(effectRow.effects.toSet())
+                val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
+                FunkType.EffectRow(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
             }
 
             // Convert ability constraints

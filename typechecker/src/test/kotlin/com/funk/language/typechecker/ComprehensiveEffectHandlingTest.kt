@@ -162,7 +162,8 @@ class ComprehensiveEffectHandlingTest {
     @Test
     fun `test 2b - handle one effect then call returns suspended with remaining effects`() {
         // CRITICAL: This tests the partial effect handling bug fix
-        // The result should be String <FileSystem>, not just String
+        // The result should be String <FileSystem, *>, not just String
+        // The * marks that Log was already performed
         assertTypeChecks(
             """
             use std::effects::log::{Log, Console}
@@ -178,7 +179,7 @@ class ComprehensiveEffectHandlingTest {
             result
             """.trimIndent(),
             "result",
-            "String <FileSystem>"
+            "String <FileSystem, *>"  // FileSystem remains, * marks Log was performed
         )
     }
 
@@ -275,7 +276,8 @@ class ComprehensiveEffectHandlingTest {
     fun `test 3c - call function then partially handle effects`() {
         // CRITICAL: This tests the partial effect handling bug fix
         // After calling myFunc {}, we get String <FileSystem, Log>
-        // After perform Console, we should get String <FileSystem>, NOT just String
+        // After perform Console, we should get String <FileSystem, *>
+        // * marks that Log was performed
         assertTypeChecks(
             """
             use std::effects::log::{Log, Console}
@@ -291,7 +293,7 @@ class ComprehensiveEffectHandlingTest {
             partiallyHandled
             """.trimIndent(),
             "partiallyHandled",
-            "String <FileSystem>"
+            "String <FileSystem, *>"  // FileSystem remains, * marks Log was performed
         )
     }
 
@@ -412,7 +414,7 @@ class ComprehensiveEffectHandlingTest {
     @Test
     fun `test 4d - verify intermediate types in two effect sequence`() {
         // This test verifies each intermediate step has the correct type
-        // CRITICAL: After handling Log, FileSystem should remain
+        // CRITICAL: After handling Log, FileSystem should remain, * marks performed
         assertTypeChecks(
             """
             use std::effects::log::{Log, Console}
@@ -428,7 +430,7 @@ class ComprehensiveEffectHandlingTest {
             step1
             """.trimIndent(),
             "step1",
-            "String <FileSystem>"
+            "String <FileSystem, *>"  // FileSystem remains, * marks Log was performed
         )
     }
 

@@ -215,10 +215,13 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     is FunkType.SortedMapType -> "SortedMap ${prettyPrintTypeWithMapping(type.keyType, typeVarMapping)} ${prettyPrintTypeWithMapping(type.valueType, typeVarMapping)}"
     is FunkType.SortedSetType -> "SortedSet ${prettyPrintTypeWithMapping(type.elementType, typeVarMapping)}"
     is FunkType.SuspendedType -> {
-        // Suspended types print as: valueType <effects>
+        // Suspended types print as: valueType <effects, *>
         val valueTypeStr = prettyPrintTypeWithMapping(type.valueType, typeVarMapping)
-        val effectList = type.effects.effects.sorted().joinToString(", ")
-        "$valueTypeStr <$effectList>"
+        val parts = mutableListOf<String>()
+        parts.addAll(type.effects.effects.sorted())
+        if (type.effects.isOpen) parts.add("...")
+        if (type.effects.performed) parts.add("*")
+        "$valueTypeStr <${parts.joinToString(", ")}>"
     }
     is FunkType.FunctionType -> {
         // Build parameter type string - add parentheses if parameter is also a function type
