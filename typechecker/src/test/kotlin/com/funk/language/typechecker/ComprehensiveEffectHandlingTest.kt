@@ -70,7 +70,7 @@ class ComprehensiveEffectHandlingTest {
             handled
             """.trimIndent(),
             "handled",
-            "{} -> String"
+            "{} -> String <*>"  // <*> marks that effects were performed
         )
     }
 
@@ -79,6 +79,7 @@ class ComprehensiveEffectHandlingTest {
         // CRITICAL: This tests the partial effect handling bug fix
         // Before fix: ALL effects were removed
         // After fix: Only the handled effect (Log via Console) is removed, FileSystem remains
+        // <*> marks that some effects were already performed
         assertTypeChecks(
             """
             use std::effects::log::{Log, Console}
@@ -93,7 +94,7 @@ class ComprehensiveEffectHandlingTest {
             partiallyHandled
             """.trimIndent(),
             "partiallyHandled",
-            "{} -> String <FileSystem>"
+            "{} -> String <FileSystem, *>"  // FileSystem remains, * marks performed
         )
     }
 
@@ -114,7 +115,7 @@ class ComprehensiveEffectHandlingTest {
             step2
             """.trimIndent(),
             "step2",
-            "{} -> String"
+            "{} -> String <*>"  // All effects handled, * marks performed
         )
     }
 
@@ -446,7 +447,7 @@ class ComprehensiveEffectHandlingTest {
             handled
             """.trimIndent(),
             "handled",
-            "{} -> String"
+            "{} -> String <*>"  // <*> marks that effects were performed
         )
     }
 

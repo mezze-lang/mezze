@@ -252,8 +252,8 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
         // Build return type string
         val returnTypeStr = prettyPrintTypeWithMapping(type.returnType, typeVarMapping)
         
-        // Add effects
-        val effects = if (type.effects != null && type.effects.effects.isNotEmpty()) {
+        // Add effects (including performed marker)
+        val effects = if (type.effects != null && (type.effects.effects.isNotEmpty() || type.effects.performed)) {
             // Deduplicate effects by keeping shortest name variant
             // E.g., if we have both "FileSystem" and "filesystem::FileSystem", keep "FileSystem"
             val deduped = type.effects.effects.groupBy { effect ->
@@ -264,12 +264,15 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
                 variants.minByOrNull { it.length } ?: variants.first()
             }.values.sorted()
 
-            val effectList = deduped.joinToString(", ")
-            " <$effectList>"
+            val parts = mutableListOf<String>()
+            parts.addAll(deduped)
+            if (type.effects.isOpen) parts.add("...")
+            if (type.effects.performed) parts.add("*")
+            " <${parts.joinToString(", ")}>"
         } else {
             ""
         }
-        
+
         // Construct final string: param with constraints -> return effects
         paramTypeStr + abilityConstraints + " -> " + returnTypeStr + effects
     }
@@ -277,8 +280,11 @@ private fun prettyPrintTypeWithMapping(type: FunkType, typeVarMapping: Map<TypeV
     is FunkType.BytesType -> "Bytes"
     is FunkType.ByteBufferType -> "ByteBuffer"
     is FunkType.EffectRow -> {
-        val effectList = type.effects.sorted().joinToString(", ")
-        if (type.isOpen) "<$effectList, ...>" else "<$effectList>"
+        val parts = mutableListOf<String>()
+        parts.addAll(type.effects.sorted())
+        if (type.isOpen) parts.add("...")
+        if (type.performed) parts.add("*")
+        "<${parts.joinToString(", ")}>"
     }
 }
 
@@ -575,8 +581,8 @@ private fun prettyPrintTypeWithAliasesRecursive(
         // Build return type string
         val returnTypeStr = prettyPrintWithAliasCheck(type.returnType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
 
-        // Add effects
-        val effects = if (type.effects != null && type.effects.effects.isNotEmpty()) {
+        // Add effects (including performed marker)
+        val effects = if (type.effects != null && (type.effects.effects.isNotEmpty() || type.effects.performed)) {
             // Deduplicate effects by keeping shortest name variant
             // E.g., if we have both "FileSystem" and "filesystem::FileSystem", keep "FileSystem"
             val deduped = type.effects.effects.groupBy { effect ->
@@ -587,8 +593,11 @@ private fun prettyPrintTypeWithAliasesRecursive(
                 variants.minByOrNull { it.length } ?: variants.first()
             }.values.sorted()
 
-            val effectList = deduped.joinToString(", ")
-            " <$effectList>"
+            val parts = mutableListOf<String>()
+            parts.addAll(deduped)
+            if (type.effects.isOpen) parts.add("...")
+            if (type.effects.performed) parts.add("*")
+            " <${parts.joinToString(", ")}>"
         } else {
             ""
         }
@@ -601,15 +610,21 @@ private fun prettyPrintTypeWithAliasesRecursive(
         // Example: String <Log, FileSystem>
         // These represent values with unhandled effects
         val valueTypeStr = prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
-        val effectList = type.effects.effects.sorted().joinToString(", ")
-        "$valueTypeStr <$effectList>"
+        val parts = mutableListOf<String>()
+        parts.addAll(type.effects.effects.sorted())
+        if (type.effects.isOpen) parts.add("...")
+        if (type.effects.performed) parts.add("*")
+        "$valueTypeStr <${parts.joinToString(", ")}>"
     }
     is FunkType.OrderingType -> "Ordering"
     is FunkType.BytesType -> "Bytes"
     is FunkType.ByteBufferType -> "ByteBuffer"
     is FunkType.EffectRow -> {
-        val effectList = type.effects.sorted().joinToString(", ")
-        if (type.isOpen) "<$effectList, ...>" else "<$effectList>"
+        val parts = mutableListOf<String>()
+        parts.addAll(type.effects.sorted())
+        if (type.isOpen) parts.add("...")
+        if (type.performed) parts.add("*")
+        "<${parts.joinToString(", ")}>"
     }
 }
 
