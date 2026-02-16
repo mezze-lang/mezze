@@ -155,14 +155,16 @@ class EffectAssociatedTypesInterpreterTest {
                 put = {value} -> {}
             }
 
-            let result = perform Counter in do
+            let getResult = {} -> perform Counter in do
                 let x = State.get {}
                 State.put { value = x + 5 }
                 x
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(10L, (context["result"] as FunkInt).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(10L, (result as FunkInt).value)
     }
 
     @Test
@@ -184,14 +186,16 @@ class EffectAssociatedTypesInterpreterTest {
                 ask = {} -> "hello"
             }
 
-            let result = perform IntState, StringReader in do
+            let getResult = {} -> perform IntState, StringReader in do
                 let num = State.get {}
                 let str = Reader.ask {}
                 num
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(42L, (context["result"] as FunkInt).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(42L, (result as FunkInt).value)
     }
 
     @Test
@@ -227,11 +231,13 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let getState = {} -> perform IntState in State.get {}
-            let result = getState {}
+            let getResult = {} -> getState {}
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(100L, (context["result"] as FunkInt).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(100L, (result as FunkInt).value)
     }
 
     @Test
@@ -247,14 +253,16 @@ class EffectAssociatedTypesInterpreterTest {
                 put = {value} -> {}
             }
 
-            let result = perform BoolState in do
+            let getResult = {} -> perform BoolState in do
                 let flag = State.get {}
                 State.put { value = False }
                 flag
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertTrue((context["result"] as FunkBool).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertTrue((result as FunkBool).value)
     }
 
     @Test
@@ -270,15 +278,17 @@ class EffectAssociatedTypesInterpreterTest {
                 put = {value} -> {}
             }
 
-            let result = perform Counter in do
+            let getResult = {} -> perform Counter in do
                 let x = State.get {}
                 let y = x + 5
                 State.put { value = y }
                 y
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(15L, (context["result"] as FunkInt).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(15L, (result as FunkInt).value)
     }
 
     @Test
@@ -318,14 +328,16 @@ class EffectAssociatedTypesInterpreterTest {
                 ask = {} -> "config"
             }
 
-            let result = perform IntState, StringReader in do
+            let getResult = {} -> perform IntState, StringReader in do
                 let num = State.get {}
                 let str = Reader.ask {}
                 num
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(10L, (context["result"] as FunkInt).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(10L, (result as FunkInt).value)
     }
 
     @Test
@@ -425,15 +437,17 @@ class EffectAssociatedTypesInterpreterTest {
                 modify = {delta} -> 50 + delta
             }
 
-            let result = perform Counter in do
+            let getResult = {} -> perform Counter in do
                 let x = State.get {}
                 let y = State.modify { delta = 10 }
                 State.put { value = y }
                 y
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(60L, (context["result"] as FunkInt).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(60L, (result as FunkInt).value)
     }
 
     @Test
@@ -448,11 +462,13 @@ class EffectAssociatedTypesInterpreterTest {
             }
 
             let getFromState = {} -> perform StringState in State.get {}
-            let result = getFromState {}
+            let getResult = {} -> getFromState {}
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals("from function", (context["result"] as FunkString).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals("from function", (result as FunkString).value)
     }
 
     @Test
@@ -474,14 +490,16 @@ class EffectAssociatedTypesInterpreterTest {
                 ask = {} -> 777
             }
 
-            let combined = perform BoolState, IntReader in do
+            let getCombined = {} -> perform BoolState, IntReader in do
                 let flag = State.get {}
                 let num = Reader.ask {}
                 num
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(777L, (context["combined"] as FunkInt).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getCombined", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(777L, (result as FunkInt).value)
     }
 
     // ===== Tests for Multiple Associated Types =====
@@ -547,14 +565,16 @@ class EffectAssociatedTypesInterpreterTest {
                 fail = {error} -> error
             }
 
-            let result = perform BoolFloatResult in do
+            let getResult = {} -> perform BoolFloatResult in do
                 let success = Outcome.succeed { value = True }
                 let failure = Outcome.fail { error = 3.14 }
                 success
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertTrue((context["result"] as FunkBool).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertTrue((result as FunkBool).value)
     }
 
     @Test
@@ -628,15 +648,17 @@ class EffectAssociatedTypesInterpreterTest {
                 update = {delta} -> 100
             }
 
-            let combined = perform IntStringResult, IntFloatState in do
+            let getCombined = {} -> perform IntStringResult, IntFloatState in do
                 let r = Outcome.succeed { value = 42 }
                 let s = State.get {}
                 let u = State.update { delta = 3.14 }
                 r
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(42L, (context["combined"] as FunkInt).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getCombined", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(42L, (result as FunkInt).value)
     }
 
     @Test
@@ -678,11 +700,13 @@ class EffectAssociatedTypesInterpreterTest {
                 let y = Outcome.succeed { value = x + 10 }
                 y
 
-            let result = compute { x = 32 }
+            let getResult = {} -> compute { x = 32 }
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(42L, (context["result"] as FunkInt).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(42L, (result as FunkInt).value)
     }
 
     @Test
@@ -703,10 +727,12 @@ class EffectAssociatedTypesInterpreterTest {
             else
                 perform BoolStringResult in Outcome.succeed { value = False }
 
-            let result = check { flag = True }
+            let getResult = {} -> check { flag = True }
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertTrue((context["result"] as FunkBool).value)
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertTrue((result as FunkBool).value)
     }
 }

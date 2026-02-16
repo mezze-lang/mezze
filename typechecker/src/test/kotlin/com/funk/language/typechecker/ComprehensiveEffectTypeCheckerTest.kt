@@ -115,6 +115,7 @@ class ComprehensiveEffectTypeCheckerTest {
 
     @Test
     fun testEffectCallTypeChecking() {
+        // Test wrapped in function to avoid top-level performed effects restriction
         val source = """
             effect Random where {
               nextInt : {min: Int, max: Int} -> Int <Random>
@@ -124,7 +125,7 @@ class ComprehensiveEffectTypeCheckerTest {
               nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
             }
 
-            let randomValue = perform MathRandom in Random.nextInt {min = 1, max = 10}
+            let getRandomValue = {} -> perform MathRandom in Random.nextInt {min = 1, max = 10}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -133,11 +134,15 @@ class ComprehensiveEffectTypeCheckerTest {
         assertEquals(3, checkedProgram.items.size)
 
         val letBinding = checkedProgram.items[2] as LetBinding
-        assertEquals("randomValue", letBinding.variableName)
+        assertEquals("getRandomValue", letBinding.variableName)
 
-        // The let binding expression should be a perform expression
-        assertTrue(letBinding.expression is PerformExpression)
-        val performExpr = letBinding.expression as PerformExpression
+        // The let binding expression should be a lambda
+        assertTrue(letBinding.expression is LambdaExpression)
+        val lambda = letBinding.expression as LambdaExpression
+
+        // The lambda body should be a perform expression
+        assertTrue(lambda.body is PerformExpression)
+        val performExpr = lambda.body as PerformExpression
 
         // The performed expression should be an effect call (function call on member access)
         assertTrue(performExpr.expression is FunctionCall)
@@ -315,7 +320,8 @@ class ComprehensiveEffectTypeCheckerTest {
               Log.print {msg = "Processing $(name)"}
               "$(name) processed"
 
-            let result = perform Console in loggedFunction {name = "test"}
+            # Wrap in function to avoid top-level <*> restriction
+            let getResult = {} -> perform Console in loggedFunction {name = "test"}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -331,10 +337,10 @@ class ComprehensiveEffectTypeCheckerTest {
         val lambda = loggedFunctionBinding.expression as LambdaExpression
         assertTrue(lambda.body is DoExpression)
 
-        // Check result binding
-        val resultBinding = checkedProgram.items[3] as LetBinding
-        assertEquals("result", resultBinding.variableName)
-        assertTrue(resultBinding.expression is PerformExpression)
+        // Check getResult binding
+        val getResultBinding = checkedProgram.items[3] as LetBinding
+        assertEquals("getResult", getResultBinding.variableName)
+        assertTrue(getResultBinding.expression is LambdaExpression)
     }
 
     @Test

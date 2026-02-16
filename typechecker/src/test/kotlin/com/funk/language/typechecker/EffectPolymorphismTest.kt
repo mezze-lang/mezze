@@ -279,14 +279,17 @@ class EffectPolymorphismTest {
                 perform ConsoleLogger in Log.info { msg = "Adding" }
                 x + y
 
-            let result = log_and_add { x = 1, y = 2 }
+            # Wrap in function to avoid top-level <*> restriction
+            let getResult = {} -> log_and_add { x = 1, y = 2 }
         """.trimIndent()
 
         val program = typeCheck(code)
-        val binding = getBinding(program, "result")
+        val binding = getBinding(program, "getResult")
 
-        // Result should be Int (effects were handled)
-        assertTrue(binding.inferredType is FunkType.IntType)
+        // getResult should be a function returning Int <*>
+        assertTrue(binding.inferredType is FunkType.FunctionType)
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.IntType)
     }
 
     @Test

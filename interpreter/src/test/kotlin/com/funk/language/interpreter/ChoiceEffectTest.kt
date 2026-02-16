@@ -151,12 +151,12 @@ class ChoiceEffectTest {
             use std::effects::choice::{Choice, AllPaths}
 
             # Fully inline the computation in the perform block
-            let result = perform AllPaths {cont = continuation::new {}} in do
+            let getResult = {} -> perform AllPaths {cont = continuation::new {}} in do
                 let x = Choice.choose { options = [1, 2, 3] }
                 let y = Choice.choose { options = [4, 5] }
                 {first = x, second = y}
 
-            result
+            getResult {}
         """.trimIndent()
 
         val result = executeProgram(source)

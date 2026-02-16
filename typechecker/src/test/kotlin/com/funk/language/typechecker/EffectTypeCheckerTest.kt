@@ -138,15 +138,16 @@ class EffectTypeCheckerTest {
               Log.log {msg = "Hello"}
               42
               
-            let result = perform Console in program
+            # Wrap in function to avoid top-level <*> restriction
+            let getResult = {} -> perform Console in program
         """.trimIndent()
-        
+
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
-        
-        val resultBinding = typedProgram.items[3] as LetBinding
-        assertNotNull(resultBinding.inferredType)
-        
+
+        val getResultBinding = typedProgram.items[3] as LetBinding
+        assertNotNull(getResultBinding.inferredType)
+
         // For now, just verify that the type checker doesn't crash and produces some type
         // The specific effect system type checking can be improved later
         // The test verifies that perform expressions can be type-checked without errors

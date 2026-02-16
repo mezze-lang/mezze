@@ -971,11 +971,13 @@ class SubstitutionApplier(
             val funcType = updatedFunction.inferredType?.let { substitution.apply(it) }
             when (funcType) {
                 is FunkType.FunctionType -> {
-                    // CRITICAL: If the function has effects, wrap the return type in SuspendedType
+                    // CRITICAL: If the function has effects (including performed marker),
+                    // wrap the return type in SuspendedType
                     // Calling an effectful function produces a suspended computation
                     val returnType = funcType.returnType
                     val effects = funcType.effects
-                    if (effects != null && effects.effects.isNotEmpty()) {
+                    // Check for: concrete effects, row variable (polymorphic), OR performed marker <*>
+                    if (effects != null && (effects.effects.isNotEmpty() || effects.rowVar != null || effects.performed)) {
                         FunkType.SuspendedType(returnType, effects)
                     } else {
                         returnType
@@ -1677,16 +1679,12 @@ class SubstitutionApplier(
                 // Remove effects from suspended type, mark as performed
                 val remainingEffects = type.effects.effects - effectsToRemove
 
-                if (remainingEffects.isEmpty()) {
-                    // All effects handled - return pure value (no longer suspended)
-                    type.valueType
-                } else {
-                    // Some effects remain - still suspended, but mark as performed
-                    FunkType.SuspendedType(
-                        valueType = type.valueType,
-                        effects = FunkType.EffectRow(remainingEffects, type.effects.rowVar, true)
-                    )
-                }
+                // Keep SuspendedType with performed=true even when all effects are handled
+                // This allows top-level validation to reject values with <*> marker
+                FunkType.SuspendedType(
+                    valueType = type.valueType,
+                    effects = FunkType.EffectRow(remainingEffects, type.effects.rowVar, true)
+                )
             }
             else -> {
                 // Other types don't have effects

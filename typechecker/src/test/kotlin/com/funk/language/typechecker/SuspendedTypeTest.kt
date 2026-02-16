@@ -27,7 +27,7 @@ class SuspendedTypeTest {
     }
 
     @Test
-    fun `perform with partial effect handling creates SuspendedType`() {
+    fun `perform with partial effect handling creates function with remaining effects`() {
         val source = """
             effect Log where {
                 info: {msg: String} -> {} <Log>
@@ -49,30 +49,33 @@ class SuspendedTypeTest {
                 Log.info {msg = "test"}
                 FileSystem.write {path = "/tmp/test.txt", content = "hello"}
 
-            # Handle only Log - FileSystem remains unhandled
-            let result = perform Console in demo {}
+            # Wrap in function to avoid top-level <*> restriction
+            let testFn = {} -> do
+                perform Console in demo {}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
-        val resultBinding = typedProgram.items.last() as com.funk.language.ast.LetBinding
-        val resultType = resultBinding.inferredType
+        val testFnBinding = typedProgram.items.last() as com.funk.language.ast.LetBinding
+        val testFnType = testFnBinding.inferredType
 
-        // Should be a SuspendedType with FileSystem effect
-        assertTrue(resultType is FunkType.SuspendedType, "Expected SuspendedType but got ${resultType!!::class.simpleName}")
-        val suspendedType = resultType as FunkType.SuspendedType
+        // Should be a FunctionType with FileSystem effect and performed marker
+        assertTrue(testFnType is FunkType.FunctionType, "Expected FunctionType but got ${testFnType!!::class.simpleName}")
+        val fnType = testFnType as FunkType.FunctionType
 
-        // Value type should be {}
-        assertTrue(suspendedType.valueType is FunkType.RecordType)
-        assertEquals(emptyMap(), (suspendedType.valueType as FunkType.RecordType).fields)
+        // Return type should be {}
+        assertTrue(fnType.returnType is FunkType.RecordType)
+        assertEquals(emptyMap(), (fnType.returnType as FunkType.RecordType).fields)
 
-        // Should have FileSystem effect
-        assertEquals(setOf("FileSystem"), suspendedType.effects.effects)
+        // Should have FileSystem effect and performed marker
+        assertNotNull(fnType.effects)
+        assertEquals(setOf("FileSystem"), fnType.effects!!.effects)
+        assertTrue(fnType.effects!!.performed)
     }
 
     @Test
-    fun `perform with all effects handled returns plain value`() {
+    fun `perform with all effects handled returns function with performed marker`() {
         val source = """
             effect Log where {
                 info: {msg: String} -> {} <Log>
@@ -86,22 +89,32 @@ class SuspendedTypeTest {
                 Log.info {msg = "test"}
                 42
 
-            # Handle all effects - should get plain Int
-            let result = perform Console in demo {}
+            # Handle all effects - wrapped in function to avoid top-level <*> restriction
+            let getResult = {} -> perform Console in demo {}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
-        val resultBinding = typedProgram.items.last() as com.funk.language.ast.LetBinding
-        val resultType = resultBinding.inferredType
+        val getResultBinding = typedProgram.items.last() as com.funk.language.ast.LetBinding
+        val getResultType = getResultBinding.inferredType
 
-        // Should be plain IntType, not SuspendedType
-        assertTrue(resultType is FunkType.IntType, "Expected IntType but got ${resultType!!::class.simpleName}")
+        // Should be a FunctionType with performed marker (<*>)
+        // Note: Lambda unwraps SuspendedType into the function's effect row
+        assertTrue(getResultType is FunkType.FunctionType, "Expected FunctionType but got ${getResultType!!::class.simpleName}")
+        val fnType = getResultType as FunkType.FunctionType
+
+        // The function should have performed=true in its effects
+        assertNotNull(fnType.effects)
+        assertTrue(fnType.effects!!.performed, "Should have performed marker")
+        assertTrue(fnType.effects!!.effects.isEmpty(), "Should have no concrete effects")
+
+        // The return type should be Int (unwrapped from SuspendedType)
+        assertTrue(fnType.returnType is FunkType.IntType, "Expected IntType return but got ${fnType.returnType::class.simpleName}")
     }
 
     @Test
-    fun `perform on SuspendedType handles remaining effects`() {
+    fun `perform on function handles effects sequentially`() {
         val source = """
             effect Log where {
                 info: {msg: String} -> {} <Log>
@@ -124,26 +137,29 @@ class SuspendedTypeTest {
                 FileSystem.write {path = "/tmp/test.txt", content = "hello"}
                 42
 
-            # Handle Log first
-            let step1 = perform Console in demo {}
-
-            # Then handle FileSystem
+            # Handle effects on the FUNCTION (not calling it)
+            let step1 = perform Console in demo
             let step2 = perform LocalDisk in step1
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
-        // step1 should be SuspendedType with FileSystem
+        // step1 should be a function with FileSystem remaining + <*>
         val step1Binding = typedProgram.items[typedProgram.items.size - 2] as com.funk.language.ast.LetBinding
         val step1Type = step1Binding.inferredType
-        assertTrue(step1Type is FunkType.SuspendedType)
-        assertEquals(setOf("FileSystem"), (step1Type as FunkType.SuspendedType).effects.effects)
+        assertTrue(step1Type is FunkType.FunctionType)
+        val step1FnType = step1Type as FunkType.FunctionType
+        assertEquals(setOf("FileSystem"), step1FnType.effects!!.effects)
+        assertTrue(step1FnType.effects!!.performed)
 
-        // step2 should be plain Int (all effects handled)
+        // step2 should be a function with all effects handled + <*>
         val step2Binding = typedProgram.items.last() as com.funk.language.ast.LetBinding
         val step2Type = step2Binding.inferredType
-        assertTrue(step2Type is FunkType.IntType)
+        assertTrue(step2Type is FunkType.FunctionType)
+        val step2FnType = step2Type as FunkType.FunctionType
+        assertTrue(step2FnType.effects!!.effects.isEmpty())
+        assertTrue(step2FnType.effects!!.performed)
     }
 
     @Test
@@ -179,7 +195,7 @@ class SuspendedTypeTest {
     }
 
     @Test
-    fun `SuspendedType vs FunctionType distinction`() {
+    fun `FunctionType with partial effect handling`() {
         val source = """
             effect Log where {
                 info: {msg: String} -> {} <Log>
@@ -197,32 +213,24 @@ class SuspendedTypeTest {
                 Log.info {msg = "test"}
                 FileSystem.write {path = "/tmp/test.txt", content = "hello"}
 
-            # Function reference with effects - FunctionType
+            # Function reference with effects - FunctionType (no <*> at top level)
             let funcRef = perform Console in myFunction
-
-            # Function call with unhandled effects - SuspendedType
-            let suspended = perform Console in myFunction {}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
-        // funcRef should be FunctionType with FileSystem effect
-        val funcRefBinding = typedProgram.items[typedProgram.items.size - 2] as com.funk.language.ast.LetBinding
+        // funcRef should be FunctionType with FileSystem effect and performed marker
+        val funcRefBinding = typedProgram.items.last() as com.funk.language.ast.LetBinding
         val funcRefType = funcRefBinding.inferredType
         assertTrue(funcRefType is FunkType.FunctionType)
         assertNotNull((funcRefType as FunkType.FunctionType).effects)
         assertEquals(setOf("FileSystem"), funcRefType.effects!!.effects)
-
-        // suspended should be SuspendedType with FileSystem effect
-        val suspendedBinding = typedProgram.items.last() as com.funk.language.ast.LetBinding
-        val suspendedType = suspendedBinding.inferredType
-        assertTrue(suspendedType is FunkType.SuspendedType)
-        assertEquals(setOf("FileSystem"), (suspendedType as FunkType.SuspendedType).effects.effects)
+        assertTrue(funcRefType.effects!!.performed)  // <*> marker
     }
 
     @Test
-    fun `multiple handlers can be applied to SuspendedType`() {
+    fun `multiple handlers can be applied sequentially to function`() {
         val source = """
             effect A where { op: {} -> {} <A> }
             effect B where { op: {} -> {} <B> }
@@ -238,8 +246,8 @@ class SuspendedTypeTest {
                 C.op {}
                 "result"
 
-            # Handle effects one by one
-            let step1 = perform HandlerA in demo {}
+            # Handle effects on the FUNCTION (not calling it)
+            let step1 = perform HandlerA in demo
             let step2 = perform HandlerB in step1
             let step3 = perform HandlerC in step2
         """.trimIndent()
@@ -249,16 +257,20 @@ class SuspendedTypeTest {
 
         // step1: B, C remain
         val step1Type = (typedProgram.items[typedProgram.items.size - 3] as com.funk.language.ast.LetBinding).inferredType
-        assertTrue(step1Type is FunkType.SuspendedType)
-        assertEquals(setOf("B", "C"), (step1Type as FunkType.SuspendedType).effects.effects)
+        assertTrue(step1Type is FunkType.FunctionType)
+        assertEquals(setOf("B", "C"), (step1Type as FunkType.FunctionType).effects!!.effects)
+        assertTrue(step1Type.effects!!.performed)
 
         // step2: C remains
         val step2Type = (typedProgram.items[typedProgram.items.size - 2] as com.funk.language.ast.LetBinding).inferredType
-        assertTrue(step2Type is FunkType.SuspendedType)
-        assertEquals(setOf("C"), (step2Type as FunkType.SuspendedType).effects.effects)
+        assertTrue(step2Type is FunkType.FunctionType)
+        assertEquals(setOf("C"), (step2Type as FunkType.FunctionType).effects!!.effects)
+        assertTrue(step2Type.effects!!.performed)
 
         // step3: all handled
         val step3Type = (typedProgram.items.last() as com.funk.language.ast.LetBinding).inferredType
-        assertTrue(step3Type is FunkType.StringType)
+        assertTrue(step3Type is FunkType.FunctionType)
+        assertTrue((step3Type as FunkType.FunctionType).effects!!.effects.isEmpty())
+        assertTrue(step3Type.effects!!.performed)
     }
 }

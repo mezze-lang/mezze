@@ -132,7 +132,8 @@ class ConstraintGenerator(
                     val patternResult = patternGenerator.generate(
                         item.pattern,
                         result.type,
-                        constraintContext
+                        constraintContext,
+                        item.expression.sourceLocation
                     )
 
                     // Check for duplicate bindings BEFORE extending context
@@ -524,7 +525,8 @@ class ConstraintGenerator(
         val patternResult = patternGenerator.generate(
             binding.pattern,
             bindingType,
-            constraintContext
+            constraintContext,
+            binding.expression.sourceLocation
         )
 
         // Combine expression constraints with pattern constraints
@@ -598,9 +600,10 @@ class ConstraintGenerator(
     fun generatePattern(
         pattern: Pattern,
         scrutineeType: FunkType,
-        context: ConstraintContext
+        context: ConstraintContext,
+        sourceLocation: SourceLocation? = null
     ): PatternConstraintResult {
-        return patternGenerator.generate(pattern, scrutineeType, context)
+        return patternGenerator.generate(pattern, scrutineeType, context, sourceLocation)
     }
 
     /**

@@ -53,7 +53,8 @@ class ExceptionTypeInferenceTest {
                 else
                     a / b
 
-            let result = perform StringHandler in divide {a = 10, b = 0}
+            # Wrap in function to avoid top-level <*> restriction
+            let getResult = {} -> perform StringHandler in divide {a = 10, b = 0}
         """.trimIndent()
 
         // Should pass - handler matches error type
@@ -80,7 +81,8 @@ class ExceptionTypeInferenceTest {
             pub let validate : {} -> {} <Exception> = {} ->
                 Exception.throw {error = FieldRequired {field = "x"}}
 
-            let bad = perform StringHandler in validate {}
+            # Wrap in function to avoid top-level <*> restriction
+            let getBad = {} -> perform StringHandler in validate {}
         """.trimIndent()
 
         // Should fail - handler expects String but function throws ValidationError
@@ -115,7 +117,7 @@ class ExceptionTypeInferenceTest {
             pub let validate : {} -> {} <Exception> = {} ->
                 Exception.throw {error = FieldRequired {field = "x"}}
 
-            let good = perform ValidationHandler in validate {}
+            let getGood = {} -> perform ValidationHandler in validate {}
         """.trimIndent()
 
         // Should pass - handler matches error type
@@ -151,7 +153,7 @@ class ExceptionTypeInferenceTest {
                 else
                     Exception.throw {error = ServerError {reason = "Unknown"}}
 
-            let result = perform ApiHandler in api_call {id = ""}
+            let getResult = {} -> perform ApiHandler in api_call {id = ""}
         """.trimIndent()
 
         // Should pass - all variants unify to ApiError
@@ -185,7 +187,7 @@ class ExceptionTypeInferenceTest {
                 else
                     Exception.throw {error = ServerError {reason = "Unknown"}}
 
-            let result = perform PartialHandler in api_call {id = ""}
+            let getResult = {} -> perform PartialHandler in api_call {id = ""}
         """.trimIndent()
 
         // Should fail - handler doesn't handle NotFound and ServerError
@@ -219,7 +221,7 @@ class ExceptionTypeInferenceTest {
             pub let validate : {} -> {} <Exception> = {} ->
                 Exception.throw {error = FieldRequired {field = "username"}}
 
-            let result = perform ValidationHandler in validate {}
+            let getResult = {} -> perform ValidationHandler in validate {}
         """.trimIndent()
 
         // Should pass - handler accepts the variant
@@ -244,7 +246,7 @@ class ExceptionTypeInferenceTest {
             pub let test : {} -> {} <Log> = {} ->
                 Log.log {msg = "test"}
 
-            let result = perform ConsoleLogger in test {}
+            let getResult = {} -> perform ConsoleLogger in test {}
         """.trimIndent()
 
         // Should pass - no associated types to check
@@ -281,10 +283,10 @@ class ExceptionTypeInferenceTest {
                 Exception.throw {error = InnerBad}
 
             pub let outer_fn : {} -> {} <Exception> = {} -> do
-                let result = perform InnerHandler in inner_fn {}
+                let getResult = {} -> perform InnerHandler in inner_fn {}
                 Exception.throw {error = OuterBad}
 
-            let final = perform OuterHandler in outer_fn {}
+            let getFinal = {} -> perform OuterHandler in outer_fn {}
         """.trimIndent()
 
         // Should pass - each perform has correct handler
@@ -310,7 +312,7 @@ class ExceptionTypeInferenceTest {
                         ErrorA -> None
             }
 
-            let result = perform MyHandler in Exception.throw {error = ErrorA}
+            let getResult = {} -> perform MyHandler in Exception.throw {error = ErrorA}
         """.trimIndent()
 
         // Should pass - direct call matches handler
@@ -341,7 +343,7 @@ class ExceptionTypeInferenceTest {
                 Exception.throw {error = ErrorA}
                 Exception.throw {error = ErrorB}
 
-            let result = perform MyHandler in multi_throw {}
+            let getResult = {} -> perform MyHandler in multi_throw {}
         """.trimIndent()
 
         // Should pass - all variants handled
@@ -374,7 +376,7 @@ class ExceptionTypeInferenceTest {
                 else
                     Exception.throw {error = ErrorB}
 
-            let result = perform MyHandler in conditional {flag = True}
+            let getResult = {} -> perform MyHandler in conditional {flag = True}
         """.trimIndent()
 
         // Should pass - both variants unified and handled
@@ -409,7 +411,7 @@ class ExceptionTypeInferenceTest {
                     Blue -> Exception.throw {error = ErrorBlue}
                     Green -> Exception.throw {error = ErrorGreen}
 
-            let result = perform MyHandler in process_color {c = Red}
+            let getResult = {} -> perform MyHandler in process_color {c = Red}
         """.trimIndent()
 
         // Should pass - all error variants covered
@@ -440,7 +442,7 @@ class ExceptionTypeInferenceTest {
             pub let make_api_call : {} -> {} <Exception> = {} ->
                 Exception.throw {error = Timeout}
 
-            let result = perform DbHandler in make_api_call {}
+            let getResult = {} -> perform DbHandler in make_api_call {}
         """.trimIndent()
 
         // Should fail - DbHandler expects DatabaseError but function throws NetworkError
@@ -486,7 +488,7 @@ class ExceptionTypeInferenceTest {
                 else
                     {}
 
-            let result = perform ApiHandler in handle_request {id = "", auth = True}
+            let getResult = {} -> perform ApiHandler in handle_request {id = "", auth = True}
         """.trimIndent()
 
         // Should pass - all four variants combine and are handled
@@ -525,7 +527,7 @@ class ExceptionTypeInferenceTest {
                 else
                     {}
 
-            let result = perform PartialHandler in handle_request {id = "", auth = True}
+            let getResult = {} -> perform PartialHandler in handle_request {id = "", auth = True}
         """.trimIndent()
 
         // Should fail - PartialHandler can't handle Unauthorized or ServerError
@@ -566,7 +568,7 @@ class ExceptionTypeInferenceTest {
                 else
                     Exception.throw {error = Error3}
 
-            let result = perform MyHandler in test_fn {x = 1}
+            let getResult = {} -> perform MyHandler in test_fn {x = 1}
         """.trimIndent()
 
         // Should pass - all three variants combine: Error1 ∪ Error2 ∪ Error3 = MyError
@@ -607,13 +609,13 @@ class ExceptionTypeInferenceTest {
                     {}
 
             pub let save_to_db : {data: String} -> {} <Exception> = {data} -> do
-                let validated = perform ValidationHandler in validate_input {input = data}
+                let getValidated = {} -> perform ValidationHandler in validate_input {input = data}
                 if data == "fail" then
                     Exception.throw {error = QueryFailed {query = "INSERT"}}
                 else
                     {}
 
-            let result = perform DbHandler in save_to_db {data = "test"}
+            let getResult = {} -> perform DbHandler in save_to_db {data = "test"}
         """.trimIndent()
 
         // Should pass - each handler matches its respective error type
@@ -649,7 +651,7 @@ class ExceptionTypeInferenceTest {
                 else
                     Exception.throw {error = Error2}
 
-            let result = perform AllHandler in test_fn {x = 1}
+            let getResult = {} -> perform AllHandler in test_fn {x = 1}
         """.trimIndent()
 
         // Should pass - handler can handle Error1 and Error2 (subset of AllErrors)

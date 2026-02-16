@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Disabled
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -277,7 +278,8 @@ class ComprehensiveAbilitiesAndEffectsTest {
               Log.log {message = int::to_string{n = value * 2 }}
               value * 2
 
-            let result = perform ConsoleLogger in loggedOperation {value = 42}
+            # Wrap in function to avoid top-level <*> restriction
+            let getResult = {} -> perform ConsoleLogger in loggedOperation {value = 42}
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -294,12 +296,16 @@ class ComprehensiveAbilitiesAndEffectsTest {
         assertNotNull(functionType.effects)
         assertTrue(functionType.effects!!.effects.contains("Log"))
 
-        // Verify result doesn't have Log effect (handled)
-        val resultBinding = typedProgram.items.find {
-            it is LetBinding && it.variableName == "result"
+        // Verify getResult is a function with performed marker but no Log effect
+        val getResultBinding = typedProgram.items.find {
+            it is LetBinding && it.variableName == "getResult"
         } as LetBinding?
-        assertNotNull(resultBinding)
-        assertTrue(resultBinding.inferredType is FunkType.IntType)
+        assertNotNull(getResultBinding)
+        val getResultType = getResultBinding.inferredType as FunkType.FunctionType
+        assertNotNull(getResultType.effects)
+        assertTrue(getResultType.effects!!.performed, "Should have performed marker")
+        assertFalse(getResultType.effects!!.effects.contains("Log"), "Log should be handled")
+        assertEquals(FunkType.IntType, getResultType.returnType)
     }
 
     @Test
@@ -358,34 +364,38 @@ class ComprehensiveAbilitiesAndEffectsTest {
               Log.log {message = "Showing value: $(str)"}
               str
 
-            let result = perform ConsoleLogger in loggedShow {val = 42}
+            # Wrap in function to avoid top-level <*> restriction
+            let getResult = {} -> perform ConsoleLogger in loggedShow {val = 42}
         """.trimIndent()
 
         val program = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(program).program
 
         // Verify loggedShow has both ability constraints and effects
-        val loggedShowBinding = typedProgram.items.find { 
-            it is LetBinding && it.variableName == "loggedShow" 
+        val loggedShowBinding = typedProgram.items.find {
+            it is LetBinding && it.variableName == "loggedShow"
         } as LetBinding?
         assertNotNull(loggedShowBinding)
-        
+
         val functionType = loggedShowBinding.inferredType as? FunkType.FunctionType
         assertNotNull(functionType)
-        
+
         // Check ability constraints
         assertTrue(functionType.abilityConstraints.isNotEmpty())
         assertEquals("Show", functionType.abilityConstraints.first().abilityName)
-        
+
         // Check effects
         assertNotNull(functionType.effects)
         assertTrue(functionType.effects!!.effects.contains("Log"))
 
-        // Verify result is properly typed
-        val resultBinding = typedProgram.items.find { 
-            it is LetBinding && it.variableName == "result" 
+        // Verify getResult is a function with performed marker
+        val getResultBinding = typedProgram.items.find {
+            it is LetBinding && it.variableName == "getResult"
         } as LetBinding?
-        assertNotNull(resultBinding)
-        assertTrue(resultBinding.inferredType is FunkType.StringType)
+        assertNotNull(getResultBinding)
+        val getResultType = getResultBinding.inferredType as FunkType.FunctionType
+        assertNotNull(getResultType.effects)
+        assertTrue(getResultType.effects!!.performed, "Should have performed marker")
+        assertEquals(FunkType.StringType, getResultType.returnType)
     }
 }

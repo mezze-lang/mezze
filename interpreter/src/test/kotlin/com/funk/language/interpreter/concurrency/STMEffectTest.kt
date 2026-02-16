@@ -222,13 +222,15 @@ class STMEffectTest {
 
             let counter = tvar {init = 100}
 
-            let old = perform OptimisticSTM in do
-                STM.swap {var = counter, val = 200}
-
-            let new = deref {var = counter}
-            {old = old, new = new}
+            let getResult = {} -> do
+                let old = perform OptimisticSTM in do
+                    STM.swap {var = counter, val = 200}
+                let new = deref {var = counter}
+                {old = old, new = new}
         """
-        val result = eval(code) as FunkRecord
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances) as FunkRecord
         assertEquals(100L, (result.fields["old"] as FunkInt).value)
         assertEquals(200L, (result.fields["new"] as FunkInt).value)
     }
@@ -385,14 +387,16 @@ class STMEffectTest {
             let from = tvar {init = 500}
             let to = tvar {init = 100}
 
-            let success = perform OptimisticSTM in do
-                transfer {from = from, to = to, amount = 200}
-
-            let from_balance = deref {var = from}
-            let to_balance = deref {var = to}
-            {success = success, from = from_balance, to = to_balance}
+            let getResult = {} -> do
+                let success = perform OptimisticSTM in do
+                    transfer {from = from, to = to, amount = 200}
+                let from_balance = deref {var = from}
+                let to_balance = deref {var = to}
+                {success = success, from = from_balance, to = to_balance}
         """
-        val result = eval(code) as FunkRecord
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances) as FunkRecord
         assertEquals(true, (result.fields["success"] as FunkBool).value)
         assertEquals(300L, (result.fields["from"] as FunkInt).value)
         assertEquals(300L, (result.fields["to"] as FunkInt).value)
@@ -406,14 +410,16 @@ class STMEffectTest {
             let from = tvar {init = 50}
             let to = tvar {init = 100}
 
-            let success = perform OptimisticSTM in do
-                transfer {from = from, to = to, amount = 200}
-
-            let from_balance = deref {var = from}
-            let to_balance = deref {var = to}
-            {success = success, from = from_balance, to = to_balance}
+            let getResult = {} -> do
+                let success = perform OptimisticSTM in do
+                    transfer {from = from, to = to, amount = 200}
+                let from_balance = deref {var = from}
+                let to_balance = deref {var = to}
+                {success = success, from = from_balance, to = to_balance}
         """
-        val result = eval(code) as FunkRecord
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances) as FunkRecord
         assertEquals(false, (result.fields["success"] as FunkBool).value)
         // Balances should remain unchanged
         assertEquals(50L, (result.fields["from"] as FunkInt).value)
@@ -494,22 +500,25 @@ class STMEffectTest {
             let t2 = tvar {init = 2}
             let t3 = tvar {init = 3}
 
-            let sum = perform OptimisticSTM in do
-                let v1 = STM.read {var = t1}
-                let v2 = STM.read {var = t2}
-                let v3 = STM.read {var = t3}
+            let getResult = {} -> do
+                let sum = perform OptimisticSTM in do
+                    let v1 = STM.read {var = t1}
+                    let v2 = STM.read {var = t2}
+                    let v3 = STM.read {var = t3}
 
-                # Increment all
-                STM.write {var = t1, val = v1 + 1}
-                STM.write {var = t2, val = v2 + 1}
-                STM.write {var = t3, val = v3 + 1}
+                    # Increment all
+                    STM.write {var = t1, val = v1 + 1}
+                    STM.write {var = t2, val = v2 + 1}
+                    STM.write {var = t3, val = v3 + 1}
 
-                v1 + v2 + v3
+                    v1 + v2 + v3
 
-            let new_sum = deref {var = t1} + deref {var = t2} + deref {var = t3}
-            {old_sum = sum, new_sum = new_sum}
+                let new_sum = deref {var = t1} + deref {var = t2} + deref {var = t3}
+                {old_sum = sum, new_sum = new_sum}
         """
-        val result = eval(code) as FunkRecord
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances) as FunkRecord
         assertEquals(6L, (result.fields["old_sum"] as FunkInt).value)
         assertEquals(9L, (result.fields["new_sum"] as FunkInt).value)
     }

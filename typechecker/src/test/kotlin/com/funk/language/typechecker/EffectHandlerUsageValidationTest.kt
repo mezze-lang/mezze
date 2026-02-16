@@ -320,17 +320,18 @@ class EffectHandlerUsageValidationTest {
             impl Log for BasicLogger where {
               info : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             let logMessage = {msg: String} -> perform BasicLogger in Log.info {msg = msg}
-            
-            let program = do
+
+            # Wrap in function to avoid top-level <*> restriction
+            let testFn = {} -> do
               logMessage {msg = "Hello"}
               logMessage {msg = "World"}
               42
         """.trimIndent()
 
         val program = parser.parse(source)
-        
+
         // This should succeed because Log.info is called with proper perform syntax
         typeChecker.typeCheck(program).program
     }
@@ -353,8 +354,9 @@ class EffectHandlerUsageValidationTest {
             impl Console for Terminal where {
               print : {msg: String} -> {} = {msg} -> {}
             }
-            
-            let complexProgram = do
+
+            # Wrap in function to avoid top-level <*> restriction
+            let testFn = {} -> do
               perform BasicLogger in Log.info {msg = "Starting"}
               perform Terminal in Console.print {msg = "Processing"}
               perform BasicLogger in Log.info {msg = "Done"}
@@ -362,7 +364,7 @@ class EffectHandlerUsageValidationTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        
+
         // This should succeed because all effect calls use proper perform syntax
         typeChecker.typeCheck(program).program
     }

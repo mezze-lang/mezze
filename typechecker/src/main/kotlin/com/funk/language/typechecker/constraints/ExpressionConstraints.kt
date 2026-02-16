@@ -1842,10 +1842,11 @@ class ExpressionConstraintGenerator {
                 val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls
                 val tailCalls = if (tailCallLocation != null) baseTailCalls + tailCallLocation else baseTailCalls
 
-                // If the function has unhandled effects (suspended), wrap in SuspendedType
-                // If only performed (no suspended effects), return the value directly
+                // If the function has unhandled effects (suspended) or performed effects,
+                // wrap in SuspendedType. This is important for top-level validation to detect <*>.
                 val hasUnhandledEffects = effectRow.effects.isNotEmpty() || effectRow.rowVar != null
-                val resultType = if (hasUnhandledEffects) {
+                val hasPerformedEffects = effectRow.performed
+                val resultType = if (hasUnhandledEffects || hasPerformedEffects) {
                     // Calling an effectful function produces a SuspendedType
                     // The return value is suspended with the function's effects
                     FunkType.SuspendedType(
@@ -1853,8 +1854,7 @@ class ExpressionConstraintGenerator {
                         effects = effectRow
                     )
                 } else {
-                    // Function has only performed effects (<*>), no suspension needed
-                    // The result is the return type directly, with performed flag tracked
+                    // Pure function, no effects at all
                     functionType.returnType
                 }
 
@@ -2028,13 +2028,13 @@ class ExpressionConstraintGenerator {
 
             // Process first pattern to get bindings
             val firstPattern = matchCase.patterns.first()
-            val patternResult = patternGenerator.generate(firstPattern, scrutineeResult.type, context)
+            val patternResult = patternGenerator.generate(firstPattern, scrutineeResult.type, context, expr.sourceLocation)
             constraints.addAll(patternResult.constraints)
 
             // For additional patterns in or-pattern, just add constraints (don't use bindings)
             // Note: In a complete implementation, we should verify that or-patterns bind the same variables
             for (pattern in matchCase.patterns.drop(1)) {
-                val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context)
+                val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.sourceLocation)
                 constraints.addAll(orPatternResult.constraints)
             }
 
@@ -2162,7 +2162,8 @@ class ExpressionConstraintGenerator {
                     val patternResult = patternGenerator.generate(
                         stmt.pattern,
                         bindingType,
-                        currentContext
+                        currentContext,
+                        stmt.expression.sourceLocation
                     )
                     constraints.addAll(patternResult.constraints)
 
@@ -2304,20 +2305,33 @@ class ExpressionConstraintGenerator {
         }
 
         // VALIDATION 2: Check that handlers are meaningful
-        // Skip validation for nested performs - inner performs may have handlers that produce effects
-        // which need to be handled by outer performs. We can't track those effects statically yet.
+        // Skip validation for nested performs in certain cases:
+        // - Inner performs may have handlers that PRODUCE effects (e.g., FileLogger adds FileSystem)
+        //   which need to be handled by outer performs. We can't track handler-added effects statically.
+        // However, we CAN validate when effects are embedded in the result TYPE (e.g., SuspendedType)
         val isNestedPerform = expr.expression is PerformExpression
 
-        // Also check for effects in the result TYPE (for function references with effects)
-        // e.g., `perform Console in myEffectfulFunc` where myEffectfulFunc has type `{} -> T <Log>`
+        // Extract effects from the expression's result TYPE (for SuspendedType, FunctionType with effects)
         val extractedEffects = extractEffectsFromType(exprResult.type)
         val allEffects = exprResult.effects + extractedEffects.effects
         val hasPolymorphicEffects = extractedEffects.isPolymorphic
 
+        // Check if the inner expression has the performed marker but no effects
+        // This means all effects were already handled, so adding more handlers is an error
+        val hasPerformedMarker = exprResult.performed || hasPerformedMarkerInType(exprResult.type)
+        val isPureWithPerformed = allEffects.isEmpty() && hasPerformedMarker
+
+        // For nested performs:
+        // - If we have effects in the type, validate against those
+        // - If result is pure with <*>, validate (no effects to handle)
+        // - Otherwise skip validation (handler may add effects we can't see yet)
+        // NOTE: When a handler adds effects, those effects should appear in the result type.
+        //       If the result is truly pure with <*>, the handler didn't add any effects.
+        val canValidateNestedPerform = isNestedPerform && (extractedEffects.effects.isNotEmpty() || isPureWithPerformed)
+
         // CRITICAL: We validate based on effects, not types
-        // If effects are empty, the expression is pure - we can validate
+        // If effects are empty, the expression is pure - we can validate (unless nested perform with no <*>)
         // If effects are non-empty, we know what effects the expression uses - we can validate
-        // We only skip validation for nested performs (which may have complex effect flows)
         // ALSO skip validation if effects are polymorphic (<...>) - they could match any handler
         //
         // ALSO CRITICAL: Skip validation if there are undefined variables!
@@ -2325,7 +2339,8 @@ class ExpressionConstraintGenerator {
         // because we don't know if those variables are effectful functions or not.
         // The undefined variables will be caught later in TypeChecker.checkProgram() at line 242.
         val hasUndefinedVariables = exprResult.undefinedVariables.isNotEmpty()
-        if (!isNestedPerform && !hasPolymorphicEffects && !hasUndefinedVariables) {
+        val shouldValidate = (!isNestedPerform || canValidateNestedPerform) && !hasPolymorphicEffects && !hasUndefinedVariables
+        if (shouldValidate) {
             // If the expression has no effects (neither tracked nor in type), providing handlers is meaningless
             if (handlerEffects.isNotEmpty() && allEffects.isEmpty()) {
                 // Expression is pure but handlers provided
@@ -2340,6 +2355,7 @@ class ExpressionConstraintGenerator {
 
             if (allEffects.isNotEmpty() && handlerEffects.isNotEmpty()) {
                 // Check if at least one handler handles an effect the expression actually uses
+                // This is the "entry point" handler - the rightmost handler that touches the expression first
                 val handlersHandleUsedEffects = handlerEffects.any { (_, effectName) ->
                     effectName in allEffects
                 }
@@ -2353,6 +2369,26 @@ class ExpressionConstraintGenerator {
                         expression = expr,
                         errorType = ErrorType.CONSTRAINT_VIOLATION
                     )
+                }
+
+                // VALIDATION 3: Check that EACH handler handles an effect present in the expression
+                // ONLY when there's a single handler. With multiple handlers, handlers can add effects
+                // that other handlers handle (rightmost/innermost handler applies first and may add effects).
+                // Example: perform HttpClient, DiskFS, CompositeLogger in logMsg
+                //   - CompositeLogger handles Log, adds FileSystem+Network
+                //   - DiskFS handles FileSystem
+                //   - HttpClient handles Network
+                if (handlerEffects.size == 1) {
+                    val (handlerName, effectName) = handlerEffects[0]
+                    if (effectName !in allEffects) {
+                        throw TypeCheckError(
+                            message = "Handler '$handlerName' handles effect '$effectName', but the expression doesn't use this effect. " +
+                                "Expression uses: ${allEffects.joinToString(", ")}. " +
+                                "Remove the unnecessary handler.",
+                            expression = expr,
+                            errorType = ErrorType.CONSTRAINT_VIOLATION
+                        )
+                    }
                 }
             }
         }
@@ -2424,6 +2460,17 @@ class ExpressionConstraintGenerator {
     }
 
     /**
+     * Check if a type has the performed marker (<*>).
+     */
+    private fun hasPerformedMarkerInType(type: FunkType): Boolean {
+        return when (type) {
+            is FunkType.FunctionType -> type.effects?.performed == true
+            is FunkType.SuspendedType -> type.effects.performed
+            else -> false
+        }
+    }
+
+    /**
      * Remove specific effects from a type.
      *
      * For FunctionType with effects: Remove effects from effect row
@@ -2458,17 +2505,12 @@ class ExpressionConstraintGenerator {
                 // Remove effects from suspended type, mark as performed
                 val remainingEffects = type.effects.effects - effectsToRemove
 
-                if (remainingEffects.isEmpty()) {
-                    // All effects handled - return pure value (no longer suspended)
-                    // Note: the perform flag is tracked in ConstraintResult.performed
-                    type.valueType
-                } else {
-                    // Some effects remain - still suspended, but mark as performed
-                    FunkType.SuspendedType(
-                        valueType = type.valueType,
-                        effects = FunkType.EffectRow(remainingEffects, type.effects.rowVar, true)
-                    )
-                }
+                // Keep SuspendedType with performed=true even when all effects are handled
+                // This allows top-level validation to reject values with <*> marker
+                FunkType.SuspendedType(
+                    valueType = type.valueType,
+                    effects = FunkType.EffectRow(remainingEffects, type.effects.rowVar, true)
+                )
             }
             else -> {
                 // Other types don't have effects

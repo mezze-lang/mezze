@@ -315,16 +315,15 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             let logMessage: {msg: String} -> String <Log> = {msg} ->
               Log.log {message = msg}
 
-            let prefixResult = perform PrefixLogger in logMessage {msg = "hello"}
-            let suffixResult = perform SuffixLogger in logMessage {msg = "world"}
-
-            "$(prefixResult) | $(suffixResult)"
+            let getResult = {} -> do
+                let prefixResult = perform PrefixLogger in logMessage {msg = "hello"}
+                let suffixResult = perform SuffixLogger in logMessage {msg = "world"}
+                "$(prefixResult) | $(suffixResult)"
         """.trimIndent()
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
-        val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
 
         assertTrue(result is FunkString)
         assertEquals("PREFIX: hello | world :SUFFIX", (result as FunkString).value)

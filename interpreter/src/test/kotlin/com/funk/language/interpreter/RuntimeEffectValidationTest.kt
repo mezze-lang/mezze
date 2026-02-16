@@ -72,17 +72,17 @@ class RuntimeEffectValidationTest {
             let effectfulFunc = {x} -> do
               Log.print {msg = "test"}
               x + 1
-            
+
             # Handle the effect properly
-            let result = perform Console in effectfulFunc {x = 5}
+            let getResult = {} -> perform Console in effectfulFunc {x = 5}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
-        
-        // This should not throw an exception
+
+        // This should not throw an exception - execute and call getResult
         assertDoesNotThrow {
-            FunkTestHelper.execute(typedProgram)
+            FunkTestHelper.executeAndCallFunction(typedProgram, "getResult", FunkRecord(emptyMap()))
         }
     }
 
@@ -206,17 +206,17 @@ class RuntimeEffectValidationTest {
               Log.print {msg = "start"}
               let value = Random.nextInt {max = x}
               value
-            
+
             # Handle all effects
-            let result = perform SystemRandom, Console in multiEffectFunc {x = 10}
+            let getResult = {} -> perform SystemRandom, Console in multiEffectFunc {x = 10}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
-        
-        // This should not throw an exception
+
+        // This should not throw an exception - execute and call getResult
         assertDoesNotThrow {
-            FunkTestHelper.execute(typedProgram)
+            FunkTestHelper.executeAndCallFunction(typedProgram, "getResult", FunkRecord(emptyMap()))
         }
     }
 

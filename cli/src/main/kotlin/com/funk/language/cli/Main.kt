@@ -750,7 +750,25 @@ private fun handleExecCommand(args: List<String>) {
 
     // Type-check with main validation: main must be {} -> {} <*>
     val typeChecker = TypeChecker()
-    val typeCheckResult = typeChecker.checkProgramForExecution(ast, typeCheckProjectRoot)
+    val typeCheckResult = try {
+        typeChecker.checkProgramForExecution(ast, typeCheckProjectRoot)
+    } catch (e: TypeCheckError) {
+        // Format error with source location and code snippet
+        val formattedError = SourceContext.formatError(
+            errorType = "Type Error",
+            message = e.message ?: "Unknown error",
+            location = e.sourceLocation?.let { loc ->
+                if (loc.file == null && fileName != null) {
+                    com.funk.language.ast.SourceLocation(loc.line, loc.column, fileName)
+                } else {
+                    loc
+                }
+            },
+            sourceCode = source
+        )
+        println(formattedError)
+        kotlin.system.exitProcess(1)
+    }
 
     // Handle type-check failure
     if (typeCheckResult is TypeChecker.TypeCheckResult.Failure) {

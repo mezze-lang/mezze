@@ -36,29 +36,35 @@ class EffectHandlingTest {
             effect Log where {
               print : {msg: String} -> {} <Log>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             let effectfulFunc = {x} -> Log.print {msg = "test"}
-            let handledResult = perform Console in effectfulFunc {x = 42}
+            # Wrap in function to avoid top-level <*> restriction
+            let getHandledResult = {} -> perform Console in effectfulFunc {x = 42}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
 
         val effectfulType = getVariableType(typedProgram, "effectfulFunc") as FunkType.FunctionType
-        val handledResultType = getVariableType(typedProgram, "handledResult")
+        val getHandledResultType = getVariableType(typedProgram, "getHandledResult") as FunkType.FunctionType
 
         // Original function should have Log effect
         assertNotNull(effectfulType.effects)
         assertEquals(setOf("Log"), effectfulType.effects!!.effects)
 
-        // Handled result should be the return type of the function (which is {} - empty record)
-        assertTrue(handledResultType is FunkType.RecordType)
-        val recordType = handledResultType as FunkType.RecordType
-        assertTrue(recordType.fields.isEmpty())
+        // getHandledResult should be a function with performed marker (<*>)
+        // Note: The return type is {} (empty record), and effects.performed=true in the function type
+        // because lambda unwraps SuspendedType into the function's effect row
+        assertNotNull(getHandledResultType.effects)
+        assertTrue(getHandledResultType.effects!!.performed, "Should have performed marker")
+        assertTrue(getHandledResultType.effects!!.effects.isEmpty(), "Should have no concrete effects")
+        // Return type should be {} (empty record)
+        assertTrue(getHandledResultType.returnType is FunkType.RecordType)
+        assertTrue((getHandledResultType.returnType as FunkType.RecordType).fields.isEmpty())
     }
 
     @Test
@@ -123,49 +129,49 @@ class EffectHandlingTest {
             effect Log where {
               print : {msg: String} -> {} <Log>
             }
-            
+
             effect Random where {
               nextInt : {max: Int} -> Int <Random>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             impl Random for SystemRandom where {
               nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
             }
-            
+
             let multiEffectFunc = {x} -> do
               Log.print {msg = "start"}
               let value = Random.nextInt {max = x}
               value
 
-            let onlyLogHandled = perform Console in multiEffectFunc {x = 42}
-            let bothHandled = perform SystemRandom, Console in multiEffectFunc {x = 42}
+            # Test partial handling via function transformation (not calling)
+            let partiallyHandledFunc = perform Console in multiEffectFunc
+            let fullyHandledFunc = perform SystemRandom, Console in multiEffectFunc
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
 
         val originalType = getVariableType(typedProgram, "multiEffectFunc") as FunkType.FunctionType
-        val onlyLogHandledType = getVariableType(typedProgram, "onlyLogHandled")
-        val bothHandledType = getVariableType(typedProgram, "bothHandled")
+        val partiallyHandledFuncType = getVariableType(typedProgram, "partiallyHandledFunc") as FunkType.FunctionType
+        val fullyHandledFuncType = getVariableType(typedProgram, "fullyHandledFunc") as FunkType.FunctionType
 
         // Original function should have both effects
         assertNotNull(originalType.effects)
         assertEquals(setOf("Log", "Random"), originalType.effects!!.effects)
 
-        // onlyLogHandled: Console handles Log, Random remains unhandled
-        // Result should be a suspended value with the unhandled Random effect: Int <Random>
-        assertTrue(onlyLogHandledType is FunkType.SuspendedType)
-        val onlyLogHandledSuspendedType = onlyLogHandledType as FunkType.SuspendedType
-        assertEquals(FunkType.IntType, onlyLogHandledSuspendedType.valueType)
-        assertEquals(setOf("Random"), onlyLogHandledSuspendedType.effects.effects)
+        // partiallyHandledFunc: Console handles Log, Random remains, <*> marker
+        assertNotNull(partiallyHandledFuncType.effects)
+        assertEquals(setOf("Random"), partiallyHandledFuncType.effects!!.effects)
+        assertTrue(partiallyHandledFuncType.effects!!.performed)  // <*> marker
 
-        // bothHandled: Both Console and SystemRandom handle all effects
-        // Result should be Int (all effects handled)
-        assertEquals(FunkType.IntType, bothHandledType)
+        // fullyHandledFunc: Both handlers applied, only <*> marker remains
+        assertNotNull(fullyHandledFuncType.effects)
+        assertTrue(fullyHandledFuncType.effects!!.effects.isEmpty())  // All effects handled
+        assertTrue(fullyHandledFuncType.effects!!.performed)  // <*> marker
     }
 
     @Test
@@ -174,40 +180,45 @@ class EffectHandlingTest {
             effect Log where {
               print : {msg: String} -> {} <Log>
             }
-            
+
             effect Random where {
               nextInt : {max: Int} -> Int <Random>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             impl Random for SystemRandom where {
               nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
             }
-            
+
             let multiEffectFunc = {x} -> do
               Log.print {msg = "start"}
               let value = Random.nextInt {max = x}
               Log.print {msg = "end"}
               value
 
-            let handledResult = perform SystemRandom, Console in multiEffectFunc {x = 42}
+            # Wrap in function to avoid top-level <*> restriction
+            let getHandledResult = {} -> perform SystemRandom, Console in multiEffectFunc {x = 42}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
 
         val originalType = getVariableType(typedProgram, "multiEffectFunc") as FunkType.FunctionType
-        val handledResultType = getVariableType(typedProgram, "handledResult")
+        val getHandledResultType = getVariableType(typedProgram, "getHandledResult") as FunkType.FunctionType
 
         // Original function should have both effects
         assertNotNull(originalType.effects)
         assertEquals(setOf("Log", "Random"), originalType.effects!!.effects)
 
-        // Handled result should be an Int (the return type of the function)
-        assertEquals(FunkType.IntType, handledResultType)
+        // getHandledResult should be a function with performed marker (<*>)
+        assertNotNull(getHandledResultType.effects)
+        assertTrue(getHandledResultType.effects!!.performed, "Should have performed marker")
+        assertTrue(getHandledResultType.effects!!.effects.isEmpty(), "Should have no concrete effects")
+        // Return type should be Int
+        assertEquals(FunkType.IntType, getHandledResultType.returnType)
     }
 
     @Test
@@ -216,38 +227,43 @@ class EffectHandlingTest {
             effect Log where {
               print : {msg: String} -> {} <Log>
             }
-            
+
             effect Random where {
               nextInt : {max: Int} -> Int <Random>
             }
-            
+
             impl Log for Console where {
               print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
             }
-            
+
             impl Random for SystemRandom where {
               nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
             }
-            
+
             let multiEffectFunc = {x} -> do
               Log.print {msg = "start"}
               Random.nextInt {max = x}
 
-            let partiallyHandled = perform SystemRandom, Console in multiEffectFunc {x = 42}
+            # Wrap in function to avoid top-level <*> restriction
+            let getHandledResult = {} -> perform SystemRandom, Console in multiEffectFunc {x = 42}
         """.trimIndent()
 
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
 
         val originalType = getVariableType(typedProgram, "multiEffectFunc") as FunkType.FunctionType
-        val partiallyHandledType = getVariableType(typedProgram, "partiallyHandled")
+        val getHandledResultType = getVariableType(typedProgram, "getHandledResult") as FunkType.FunctionType
 
         // Original function should have both effects
         assertNotNull(originalType.effects)
         assertEquals(setOf("Log", "Random"), originalType.effects!!.effects)
 
-        // Partially handled result should be an Int (since we handled all effects)
-        assertEquals(FunkType.IntType, partiallyHandledType)
+        // getHandledResult should be a function with performed marker (<*>)
+        assertNotNull(getHandledResultType.effects)
+        assertTrue(getHandledResultType.effects!!.performed, "Should have performed marker")
+        assertTrue(getHandledResultType.effects!!.effects.isEmpty(), "Should have no concrete effects")
+        // Return type should be Int
+        assertEquals(FunkType.IntType, getHandledResultType.returnType)
     }
 
     @Test

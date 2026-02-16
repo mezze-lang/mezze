@@ -159,7 +159,7 @@ class EffectAssociatedTypesTest {
                 put = {value} -> {}
             }
 
-            let useState = perform Counter in do
+            let getUseState = {} -> perform Counter in do
                 let x = State.get {}
                 State.put { value = x + 1 }
                 x
@@ -168,10 +168,11 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "useState" }
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getUseState" }
         println("[TEST DO BLOCK] Actual type: ${binding.inferredType}")
         println("[TEST DO BLOCK] Type class: ${binding.inferredType?.javaClass?.simpleName}")
-        assertTrue(binding.inferredType is FunkType.IntType)
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.IntType)
     }
 
     @Test
@@ -185,14 +186,15 @@ class EffectAssociatedTypesTest {
                 ask = {} -> "hello"
             }
 
-            let readEnv = perform StringReader in Reader.ask {}
+            let getReadEnv = {} -> perform StringReader in Reader.ask {}
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "readEnv" }
-        assertTrue(binding.inferredType is FunkType.StringType)
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getReadEnv" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.StringType)
     }
 
     @Test
@@ -216,7 +218,7 @@ class EffectAssociatedTypesTest {
                 ask = {} -> "hello"
             }
 
-            let combined = perform IntState, StringReader in do
+            let getCombined = {} -> perform IntState, StringReader in do
                 let s = State.get {}
                 let e = Reader.ask {}
                 s
@@ -237,14 +239,15 @@ class EffectAssociatedTypesTest {
                 get = {} -> True
             }
 
-            let result = perform BoolState in State.get {}
+            let getResult = {} -> perform BoolState in State.get {}
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        val actualType = binding.inferredType
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        val actualType = funcType.returnType
         val typeClass = actualType?.javaClass?.simpleName
         val typeString = actualType?.let { prettyPrintType(it) }
         // Bool in Funk is a variant type with True/False constructors
@@ -267,7 +270,7 @@ class EffectAssociatedTypesTest {
                 put = {value} -> {}
             }
 
-            let putFloat = perform FloatState in State.put { value = 3.14 }
+            let getPutFloat = {} -> perform FloatState in State.put { value = 3.14 }
         """.trimIndent()
 
         val program = typeCheck(code)
@@ -304,14 +307,15 @@ class EffectAssociatedTypesTest {
                 transform = {input} -> input
             }
 
-            let result = perform StringTransform in Transform.transform { input = "hello" }
+            let getResult = {} -> perform StringTransform in Transform.transform { input = "hello" }
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        assertTrue(binding.inferredType is FunkType.StringType)
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.StringType)
     }
 
     @Test
@@ -345,14 +349,15 @@ class EffectAssociatedTypesTest {
                 get = {} -> {value = "hello", count = 1}
             }
 
-            let result = perform RecordState in State.get {}
+            let getResult = {} -> perform RecordState in State.get {}
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        assertTrue(binding.inferredType is FunkType.RecordType)
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.RecordType)
     }
 
     @Test
@@ -366,14 +371,15 @@ class EffectAssociatedTypesTest {
                 get = {} -> Some { val = 42 }
             }
 
-            let result = perform OptionState in State.get {}
+            let getResult = {} -> perform OptionState in State.get {}
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        assertTrue(binding.inferredType is FunkType.TypeApplication)
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.TypeApplication)
     }
 
     @Test
@@ -387,14 +393,15 @@ class EffectAssociatedTypesTest {
                 get = {} -> initial
             }
 
-            let result = perform ConfigState {initial = 100} in State.get {}
+            let getResult = {} -> perform ConfigState {initial = 100} in State.get {}
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        assertTrue(binding.inferredType is FunkType.IntType)
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.IntType)
     }
 
     @Test
@@ -411,17 +418,19 @@ class EffectAssociatedTypesTest {
                 getAll = {} -> Nil
             }
 
-            let result = perform StringCollection in Collection.getAll {}
+            let getResult = {} -> perform StringCollection in Collection.getAll {}
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        println("[TEST LIST] Actual type: ${binding.inferredType}")
-        println("[TEST LIST] Type class: ${binding.inferredType?.javaClass?.simpleName}")
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        val returnType = funcType.returnType
+        println("[TEST LIST] Actual type: $returnType")
+        println("[TEST LIST] Type class: ${returnType?.javaClass?.simpleName}")
         // List T can be VariantType, TypeApplication, or ListType (when using built-in Cons/Nil)
-        assertTrue(binding.inferredType is FunkType.VariantType || binding.inferredType is FunkType.TypeApplication || binding.inferredType is FunkType.ListType)
+        assertTrue(returnType is FunkType.VariantType || returnType is FunkType.TypeApplication || returnType is FunkType.ListType)
     }
 
     @Test
@@ -435,7 +444,7 @@ class EffectAssociatedTypesTest {
                 put = {value} -> {}
             }
 
-            let badPut = perform BadState in State.put { value = "wrong type" }
+            let getBadPut = {} -> perform BadState in State.put { value = "wrong type" }
         """.trimIndent()
 
         val exception = assertThrows<TypeCheckError> {
@@ -526,7 +535,7 @@ class EffectAssociatedTypesTest {
                 fail = {error} -> error
             }
 
-            let useResult = perform IntStringOperation in do
+            let getUseResult = {} -> perform IntStringOperation in do
                 let x = Operation.succeed { value = 42 }
                 let y = Operation.fail { error = "oops" }
                 x
@@ -535,8 +544,9 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "useResult" }
-        assertTrue(binding.inferredType is FunkType.IntType)
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getUseResult" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.IntType)
     }
 
     @Test
@@ -552,18 +562,20 @@ class EffectAssociatedTypesTest {
                 fail = {error} -> error
             }
 
-            let successResult = perform BoolFloatOperation in Operation.succeed { value = True }
-            let failResult = perform BoolFloatOperation in Operation.fail { error = 3.14 }
+            let getSuccessResult = {} -> perform BoolFloatOperation in Operation.succeed { value = True }
+            let getFailResult = {} -> perform BoolFloatOperation in Operation.fail { error = 3.14 }
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val successBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "successResult" }
-        assertTrue(successBinding.inferredType is FunkType.VariantType)
+        val successBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getSuccessResult" }
+        val successFuncType = successBinding.inferredType as FunkType.FunctionType
+        assertTrue(successFuncType.returnType is FunkType.VariantType)
 
-        val failBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "failResult" }
-        assertTrue(failBinding.inferredType is FunkType.FloatType)
+        val failBinding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getFailResult" }
+        val failFuncType = failBinding.inferredType as FunkType.FunctionType
+        assertTrue(failFuncType.returnType is FunkType.FloatType)
     }
 
     @Test
@@ -665,14 +677,15 @@ class EffectAssociatedTypesTest {
                 fail = {error} -> error
             }
 
-            let result = perform ConfigurableOperation {defaultOk = 0, defaultErr = "error"} in Operation.succeed { value = 100 }
+            let getResult = {} -> perform ConfigurableOperation {defaultOk = 0, defaultErr = "error"} in Operation.succeed { value = 100 }
         """.trimIndent()
 
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "result" }
-        assertTrue(binding.inferredType is FunkType.IntType)
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getResult" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.IntType)
     }
 
     @Test
@@ -698,7 +711,7 @@ class EffectAssociatedTypesTest {
                 update = {delta} -> {}
             }
 
-            let combined = perform IntStringOperation, IntFloatState in do
+            let getCombined = {} -> perform IntStringOperation, IntFloatState in do
                 let r = Operation.succeed { value = 42 }
                 let s = State.get {}
                 r
@@ -707,7 +720,8 @@ class EffectAssociatedTypesTest {
         val program = typeCheck(code)
         assertNotNull(program)
 
-        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "combined" }
-        assertTrue(binding.inferredType is FunkType.IntType)
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "getCombined" }
+        val funcType = binding.inferredType as FunkType.FunctionType
+        assertTrue(funcType.returnType is FunkType.IntType)
     }
 }

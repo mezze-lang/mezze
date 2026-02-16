@@ -53,6 +53,26 @@ class ComprehensiveEffectHandlingTest {
         }
     }
 
+    private fun assertFunctionReturnTypeChecks(code: String, variableName: String, expectedReturnType: String) {
+        val program = parseAndTypeCheck(code)
+        val actualType = getVariableType(program, variableName)
+        assertNotNull(actualType, "Variable '$variableName' not found")
+        val funcType = actualType as? FunkType.FunctionType
+        assertNotNull(funcType, "Expected '$variableName' to be a function type, got ${prettyPrintType(actualType)}")
+        val returnType = funcType.returnType
+        // If there are effects on the function, we need to include them in the return type representation
+        val effects = funcType.effects
+        val returnTypeStr = if (effects != null && (effects.effects.isNotEmpty() || effects.performed)) {
+            val parts = mutableListOf<String>()
+            parts.addAll(effects.effects.sorted())
+            if (effects.performed) parts.add("*")
+            "${prettyPrintType(returnType)} <${parts.joinToString(", ")}>"
+        } else {
+            prettyPrintType(returnType)
+        }
+        assertEquals(expectedReturnType, returnTypeStr)
+    }
+
     // ===== Category 1: Handling effects on UNCALLED functions =====
     // These tests verify that perform on a function (not a call) transforms the function type
 
@@ -142,7 +162,9 @@ class ComprehensiveEffectHandlingTest {
 
     @Test
     fun `test 2a - handle single effect then call function returns pure value`() {
-        assertTypeChecks(
+        // Wrap in function to avoid top-level <*> restriction
+        // The function returns String <*> because calling handled {} executes performed effects
+        assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Log, Console}
 
@@ -150,21 +172,20 @@ class ComprehensiveEffectHandlingTest {
                 Log.println { msg = "Hello" }
                 "Done"
 
-            let handled = perform Console in myFunc
-            let result = handled {}
-            result
+            let getResult = {} -> do
+                let handled = perform Console in myFunc
+                handled {}
             """.trimIndent(),
-            "result",
-            "String"
+            "getResult",
+            "String <*>"
         )
     }
 
     @Test
-    fun `test 2b - handle one effect then call returns suspended with remaining effects`() {
-        // CRITICAL: This tests the partial effect handling bug fix
-        // The result should be String <FileSystem, *>, not just String
-        // The * marks that Log was already performed
-        assertTypeChecks(
+    fun `test 2b - handle one effect then call returns suspended with remaining effects is rejected at top level`() {
+        // Calling a partially handled function returns value with <*>
+        // This is rejected at top level because * means effects were executed
+        assertTypeCheckFails(
             """
             use std::effects::log::{Log, Console}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -177,15 +198,15 @@ class ComprehensiveEffectHandlingTest {
             let partiallyHandled = perform Console in myFunc
             let result = partiallyHandled {}
             result
-            """.trimIndent(),
-            "result",
-            "String <FileSystem, *>"  // FileSystem remains, * marks Log was performed
+            """.trimIndent()
         )
     }
 
     @Test
     fun `test 2c - handle all effects then call returns pure value`() {
-        assertTypeChecks(
+        // Wrap in function to avoid top-level <*> restriction
+        // The function returns String <*> because calling step2 {} executes performed effects
+        assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Log, Console}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -195,20 +216,22 @@ class ComprehensiveEffectHandlingTest {
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
-            let step1 = perform Console in myFunc
-            let step2 = perform LocalDisk in step1
-            let result = step2 {}
-            result
+            let getResult = {} -> do
+                let step1 = perform Console in myFunc
+                let step2 = perform LocalDisk in step1
+                step2 {}
             """.trimIndent(),
-            "result",
-            "String"
+            "getResult",
+            "String <*>"
         )
     }
 
     @Test
     fun `test 2d - handle effects in different order then call`() {
         // Order of handling should not matter
-        assertTypeChecks(
+        // Wrap in function to avoid top-level <*> restriction
+        // The function returns String <*> because calling step2 {} executes performed effects
+        assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Log, Console}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -218,13 +241,13 @@ class ComprehensiveEffectHandlingTest {
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
-            let step1 = perform LocalDisk in myFunc
-            let step2 = perform Console in step1
-            let result = step2 {}
-            result
+            let getResult = {} -> do
+                let step1 = perform LocalDisk in myFunc
+                let step2 = perform Console in step1
+                step2 {}
             """.trimIndent(),
-            "result",
-            "String"
+            "getResult",
+            "String <*>"
         )
     }
 
@@ -255,7 +278,9 @@ class ComprehensiveEffectHandlingTest {
 
     @Test
     fun `test 3b - call function then handle single effect`() {
-        assertTypeChecks(
+        // Wrap in function to avoid top-level <*> restriction
+        // Use nested expression instead of do block to avoid variable reference issues
+        assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Log, Console}
 
@@ -263,22 +288,19 @@ class ComprehensiveEffectHandlingTest {
                 Log.println { msg = "Hello" }
                 "Done"
 
-            let called = myFunc {}
-            let handled = perform Console in called
-            handled
+            let getHandled = {} -> perform Console in myFunc {}
             """.trimIndent(),
-            "handled",
-            "String"
+            "getHandled",
+            "String <*>"  // Return type is String, function has <*> marker
         )
     }
 
     @Test
-    fun `test 3c - call function then partially handle effects`() {
-        // CRITICAL: This tests the partial effect handling bug fix
+    fun `test 3c - call function then partially handle effects is rejected at top level`() {
         // After calling myFunc {}, we get String <FileSystem, Log>
         // After perform Console, we should get String <FileSystem, *>
-        // * marks that Log was performed
-        assertTypeChecks(
+        // But this is rejected at top level because * means effects were executed
+        assertTypeCheckFails(
             """
             use std::effects::log::{Log, Console}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -291,15 +313,14 @@ class ComprehensiveEffectHandlingTest {
             let called = myFunc {}
             let partiallyHandled = perform Console in called
             partiallyHandled
-            """.trimIndent(),
-            "partiallyHandled",
-            "String <FileSystem, *>"  // FileSystem remains, * marks Log was performed
+            """.trimIndent()
         )
     }
 
     @Test
-    fun `test 3d - call function then handle effects sequentially`() {
-        assertTypeChecks(
+    fun `test 3d - call function then handle effects sequentially is rejected at top level`() {
+        // Intermediate values with <*> are rejected at top level
+        assertTypeCheckFails(
             """
             use std::effects::log::{Log, Console}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -313,16 +334,14 @@ class ComprehensiveEffectHandlingTest {
             let step1 = perform Console in called
             let step2 = perform LocalDisk in step1
             step2
-            """.trimIndent(),
-            "step2",
-            "String"
+            """.trimIndent()
         )
     }
 
     @Test
-    fun `test 3e - call function then handle effects in different order`() {
-        // CRITICAL: Verify order independence of effect handling
-        assertTypeChecks(
+    fun `test 3e - call function then handle effects in different order is rejected at top level`() {
+        // Intermediate values with <*> are rejected at top level
+        assertTypeCheckFails(
             """
             use std::effects::log::{Log, Console}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -336,16 +355,14 @@ class ComprehensiveEffectHandlingTest {
             let step1 = perform LocalDisk in called
             let step2 = perform Console in step1
             step2
-            """.trimIndent(),
-            "step2",
-            "String"
+            """.trimIndent()
         )
     }
 
-    // ===== Category 4: Complex scenarios =====
-
     @Test
-    fun `test 4a - nested perform expressions`() {
+    fun `test 3f - partial effect handling verified on function type`() {
+        // Test partial effect handling using function transformation (not calling)
+        // This verifies the behavior without triggering top-level value restrictions
         assertTypeChecks(
             """
             use std::effects::log::{Log, Console}
@@ -356,17 +373,40 @@ class ComprehensiveEffectHandlingTest {
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
-            let result = perform LocalDisk in (perform Console in (myFunc {}))
-            result
+            let partiallyHandled = perform Console in myFunc
+            partiallyHandled
             """.trimIndent(),
-            "result",
-            "String"
+            "partiallyHandled",
+            "{} -> String <FileSystem, *>"
+        )
+    }
+
+    // ===== Category 4: Complex scenarios =====
+
+    @Test
+    fun `test 4a - nested perform expressions`() {
+        // Wrap in function to avoid top-level <*> restriction
+        assertFunctionReturnTypeChecks(
+            """
+            use std::effects::log::{Log, Console}
+            use std::effects::filesystem::{FileSystem, LocalDisk}
+
+            let myFunc: {} -> String <FileSystem, Log> = {} -> do
+                Log.println { msg = "Hello" }
+                FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
+                "Done"
+
+            let getResult = {} -> perform LocalDisk in (perform Console in (myFunc {}))
+            """.trimIndent(),
+            "getResult",
+            "String <*>"  // Return type is String, function has <*> marker
         )
     }
 
     @Test
     fun `test 4b - multiple effectful functions with independent handling`() {
-        assertTypeChecks(
+        // Wrap in function to avoid top-level <*> restriction
+        assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Log, Console}
 
@@ -378,18 +418,21 @@ class ComprehensiveEffectHandlingTest {
                 Log.println { msg = "Func2" }
                 "Result2"
 
-            let result1 = perform Console in (func1 {})
-            let result2 = perform Console in (func2 {})
-            result1
+            let getResults = {} -> do
+                let result1 = perform Console in (func1 {})
+                let result2 = perform Console in (func2 {})
+                result1
             """.trimIndent(),
-            "result1",
-            "String"
+            "getResults",
+            "String <*>"  // Return type is String, function has <*> marker
         )
     }
 
     @Test
     fun `test 4c - compose effectful computations`() {
-        assertTypeChecks(
+        // Wrap in function to avoid top-level <*> restriction
+        // Use nested expression instead of do block to avoid variable reference issues
+        assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Log, Console}
 
@@ -401,21 +444,17 @@ class ComprehensiveEffectHandlingTest {
                 Log.println { msg = "Func2" }
                 "Result"
 
-            let val1 = func1 {}
-            let val2 = func2 { val = val1 }
-            let handled = perform Console in val2
-            handled
+            let getHandled = {} -> perform Console in func2 { val = func1 {} }
             """.trimIndent(),
-            "handled",
-            "String"
+            "getHandled",
+            "String <*>"  // Return type is String, function has <*> marker
         )
     }
 
     @Test
-    fun `test 4d - verify intermediate types in two effect sequence`() {
-        // This test verifies each intermediate step has the correct type
-        // CRITICAL: After handling Log, FileSystem should remain, * marks performed
-        assertTypeChecks(
+    fun `test 4d - verify intermediate types in two effect sequence is rejected at top level`() {
+        // Intermediate values with <*> are rejected at top level
+        assertTypeCheckFails(
             """
             use std::effects::log::{Log, Console}
             use std::effects::filesystem::{FileSystem, LocalDisk}
@@ -428,9 +467,7 @@ class ComprehensiveEffectHandlingTest {
             let called = myFunc {}
             let step1 = perform Console in called
             step1
-            """.trimIndent(),
-            "step1",
-            "String <FileSystem, *>"  // FileSystem remains, * marks Log was performed
+            """.trimIndent()
         )
     }
 
@@ -456,7 +493,8 @@ class ComprehensiveEffectHandlingTest {
     @Test
     fun `test 4g - handle same effect type multiple times in sequence`() {
         // Different effectful computations with the same effect type
-        assertTypeChecks(
+        // Wrap in function to avoid top-level <*> restriction
+        assertFunctionReturnTypeChecks(
             """
             use std::effects::log::{Log, Console}
 
@@ -468,12 +506,12 @@ class ComprehensiveEffectHandlingTest {
                 Log.println { msg = "Func2" }
                 "Result"
 
-            let result1 = perform Console in (func1 {})
-            let result2 = perform Console in (func2 { val = result1 })
-            result2
+            let getResult2 = {} -> do
+                let result1 = perform Console in (func1 {})
+                perform Console in (func2 { val = result1 })
             """.trimIndent(),
-            "result2",
-            "String"
+            "getResult2",
+            "String <*>"  // Return type is String, function has <*> marker
         )
     }
 

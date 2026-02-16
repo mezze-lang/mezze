@@ -74,11 +74,13 @@ class PolymorphicEffectsInterpreterTest {
                 Log.info { msg = "Called" }
                 21
 
-            let result = perform ConsoleLogger in twice { f = counter }
+            let getResult = {} -> perform ConsoleLogger in twice { f = counter }
         """.trimIndent()
 
-        val context = executeWithContext(code)
-        assertEquals(42L, (context["result"] as FunkInt).value) // 21 + 21 = 42
+        val program = parser.parse(code)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = FunkTestHelper.executeAndCallFunction(typeCheckResult.program, "getResult", FunkRecord(emptyMap()), typeCheckResult.monomorphicInstances)
+        assertEquals(42L, (result as FunkInt).value) // 21 + 21 = 42
     }
 
     @Test

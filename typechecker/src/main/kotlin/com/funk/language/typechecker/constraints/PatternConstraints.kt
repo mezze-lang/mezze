@@ -30,20 +30,22 @@ class PatternConstraintGenerator {
      * @param pattern The pattern to analyze
      * @param scrutineeType The type of the value being matched
      * @param context The constraint generation context
+     * @param sourceLocation Optional source location for error reporting (from scrutinee expression)
      * @return Bindings introduced + constraints on scrutinee
      */
     fun generate(
         pattern: Pattern,
         scrutineeType: FunkType,
-        context: ConstraintContext
+        context: ConstraintContext,
+        sourceLocation: SourceLocation? = null
     ): PatternConstraintResult {
         return when (pattern) {
             is WildcardPattern -> generateWildcard(pattern, scrutineeType, context)
             is VariablePattern -> generateVariable(pattern, scrutineeType, context)
-            is ConstructorPattern -> generateConstructor(pattern, scrutineeType, context)
-            is RecordPattern -> generateRecord(pattern, scrutineeType, context)
+            is ConstructorPattern -> generateConstructor(pattern, scrutineeType, context, sourceLocation)
+            is RecordPattern -> generateRecord(pattern, scrutineeType, context, sourceLocation)
             is LiteralPattern -> generateLiteral(pattern, scrutineeType, context)
-            is ArrayPattern -> generateArray(pattern, scrutineeType, context)
+            is ArrayPattern -> generateArray(pattern, scrutineeType, context, sourceLocation)
         }
     }
 
@@ -117,7 +119,8 @@ class PatternConstraintGenerator {
     private fun generateConstructor(
         pattern: ConstructorPattern,
         scrutineeType: FunkType,
-        context: ConstraintContext
+        context: ConstraintContext,
+        sourceLocation: SourceLocation? = null
     ): PatternConstraintResult {
         // Constructor pattern: Some {val = x}
         // Scrutinee must be variant type with this constructor
@@ -159,7 +162,7 @@ class PatternConstraintGenerator {
             )
 
             // Generate constraints for payload pattern (which is a RecordPattern)
-            val payloadResult = generate(recordPattern, payloadType, context)
+            val payloadResult = generate(recordPattern, payloadType, context, sourceLocation)
             constraints.addAll(payloadResult.constraints)
 
             return PatternConstraintResult(
@@ -176,7 +179,8 @@ class PatternConstraintGenerator {
     private fun generateRecord(
         pattern: RecordPattern,
         scrutineeType: FunkType,
-        context: ConstraintContext
+        context: ConstraintContext,
+        sourceLocation: SourceLocation? = null
     ): PatternConstraintResult {
         // Record pattern: {x, y = z, ...}
         // Scrutinee must be record type with these fields
@@ -196,9 +200,7 @@ class PatternConstraintGenerator {
                 throw TypeCheckError(
                     "Non-exhaustive record pattern: missing field${if (uncoveredFields.size > 1) "s" else ""} $fieldList. " +
                     "Use { ${patternFieldNames.joinToString(", ")}, ... } to ignore extra fields.",
-                    null as Expression?,
-                    ErrorType.GENERAL,
-                    mapOf("missingFields" to uncoveredFields.toList(), "patternFields" to patternFieldNames.toList())
+                    sourceLocation
                 )
             }
         }
@@ -218,7 +220,7 @@ class PatternConstraintGenerator {
 
             // Generate constraints for the field pattern
             val fieldPattern = entry.pattern ?: VariablePattern(entry.name)
-            val fieldResult = generate(fieldPattern, fieldType, context)
+            val fieldResult = generate(fieldPattern, fieldType, context, sourceLocation)
 
             bindings.putAll(fieldResult.bindings)
             constraints.addAll(fieldResult.constraints)
@@ -237,7 +239,8 @@ class PatternConstraintGenerator {
     private fun generateArray(
         pattern: ArrayPattern,
         scrutineeType: FunkType,
-        context: ConstraintContext
+        context: ConstraintContext,
+        sourceLocation: SourceLocation? = null
     ): PatternConstraintResult {
         // Array pattern: [x, y, z] or [head, ...tail]
         // Scrutinee must be array type
@@ -257,7 +260,7 @@ class PatternConstraintGenerator {
 
         // Generate constraints for each element pattern
         for (elementPattern in pattern.elements) {
-            val elementResult = generate(elementPattern, elementType, context)
+            val elementResult = generate(elementPattern, elementType, context, sourceLocation)
             bindings.putAll(elementResult.bindings)
             constraints.addAll(elementResult.constraints)
         }
