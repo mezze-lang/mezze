@@ -250,7 +250,8 @@ object DuplicateDeclarationValidator {
             for (name in boundNames) {
                 if (declaredVariables.contains(name)) {
                     throw TypeCheckError(
-                        "Duplicate variable declaration: '$name' is already defined in this scope"
+                        "Duplicate variable declaration: '$name' is already defined in this scope",
+                        item.expression.sourceLocation
                     )
                 }
                 declaredVariables.add(name)

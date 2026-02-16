@@ -236,7 +236,8 @@ class ConstraintGenerator(
                                     validatePolymorphismPreserved(
                                         preConvertedAnnotationType,
                                         substitution,
-                                        varName
+                                        varName,
+                                        item.expression.sourceLocation
                                     )
                                 }
 
@@ -250,7 +251,8 @@ class ConstraintGenerator(
                                     validateEffectsNotOverpromised(
                                         preConvertedAnnotationType,
                                         inferredTypeWithAbilities,
-                                        varName
+                                        varName,
+                                        item.expression.sourceLocation
                                     )
                                 }
 
@@ -273,7 +275,8 @@ class ConstraintGenerator(
                                         preConvertedAnnotationType,
                                         resolvedAbilityConstraints,
                                         varName,
-                                        substitution
+                                        substitution,
+                                        item.expression.sourceLocation
                                     )
                                 }
                             }
@@ -1257,7 +1260,8 @@ class ConstraintGenerator(
                 if (extraFields.isNotEmpty()) {
                     throw com.funk.language.typechecker.TypeCheckError(
                         "Type annotation mismatch: record has extra field(s) ${extraFields.sorted().joinToString(", ")} " +
-                        "not present in closed record type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }"
+                        "not present in closed record type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
+                        expression.sourceLocation
                     )
                 }
 
@@ -1266,7 +1270,8 @@ class ConstraintGenerator(
                 if (missingFields.isNotEmpty()) {
                     throw com.funk.language.typechecker.TypeCheckError(
                         "Type annotation mismatch: record is missing field(s) ${missingFields.sorted().joinToString(", ")} " +
-                        "required by type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }"
+                        "required by type annotation { ${annotatedFields.sorted().joinToString(", ") { "$it: ..." }} }",
+                        expression.sourceLocation
                     )
                 }
             }
@@ -1293,7 +1298,8 @@ class ConstraintGenerator(
             if (expectedParamCount != actualParamCount) {
                 throw com.funk.language.typechecker.TypeCheckError(
                     "Type annotation mismatch: function expects $expectedParamCount parameter(s) " +
-                    "but lambda has $actualParamCount parameter(s)"
+                    "but lambda has $actualParamCount parameter(s)",
+                    expression.sourceLocation
                 )
             }
         }
@@ -1317,7 +1323,8 @@ class ConstraintGenerator(
     private fun validatePolymorphismPreserved(
         annotationType: FunkType,
         substitution: com.funk.language.typechecker.solving.Substitution,
-        varName: String
+        varName: String,
+        sourceLocation: SourceLocation? = null
     ) {
         // Collect all type variables from the annotation
         val annotationTypeVars = collectTypeVars(annotationType)
@@ -1332,7 +1339,8 @@ class ConstraintGenerator(
                     throw com.funk.language.typechecker.TypeCheckError(
                         "Type annotation mismatch for '$varName': Annotation declares type variable '${typeVar.name}' " +
                         "but implementation forces it to concrete type '${com.funk.language.ast.prettyPrintType(substituted)}'. " +
-                        "The implementation must work for all types, not just specific ones."
+                        "The implementation must work for all types, not just specific ones.",
+                        sourceLocation
                     )
                 }
             }
@@ -1461,7 +1469,8 @@ class ConstraintGenerator(
             if (extraEffects.isNotEmpty()) {
                 throw com.funk.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Implementation uses effects ${extraEffects.joinToString(", ")} " +
-                    "which are not declared in the annotation."
+                    "which are not declared in the annotation.",
+                    expression.sourceLocation
                 )
             }
 
@@ -1470,7 +1479,8 @@ class ConstraintGenerator(
             if (missingEffects.isNotEmpty()) {
                 throw com.funk.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${missingEffects.joinToString(", ")} " +
-                    "which are not used in the implementation."
+                    "which are not used in the implementation.",
+                    expression.sourceLocation
                 )
             }
         }
@@ -1489,7 +1499,8 @@ class ConstraintGenerator(
     private fun validateEffectsNotOverpromised(
         annotationType: FunkType,
         inferredType: FunkType,
-        varName: String
+        varName: String,
+        sourceLocation: SourceLocation? = null
     ) {
         if (annotationType is FunkType.FunctionType && inferredType is FunkType.FunctionType) {
             val annotatedEffects = annotationType.effects?.effects ?: emptySet()
@@ -1500,7 +1511,8 @@ class ConstraintGenerator(
             if (overpromisedEffects.isNotEmpty()) {
                 throw com.funk.language.typechecker.TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${overpromisedEffects.joinToString(", ")} " +
-                    "which are not used in the implementation."
+                    "which are not used in the implementation.",
+                    sourceLocation
                 )
             }
         }
@@ -1518,7 +1530,8 @@ class ConstraintGenerator(
         annotationType: FunkType,
         inferredAbilityConstraints: List<Constraint.AbilityRequired>,
         varName: String,
-        substitution: com.funk.language.typechecker.solving.Substitution
+        substitution: com.funk.language.typechecker.solving.Substitution,
+        sourceLocation: SourceLocation? = null
     ) {
         if (annotationType !is FunkType.FunctionType) return
 
@@ -1567,7 +1580,8 @@ class ConstraintGenerator(
                         .distinct()
                     throw com.funk.language.typechecker.TypeCheckError(
                         "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
-                        "Annotation declares constraint on ${declaredVars.joinToString()} but implementation uses it on '${usage.typeVar.name}'."
+                        "Annotation declares constraint on ${declaredVars.joinToString()} but implementation uses it on '${usage.typeVar.name}'.",
+                        sourceLocation
                     )
                 }
             } else {
@@ -1579,7 +1593,8 @@ class ConstraintGenerator(
                 if (isOnAnnotationTypeVar) {
                     throw com.funk.language.typechecker.TypeCheckError(
                         "Type annotation mismatch for '$varName': Implementation requires '${usage.abilityName}' on type variable '${usage.typeVar.name}', " +
-                        "but the annotation does not declare this constraint."
+                        "but the annotation does not declare this constraint.",
+                        sourceLocation
                     )
                 }
             }
@@ -1631,7 +1646,8 @@ class ConstraintGenerator(
                             if (usage.typeVar.name != annotatedTypeArg.variable.name) {
                                 throw com.funk.language.typechecker.TypeCheckError(
                                     "Type annotation mismatch for '$varName': Ability '${usage.abilityName}' is applied to wrong type variable. " +
-                                    "Annotation declares '${annotatedTypeArg.variable.name}' but implementation uses '${usage.typeVar.name}'."
+                                    "Annotation declares '${annotatedTypeArg.variable.name}' but implementation uses '${usage.typeVar.name}'.",
+                                    expression.sourceLocation
                                 )
                             }
                         }
@@ -1654,7 +1670,8 @@ class ConstraintGenerator(
                     if (matchingInferred == null) {
                         throw com.funk.language.typechecker.TypeCheckError(
                             "Type annotation mismatch for '$varName': Annotation declares ability '${annotated.abilityName}' " +
-                            "which is not used in the implementation."
+                            "which is not used in the implementation.",
+                            expression.sourceLocation
                         )
                     }
                 }

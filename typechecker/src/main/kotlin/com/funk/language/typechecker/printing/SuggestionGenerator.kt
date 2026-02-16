@@ -136,6 +136,11 @@ object SuggestionGenerator {
                 "Move the effectful computation inside main or another function"
             )
 
+            is ValidationError.TopLevelExpressionPerformedEffects -> listOf(
+                "Wrap in a function: let myFunc = {} -> <expression>",
+                "Or move inside an existing function body"
+            )
+
             is ValidationError.MainFunctionTypeError -> listOf(
                 "main must be: main = {} -> perform Handler in ...",
                 "Use 'perform' to handle all effects in main",

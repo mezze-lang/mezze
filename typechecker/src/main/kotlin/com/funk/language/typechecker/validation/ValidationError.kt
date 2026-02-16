@@ -527,6 +527,27 @@ sealed interface ValidationError {
     }
 
     /**
+     * Top-level expression has performed effects (<*>).
+     *
+     * Top-level expressions (bare function calls, etc.) cannot have performed effects
+     * because that would mean executing effects at module load time without assignment.
+     *
+     * Example: myEffectfulFunc {}  (NOT ALLOWED at top level)
+     */
+    data class TopLevelExpressionPerformedEffects(
+        val effectRow: FunkType.EffectRow,
+        val sourceLocation: SourceLocation? = null
+    ) : ValidationError {
+        override fun message(): String = buildString {
+            append("Bare expression with performed effects <*> is not allowed at module level. ")
+            append("This would execute effects when the module loads, which is not permitted. ")
+            append("Move this expression inside a function body.")
+        }
+
+        override fun location() = sourceLocation
+    }
+
+    /**
      * main function has wrong type.
      *
      * main must have type {} -> {} <*> (takes unit, returns unit with performed effects).

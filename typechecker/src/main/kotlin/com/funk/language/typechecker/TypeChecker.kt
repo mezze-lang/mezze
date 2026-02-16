@@ -506,8 +506,25 @@ class TypeChecker(
 
         val success = result as TypeCheckResult.Success
 
-        // Now validate main for execution
         val validator = TypeValidator(parentContext)
+
+        // Validate top-level expressions don't have performed effects
+        // (they would execute effects at module load time)
+        val topLevelErrors = validator.validateTopLevelExpressionsForExecution(
+            success.program,
+            success.substitution
+        )
+        if (topLevelErrors.isNotEmpty()) {
+            return TypeCheckResult.Failure(topLevelErrors.map { error ->
+                TypeCheckError(
+                    phase = "Validation",
+                    message = error.message(),
+                    sourceLocation = error.location()
+                )
+            })
+        }
+
+        // Now validate main for execution
         val mainError = validator.validateMainForExecution(success.program, success.substitution)
 
         return if (mainError != null) {

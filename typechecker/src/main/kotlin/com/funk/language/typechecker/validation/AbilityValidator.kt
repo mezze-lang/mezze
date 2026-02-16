@@ -111,9 +111,12 @@ object AbilityValidator {
         val extraOps = implementedOps - declaredOps
         if (extraOps.isNotEmpty()) {
             val extra = extraOps.joinToString(", ")
+            // Get source location from first extra operation
+            val extraOpLocation = impl.operations.find { it.name in extraOps }?.implementation?.sourceLocation
             throw TypeCheckError(
                 "Implementation of '${impl.abilityName}' has extra ${if (extraOps.size == 1) "method" else "methods"} not in ability: $extra. " +
-                "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the ability declaration."
+                "Remove ${if (extraOps.size == 1) "it" else "them"} or add to the ability declaration.",
+                extraOpLocation
             )
         }
 
@@ -148,19 +151,24 @@ object AbilityValidator {
             val actualParamType = implOp.paramType ?: expectedParamType
             val actualReturnType = implOp.returnType ?: expectedReturnType
 
+            // Get source location from implementation expression for better error messages
+            val sourceLocation = implOp.implementation.sourceLocation
+
             // Check for type variables in concrete implementations
             if (implOp.paramType != null && hasTypeVariables(actualParamType)) {
                 throw TypeCheckError(
                     "Type variables not allowed in ability implementation: " +
                     "operation '${implOp.name}' parameter type contains type variables. " +
-                    "All type variables must be replaced with concrete types."
+                    "All type variables must be replaced with concrete types.",
+                    sourceLocation
                 )
             }
             if (implOp.returnType != null && hasTypeVariables(actualReturnType)) {
                 throw TypeCheckError(
                     "Type variables not allowed in ability implementation: " +
                     "operation '${implOp.name}' return type contains type variables. " +
-                    "All type variables must be replaced with concrete types."
+                    "All type variables must be replaced with concrete types.",
+                    sourceLocation
                 )
             }
 
@@ -169,7 +177,8 @@ object AbilityValidator {
                 throw TypeCheckError(
                     "Wrong parameter type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${typeAnnotationToString(expectedParamType)}, " +
-                    "but got ${typeAnnotationToString(actualParamType)}."
+                    "but got ${typeAnnotationToString(actualParamType)}.",
+                    sourceLocation
                 )
             }
 
@@ -178,7 +187,8 @@ object AbilityValidator {
                 throw TypeCheckError(
                     "Wrong return type for '${implOp.name}' in impl ${impl.abilityName}: " +
                     "expected ${typeAnnotationToString(expectedReturnType)}, " +
-                    "but got ${typeAnnotationToString(actualReturnType)}."
+                    "but got ${typeAnnotationToString(actualReturnType)}.",
+                    sourceLocation
                 )
             }
         }

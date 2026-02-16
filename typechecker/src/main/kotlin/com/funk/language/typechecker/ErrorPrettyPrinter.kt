@@ -149,11 +149,45 @@ object ErrorPrettyPrinter {
             }
 
             ErrorType.CONSTRAINT_VIOLATION -> {
-                sb.appendLine()
-                sb.appendLine("💡 Constraint Violation Help:")
-                sb.appendLine("   - Built-in types (Int, String, etc.) have common abilities")
-                sb.appendLine("   - Custom types need 'impl' declarations")
-                sb.appendLine("   - Check that your type implements the required ability")
+                // Check if this is an effect handling error vs ability constraint
+                when {
+                    message.contains("None of the provided handlers handle effects") -> {
+                        sb.appendLine()
+                        sb.appendLine("💡 Effect Handling Help:")
+                        sb.appendLine("   - The handler doesn't implement the effect that the expression uses")
+                        // Extract the effect names from the error message for a more specific suggestion
+                        val usesMatch = Regex("Expression uses: ([^.]+)\\.").find(message)
+                        val handlesMatch = Regex("handles ([^)]+)\\)").find(message)
+                        if (usesMatch != null && handlesMatch != null) {
+                            val uses = usesMatch.groupValues[1]
+                            val handles = handlesMatch.groupValues[1]
+                            sb.appendLine("   - Use a handler that implements $uses instead of $handles")
+                            sb.appendLine("   - Or check if $uses should be handled at a different level")
+                        } else {
+                            sb.appendLine("   - Add a handler that implements the missing effect")
+                            sb.appendLine("   - Or restructure to handle effects at the correct level")
+                        }
+                    }
+                    message.contains("doesn't use this effect") -> {
+                        sb.appendLine()
+                        sb.appendLine("💡 Unnecessary Handler:")
+                        sb.appendLine("   - This handler isn't needed because the expression doesn't use its effect")
+                        sb.appendLine("   - Remove the handler or check if you meant to use a different effect")
+                    }
+                    message.contains("handler") && message.contains("effect") -> {
+                        sb.appendLine()
+                        sb.appendLine("💡 Effect Handling Help:")
+                        sb.appendLine("   - Ensure each effect used by the expression has a matching handler")
+                        sb.appendLine("   - Handlers are matched by the effect they implement, not their name")
+                    }
+                    else -> {
+                        sb.appendLine()
+                        sb.appendLine("💡 Constraint Violation Help:")
+                        sb.appendLine("   - Built-in types (Int, String, etc.) have common abilities")
+                        sb.appendLine("   - Custom types need 'impl' declarations")
+                        sb.appendLine("   - Check that your type implements the required ability")
+                    }
+                }
             }
 
             ErrorType.INEXHAUSTIVE_MATCH -> {

@@ -97,6 +97,7 @@ object ErrorFormatter {
             is ValidationError.HandlerTypeMismatch -> formatHandlerTypeMismatchError(error, sourceCode)
             is ValidationError.UnitVariantPayloadMismatch -> formatUnitVariantPayloadMismatchError(error, sourceCode)
             is ValidationError.TopLevelPerformedEffects -> formatTopLevelPerformedEffectsError(error, sourceCode)
+            is ValidationError.TopLevelExpressionPerformedEffects -> formatTopLevelExpressionPerformedEffectsError(error, sourceCode)
             is ValidationError.MainFunctionTypeError -> formatMainFunctionTypeError(error, sourceCode)
         }
     }
@@ -625,11 +626,24 @@ object ErrorFormatter {
         sourceCode: String?
     ): String {
         return SourceContext.formatError(
-            errorType = "Type Error [Validation - Top Level Performed Effects]",
+            errorType = "Type Error",
             message = error.message(),
             location = error.location(),
             sourceCode = sourceCode,
             suggestion = "Wrap this in a function: let ${error.bindingName} = {} -> ..."
+        )
+    }
+
+    private fun formatTopLevelExpressionPerformedEffectsError(
+        error: ValidationError.TopLevelExpressionPerformedEffects,
+        sourceCode: String?
+    ): String {
+        return SourceContext.formatError(
+            errorType = "Type Error",
+            message = error.message(),
+            location = error.location(),
+            sourceCode = sourceCode,
+            suggestion = "Wrap in a function: let myFunc = {} -> <expression>"
         )
     }
 

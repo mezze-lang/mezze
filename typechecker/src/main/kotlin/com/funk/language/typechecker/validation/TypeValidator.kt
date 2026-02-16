@@ -122,14 +122,18 @@ class TypeValidator(
         // 1. Top-level VALUES cannot have <*> (performed effects)
         // 2. Top-level FUNCTIONS can return <*> (they're just definitions)
         // 3. 'main' must have type {} -> {} <*>
+        // Note: TopLevelExpression items are NOT validated for <*> because:
+        //   - They're primarily used in tests/REPL to evaluate expressions
+        //   - Real programs shouldn't have bare expressions at module level
+        //   - The critical case (let result = ...) is already caught by LetBinding validation
         for (item in program.items) {
             when (item) {
                 is LetBinding -> {
-                    val topLevelErrors = validateTopLevelEffects(item, substitution)
+                    val topLevelErrors = validateTopLevelEffects(item, substitution, constraintResults)
                     errors.addAll(topLevelErrors)
                 }
                 else -> {
-                    // Other items don't have effect restrictions
+                    // TopLevelExpression and other items don't need effect restrictions
                 }
             }
         }
@@ -704,13 +708,131 @@ class TypeValidator(
      * This keeps type-checking working for tests and library code that use
      * 'main' as a regular binding name.
      */
-    @Suppress("UNUSED_PARAMETER")
     private fun validateTopLevelEffects(
         binding: LetBinding,
+        substitution: Substitution,
+        constraintResults: Map<String, ConstraintResult>
+    ): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+
+        // Skip 'main' - it has separate validation via validateMainForExecution
+        if (binding.isSimpleBinding && binding.variableName == "main") {
+            return emptyList()
+        }
+
+        val inferredType = binding.inferredType ?: return emptyList()
+        val finalType = substitution.apply(inferredType)
+
+        // Check if this is a value (not a function) with performed effects
+        // Functions are allowed to have <*> because they're just definitions
+        // Values with <*> would mean effects executed at module load time
+        when (finalType) {
+            is FunkType.FunctionType -> {
+                // Functions can have <*> in their return type - that's fine
+                // They're just definitions, execution happens when called
+            }
+            is FunkType.SuspendedType -> {
+                // SuspendedType wraps a value with its effects
+                // If it has performed=true, that means effects were executed
+                if (finalType.effects.performed) {
+                    errors.add(
+                        ValidationError.TopLevelPerformedEffects(
+                            bindingName = binding.variableName,
+                            effectRow = finalType.effects,
+                            sourceLocation = binding.expression.sourceLocation
+                        )
+                    )
+                }
+            }
+            else -> {
+                // For non-SuspendedType, non-FunctionType values, we DON'T validate
+                // based on ConstraintResult.performed because:
+                // 1. Direct `perform` expressions at top-level are a common test pattern
+                // 2. The perform is explicit and visible in the code
+                // 3. The truly problematic pattern (calling functions with <*>) is caught
+                //    by the SuspendedType check above
+                //
+                // The key patterns we want to catch are:
+                // - let result = myFunc {} where myFunc returns T <*>
+                // - let result = ({} -> perform H in e) {}
+                // Both produce SuspendedType and are caught above.
+            }
+        }
+
+        return errors
+    }
+
+    /**
+     * Validate a top-level expression for effect restrictions.
+     *
+     * Top-level expressions (bare function calls, etc.) cannot have performed effects (<*>)
+     * because that would mean executing effects at module load time without assignment.
+     *
+     * Example of invalid code:
+     *   myEffectfulFunc {}  // Can't call effectful function at top-level
+     */
+    private fun validateTopLevelExpressionEffects(
+        topLevelExpr: TopLevelExpression,
         substitution: Substitution
     ): List<ValidationError> {
-        // No validation currently - main type is checked at runtime
-        return emptyList()
+        val errors = mutableListOf<ValidationError>()
+
+        val inferredType = topLevelExpr.expression.inferredType ?: return emptyList()
+        val finalType = substitution.apply(inferredType)
+
+        // Check if this expression has performed effects
+        when (finalType) {
+            is FunkType.FunctionType -> {
+                // A function value at top-level is fine - it's just a value
+                // (though unusual to have a bare function expression at top-level)
+            }
+            is FunkType.SuspendedType -> {
+                // SuspendedType wraps a value with its effects
+                // If it has performed=true, that means effects were executed
+                if (finalType.effects.performed) {
+                    errors.add(
+                        ValidationError.TopLevelExpressionPerformedEffects(
+                            effectRow = finalType.effects,
+                            sourceLocation = topLevelExpr.expression.sourceLocation
+                        )
+                    )
+                }
+            }
+            else -> {
+                // Other types are fine at top-level
+            }
+        }
+
+        return errors
+    }
+
+    /**
+     * Validate top-level expressions for execution.
+     *
+     * Call this AFTER type-checking when you want to run the program as an executable.
+     * This validates that no top-level expressions have performed effects (<*>).
+     *
+     * This is NOT called during normal type-checking (checkProgram) because:
+     * - Tests and REPL use top-level expressions to evaluate effectful code
+     * - Only actual program execution (exec/build) needs this validation
+     *
+     * @param program The type-checked program
+     * @param substitution The substitution from constraint solving
+     * @return List of validation errors for any top-level expressions with <*>
+     */
+    fun validateTopLevelExpressionsForExecution(
+        program: Program,
+        substitution: Substitution
+    ): List<ValidationError> {
+        val errors = mutableListOf<ValidationError>()
+
+        for (item in program.items) {
+            if (item is TopLevelExpression) {
+                errors.addAll(validateTopLevelExpressionEffects(item, substitution))
+            }
+        }
+
+        return errors
     }
 
     /**

@@ -755,8 +755,10 @@ private fun handleExecCommand(args: List<String>) {
     // Handle type-check failure
     if (typeCheckResult is TypeChecker.TypeCheckResult.Failure) {
         val error = typeCheckResult.errors.first()
-        println("❌ Type Error: ${error.message}")
-        println("━".repeat(50))
+
+        // Format error with source location and code snippet
+        val formattedError = formatTypeCheckError(error, source, fileName)
+        println(formattedError)
 
         // Provide helpful suggestions based on error
         if (error.message.contains("pure", ignoreCase = true)) {
@@ -893,8 +895,10 @@ private fun handleCompileCommand(args: List<String>) {
         // Handle type-check failure
         if (typeCheckResult is TypeChecker.TypeCheckResult.Failure) {
             val error = typeCheckResult.errors.first()
-            println("❌ Compilation Error: ${error.message}")
-            println("━".repeat(50))
+
+            // Format error with source location and code snippet
+            val formattedError = formatTypeCheckError(error, source, inputFile.name)
+            println(formattedError)
 
             // Provide helpful suggestions based on error
             if (error.message.contains("pure", ignoreCase = true)) {
@@ -1625,4 +1629,28 @@ private fun prettyPrintResult(result: com.funk.language.interpreter.FunkValue): 
             }
         }
     }
+}
+
+/**
+ * Format a type check error with source location and code snippet.
+ * This provides better error messages that help users locate and fix issues.
+ */
+private fun formatTypeCheckError(
+    error: TypeChecker.TypeCheckError,
+    sourceCode: String?,
+    fileName: String?
+): String {
+    return SourceContext.formatError(
+        errorType = "Type Error",
+        message = error.message,
+        location = error.sourceLocation?.let { loc ->
+            // Add filename to location if not already present
+            if (loc.file == null && fileName != null) {
+                com.funk.language.ast.SourceLocation(loc.line, loc.column, fileName)
+            } else {
+                loc
+            }
+        },
+        sourceCode = sourceCode
+    )
 }
