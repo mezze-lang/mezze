@@ -22,7 +22,7 @@ class BytesModuleTest {
         ModuleResolver.clearCache()
         TypeChecker.clearCache()
         typeChecker = TypeChecker()
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
     }
 
     private fun parseAndTypeCheck(source: String): com.mezze.language.ast.Program {

@@ -38,7 +38,7 @@ class TestOfDetailed {
         val result = MezzeTestHelper.execute(
             typeCheckResult.program,
             typeCheckResult.monomorphicInstances,
-            java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         )
 
         println("Result type: ${result::class.simpleName}")
@@ -68,7 +68,7 @@ class TestOfDetailed {
         val result = MezzeTestHelper.execute(
             typeCheckResult.program,
             typeCheckResult.monomorphicInstances,
-            java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         )
 
         println("Result type: ${result::class.simpleName}")
@@ -97,7 +97,7 @@ class TestOfDetailed {
         val result = MezzeTestHelper.execute(
             typeCheckResult.program,
             typeCheckResult.monomorphicInstances,
-            java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         )
 
         println("Result type: ${result::class.simpleName}")
@@ -127,7 +127,7 @@ class TestOfDetailed {
         val result = MezzeTestHelper.execute(
             typeCheckResult.program,
             typeCheckResult.monomorphicInstances,
-            java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         )
 
         println("Result type: ${result::class.simpleName}")
@@ -160,7 +160,7 @@ class TestOfDetailed {
         val result = MezzeTestHelper.execute(
             typeCheckResult.program,
             typeCheckResult.monomorphicInstances,
-            java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         )
 
         println("Result type: ${result::class.simpleName}")
@@ -191,7 +191,7 @@ class TestOfDetailed {
         val result = MezzeTestHelper.execute(
             typeCheckResult.program,
             typeCheckResult.monomorphicInstances,
-            java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         )
 
         println("Result type: ${result::class.simpleName}")

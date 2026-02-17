@@ -36,7 +36,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should execute successfully and return unit
@@ -61,7 +61,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return an integer between 1 and 100
@@ -101,7 +101,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return an integer
@@ -140,7 +140,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return 15
@@ -164,7 +164,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should execute successfully and return unit
@@ -188,7 +188,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return 42
@@ -214,7 +214,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return "test"
@@ -251,7 +251,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return the string
@@ -282,7 +282,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return 42
@@ -318,7 +318,7 @@ class ComprehensiveEffectInterpreterTest {
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should return (3 + 4) * 2 = 14
@@ -352,7 +352,7 @@ class ComprehensiveEffectInterpreterTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         // Should execute successfully and return 60
@@ -376,7 +376,7 @@ let quot = a / b
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         // Should return a record with computed values
@@ -416,7 +416,7 @@ let quot = a / b
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should execute successfully
@@ -442,7 +442,7 @@ let quot = a / b
         
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
         
         // Should execute successfully even with empty parameters

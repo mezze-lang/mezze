@@ -19,7 +19,7 @@ class TestResultImportWithTypeChecker {
         ModuleResolver.clearCache()
         TypeChecker.clearCache()  // Changed from TypeChecker
         typeChecker = TypeChecker()  // Changed from TypeChecker
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
     }
 
     @Test

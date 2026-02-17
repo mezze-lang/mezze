@@ -30,7 +30,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -46,7 +46,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -69,7 +69,7 @@ class MezzeInterpreterComprehensiveTest {
         }
 
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -86,7 +86,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -107,7 +107,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
 
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -126,7 +126,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -144,7 +144,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -160,7 +160,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -177,7 +177,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -194,7 +194,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -211,7 +211,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -231,7 +231,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -247,7 +247,7 @@ class MezzeInterpreterComprehensiveTest {
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -267,7 +267,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
 
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -288,7 +288,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -307,7 +307,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -330,7 +330,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -353,7 +353,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
 
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -370,7 +370,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -388,7 +388,7 @@ class MezzeInterpreterComprehensiveTest {
         val ast = parser.parse(source)
         val typedProgram = typeChecker.typeCheck(ast).program
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }
@@ -411,7 +411,7 @@ class MezzeInterpreterComprehensiveTest {
         val typedProgram = typeChecker.typeCheck(ast).program
         
         assertDoesNotThrow {
-            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+            val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
             MezzeTestHelper.execute(typedProgram, projectRoot)
         }
     }

@@ -119,7 +119,7 @@ class PerformerValidationTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is MezzeRecord)
@@ -142,7 +142,7 @@ class PerformerValidationTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is MezzeRecord)
@@ -177,7 +177,7 @@ class PerformerValidationTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is MezzeString)
@@ -215,7 +215,7 @@ class PerformerValidationTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is MezzeRecord)

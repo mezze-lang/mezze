@@ -16,12 +16,12 @@ class TestFullResultStep {
         ModuleResolver.clearCache()
         TypeChecker.clearCache()
         typeChecker = TypeChecker()
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
     }
 
     @Test
     fun `test parsing full result module functions one by one`() {
-        val resultFile = File("/Users/shriyans/Projects/mezze/stdlib/std/result.mz")
+        val resultFile = TestUtils.findProjectRoot().resolve("stdlib/std/result.mz").toFile()
         val lines = resultFile.readLines()
 
         val functions = mutableListOf<String>()

@@ -51,7 +51,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(1L, (result as MezzeInt).value)
@@ -74,7 +74,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(42L, (result as MezzeInt).value)
@@ -116,7 +116,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(1L, (result as MezzeInt).value)
@@ -135,7 +135,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(3L, (result as MezzeInt).value)
@@ -158,7 +158,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(1L, (result as MezzeInt).value)
@@ -179,7 +179,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(4L, (result as MezzeInt).value)
@@ -217,7 +217,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(1L, (result as MezzeInt).value)
@@ -237,7 +237,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(2L, (result as MezzeInt).value)
@@ -256,7 +256,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(6L, (result as MezzeInt).value)
@@ -280,7 +280,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(1L, (result as MezzeInt).value)
@@ -300,7 +300,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(1L, (result as MezzeInt).value)
@@ -326,7 +326,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(3L, (result as MezzeInt).value)
@@ -351,7 +351,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(3L, (result as MezzeInt).value)
@@ -372,7 +372,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(3L, (result as MezzeInt).value)
@@ -395,7 +395,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(10L, (result as MezzeInt).value)
@@ -414,7 +414,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(5L, (result as MezzeInt).value)
@@ -439,7 +439,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(1L, (result as MezzeInt).value)
@@ -460,7 +460,7 @@ class ListTest {
 
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
 
         assertTrue(result is MezzeInt)
         assertEquals(0L, (result as MezzeInt).value)

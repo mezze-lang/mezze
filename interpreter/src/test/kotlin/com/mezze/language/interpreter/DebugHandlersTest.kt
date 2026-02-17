@@ -18,7 +18,7 @@ class DebugHandlersTest {
         parser = MezzeParser()
         typeChecker = TypeChecker()
         interpreter = MezzeInterpreter()
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
         // Clear module cache for fresh resolution
         com.mezze.language.typechecker.ModuleResolver.clearCache()
     }

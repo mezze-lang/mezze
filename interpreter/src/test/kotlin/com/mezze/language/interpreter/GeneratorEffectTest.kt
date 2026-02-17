@@ -33,7 +33,7 @@ class GeneratorEffectTest {
         typeChecker = TypeChecker()
         interpreter = MezzeInterpreter()
         // Set project root for stdlib module resolution
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
         // Clear module cache to ensure fresh module resolution with updated exports
         com.mezze.language.typechecker.ModuleResolver.clearCache()
         com.mezze.language.typechecker.TypeChecker.clearCache()

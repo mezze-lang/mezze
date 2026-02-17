@@ -23,7 +23,7 @@ class ArrayPatternInterpreterTest {
     private fun eval(source: String): MezzeValue {
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program)
-        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")))
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
         return result
     }
 

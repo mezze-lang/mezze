@@ -7,7 +7,7 @@ class DebugTestFullResultParsing {
 
     @Test
     fun `debug function extraction logic`() {
-        val resultFile = File("/Users/shriyans/Projects/mezze/stdlib/std/result.mz")
+        val resultFile = TestUtils.findProjectRoot().resolve("stdlib/std/result.mz").toFile()
         val lines = resultFile.readLines()
 
         val functions = mutableListOf<String>()

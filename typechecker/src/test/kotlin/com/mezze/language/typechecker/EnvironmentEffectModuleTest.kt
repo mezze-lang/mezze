@@ -20,7 +20,7 @@ class EnvironmentEffectModuleTest {
         TypeChecker.clearCache()
         typeChecker = TypeChecker()
         // Set project root for module resolution
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
     }
 
     private fun parseAndTypeCheck(source: String): com.mezze.language.ast.Program {

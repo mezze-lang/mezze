@@ -3,6 +3,7 @@ package com.mezze.language.interpreter.stdlib
 import com.mezze.language.interpreter.MezzeInt
 import com.mezze.language.interpreter.MezzeString
 import com.mezze.language.interpreter.MezzeTestHelper
+import com.mezze.language.interpreter.TestUtils
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
 import org.junit.jupiter.api.Test
@@ -18,7 +19,7 @@ class IntModuleTest {
     @BeforeEach
     fun setup() {
         // Set project root for module resolution
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
         // Clear module cache to ensure clean state between tests
         com.mezze.language.typechecker.ModuleResolver.clearCache()
     }

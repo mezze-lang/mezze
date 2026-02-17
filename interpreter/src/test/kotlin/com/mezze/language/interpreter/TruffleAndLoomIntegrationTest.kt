@@ -27,7 +27,7 @@ class TruffleAndLoomIntegrationTest {
     }
 
     private fun eval(source: String): MezzeValue {
-        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+        val projectRoot = java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
         val program = parser.parse(source)
         val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
         val result = MezzeTestHelper.execute(

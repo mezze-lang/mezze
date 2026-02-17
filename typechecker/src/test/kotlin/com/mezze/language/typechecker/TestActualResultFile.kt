@@ -20,7 +20,7 @@ class TestActualResultFile {
 
     @Test
     fun `test typecheck actual result mezze file directly`() {
-        val resultFile = File("/Users/shriyans/Projects/mezze/stdlib/std/result.mz")
+        val resultFile = TestUtils.findProjectRoot().resolve("stdlib/std/result.mz").toFile()
         val source = resultFile.readText()
 
         println("Testing actual result.mz file")

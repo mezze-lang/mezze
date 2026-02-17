@@ -31,7 +31,7 @@ class AbilityVsVariantResolutionTest {
     @BeforeEach
     fun setup() {
         // Set project root for stdlib module resolution
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
         com.mezze.language.typechecker.ModuleResolver.clearCache()
         TypeChecker.clearCache()
         parser = MezzeParser()

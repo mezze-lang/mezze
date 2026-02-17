@@ -20,7 +20,7 @@ class GeneratorMinimalTest {
         typeChecker = TypeChecker()
         interpreter = MezzeInterpreter()
         // Set project root for stdlib module resolution
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
         // Clear both module caches for fresh resolution
         com.mezze.language.typechecker.ModuleResolver.clearCache()
         com.mezze.language.typechecker.TypeChecker.clearCache()

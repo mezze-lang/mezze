@@ -16,7 +16,7 @@ class DebugIncompleteGetOrElseTest {
         ModuleResolver.clearCache()
         TypeChecker.clearCache()
         typeChecker = TypeChecker()
-        System.setProperty("mezze.project.root", "/Users/shriyans/Projects/mezze")
+        TestUtils.setupProjectRoot()
     }
 
     @Test

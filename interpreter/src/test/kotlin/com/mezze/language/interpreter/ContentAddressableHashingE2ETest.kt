@@ -27,7 +27,7 @@ class ContentAddressableHashingE2ETest {
 
     private lateinit var parser: MezzeParser
     private lateinit var typeChecker: TypeChecker
-    private val projectRoot = Paths.get(System.getProperty("mezze.project.root", "/Users/shriyans/Projects/mezze"))
+    private val projectRoot = Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString()))
 
     @BeforeEach
     fun setup() {
