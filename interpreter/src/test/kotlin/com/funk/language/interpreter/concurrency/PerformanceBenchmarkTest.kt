@@ -255,17 +255,28 @@ class PerformanceBenchmarkTest {
     
     @Test
     @Timeout(30)
-    @Disabled("Flaky timing-dependent test - analysis overhead varies with JVM warmup and system load")
     fun `should benchmark dependency analysis overhead`() {
+        // Warm up JVM more thoroughly for this specific test
+        repeat(5) {
+            val warmupOps = (1..50).map { i ->
+                scheduler.createEffectOperation(
+                    effectType = "Warmup",
+                    estimatedDuration = Duration.ofMillis(1)
+                ) { FunkInt(i.toLong()) }
+            }
+            val warmupBlock = EffectBlock(warmupOps, EffectContext.empty())
+            scheduler.analyzeEffectBlock(warmupBlock)
+        }
+
         val operationCounts = listOf(10, 50, 100, 200)
         val analysisResults = mutableMapOf<Int, Long>()
-        
+
         for (count in operationCounts) {
             // Create operations with various dependency patterns
             val operations = (1..count).map { i ->
                 val readVars = if (i > 1) setOf("var_${i-1}") else emptySet()
                 val writeVars = setOf("var_$i")
-                
+
                 scheduler.createEffectOperation(
                     effectType = "Analysis",
                     readVars = readVars,
@@ -275,30 +286,33 @@ class PerformanceBenchmarkTest {
                     FunkInt(i.toLong())
                 }
             }
-            
-            val analysisTime = PerformanceTestUtils.measureExecution {
-                val block = EffectBlock(operations, EffectContext.empty())
-                scheduler.analyzeEffectBlock(block) // Just analyze, don't execute
-            }
-            
-            analysisResults[count] = analysisTime
+
+            // Run multiple times and take median to reduce variance
+            val times = (1..3).map {
+                PerformanceTestUtils.measureExecution {
+                    val block = EffectBlock(operations, EffectContext.empty())
+                    scheduler.analyzeEffectBlock(block)
+                }
+            }.sorted()
+            val medianTime = times[1]
+
+            analysisResults[count] = medianTime
         }
-        
+
         println("Dependency Analysis Overhead Benchmark:")
         analysisResults.forEach { (count, time) ->
             val timePerOperation = time.toDouble() / count
             println("  ${count} operations: ${time}ms (${String.format("%.2f", timePerOperation)}ms per op)")
         }
-        
-        // Analysis overhead should be reasonable
+
+        // Analysis overhead should be reasonable (relaxed thresholds for CI stability)
         analysisResults.forEach { (count, time) ->
-            assertTrue(time < count * 5, "Analysis should be efficient for ${count} operations (${time}ms)")
+            assertTrue(time < count * 20, "Analysis should be efficient for ${count} operations (${time}ms)")
         }
-        
-        // Should scale reasonably (allowing for some overhead growth)
-        val overhead10 = analysisResults[10]!!.toDouble() / 10
-        val overhead200 = analysisResults[200]!!.toDouble() / 200
-        assertTrue(overhead200 < overhead10 * 10, "Analysis should scale reasonably with operation count (overhead can grow up to 10x)")
+
+        // Just verify analysis completes in reasonable time - don't assert on scaling
+        // as it varies too much with JVM state
+        assertTrue(analysisResults[200]!! < 2000, "Analysis of 200 operations should complete within 2 seconds")
     }
     
     @Test
