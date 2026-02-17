@@ -157,7 +157,8 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_map", "expects 'f' function")
 
             val mapped = xs.elements.map { elem ->
-                callFunction(f, elem, "__native_nel_map")
+                val callArg = FunkRecord(mapOf("x" to elem))
+                callFunction(f, callArg, "__native_nel_map")
             }
             FunkNonEmptyList(mapped)
         }
@@ -171,7 +172,8 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_flat_map", "expects 'f' function")
 
             val mapped = xs.elements.flatMap { elem ->
-                val result = callFunction(f, elem, "__native_nel_flat_map")
+                val callArg = FunkRecord(mapOf("x" to elem))
+                val result = callFunction(f, callArg, "__native_nel_flat_map")
                 (result as? FunkNonEmptyList)?.elements
                     ?: throw NativeFunctionException("__native_nel_flat_map", "f must return NonEmptyList")
             }
@@ -240,7 +242,8 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_any", "expects 'p' predicate")
 
             val result = xs.elements.any { elem ->
-                val res = callFunction(p, elem, "__native_nel_any")
+                val callArg = FunkRecord(mapOf("x" to elem))
+                val res = callFunction(p, callArg, "__native_nel_any")
                 (res as? FunkBool)?.value
                     ?: throw NativeFunctionException("__native_nel_any", "predicate must return Boolean")
             }
@@ -256,7 +259,8 @@ object TruffleNonEmptyListImplementations {
                 ?: throw NativeFunctionException("__native_nel_all", "expects 'p' predicate")
 
             val result = xs.elements.all { elem ->
-                val res = callFunction(p, elem, "__native_nel_all")
+                val callArg = FunkRecord(mapOf("x" to elem))
+                val res = callFunction(p, callArg, "__native_nel_all")
                 (res as? FunkBool)?.value
                     ?: throw NativeFunctionException("__native_nel_all", "predicate must return Boolean")
             }

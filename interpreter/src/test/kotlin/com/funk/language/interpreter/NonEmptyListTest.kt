@@ -12,7 +12,6 @@ import kotlin.test.assertEquals
  * Comprehensive tests for NonEmptyList operations
  * Tests the non-empty list that is guaranteed to have at least one element
  */
-@org.junit.jupiter.api.Disabled("__native_nel_* intrinsics need to be registered in TypeChecker")
 class NonEmptyListTest {
 
     private lateinit var parser: FunkParser
@@ -117,7 +116,7 @@ class NonEmptyListTest {
             use std::collections::nonemptylist::{singleton, cons, map, head}
 
             let xs = cons { x = 1, xs = singleton { x = 2 } }
-            let ys = map { xs = xs, f = { x } -> x * 2 }
+            let ys = map { xs = xs, f = {x} -> x * 2 }
 
             head { xs = ys }
         """.trimIndent()
@@ -210,16 +209,15 @@ class NonEmptyListTest {
     }
 
     @Test
-    @DisplayName("NonEmptyList equality - equal lists")
-    fun testNonEmptyListEqualityTrue() {
+    @DisplayName("NonEmptyList any predicate")
+    fun testAny() {
         val source = """
-            use std::collections::nonemptylist::{singleton}
+            use std::collections::nonemptylist::{singleton, cons, any}
 
-            let xs = singleton { x = 42 }
-            let ys = singleton { x = 42 }
-            let eq_result = xs == ys
+            let xs = cons { x = 1, xs = cons { x = 5, xs = singleton { x = 3 } } }
 
-            if eq_result then 1 else 0
+            # Check if any element is greater than 4
+            if any { xs = xs, p = {x} -> x > 4 } then 1 else 0
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -231,16 +229,15 @@ class NonEmptyListTest {
     }
 
     @Test
-    @DisplayName("NonEmptyList equality - different lists")
-    fun testNonEmptyListEqualityFalse() {
+    @DisplayName("NonEmptyList all predicate")
+    fun testAll() {
         val source = """
-            use std::collections::nonemptylist::{singleton}
+            use std::collections::nonemptylist::{singleton, cons, all}
 
-            let xs = singleton { x = 42 }
-            let ys = singleton { x = 99 }
-            let eq_result = xs == ys
+            let xs = cons { x = 2, xs = cons { x = 4, xs = singleton { x = 6 } } }
 
-            if eq_result then 1 else 0
+            # Check if all elements are even
+            if all { xs = xs, p = {x} -> x % 2 == 0 } then 1 else 0
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -248,6 +245,6 @@ class NonEmptyListTest {
         val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk")))
 
         assertTrue(result is FunkInt)
-        assertEquals(0L, (result as FunkInt).value)
+        assertEquals(1L, (result as FunkInt).value)
     }
 }

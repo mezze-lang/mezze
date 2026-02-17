@@ -45,10 +45,10 @@ pub let last: { xs: NonEmptyList 'a } -> 'a = { xs } ->
     __native_nel_last { xs = xs }
 
 # Higher-order functions
-pub let map: { xs: NonEmptyList 'a, f: 'a -> 'b } -> NonEmptyList 'b = { xs, f } ->
+pub let map: { xs: NonEmptyList 'a, f: {x: 'a} -> 'b } -> NonEmptyList 'b = { xs, f } ->
     __native_nel_map { xs = xs, f = f }
 
-pub let flat_map: { xs: NonEmptyList 'a, f: 'a -> NonEmptyList 'b } -> NonEmptyList 'b = { xs, f } ->
+pub let flat_map: { xs: NonEmptyList 'a, f: {x: 'a} -> NonEmptyList 'b } -> NonEmptyList 'b = { xs, f } ->
     __native_nel_flat_map { xs = xs, f = f }
 
 pub let fold_left: { xs: NonEmptyList 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc } -> 'acc = { xs, init, f } ->
@@ -61,10 +61,10 @@ pub let reduce: { xs: NonEmptyList 'a, f: { acc: 'a, x: 'a } -> 'a } -> 'a = { x
     __native_nel_reduce { xs = xs, f = f }
 
 # Predicates
-pub let any: { xs: NonEmptyList 'a, p: 'a -> Bool } -> Bool = { xs, p } ->
+pub let any: { xs: NonEmptyList 'a, p: {x: 'a} -> Bool } -> Bool = { xs, p } ->
     __native_nel_any { xs = xs, p = p }
 
-pub let all: { xs: NonEmptyList 'a, p: 'a -> Bool } -> Bool = { xs, p } ->
+pub let all: { xs: NonEmptyList 'a, p: {x: 'a} -> Bool } -> Bool = { xs, p } ->
     __native_nel_all { xs = xs, p = p }
 
 pub let contains: { xs: NonEmptyList 'a, x: 'a } -> Bool = { xs, x } ->
