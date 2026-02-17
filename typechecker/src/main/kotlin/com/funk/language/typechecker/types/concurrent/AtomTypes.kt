@@ -127,5 +127,92 @@ object AtomTypes {
                 ))
             )
         }
+
+        // __native_atom_add_watch: {atom: Atom 'a, key: String, f: {key: String, old: 'a, new: 'a} -> {}} -> {}
+        run {
+            val elementType = FunkType.VarType(TypeVar("a"))
+            val atomType = FunkType.TypeApplication("Atom", listOf(elementType))
+            val watchFuncType = FunkType.FunctionType(
+                FunkType.RecordType(mapOf(
+                    "key" to FunkType.StringType,
+                    "old" to elementType,
+                    "new" to elementType
+                )),
+                FunkType.RecordType(emptyMap())  // Unit
+            )
+            context["__native_atom_add_watch"] = FunkType.FunctionType(
+                FunkType.RecordType(mapOf(
+                    "atom" to atomType,
+                    "key" to FunkType.StringType,
+                    "f" to watchFuncType
+                )),
+                FunkType.RecordType(emptyMap())  // Unit
+            )
+        }
+
+        // __native_atom_remove_watch: {atom: Atom 'a, key: String} -> {}
+        run {
+            val elementType = FunkType.VarType(TypeVar("a"))
+            val atomType = FunkType.TypeApplication("Atom", listOf(elementType))
+            context["__native_atom_remove_watch"] = FunkType.FunctionType(
+                FunkType.RecordType(mapOf(
+                    "atom" to atomType,
+                    "key" to FunkType.StringType
+                )),
+                FunkType.RecordType(emptyMap())  // Unit
+            )
+        }
+
+        // __native_atom_new_validated: {value: 'a, validator: {val: 'a} -> Bool} -> Atom 'a
+        run {
+            val elementType = FunkType.VarType(TypeVar("a"))
+            val atomType = FunkType.TypeApplication("Atom", listOf(elementType))
+            val validatorType = FunkType.FunctionType(
+                FunkType.RecordType(mapOf("val" to elementType)),
+                FunkType.BooleanType
+            )
+            context["__native_atom_new_validated"] = FunkType.FunctionType(
+                FunkType.RecordType(mapOf(
+                    "value" to elementType,
+                    "validator" to validatorType
+                )),
+                atomType
+            )
+        }
+
+        // __native_atom_set_validator: {atom: Atom 'a, validator: {val: 'a} -> Bool} -> {}
+        run {
+            val elementType = FunkType.VarType(TypeVar("a"))
+            val atomType = FunkType.TypeApplication("Atom", listOf(elementType))
+            val validatorType = FunkType.FunctionType(
+                FunkType.RecordType(mapOf("val" to elementType)),
+                FunkType.BooleanType
+            )
+            context["__native_atom_set_validator"] = FunkType.FunctionType(
+                FunkType.RecordType(mapOf(
+                    "atom" to atomType,
+                    "validator" to validatorType
+                )),
+                FunkType.RecordType(emptyMap())  // Unit
+            )
+        }
+
+        // __native_atom_get_validator: {atom: Atom 'a} -> Option ({val: 'a} -> Bool)
+        // Note: We can't express the full Option type here, so we use a generic return
+        run {
+            val elementType = FunkType.VarType(TypeVar("a"))
+            val atomType = FunkType.TypeApplication("Atom", listOf(elementType))
+            val validatorType = FunkType.FunctionType(
+                FunkType.RecordType(mapOf("val" to elementType)),
+                FunkType.BooleanType
+            )
+            val optionType = FunkType.TypeApplication("Option", listOf(validatorType))
+            context["__native_atom_get_validator"] = FunkType.FunctionType(
+                FunkType.RecordType(mapOf(
+                    "atom" to atomType
+                )),
+                optionType
+            )
+        }
     }
 }

@@ -1,0 +1,112 @@
+# std/concurrent/agent.funk - Clojure-Style Agents
+#
+# Agents provide asynchronous, queued state updates with these properties:
+# - State changes happen asynchronously (send returns immediately)
+# - Actions are processed sequentially in order
+# - If an action throws, the agent enters error state
+# - Can be restarted after error with a new value
+#
+# Agents are perfect for:
+# - Fire-and-forget state updates (logging, metrics)
+# - Decoupling state changes from coordination
+# - Background processing of state transformations
+#
+# Key differences from Atoms:
+# - Atoms: Synchronous (swap blocks until complete)
+# - Agents: Asynchronous (send returns immediately)
+#
+# Usage:
+#   use std::concurrent::agent::{Agent, agent, send, deref_agent, await_agent}
+#
+#   let counter = agent {value = 0}
+#   send {agent = counter, f = {current} -> current + 1}
+#   send {agent = counter, f = {current} -> current + 1}
+#   await_agent {agent = counter}
+#   let final = deref_agent {agent = counter}  # 2
+
+# Agent type - opaque wrapper around native agent
+pub newtype Agent 'a = Agent __NativeAgent
+
+# Create a new agent with the given initial value
+#
+# Example:
+#   let counter = agent {value = 0}
+#   let stats = agent {value = {count = 0, sum = 0}}
+pub let agent: {value: 'a} -> Agent 'a =
+    {value} -> __native_agent_new {value = value}
+
+# Read the current value of the agent (non-blocking snapshot)
+# Note: The value may change immediately after reading
+#
+# Example:
+#   let current = deref_agent {agent = counter}
+pub let deref_agent: {agent: Agent 'a} -> 'a =
+    {agent} -> __native_agent_deref {agent = agent}
+
+# Queue an action to be applied to the agent's state
+# Returns immediately - the action runs asynchronously
+# Uses shared thread pool (good for CPU-bound work)
+#
+# Example:
+#   send {agent = counter, f = {current} -> current + 1}
+pub let send: {agent: Agent 'a, f: {current: 'a} -> 'a} -> {} =
+    {agent, f} -> __native_agent_send {agent = agent, f = f}
+
+# Like send, but intended for potentially blocking operations
+# Uses unbounded threads (good for I/O-bound work)
+# In virtual thread implementations, this is equivalent to send
+#
+# Example:
+#   send_off {agent = logger, f = {current} -> log_to_file {msg = current}}
+pub let send_off: {agent: Agent 'a, f: {current: 'a} -> 'a} -> {} =
+    {agent, f} -> __native_agent_send_off {agent = agent, f = f}
+
+# Wait until all pending actions have completed
+# Returns True if completed, False if timeout (0 = no timeout)
+#
+# Example:
+#   send {agent = counter, f = {current} -> current + 1}
+#   await_agent {agent = counter}  # Blocks until +1 is done
+#   await_agent_timeout {agent = counter, timeout_ms = 5000}
+pub let await_agent: {agent: Agent 'a} -> {} =
+    {agent} -> do
+        let _ = __native_agent_await {agent = agent, timeout_ms = 0}
+        {}
+
+pub let await_agent_timeout: {agent: Agent 'a, timeout_ms: Int} -> Bool =
+    {agent, timeout_ms} -> __native_agent_await {agent = agent, timeout_ms = timeout_ms}
+
+# Check if the agent is in error state
+# Returns Some {val = error_message} if in error state, None otherwise
+#
+# Example:
+#   match agent_error {agent = counter} is
+#       Some {val} -> "Agent failed: " ++ val
+#       None -> "Agent is healthy"
+pub let agent_error: {agent: Agent 'a} -> Option String =
+    {agent} -> __native_agent_error {agent = agent}
+
+# Check if the agent is in error state (boolean)
+pub let has_error: {agent: Agent 'a} -> Bool =
+    {agent} -> match agent_error {agent = agent} is
+        Some {val = _} -> True
+        None -> False
+
+# Clear the error state and set a new value
+# The action queue is NOT cleared - pending actions will still run after restart
+#
+# Example:
+#   restart_agent {agent = counter, value = 0}  # Reset to 0, clear error
+pub let restart_agent: {agent: Agent 'a, value: 'a} -> {} =
+    {agent, value} -> __native_agent_restart {agent = agent, value = value}
+
+# Set a custom error handler that's called when an action throws
+# The handler receives the agent and error message
+#
+# Example:
+#   set_error_handler {
+#       agent = counter,
+#       handler = {agent, error} -> log {msg = "Agent error: " ++ error}
+#   }
+pub let set_error_handler: {agent: Agent 'a, handler: {agent: Agent 'a, error: String} -> {}} -> {} =
+    {agent, handler} -> __native_agent_set_error_handler {agent = agent, handler = handler}

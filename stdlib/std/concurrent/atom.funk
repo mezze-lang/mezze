@@ -68,7 +68,7 @@ pub let compare_and_set: {atom: Atom 'a, expected: 'a, new: 'a} -> Bool =
 #
 # Example:
 #   swap_with {atom = counter, f = {current, delta} -> current + delta, arg = 5}
-pub let swap_with: {atom: Atom 'a, f: {'a, 'b} -> 'a, arg: 'b} -> 'a =
+pub let swap_with: {atom: Atom 'a, f: {current: 'a, arg: 'b} -> 'a, arg: 'b} -> 'a =
     {atom, f, arg} -> __native_atom_swap_with {atom = atom, f = f, arg = arg}
 
 # Read the current value and apply a function atomically
@@ -78,3 +78,67 @@ pub let swap_with: {atom: Atom 'a, f: {'a, 'b} -> 'a, arg: 'b} -> 'a =
 #   let {old, new} = get_and_swap {atom = counter, f = {current} -> current + 1}
 pub let get_and_swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> {old: 'a, new: 'a} =
     {atom, f} -> __native_atom_get_and_swap {atom = atom, f = f}
+
+# =============================================================================
+# Watches - Callbacks on State Change
+# =============================================================================
+#
+# Watches are functions called whenever the atom's value changes.
+# They receive the watch key, old value, and new value.
+#
+# Use cases:
+# - Logging/debugging state changes
+# - Updating derived state
+# - Reactive patterns
+
+# Add a watch function to the atom
+# The watch will be called on every state change with (key, old, new)
+#
+# Example:
+#   add_watch {
+#       atom = counter,
+#       key = "logger",
+#       f = {key, old, new} -> Log.debug {msg = key ++ ": " ++ show {v = old} ++ " -> " ++ show {v = new}}
+#   }
+pub let add_watch: {atom: Atom 'a, key: String, f: {key: String, old: 'a, new: 'a} -> {}} -> {} =
+    {atom, key, f} -> __native_atom_add_watch {atom = atom, key = key, f = f}
+
+# Remove a watch by its key
+#
+# Example:
+#   remove_watch {atom = counter, key = "logger"}
+pub let remove_watch: {atom: Atom 'a, key: String} -> {} =
+    {atom, key} -> __native_atom_remove_watch {atom = atom, key = key}
+
+# =============================================================================
+# Validators - State Invariants
+# =============================================================================
+#
+# Validators are functions that check whether a new value is valid.
+# If a validator returns false, the update is rejected with an exception.
+#
+# Use cases:
+# - Enforcing business rules (e.g., counter must be non-negative)
+# - Preventing invalid state transitions
+# - Catching bugs early
+
+# Create a new atom with a validator
+# The initial value must pass the validator
+# All future updates must also pass the validator
+#
+# Example:
+#   let positive = atom_validated {value = 0, validator = {val} -> val >= 0}
+#   swap {atom = positive, f = {current} -> current + 1}  # OK
+#   swap {atom = positive, f = {current} -> current - 100}  # Throws!
+pub let atom_validated: {value: 'a, validator: {val: 'a} -> Bool} -> Atom 'a =
+    {value, validator} -> __native_atom_new_validated {value = value, validator = validator}
+
+# Set a validator on an existing atom
+# Note: Does NOT validate the current value
+# All future updates must pass the validator
+#
+# Example:
+#   let counter = atom {value = 0}
+#   set_validator {atom = counter, validator = {val} -> val >= 0}
+pub let set_validator: {atom: Atom 'a, validator: {val: 'a} -> Bool} -> {} =
+    {atom, validator} -> __native_atom_set_validator {atom = atom, validator = validator}

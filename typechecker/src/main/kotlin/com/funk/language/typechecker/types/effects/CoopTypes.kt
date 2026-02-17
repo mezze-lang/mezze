@@ -217,5 +217,22 @@ object CoopTypes {
             )),
             FunkType.ArrayType(resultType)
         )
+
+        // === Structured Concurrency Scopes ===
+
+        // Scope type for Coop
+        val scopeType = FunkType.TypeApplication("Scope", listOf(FunkType.VarType(TypeVar("a"))))
+
+        // __native_coop_scoped: {f: {scope: Scope 'a} -> 'a, cont: Continuation} -> 'a
+        context["__native_coop_scoped"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf("scope" to scopeType)),
+                    FunkType.VarType(TypeVar("a"))
+                ),
+                "cont" to contType
+            )),
+            FunkType.VarType(TypeVar("a"))
+        )
     }
 }

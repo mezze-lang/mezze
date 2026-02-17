@@ -22,12 +22,17 @@ object AtomImplementations {
      */
     fun registerAll(context: MutableMap<String, FunkValue>) {
         registerNew(context)
+        registerNewValidated(context)
         registerDeref(context)
         registerReset(context)
         registerSwap(context)
         registerSwapWith(context)
         registerCas(context)
         registerGetAndSwap(context)
+        registerAddWatch(context)
+        registerRemoveWatch(context)
+        registerSetValidator(context)
+        registerGetValidator(context)
     }
 
     /**
@@ -43,6 +48,33 @@ object AtomImplementations {
                 ?: throw FunkException("__native_atom_new expects 'value' field")
 
             FunkAtom(AtomicReference(value))
+        }
+    }
+
+    /**
+     * __native_atom_new_validated: {value: 'a, validator: {val: 'a} -> Bool} -> Atom 'a
+     * Creates a new atom with the given initial value and validator.
+     * Throws if the initial value doesn't pass the validator.
+     */
+    private fun registerNewValidated(context: MutableMap<String, FunkValue>) {
+        context["__native_atom_new_validated"] = NativeFunkFunction("__native_atom_new_validated") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw FunkException("__native_atom_new_validated expects FunkRecord")
+
+            val value = record.fields["value"]
+                ?: throw FunkException("__native_atom_new_validated expects 'value' field")
+
+            val validator = record.fields["validator"]
+                ?: throw FunkException("__native_atom_new_validated expects 'validator' field")
+
+            // Validate the initial value
+            if (!runValidator(validator, value)) {
+                throw FunkException("Atom validator rejected initial value")
+            }
+
+            val atom = FunkAtom(AtomicReference(value))
+            atom.validator.set(validator)
+            atom
         }
     }
 
@@ -65,6 +97,8 @@ object AtomImplementations {
     /**
      * __native_atom_reset: {atom: Atom 'a, value: 'a} -> 'a
      * Sets the atom to a new value, returns the new value.
+     * Validates the new value if a validator is set.
+     * Notifies all watches of the change.
      */
     private fun registerReset(context: MutableMap<String, FunkValue>) {
         context["__native_atom_reset"] = NativeFunkFunction("__native_atom_reset") { args ->
@@ -77,7 +111,11 @@ object AtomImplementations {
             val value = record.fields["value"]
                 ?: throw FunkException("__native_atom_reset expects 'value' field")
 
-            atom.ref.set(value)
+            // Validate before updating
+            validateOrThrow(atom, value)
+
+            val oldValue = atom.ref.getAndSet(value)
+            notifyWatches(atom, oldValue, value)
             value
         }
     }
@@ -86,6 +124,8 @@ object AtomImplementations {
      * __native_atom_swap: {atom: Atom 'a, f: 'a -> 'a} -> 'a
      * Atomically applies function f to the atom's value using CAS retry loop.
      * Returns the new value after successful update.
+     * Validates the new value if a validator is set (throws if invalid).
+     * Notifies all watches of the change.
      *
      * WARNING: f may be called multiple times if there's contention!
      */
@@ -101,17 +141,23 @@ object AtomImplementations {
                 ?: throw FunkException("__native_atom_swap expects 'f' field")
 
             // CAS retry loop
+            var oldValue: FunkValue
             var result: FunkValue
             while (true) {
                 val current = atom.ref.get()
                 val newValue = callFunction(f, current)
 
+                // Validate before CAS
+                validateOrThrow(atom, newValue)
+
                 if (atom.ref.compareAndSet(current, newValue)) {
+                    oldValue = current
                     result = newValue
                     break
                 }
                 // Value changed, retry with new current value
             }
+            notifyWatches(atom, oldValue, result)
             result
         }
     }
@@ -119,6 +165,8 @@ object AtomImplementations {
     /**
      * __native_atom_swap_with: {atom: Atom 'a, f: {'a, 'b} -> 'a, arg: 'b} -> 'a
      * Like swap but passes an additional argument to the function.
+     * Validates the new value if a validator is set (throws if invalid).
+     * Notifies all watches of the change.
      */
     private fun registerSwapWith(context: MutableMap<String, FunkValue>) {
         context["__native_atom_swap_with"] = NativeFunkFunction("__native_atom_swap_with") { args ->
@@ -135,13 +183,22 @@ object AtomImplementations {
                 ?: throw FunkException("__native_atom_swap_with expects 'arg' field")
 
             // CAS retry loop - runs until CAS succeeds
+            var oldValue: FunkValue
             var current = atom.ref.get()
             var newValue = callFunction2(f, current, arg)
+
+            // Validate before CAS
+            validateOrThrow(atom, newValue)
+
             while (!atom.ref.compareAndSet(current, newValue)) {
                 // Value changed, retry with new current value
                 current = atom.ref.get()
                 newValue = callFunction2(f, current, arg)
+                // Re-validate on retry
+                validateOrThrow(atom, newValue)
             }
+            oldValue = current
+            notifyWatches(atom, oldValue, newValue)
             newValue
         }
     }
@@ -149,6 +206,7 @@ object AtomImplementations {
     /**
      * __native_atom_cas: {atom: Atom 'a, expected: 'a, new: 'a} -> Bool
      * Low-level compare-and-set. Returns true if successful.
+     * Validates the new value if a validator is set (throws if invalid).
      *
      * Note: Uses value equality (equals) not reference equality, since
      * FunkInt(10) != FunkInt(10) by reference but should be equal by value.
@@ -166,6 +224,9 @@ object AtomImplementations {
 
             val newValue = record.fields["new"]
                 ?: throw FunkException("__native_atom_cas expects 'new' field")
+
+            // Validate before CAS
+            validateOrThrow(atom, newValue)
 
             // CAS with value equality check instead of reference equality
             var result = false
@@ -189,6 +250,8 @@ object AtomImplementations {
     /**
      * __native_atom_get_and_swap: {atom: Atom 'a, f: 'a -> 'a} -> {old: 'a, new: 'a}
      * Like swap but returns both old and new values.
+     * Validates the new value if a validator is set (throws if invalid).
+     * Notifies all watches of the change.
      */
     private fun registerGetAndSwap(context: MutableMap<String, FunkValue>) {
         context["__native_atom_get_and_swap"] = NativeFunkFunction("__native_atom_get_and_swap") { args ->
@@ -204,11 +267,18 @@ object AtomImplementations {
             // CAS retry loop - runs until CAS succeeds
             var current = atom.ref.get()
             var newValue = callFunction(f, current)
+
+            // Validate before CAS
+            validateOrThrow(atom, newValue)
+
             while (!atom.ref.compareAndSet(current, newValue)) {
                 // Value changed, retry with new current value
                 current = atom.ref.get()
                 newValue = callFunction(f, current)
+                // Re-validate on retry
+                validateOrThrow(atom, newValue)
             }
+            notifyWatches(atom, current, newValue)
             FunkRecord(mapOf(
                 "old" to current,
                 "new" to newValue
@@ -260,13 +330,170 @@ object AtomImplementations {
             else -> throw FunkException("Expected function, got: ${f::class.simpleName}")
         }
     }
+
+    /**
+     * __native_atom_add_watch: {atom: Atom 'a, key: String, f: {key: String, old: 'a, new: 'a} -> {}} -> {}
+     * Adds a watch function that will be called whenever the atom's value changes.
+     */
+    private fun registerAddWatch(context: MutableMap<String, FunkValue>) {
+        context["__native_atom_add_watch"] = NativeFunkFunction("__native_atom_add_watch") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw FunkException("__native_atom_add_watch expects FunkRecord")
+
+            val atom = record.fields["atom"] as? FunkAtom
+                ?: throw FunkException("__native_atom_add_watch expects 'atom' field of type Atom")
+
+            val key = (record.fields["key"] as? FunkString)?.value
+                ?: throw FunkException("__native_atom_add_watch expects 'key' field of type String")
+
+            val f = record.fields["f"]
+                ?: throw FunkException("__native_atom_add_watch expects 'f' field")
+
+            atom.watches[key] = f
+            FunkUnit
+        }
+    }
+
+    /**
+     * __native_atom_remove_watch: {atom: Atom 'a, key: String} -> {}
+     * Removes the watch with the given key.
+     */
+    private fun registerRemoveWatch(context: MutableMap<String, FunkValue>) {
+        context["__native_atom_remove_watch"] = NativeFunkFunction("__native_atom_remove_watch") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw FunkException("__native_atom_remove_watch expects FunkRecord")
+
+            val atom = record.fields["atom"] as? FunkAtom
+                ?: throw FunkException("__native_atom_remove_watch expects 'atom' field of type Atom")
+
+            val key = (record.fields["key"] as? FunkString)?.value
+                ?: throw FunkException("__native_atom_remove_watch expects 'key' field of type String")
+
+            atom.watches.remove(key)
+            FunkUnit
+        }
+    }
+
+    /**
+     * Helper to notify all watches of a value change.
+     */
+    private fun notifyWatches(atom: FunkAtom, oldValue: FunkValue, newValue: FunkValue) {
+        if (atom.watches.isEmpty()) return
+
+        for ((key, watchFn) in atom.watches) {
+            try {
+                val argsRecord = FunkRecord(mapOf(
+                    "key" to FunkString(key),
+                    "old" to oldValue,
+                    "new" to newValue
+                ))
+                when (watchFn) {
+                    is FunkTruffleFunction -> {
+                        watchFn.callTarget.call(
+                            argsRecord,
+                            watchFn.closureVariables,
+                            watchFn.lexicalScope,
+                            watchFn.lexicalScopeSlotMap
+                        )
+                    }
+                    is NativeFunkFunction -> {
+                        watchFn.call(listOf(argsRecord))
+                    }
+                }
+            } catch (e: Exception) {
+                // Watches should not throw, but if they do, we ignore it
+                // to not break the atom operation
+            }
+        }
+    }
+
+    /**
+     * __native_atom_set_validator: {atom: Atom 'a, validator: {val: 'a} -> Bool} -> {}
+     * Sets a validator function on the atom.
+     * Future updates will be rejected if the validator returns false.
+     * Note: Does NOT validate the current value.
+     */
+    private fun registerSetValidator(context: MutableMap<String, FunkValue>) {
+        context["__native_atom_set_validator"] = NativeFunkFunction("__native_atom_set_validator") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw FunkException("__native_atom_set_validator expects FunkRecord")
+
+            val atom = record.fields["atom"] as? FunkAtom
+                ?: throw FunkException("__native_atom_set_validator expects 'atom' field of type Atom")
+
+            val validator = record.fields["validator"]
+                ?: throw FunkException("__native_atom_set_validator expects 'validator' field")
+
+            atom.validator.set(validator)
+            FunkUnit
+        }
+    }
+
+    /**
+     * __native_atom_get_validator: {atom: Atom 'a} -> Option ({val: 'a} -> Bool)
+     * Returns the current validator if one is set, or None.
+     */
+    private fun registerGetValidator(context: MutableMap<String, FunkValue>) {
+        context["__native_atom_get_validator"] = NativeFunkFunction("__native_atom_get_validator") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw FunkException("__native_atom_get_validator expects FunkRecord")
+
+            val atom = record.fields["atom"] as? FunkAtom
+                ?: throw FunkException("__native_atom_get_validator expects 'atom' field of type Atom")
+
+            val validator = atom.validator.get()
+            if (validator != null) {
+                FunkVariant("Some", FunkRecord(mapOf("val" to validator)))
+            } else {
+                FunkVariant("None", FunkUnit)
+            }
+        }
+    }
+
+    /**
+     * Helper to run a validator function on a value.
+     * Returns true if valid, false otherwise.
+     */
+    private fun runValidator(validator: FunkValue, value: FunkValue): Boolean {
+        val argsRecord = FunkRecord(mapOf("val" to value))
+        val result = when (validator) {
+            is FunkTruffleFunction -> {
+                validator.callTarget.call(
+                    argsRecord,
+                    validator.closureVariables,
+                    validator.lexicalScope,
+                    validator.lexicalScopeSlotMap
+                ) as FunkValue
+            }
+            is NativeFunkFunction -> {
+                validator.call(listOf(argsRecord))
+            }
+            else -> throw FunkException("Validator must be a function")
+        }
+        return (result as? FunkBool)?.value
+            ?: throw FunkException("Validator must return Bool, got: ${result::class.simpleName}")
+    }
+
+    /**
+     * Helper to validate a new value against the atom's validator (if set).
+     * Throws FunkException if validation fails.
+     */
+    private fun validateOrThrow(atom: FunkAtom, newValue: FunkValue) {
+        val validator = atom.validator.get()
+        if (validator != null && !runValidator(validator, newValue)) {
+            throw FunkException("Atom validator rejected value")
+        }
+    }
 }
 
 /**
  * FunkAtom - wraps an AtomicReference for Clojure-style atomic state.
+ * Now includes support for watches (callbacks on state change) and validators.
  */
 data class FunkAtom(
-    val ref: AtomicReference<FunkValue>
+    val ref: AtomicReference<FunkValue>,
+    val watches: java.util.concurrent.ConcurrentHashMap<String, FunkValue> = java.util.concurrent.ConcurrentHashMap(),
+    val validator: AtomicReference<FunkValue?> = AtomicReference(null)
 ) : FunkValue() {
     override fun getDisplayString(): String = "<atom:${ref.get().getDisplayString()}>"
 }

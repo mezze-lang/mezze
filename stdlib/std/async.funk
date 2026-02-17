@@ -20,9 +20,14 @@
 
 use std::control::continuation
 use std::control::continuation::{Continuation}
+use std::concurrent::cancellation::{CancellationToken}
 
 # Promise type - opaque wrapper around native promise/future
 pub newtype Promise 'a = Promise __NativePromise
+
+# Scope type - opaque wrapper for structured concurrency scopes
+# Used with `scoped` to ensure all spawned children complete before parent
+pub newtype Scope 'a = Scope __NativeScope
 
 # Error type for async operations
 # - AsyncFailed: Task failed with an exception
@@ -89,7 +94,23 @@ pub effect Async where {
 
     # Wait for all promises, return list of Results
     # Never throws - each result is either Ok or Err
-    settle: {ps: [Promise 'a]} -> [Result 'a AsyncError] <Async>
+    settle: {ps: [Promise 'a]} -> [Result 'a AsyncError] <Async>,
+
+    # === Structured Concurrency Scopes ===
+
+    # Run a function with a structured concurrency scope.
+    # All tasks spawned via Scope.spawn must complete before scoped returns.
+    # If the function fails, all children are cancelled.
+    # If any child fails, siblings are cancelled (fail-fast behavior).
+    #
+    # Example:
+    #   Async.scoped {f = {scope} -> do
+    #       let p1 = Scope.spawn {scope = scope, f = {} -> task1 {}}
+    #       let p2 = Scope.spawn {scope = scope, f = {} -> task2 {}}
+    #       # Both p1 and p2 are awaited automatically before scoped returns
+    #       process {p1 = p1, p2 = p2}
+    #   }
+    scoped: {f: {scope: Scope 'a} -> 'a} -> 'a <Async>
 }
 
 # =============================================================================
@@ -126,7 +147,8 @@ pub impl Async for LoomAsync where {
     for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
     filter = {xs, f} -> __native_loom_filter {xs = xs, f = f},
     any = {ps} -> __native_loom_any {ps = ps},
-    settle = {ps} -> __native_loom_settle {ps = ps}
+    settle = {ps} -> __native_loom_settle {ps = ps},
+    scoped = {f} -> __native_loom_scoped {f = f}
 }
 
 # Configurable handler - control concurrency limit
@@ -153,7 +175,8 @@ pub impl Async for LoomAsyncWith { max_concurrent: Int } where {
     for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
     filter = {xs, f} -> __native_loom_filter {xs = xs, f = f},
     any = {ps} -> __native_loom_any {ps = ps},
-    settle = {ps} -> __native_loom_settle {ps = ps}
+    settle = {ps} -> __native_loom_settle {ps = ps},
+    scoped = {f} -> __native_loom_scoped {f = f}
 }
 
 # =============================================================================
@@ -189,7 +212,8 @@ pub impl Async for OSThreadAsync where {
     for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
     filter = {xs, f} -> __native_os_filter {xs = xs, f = f},
     any = {ps} -> __native_os_any {ps = ps},
-    settle = {ps} -> __native_os_settle {ps = ps}
+    settle = {ps} -> __native_os_settle {ps = ps},
+    scoped = {f} -> __native_os_scoped {f = f}
 }
 
 # Configurable handler - control thread pool size
@@ -216,7 +240,8 @@ pub impl Async for OSThreadAsyncWith { pool_size: Int } where {
     for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
     filter = {xs, f} -> __native_os_filter {xs = xs, f = f},
     any = {ps} -> __native_os_any {ps = ps},
-    settle = {ps} -> __native_os_settle {ps = ps}
+    settle = {ps} -> __native_os_settle {ps = ps},
+    scoped = {f} -> __native_os_scoped {f = f}
 }
 
 # =============================================================================
@@ -254,7 +279,10 @@ pub impl Async for CoopAsync { cont: Continuation } where {
     for_each = {xs, f} -> __native_coop_for_each { xs = xs, f = f, cont = cont },
     filter = {xs, f} -> __native_coop_filter { xs = xs, f = f, cont = cont },
     any = {ps} -> __native_coop_any { ps = ps, cont = cont },
-    settle = {ps} -> __native_coop_settle { ps = ps, cont = cont }
+    settle = {ps} -> __native_coop_settle { ps = ps, cont = cont },
+    # For cooperative async, scoped is a no-op since there's no parallelism
+    # The function just runs with an empty scope
+    scoped = {f} -> __native_coop_scoped { f = f, cont = cont }
 }
 
 # =============================================================================
@@ -279,3 +307,62 @@ pub let go: {f: {} -> 'a} -> {} <Async> = {f} -> do
 # Equivalent to: perform CoopAsync {cont = continuation::new {}} in computation {}
 pub let run_coop: {computation: {} -> 'a <Async>} -> 'a = {computation} ->
     perform CoopAsync {cont = continuation::new {}} in computation {}
+
+# =============================================================================
+# Scope Functions - Helpers for Structured Concurrency Scopes
+# =============================================================================
+#
+# These functions help with spawning tasks within a structured concurrency scope.
+# Tasks spawned via scope_spawn are tracked by the scope and automatically
+# awaited when the scope ends.
+#
+# Usage:
+#   perform LoomAsync in do
+#       Async.scoped {f = {scope} -> do
+#           let p1 = scope_spawn {scope = scope, f = {} -> task1 {}}
+#           let p2 = scope_spawn {scope = scope, f = {} -> task2 {}}
+#           # p1 and p2 are awaited automatically before scoped returns
+#           process {p1 = Async.await {p = p1}, p2 = Async.await {p = p2}}
+#       }
+
+# Spawn a task within a scope
+# The scope will wait for this task to complete before exiting
+#
+# Example:
+#   scope_spawn {scope = scope, f = {} -> expensive_computation {}}
+pub let scope_spawn: {scope: Scope 'a, f: {} -> 'b} -> Promise 'b =
+    {scope, f} -> __native_loom_scope_spawn {scope = scope, f = f}
+
+# Cancel all tasks in the scope
+#
+# Example:
+#   scope_cancel_all {scope = scope}
+pub let scope_cancel_all: {scope: Scope 'a} -> {} =
+    {scope} -> __native_loom_scope_cancel_all {scope = scope}
+
+# Get the CancellationToken for a scope
+#
+# Each scope has an associated CancellationToken that tasks can use
+# to check for cancellation or register cleanup callbacks.
+#
+# Example:
+#   Async.scoped {f = {scope} -> do
+#       let token = scope_get_token {scope = scope}
+#       scope_spawn {scope = scope, f = {} -> do
+#           # Periodically check for cancellation
+#           while not (Cancellation.is_cancelled {token = token}) do
+#               process_batch {}
+#       }
+#   }
+pub let scope_get_token: {scope: Scope 'a} -> CancellationToken =
+    {scope} -> __native_loom_scope_get_token {scope = scope}
+
+# Check if a scope has been cancelled
+#
+# Example:
+#   if scope_is_cancelled {scope = scope} then
+#       cleanup {}
+#   else
+#       continue_work {}
+pub let scope_is_cancelled: {scope: Scope 'a} -> Bool =
+    {scope} -> __native_loom_scope_is_cancelled {scope = scope}

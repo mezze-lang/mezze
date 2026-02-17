@@ -251,5 +251,59 @@ object LoomTypes {
             )),
             FunkType.ArrayType(resultType)
         )
+
+        // === Structured Concurrency Scopes ===
+
+        // Scope type - opaque wrapper for structured concurrency scopes
+        val scopeType = FunkType.TypeApplication("Scope", listOf(FunkType.VarType(com.funk.language.ast.TypeVar("a"))))
+
+        // __native_loom_scoped: {f: {scope: Scope 'a} -> 'a} -> 'a
+        context["__native_loom_scoped"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf("scope" to scopeType)),
+                    FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+                )
+            )),
+            FunkType.VarType(com.funk.language.ast.TypeVar("a"))
+        )
+
+        // __native_loom_scope_spawn: {scope: Scope 'a, f: {} -> 'b} -> Promise 'b
+        val scopeSpawnPromiseType = FunkType.TypeApplication("Promise", listOf(FunkType.VarType(com.funk.language.ast.TypeVar("b"))))
+        context["__native_loom_scope_spawn"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "scope" to scopeType,
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(com.funk.language.ast.TypeVar("b"))
+                )
+            )),
+            scopeSpawnPromiseType
+        )
+
+        // __native_loom_scope_cancel_all: {scope: Scope 'a} -> {}
+        context["__native_loom_scope_cancel_all"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "scope" to scopeType
+            )),
+            FunkType.RecordType(emptyMap())
+        )
+
+        // __native_loom_scope_get_token: {scope: Scope 'a} -> CancellationToken
+        val cancellationTokenType = FunkType.TypeApplication("CancellationToken", emptyList())
+        context["__native_loom_scope_get_token"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "scope" to scopeType
+            )),
+            cancellationTokenType
+        )
+
+        // __native_loom_scope_is_cancelled: {scope: Scope 'a} -> Bool
+        context["__native_loom_scope_is_cancelled"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "scope" to scopeType
+            )),
+            FunkType.BooleanType
+        )
     }
 }

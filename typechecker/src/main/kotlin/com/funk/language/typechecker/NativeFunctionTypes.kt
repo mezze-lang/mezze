@@ -27,11 +27,13 @@ import com.funk.language.typechecker.types.effects.CoopTypes
 import com.funk.language.typechecker.types.effects.ParallelTypes
 import com.funk.language.typechecker.types.effects.STMTypes
 import com.funk.language.typechecker.types.concurrent.AtomTypes
+import com.funk.language.typechecker.types.concurrent.AgentTypes
 import com.funk.language.typechecker.types.concurrent.ChannelTypes
 import com.funk.language.typechecker.types.concurrent.MutexTypes
 import com.funk.language.typechecker.types.concurrent.SemaphoreTypes
 import com.funk.language.typechecker.types.concurrent.LatchTypes
 import com.funk.language.typechecker.types.concurrent.WaitGroupTypes
+import com.funk.language.typechecker.types.concurrent.CancellationTokenTypes
 import com.funk.language.typechecker.types.codec.JsonTypes
 
 /**
@@ -85,13 +87,15 @@ object NativeFunctionTypes {
         ParallelTypes.registerAll(context)
         STMTypes.registerAll(context)
 
-        // Concurrent primitives (Atom, Channel, Mutex, Semaphore, Latch, WaitGroup)
+        // Concurrent primitives (Atom, Agent, Channel, Mutex, Semaphore, Latch, WaitGroup)
         AtomTypes.registerAll(context)
+        AgentTypes.registerAll(context)
         ChannelTypes.registerAll(context)
         MutexTypes.registerAll(context)
         SemaphoreTypes.registerAll(context)
         LatchTypes.registerAll(context)
         WaitGroupTypes.registerAll(context)
+        CancellationTokenTypes.registerAll(context)
 
         // Codec types (JSON serialization/deserialization)
         JsonTypes.registerAll(context)

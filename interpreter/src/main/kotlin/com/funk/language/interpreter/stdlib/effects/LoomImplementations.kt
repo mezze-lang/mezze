@@ -2,6 +2,7 @@ package com.funk.language.interpreter.stdlib.effects
 
 import com.funk.language.interpreter.*
 import com.funk.language.interpreter.concurrency.LoomConcurrencyManager
+import com.funk.language.interpreter.stdlib.concurrent.FunkCancellationToken
 import java.util.concurrent.CompletableFuture
 import com.oracle.truffle.api.CallTarget
 
@@ -71,6 +72,12 @@ object LoomImplementations {
         // New error handling operations
         registerAny(context)
         registerSettle(context)
+        // Structured concurrency scopes
+        registerScoped(context)
+        registerScopeSpawn(context)
+        registerScopeCancelAll(context)
+        registerScopeGetToken(context)
+        registerScopeIsCancelled(context)
     }
 
     /**
@@ -895,6 +902,314 @@ object LoomImplementations {
             else -> throw FunkException("Expected function, got: ${fn::class.simpleName}")
         }
     }
+
+    // =========================================================================
+    // Structured Concurrency Scopes
+    // =========================================================================
+
+    /**
+     * __native_loom_scoped - Run a function with a structured concurrency scope.
+     *
+     * Takes: { f: {scope: Scope} -> 'a }
+     * Returns: 'a
+     *
+     * Creates a scope, runs the function with it, waits for all spawned children
+     * to complete, then returns the result. If the function fails, all children
+     * are cancelled. If any child fails, the scope fails and other children are cancelled.
+     *
+     * This provides Kotlin/Java-style structured concurrency where:
+     * - Parent always waits for all children to complete
+     * - If parent fails, all children are cancelled
+     * - If child fails, siblings are cancelled (fail-fast behavior)
+     */
+    private fun registerScoped(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_scoped"] = NativeFunkFunction("__native_loom_scoped") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_scoped", "expects FunkRecord")
+
+            val fn = record.fields["f"]
+                ?: throw NativeFunctionException("__native_loom_scoped", "expects 'f' field")
+
+            val env = TruffleContextHolder.getEnv()
+                ?: throw NativeFunctionException("__native_loom_scoped", "No Truffle environment available")
+
+            // Create the scope
+            val scope = FunkScope(env)
+
+            try {
+                // Call the function with the scope
+                val result = callFunctionWithScopeArg(fn, scope)
+
+                // Wait for all spawned children to complete
+                scope.awaitAll()
+
+                // Check if any child failed
+                val error = scope.getFirstError()
+                if (error != null) {
+                    throw error
+                }
+
+                result
+            } catch (e: Exception) {
+                // Cancel all children on failure
+                scope.cancelAll()
+                throw e
+            } finally {
+                // Always wait for all children to finish (even if cancelled)
+                scope.awaitAllQuietly()
+            }
+        }
+    }
+
+    /**
+     * __native_loom_scope_spawn - Spawn a task within a scope.
+     *
+     * Takes: { scope: Scope, f: {} -> 'a }
+     * Returns: Promise 'a
+     *
+     * Spawns a task that is tracked by the scope. The scope will wait for this
+     * task to complete before returning.
+     */
+    private fun registerScopeSpawn(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_scope_spawn"] = NativeFunkFunction("__native_loom_scope_spawn") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_scope_spawn", "expects FunkRecord")
+
+            val scopeVal = record.fields["scope"]
+                ?: throw NativeFunctionException("__native_loom_scope_spawn", "expects 'scope' field")
+
+            val fn = record.fields["f"]
+                ?: throw NativeFunctionException("__native_loom_scope_spawn", "expects 'f' field")
+
+            val scope = scopeVal as? FunkScope
+                ?: throw NativeFunctionException("__native_loom_scope_spawn", "scope must be a Scope")
+
+            // Spawn the task within the scope
+            scope.spawn(fn)
+        }
+    }
+
+    /**
+     * __native_loom_scope_cancel_all - Cancel all tasks in a scope.
+     *
+     * Takes: { scope: Scope }
+     * Returns: {}
+     *
+     * Requests cancellation of all tasks spawned within the scope.
+     */
+    private fun registerScopeCancelAll(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_scope_cancel_all"] = NativeFunkFunction("__native_loom_scope_cancel_all") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_scope_cancel_all", "expects FunkRecord")
+
+            val scopeVal = record.fields["scope"]
+                ?: throw NativeFunctionException("__native_loom_scope_cancel_all", "expects 'scope' field")
+
+            val scope = scopeVal as? FunkScope
+                ?: throw NativeFunctionException("__native_loom_scope_cancel_all", "scope must be a Scope")
+
+            scope.cancelAll()
+            FunkUnit
+        }
+    }
+
+    /**
+     * __native_loom_scope_get_token - Get the CancellationToken for a scope.
+     *
+     * Takes: { scope: Scope }
+     * Returns: CancellationToken
+     *
+     * Returns the CancellationToken associated with this scope.
+     * Tasks can use this to check for cancellation or register callbacks.
+     */
+    private fun registerScopeGetToken(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_scope_get_token"] = NativeFunkFunction("__native_loom_scope_get_token") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_scope_get_token", "expects FunkRecord")
+
+            val scopeVal = record.fields["scope"]
+                ?: throw NativeFunctionException("__native_loom_scope_get_token", "expects 'scope' field")
+
+            val scope = scopeVal as? FunkScope
+                ?: throw NativeFunctionException("__native_loom_scope_get_token", "scope must be a Scope")
+
+            FunkCancellationToken(scope.cancellationToken)
+        }
+    }
+
+    /**
+     * __native_loom_scope_is_cancelled - Check if a scope is cancelled.
+     *
+     * Takes: { scope: Scope }
+     * Returns: Bool
+     *
+     * Returns true if the scope has been cancelled.
+     */
+    private fun registerScopeIsCancelled(context: MutableMap<String, FunkValue>) {
+        context["__native_loom_scope_is_cancelled"] = NativeFunkFunction("__native_loom_scope_is_cancelled") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_loom_scope_is_cancelled", "expects FunkRecord")
+
+            val scopeVal = record.fields["scope"]
+                ?: throw NativeFunctionException("__native_loom_scope_is_cancelled", "expects 'scope' field")
+
+            val scope = scopeVal as? FunkScope
+                ?: throw NativeFunctionException("__native_loom_scope_is_cancelled", "scope must be a Scope")
+
+            FunkBool(scope.isCancelled())
+        }
+    }
+
+    /**
+     * Call a function with a scope argument wrapped in a record {scope = arg}.
+     */
+    private fun callFunctionWithScopeArg(fn: FunkValue, scope: FunkScope): FunkValue {
+        val recordArg = FunkRecord(mapOf("scope" to scope))
+        return when (fn) {
+            is FunkTruffleFunction -> {
+                fn.callTarget.call(
+                    recordArg,
+                    fn.closureVariables,
+                    fn.lexicalScope,
+                    fn.lexicalScopeSlotMap
+                ) as FunkValue
+            }
+            is NativeFunkFunction -> fn.call(listOf(recordArg))
+            else -> throw FunkException("Expected function, got: ${fn::class.simpleName}")
+        }
+    }
+}
+
+/**
+ * FunkScope - Tracks spawned tasks for structured concurrency.
+ *
+ * A scope maintains a list of all tasks spawned within it and ensures:
+ * - All tasks complete before the scope exits
+ * - If any task fails, all others are cancelled
+ * - If the scope function fails, all tasks are cancelled
+ *
+ * The scope has an associated CancellationToken that:
+ * - Is cancelled when the scope fails or is explicitly cancelled
+ * - Can be used by child tasks to check for cancellation
+ * - Can have parent token for hierarchical cancellation
+ */
+class FunkScope(
+    private val env: com.oracle.truffle.api.TruffleLanguage.Env,
+    parentToken: com.funk.language.interpreter.effects.CancellationToken? = null
+) : FunkValue() {
+
+    private val tasks = java.util.concurrent.CopyOnWriteArrayList<CompletableFuture<FunkValue>>()
+    private val threads = java.util.concurrent.CopyOnWriteArrayList<Thread>()
+    private val firstError = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+    private val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    // CancellationToken for this scope - child of parent if provided
+    val cancellationToken: com.funk.language.interpreter.effects.CancellationToken =
+        parentToken?.createChild() ?: com.funk.language.interpreter.effects.CancellationToken()
+
+    /**
+     * Spawn a new task within this scope.
+     */
+    fun spawn(fn: FunkValue): FunkPromise {
+        val future = CompletableFuture<FunkValue>()
+        tasks.add(future)
+
+        val thread = env.newTruffleThreadBuilder {
+            try {
+                // Check if scope is cancelled before starting
+                if (cancelled.get() || cancellationToken.isCancelled()) {
+                    future.cancel(true)
+                    return@newTruffleThreadBuilder
+                }
+
+                val result = when (fn) {
+                    is FunkTruffleFunction -> {
+                        val emptyArgs = FunkRecord(emptyMap())
+                        fn.callTarget.call(
+                            emptyArgs,
+                            fn.closureVariables,
+                            fn.lexicalScope,
+                            fn.lexicalScopeSlotMap
+                        ) as FunkValue
+                    }
+                    is NativeFunkFunction -> fn.call(emptyList())
+                    else -> throw FunkException("Expected function, got: ${fn::class.simpleName}")
+                }
+                future.complete(result)
+            } catch (e: com.funk.language.interpreter.effects.EffectCancellationException) {
+                // Task was cancelled via CancellationToken - don't treat as error
+                future.cancel(true)
+            } catch (e: Exception) {
+                // Record first error for fail-fast behavior
+                firstError.compareAndSet(null, e)
+                future.completeExceptionally(e)
+                // Cancel siblings on failure (fail-fast)
+                cancelAll()
+            }
+        }.virtual(true).build()
+
+        threads.add(thread)
+        thread.start()
+
+        return FunkPromise(future)
+    }
+
+    /**
+     * Cancel all tasks in this scope.
+     */
+    fun cancelAll() {
+        cancelled.set(true)
+        // Cancel the CancellationToken so tasks can detect cancellation
+        cancellationToken.cancel("Scope cancelled")
+        for (task in tasks) {
+            task.cancel(true)
+        }
+        for (thread in threads) {
+            thread.interrupt()
+        }
+    }
+
+    /**
+     * Wait for all tasks to complete.
+     * Throws the first error if any task failed.
+     */
+    fun awaitAll() {
+        for (task in tasks) {
+            try {
+                task.get()
+            } catch (e: java.util.concurrent.CancellationException) {
+                // Task was cancelled, that's ok
+            } catch (e: java.util.concurrent.ExecutionException) {
+                // Don't throw here, we'll check firstError after
+            }
+        }
+    }
+
+    /**
+     * Wait for all tasks to complete, ignoring all errors.
+     * Used in finally blocks for cleanup.
+     */
+    fun awaitAllQuietly() {
+        for (task in tasks) {
+            try {
+                task.get()
+            } catch (e: Exception) {
+                // Ignore all errors
+            }
+        }
+    }
+
+    /**
+     * Get the first error that occurred, or null if none.
+     */
+    fun getFirstError(): Throwable? = firstError.get()
+
+    /**
+     * Check if the scope is cancelled.
+     */
+    fun isCancelled(): Boolean = cancelled.get() || cancellationToken.isCancelled()
+
+    override fun getDisplayString(): String = "<scope:${tasks.size} tasks>"
 }
 
 /**

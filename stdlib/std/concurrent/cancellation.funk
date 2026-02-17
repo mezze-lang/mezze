@@ -1,0 +1,172 @@
+# std/concurrent/cancellation.funk - Cooperative Cancellation
+#
+# CancellationToken provides a way to signal and check for cancellation
+# in async operations. It supports:
+# - Checking if cancellation has been requested
+# - Registering callbacks to run on cancellation
+# - Creating child tokens that form a cancellation hierarchy
+# - Throwing exceptions at cancellation checkpoints
+#
+# Unlike thread interrupts, CancellationToken is cooperative - the code
+# being cancelled must explicitly check for cancellation and respond.
+#
+# Usage:
+#   use std::concurrent::cancellation::{CancellationToken, token, cancel, is_cancelled}
+#
+#   let ct = token {}
+#   # Pass ct to async operations
+#   # In async code: check is_cancelled, or use check_cancelled
+#   # When done: cancel {token = ct, reason = "User requested"}
+
+# Opaque type wrapping the native CancellationToken
+pub newtype CancellationToken = CancellationToken __NativeCancellationToken
+
+# =============================================================================
+# Creation
+# =============================================================================
+
+# Create a new cancellation token
+#
+# Example:
+#   let ct = token {}
+pub let token: {} -> CancellationToken =
+    {} -> __native_cancellation_token_new {}
+
+# Create a new cancellation token (alias for token)
+pub let new: {} -> CancellationToken = token
+
+# =============================================================================
+# Cancellation
+# =============================================================================
+
+# Cancel the token with a reason
+#
+# This sets the token to cancelled state and invokes all registered callbacks.
+# The reason is available via get_reason.
+#
+# Example:
+#   cancel {token = ct, reason = "Operation timed out"}
+pub let cancel: {token: CancellationToken, reason: String} -> {} =
+    {token, reason} -> __native_cancellation_token_cancel {token = token, reason = reason}
+
+# Cancel with a default reason
+#
+# Example:
+#   cancel_default {token = ct}
+pub let cancel_default: {token: CancellationToken} -> {} =
+    {token} -> cancel {token = token, reason = "Operation cancelled"}
+
+# =============================================================================
+# Checking Status
+# =============================================================================
+
+# Check if the token has been cancelled
+#
+# Example:
+#   if is_cancelled {token = ct} then
+#       cleanup {}
+#   else
+#       continue_work {}
+pub let is_cancelled: {token: CancellationToken} -> Bool =
+    {token} -> __native_cancellation_token_is_cancelled {token = token}
+
+# Get the cancellation reason if cancelled
+#
+# Returns Some with the reason if cancelled, None otherwise.
+#
+# Example:
+#   match get_reason {token = ct} is
+#       Some {val = reason} -> print {s = "Cancelled: " ++ reason},
+#       None -> print {s = "Still running"}
+pub let get_reason: {token: CancellationToken} -> Option String =
+    {token} -> __native_cancellation_token_get_reason {token = token}
+
+# =============================================================================
+# Checkpoints
+# =============================================================================
+
+# Throw an exception if the token is cancelled
+#
+# Use this at cancellation checkpoints in your code. If the token is
+# cancelled, this throws an exception that propagates up the call stack.
+#
+# Example:
+#   let process_items = {items, token} ->
+#       List.map {xs = items, f = {item} -> do
+#           check_cancelled {token = token}  # Checkpoint
+#           process {item = item}
+#       }
+pub let check_cancelled: {token: CancellationToken} -> {} =
+    {token} -> __native_cancellation_token_throw_if_cancelled {token = token}
+
+# Alias for check_cancelled
+pub let throw_if_cancelled: {token: CancellationToken} -> {} = check_cancelled
+
+# =============================================================================
+# Callbacks
+# =============================================================================
+
+# Register a callback to be called when the token is cancelled
+#
+# Returns a unique ID that can be used to unregister the callback.
+# If the token is already cancelled, the callback is invoked immediately.
+#
+# Example:
+#   let id = on_cancel {token = ct, callback = {} -> cleanup_resources {}}
+#   # ... later ...
+#   remove_callback {token = ct, id = id}
+pub let on_cancel: {token: CancellationToken, callback: {} -> {}} -> String =
+    {token, callback} -> __native_cancellation_token_on_cancellation {token = token, callback = callback}
+
+# Alias for on_cancel
+pub let on_cancellation: {token: CancellationToken, callback: {} -> {}} -> String = on_cancel
+
+# Remove a previously registered callback
+#
+# Example:
+#   remove_callback {token = ct, id = callback_id}
+pub let remove_callback: {token: CancellationToken, id: String} -> {} =
+    {token, id} -> __native_cancellation_token_remove_callback {token = token, id = id}
+
+# =============================================================================
+# Child Tokens
+# =============================================================================
+
+# Create a child token that is cancelled when the parent is cancelled
+#
+# The child can also be cancelled independently without affecting the parent.
+# This allows creating a cancellation hierarchy.
+#
+# Example:
+#   let parent = token {}
+#   let child = create_child {token = parent}
+#   # If parent is cancelled, child is also cancelled
+#   # If child is cancelled, parent continues
+pub let create_child: {token: CancellationToken} -> CancellationToken =
+    {token} -> __native_cancellation_token_create_child {token = token}
+
+# =============================================================================
+# Combinators
+# =============================================================================
+
+# Run a computation with cancellation support
+#
+# Returns Some with the result if successful, None if cancelled.
+#
+# Example:
+#   let result = with_cancellation {
+#       token = ct,
+#       f = {} -> expensive_computation {}
+#   }
+#   match result is
+#       Some {val = value} -> use {value = value},
+#       None -> handle_cancellation {}
+pub let with_cancellation: {token: CancellationToken, f: {} -> 'a} -> Option 'a =
+    {token, f} ->
+        if is_cancelled {token = token} then
+            None
+        else
+            Some {val = f {}}
+
+# TODO: cancellable_map requires list pattern matching [head, ...tail] which is not yet supported
+# Will be added once parser supports this pattern

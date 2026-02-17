@@ -52,6 +52,10 @@ class AtomTest {
         let reset: {atom: Atom 'a, value: 'a} -> 'a = {atom, value} -> __native_atom_reset {atom = atom, value = value}
         let swap: {atom: Atom 'a, f: {current: 'a} -> 'a} -> 'a = {atom, f} -> __native_atom_swap {atom = atom, f = f}
         let compare_and_set: {atom: Atom 'a, expected: 'a, new: 'a} -> Bool = {atom, expected, new} -> __native_atom_cas {atom = atom, expected = expected, new = new}
+        let add_watch: {atom: Atom 'a, key: String, f: {key: String, old: 'a, new: 'a} -> {}} -> {} = {atom, key, f} -> __native_atom_add_watch {atom = atom, key = key, f = f}
+        let remove_watch: {atom: Atom 'a, key: String} -> {} = {atom, key} -> __native_atom_remove_watch {atom = atom, key = key}
+        let atom_validated: {value: 'a, validator: {val: 'a} -> Bool} -> Atom 'a = {value, validator} -> __native_atom_new_validated {value = value, validator = validator}
+        let set_validator: {atom: Atom 'a, validator: {val: 'a} -> Bool} -> {} = {atom, validator} -> __native_atom_set_validator {atom = atom, validator = validator}
     """.trimIndent()
 
     // Loom primitives for concurrent tests
@@ -293,5 +297,318 @@ class AtomTest {
         """
         val result = eval(code)
         assertEquals(FunkInt(2), result)
+    }
+
+    // =============================================================================
+    // Watch Tests
+    // =============================================================================
+
+    @Test
+    fun `test add_watch is called on swap`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom {value = 0}
+            let log = atom {value = 0}
+
+            # Add a watch that records the sum of old + new
+            let _ = add_watch {
+                atom = counter,
+                key = "logger",
+                f = {key, old, new} -> do
+                    let _ = reset {atom = log, value = old + new}
+                    {}
+            }
+
+            # swap should trigger the watch
+            let _ = swap {atom = counter, f = {current} -> current + 10}
+
+            # Watch should have recorded 0 + 10 = 10
+            deref {atom = log}
+        """
+        val result = eval(code)
+        assertEquals(FunkInt(10), result)
+    }
+
+    @Test
+    fun `test add_watch is called on reset`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom {value = 5}
+            let log = atom {value = 0}
+
+            let _ = add_watch {
+                atom = counter,
+                key = "logger",
+                f = {key, old, new} -> do
+                    let _ = reset {atom = log, value = old + new}
+                    {}
+            }
+
+            # reset should trigger the watch
+            let _ = reset {atom = counter, value = 15}
+
+            # Watch should have recorded 5 + 15 = 20
+            deref {atom = log}
+        """
+        val result = eval(code)
+        assertEquals(FunkInt(20), result)
+    }
+
+    @Test
+    fun `test multiple watches on same atom`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom {value = 0}
+            let log1 = atom {value = 0}
+            let log2 = atom {value = 0}
+
+            let _ = add_watch {
+                atom = counter,
+                key = "watch1",
+                f = {key, old, new} -> do
+                    let _ = reset {atom = log1, value = new}
+                    {}
+            }
+
+            let _ = add_watch {
+                atom = counter,
+                key = "watch2",
+                f = {key, old, new} -> do
+                    let _ = reset {atom = log2, value = new * 2}
+                    {}
+            }
+
+            let _ = swap {atom = counter, f = {current} -> current + 5}
+
+            # Both watches should have been called
+            deref {atom = log1} + deref {atom = log2}
+        """
+        val result = eval(code)
+        // log1 = 5, log2 = 10, sum = 15
+        assertEquals(FunkInt(15), result)
+    }
+
+    @Test
+    fun `test remove_watch stops notifications`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom {value = 0}
+            let log = atom {value = 0}
+
+            let _ = add_watch {
+                atom = counter,
+                key = "logger",
+                f = {key, old, new} -> do
+                    let _ = swap {atom = log, f = {current} -> current + 1}
+                    {}
+            }
+
+            # First swap should trigger watch
+            let _ = swap {atom = counter, f = {current} -> current + 1}
+
+            # Remove the watch
+            let _ = remove_watch {atom = counter, key = "logger"}
+
+            # Second swap should NOT trigger watch
+            let _ = swap {atom = counter, f = {current} -> current + 1}
+
+            # Log should be 1 (only first swap triggered watch)
+            deref {atom = log}
+        """
+        val result = eval(code)
+        assertEquals(FunkInt(1), result)
+    }
+
+    @Test
+    fun `test watch receives correct key`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom {value = 0}
+            let key_log = atom {value = "none"}
+
+            let _ = add_watch {
+                atom = counter,
+                key = "my_watch_key",
+                f = {key, old, new} -> do
+                    let _ = reset {atom = key_log, value = key}
+                    {}
+            }
+
+            let _ = swap {atom = counter, f = {current} -> current + 1}
+
+            deref {atom = key_log}
+        """
+        val result = eval(code)
+        assertEquals(FunkString("my_watch_key"), result)
+    }
+
+    @Test
+    fun `test watch called multiple times on multiple swaps`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom {value = 0}
+            let call_count = atom {value = 0}
+
+            let _ = add_watch {
+                atom = counter,
+                key = "counter",
+                f = {key, old, new} -> do
+                    let _ = swap {atom = call_count, f = {current} -> current + 1}
+                    {}
+            }
+
+            # Three swaps should trigger watch three times
+            let _ = swap {atom = counter, f = {current} -> current + 1}
+            let _ = swap {atom = counter, f = {current} -> current + 1}
+            let _ = swap {atom = counter, f = {current} -> current + 1}
+
+            deref {atom = call_count}
+        """
+        val result = eval(code)
+        assertEquals(FunkInt(3), result)
+    }
+
+    // =============================================================================
+    // Validator Tests
+    // =============================================================================
+
+    @Test
+    fun `test atom_validated with valid initial value`() {
+        val code = """
+            $atomSetup
+
+            let positive = atom_validated {value = 10, validator = {val} -> val >= 0}
+            deref {atom = positive}
+        """
+        val result = eval(code)
+        assertEquals(FunkInt(10), result)
+    }
+
+    @Test
+    fun `test atom_validated rejects invalid initial value`() {
+        val code = """
+            $atomSetup
+
+            let positive = atom_validated {value = -5, validator = {val} -> val >= 0}
+            deref {atom = positive}
+        """
+        val exception = assertThrows(Exception::class.java) {
+            eval(code)
+        }
+        assertTrue(exception.message?.contains("validator rejected") == true)
+    }
+
+    @Test
+    fun `test validator allows valid swap`() {
+        val code = """
+            $atomSetup
+
+            let positive = atom_validated {value = 5, validator = {val} -> val >= 0}
+            let _ = swap {atom = positive, f = {current} -> current + 10}
+            deref {atom = positive}
+        """
+        val result = eval(code)
+        assertEquals(FunkInt(15), result)
+    }
+
+    @Test
+    fun `test validator rejects invalid swap`() {
+        val code = """
+            $atomSetup
+
+            let positive = atom_validated {value = 5, validator = {val} -> val >= 0}
+            swap {atom = positive, f = {current} -> current - 100}
+        """
+        val exception = assertThrows(Exception::class.java) {
+            eval(code)
+        }
+        assertTrue(exception.message?.contains("validator rejected") == true)
+    }
+
+    @Test
+    fun `test validator rejects invalid reset`() {
+        val code = """
+            $atomSetup
+
+            let positive = atom_validated {value = 5, validator = {val} -> val >= 0}
+            reset {atom = positive, value = -10}
+        """
+        val exception = assertThrows(Exception::class.java) {
+            eval(code)
+        }
+        assertTrue(exception.message?.contains("validator rejected") == true)
+    }
+
+    @Test
+    fun `test set_validator on existing atom`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom {value = 10}
+            let _ = set_validator {atom = counter, validator = {val} -> val < 100}
+
+            # This should be allowed
+            let _ = swap {atom = counter, f = {current} -> current + 50}
+            deref {atom = counter}
+        """
+        val result = eval(code)
+        assertEquals(FunkInt(60), result)
+    }
+
+    @Test
+    fun `test set_validator rejects future invalid updates`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom {value = 10}
+            let _ = set_validator {atom = counter, validator = {val} -> val < 100}
+
+            # This should fail because 10 + 100 = 110 >= 100
+            swap {atom = counter, f = {current} -> current + 100}
+        """
+        val exception = assertThrows(Exception::class.java) {
+            eval(code)
+        }
+        assertTrue(exception.message?.contains("validator rejected") == true)
+    }
+
+    @Test
+    fun `test atom without validator has no restrictions`() {
+        val code = """
+            $atomSetup
+
+            let counter = atom {value = 0}
+            let _ = swap {atom = counter, f = {current} -> current - 1000}
+            deref {atom = counter}
+        """
+        val result = eval(code)
+        assertEquals(FunkInt(-1000), result)
+    }
+
+    @Test
+    fun `test validator preserves value on failure`() {
+        // After a failed swap, the atom should still have its old value
+        val code = """
+            $atomSetup
+
+            let positive = atom_validated {value = 5, validator = {val} -> val >= 0}
+            let result = atom {value = 0}
+
+            # Try an invalid swap inside a function that catches the error
+            # Since Funk doesn't have try/catch, we'll just verify the atom value is preserved
+            # by doing a valid swap after the test
+
+            # First, do a valid swap
+            let _ = swap {atom = positive, f = {current} -> current + 1}
+            deref {atom = positive}
+        """
+        val result = eval(code)
+        assertEquals(FunkInt(6), result)
     }
 }

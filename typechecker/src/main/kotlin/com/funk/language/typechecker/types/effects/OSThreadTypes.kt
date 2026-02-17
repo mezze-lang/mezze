@@ -232,5 +232,42 @@ object OSThreadTypes {
             )),
             FunkType.ArrayType(resultType)
         )
+
+        // === Structured Concurrency Scopes ===
+
+        // Scope type for OS threads
+        val scopeType = FunkType.TypeApplication("Scope", listOf(FunkType.VarType(TypeVar("a"))))
+
+        // __native_os_scoped: {f: {scope: Scope 'a} -> 'a} -> 'a
+        context["__native_os_scoped"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(mapOf("scope" to scopeType)),
+                    FunkType.VarType(TypeVar("a"))
+                )
+            )),
+            FunkType.VarType(TypeVar("a"))
+        )
+
+        // __native_os_scope_spawn: {scope: Scope 'a, f: {} -> 'b} -> Promise 'b
+        val scopeSpawnPromiseType = FunkType.TypeApplication("Promise", listOf(FunkType.VarType(TypeVar("b"))))
+        context["__native_os_scope_spawn"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "scope" to scopeType,
+                "f" to FunkType.FunctionType(
+                    FunkType.RecordType(emptyMap()),
+                    FunkType.VarType(TypeVar("b"))
+                )
+            )),
+            scopeSpawnPromiseType
+        )
+
+        // __native_os_scope_cancel_all: {scope: Scope 'a} -> {}
+        context["__native_os_scope_cancel_all"] = FunkType.FunctionType(
+            FunkType.RecordType(mapOf(
+                "scope" to scopeType
+            )),
+            FunkType.RecordType(emptyMap())
+        )
     }
 }

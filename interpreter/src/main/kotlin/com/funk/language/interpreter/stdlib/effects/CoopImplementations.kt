@@ -47,6 +47,9 @@ object CoopImplementations {
         registerAny(context)
         registerSettle(context)
 
+        // Structured concurrency scopes
+        registerScoped(context)
+
         // Keep legacy functions for compatibility
         registerWrapPromise(context)
         registerUnwrapPromise(context)
@@ -544,6 +547,51 @@ object CoopImplementations {
     }
 
     // =========================================================================
+    // Structured Concurrency Scopes
+    // =========================================================================
+
+    /**
+     * __native_coop_scoped - Run a function with a structured concurrency scope.
+     *
+     * In Coop, there's no actual parallelism, so scoped just runs the function
+     * with a dummy scope that tracks promises for sequential execution.
+     */
+    private fun registerScoped(context: MutableMap<String, FunkValue>) {
+        context["__native_coop_scoped"] = NativeFunkFunction("__native_coop_scoped") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_coop_scoped", "expects FunkRecord")
+
+            val f = record.fields["f"]
+                ?: throw NativeFunctionException("__native_coop_scoped", "expects 'f' field")
+
+            // Create a dummy Coop scope
+            val scope = CoopScope()
+
+            // Call the function with the scope
+            val scopeArg = FunkRecord(mapOf("scope" to scope))
+            val result = when (f) {
+                is FunkTruffleFunction -> {
+                    f.callTarget.call(
+                        scopeArg,
+                        f.closureVariables,
+                        f.lexicalScope,
+                        f.lexicalScopeSlotMap
+                    ) as FunkValue
+                }
+                is NativeFunkFunction -> f.call(listOf(scopeArg))
+                else -> throw NativeFunctionException(
+                    "__native_coop_scoped",
+                    "f must be a function, got: ${f::class.simpleName}"
+                )
+            }
+
+            // In Coop, we don't need to await anything since there's no parallelism
+            // The spawned tasks are already executed when awaited
+            result
+        }
+    }
+
+    // =========================================================================
     // Legacy functions (for compatibility)
     // =========================================================================
 
@@ -605,4 +653,15 @@ object CoopImplementations {
             }
         }
     }
+}
+
+/**
+ * CoopScope - A dummy scope for cooperative async.
+ *
+ * In Coop, there's no actual parallelism, so the scope is just a placeholder.
+ * Tasks "spawned" in the scope are immediately available as promises that
+ * execute when awaited.
+ */
+class CoopScope : FunkValue() {
+    override fun getDisplayString(): String = "<coop-scope>"
 }

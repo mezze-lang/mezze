@@ -49,6 +49,10 @@ object OSThreadImplementations {
         // New error handling operations
         registerAny(context)
         registerSettle(context)
+        // Structured concurrency scopes
+        registerScoped(context)
+        registerScopeSpawn(context)
+        registerScopeCancelAll(context)
     }
 
     /**
@@ -748,4 +752,215 @@ object OSThreadImplementations {
             else -> throw FunkException("Expected function, got: ${fn::class.simpleName}")
         }
     }
+
+    // =========================================================================
+    // Structured Concurrency Scopes
+    // =========================================================================
+
+    /**
+     * __native_os_scoped - Run a function with a structured concurrency scope.
+     * Uses OS platform threads instead of virtual threads.
+     */
+    private fun registerScoped(context: MutableMap<String, FunkValue>) {
+        context["__native_os_scoped"] = NativeFunkFunction("__native_os_scoped") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_os_scoped", "expects FunkRecord")
+
+            val fn = record.fields["f"]
+                ?: throw NativeFunctionException("__native_os_scoped", "expects 'f' field")
+
+            val env = TruffleContextHolder.getEnv()
+                ?: throw NativeFunctionException("__native_os_scoped", "No Truffle environment available")
+
+            // Create the scope (uses OS threads)
+            val scope = OSScope(env)
+
+            try {
+                // Call the function with the scope
+                val result = callFunctionWithScopeArg(fn, scope)
+
+                // Wait for all spawned children to complete
+                scope.awaitAll()
+
+                // Check if any child failed
+                val error = scope.getFirstError()
+                if (error != null) {
+                    throw error
+                }
+
+                result
+            } catch (e: Exception) {
+                // Cancel all children on failure
+                scope.cancelAll()
+                throw e
+            } finally {
+                // Always wait for all children to finish (even if cancelled)
+                scope.awaitAllQuietly()
+            }
+        }
+    }
+
+    /**
+     * __native_os_scope_spawn - Spawn a task within a scope using OS threads.
+     */
+    private fun registerScopeSpawn(context: MutableMap<String, FunkValue>) {
+        context["__native_os_scope_spawn"] = NativeFunkFunction("__native_os_scope_spawn") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_os_scope_spawn", "expects FunkRecord")
+
+            val scopeVal = record.fields["scope"]
+                ?: throw NativeFunctionException("__native_os_scope_spawn", "expects 'scope' field")
+
+            val fn = record.fields["f"]
+                ?: throw NativeFunctionException("__native_os_scope_spawn", "expects 'f' field")
+
+            val scope = scopeVal as? OSScope
+                ?: throw NativeFunctionException("__native_os_scope_spawn", "scope must be an OSScope")
+
+            scope.spawn(fn)
+        }
+    }
+
+    /**
+     * __native_os_scope_cancel_all - Cancel all tasks in a scope.
+     */
+    private fun registerScopeCancelAll(context: MutableMap<String, FunkValue>) {
+        context["__native_os_scope_cancel_all"] = NativeFunkFunction("__native_os_scope_cancel_all") { args ->
+            val record = args.firstOrNull() as? FunkRecord
+                ?: throw NativeFunctionException("__native_os_scope_cancel_all", "expects FunkRecord")
+
+            val scopeVal = record.fields["scope"]
+                ?: throw NativeFunctionException("__native_os_scope_cancel_all", "expects 'scope' field")
+
+            val scope = scopeVal as? OSScope
+                ?: throw NativeFunctionException("__native_os_scope_cancel_all", "scope must be an OSScope")
+
+            scope.cancelAll()
+            FunkUnit
+        }
+    }
+
+    /**
+     * Call a function with a scope argument wrapped in a record {scope = arg}.
+     */
+    private fun callFunctionWithScopeArg(fn: FunkValue, scope: OSScope): FunkValue {
+        val recordArg = FunkRecord(mapOf("scope" to scope))
+        return when (fn) {
+            is FunkTruffleFunction -> {
+                fn.callTarget.call(
+                    recordArg,
+                    fn.closureVariables,
+                    fn.lexicalScope,
+                    fn.lexicalScopeSlotMap
+                ) as FunkValue
+            }
+            is NativeFunkFunction -> fn.call(listOf(recordArg))
+            else -> throw FunkException("Expected function, got: ${fn::class.simpleName}")
+        }
+    }
+}
+
+/**
+ * OSScope - Tracks spawned tasks for structured concurrency using OS threads.
+ */
+class OSScope(
+    private val env: com.oracle.truffle.api.TruffleLanguage.Env
+) : FunkValue() {
+
+    private val tasks = java.util.concurrent.CopyOnWriteArrayList<java.util.concurrent.CompletableFuture<FunkValue>>()
+    private val threads = java.util.concurrent.CopyOnWriteArrayList<Thread>()
+    private val firstError = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+    private val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Spawn a new task within this scope using OS threads.
+     */
+    fun spawn(fn: FunkValue): FunkPromise {
+        val future = java.util.concurrent.CompletableFuture<FunkValue>()
+        tasks.add(future)
+
+        val thread = env.newTruffleThreadBuilder {
+            try {
+                // Check if scope is cancelled before starting
+                if (cancelled.get()) {
+                    future.cancel(true)
+                    return@newTruffleThreadBuilder
+                }
+
+                val result = when (fn) {
+                    is FunkTruffleFunction -> {
+                        val emptyArgs = FunkRecord(emptyMap())
+                        fn.callTarget.call(
+                            emptyArgs,
+                            fn.closureVariables,
+                            fn.lexicalScope,
+                            fn.lexicalScopeSlotMap
+                        ) as FunkValue
+                    }
+                    is NativeFunkFunction -> fn.call(emptyList())
+                    else -> throw FunkException("Expected function, got: ${fn::class.simpleName}")
+                }
+                future.complete(result)
+            } catch (e: Exception) {
+                // Record first error for fail-fast behavior
+                firstError.compareAndSet(null, e)
+                future.completeExceptionally(e)
+                // Cancel siblings on failure (fail-fast)
+                cancelAll()
+            }
+        }.virtual(false).build()  // Use OS platform threads
+
+        threads.add(thread)
+        thread.start()
+
+        return FunkPromise(future)
+    }
+
+    /**
+     * Cancel all tasks in this scope.
+     */
+    fun cancelAll() {
+        cancelled.set(true)
+        for (task in tasks) {
+            task.cancel(true)
+        }
+        for (thread in threads) {
+            thread.interrupt()
+        }
+    }
+
+    /**
+     * Wait for all tasks to complete.
+     */
+    fun awaitAll() {
+        for (task in tasks) {
+            try {
+                task.get()
+            } catch (e: java.util.concurrent.CancellationException) {
+                // Task was cancelled, that's ok
+            } catch (e: java.util.concurrent.ExecutionException) {
+                // Don't throw here, we'll check firstError after
+            }
+        }
+    }
+
+    /**
+     * Wait for all tasks to complete, ignoring all errors.
+     */
+    fun awaitAllQuietly() {
+        for (task in tasks) {
+            try {
+                task.get()
+            } catch (e: Exception) {
+                // Ignore all errors
+            }
+        }
+    }
+
+    /**
+     * Get the first error that occurred, or null if none.
+     */
+    fun getFirstError(): Throwable? = firstError.get()
+
+    override fun getDisplayString(): String = "<os-scope:${tasks.size} tasks>"
 }

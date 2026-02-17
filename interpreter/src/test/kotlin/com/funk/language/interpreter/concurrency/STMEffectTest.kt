@@ -542,4 +542,384 @@ class STMEffectTest {
         val result = eval(code) as FunkInt
         assertEquals(1L, result.value)
     }
+
+    // =============================================================================
+    // TMVar Tests - Blocking Transactional Variable
+    // =============================================================================
+
+    @Test
+    fun `test tmvar creation empty`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar_empty, is_empty_tmvar}
+
+            let mvar = tmvar_empty {}
+            perform OptimisticSTM in do
+                is_empty_tmvar {var = mvar}
+        """
+        val result = eval(code) as FunkBool
+        assertTrue(result.value)
+    }
+
+    @Test
+    fun `test tmvar creation with value`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar, is_empty_tmvar}
+
+            let mvar = tmvar {init = 42}
+            perform OptimisticSTM in do
+                is_empty_tmvar {var = mvar}
+        """
+        val result = eval(code) as FunkBool
+        assertFalse(result.value)
+    }
+
+    @Test
+    fun `test tmvar take from full`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar, take_tmvar, is_empty_tmvar}
+
+            let mvar = tmvar {init = 42}
+            perform OptimisticSTM in do
+                let value = take_tmvar {var = mvar}
+                let empty = is_empty_tmvar {var = mvar}
+                {value = value, empty = empty}
+        """
+        val result = eval(code) as FunkRecord
+        assertEquals(42L, (result.fields["value"] as FunkInt).value)
+        assertTrue((result.fields["empty"] as FunkBool).value)
+    }
+
+    @Test
+    fun `test tmvar put to empty`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar_empty, put_tmvar, read_tmvar}
+
+            let mvar = tmvar_empty {}
+            perform OptimisticSTM in do
+                put_tmvar {var = mvar, val = 99}
+                read_tmvar {var = mvar}
+        """
+        val result = eval(code) as FunkInt
+        assertEquals(99L, result.value)
+    }
+
+    @Test
+    fun `test tmvar read without taking`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar, read_tmvar, is_empty_tmvar}
+
+            let mvar = tmvar {init = 100}
+            perform OptimisticSTM in do
+                let v1 = read_tmvar {var = mvar}
+                let v2 = read_tmvar {var = mvar}
+                let empty = is_empty_tmvar {var = mvar}
+                {v1 = v1, v2 = v2, empty = empty}
+        """
+        val result = eval(code) as FunkRecord
+        assertEquals(100L, (result.fields["v1"] as FunkInt).value)
+        assertEquals(100L, (result.fields["v2"] as FunkInt).value)
+        assertFalse((result.fields["empty"] as FunkBool).value)
+    }
+
+    @Test
+    fun `test tmvar try_take from full`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar, try_take_tmvar}
+
+            let mvar = tmvar {init = 42}
+            perform OptimisticSTM in do
+                try_take_tmvar {var = mvar}
+        """
+        val result = eval(code) as FunkVariant
+        assertEquals("Some", result.constructor)
+        val inner = (result.value as FunkRecord).fields["val"] as FunkInt
+        assertEquals(42L, inner.value)
+    }
+
+    @Test
+    fun `test tmvar try_take from empty`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar_empty, try_take_tmvar}
+
+            let mvar = tmvar_empty {}
+            perform OptimisticSTM in do
+                try_take_tmvar {var = mvar}
+        """
+        val result = eval(code) as FunkVariant
+        assertEquals("None", result.constructor)
+    }
+
+    @Test
+    fun `test tmvar try_put to empty`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar_empty, try_put_tmvar, read_tmvar}
+
+            let mvar = tmvar_empty {}
+            perform OptimisticSTM in do
+                let success = try_put_tmvar {var = mvar, val = 55}
+                let value = read_tmvar {var = mvar}
+                {success = success, value = value}
+        """
+        val result = eval(code) as FunkRecord
+        assertTrue((result.fields["success"] as FunkBool).value)
+        assertEquals(55L, (result.fields["value"] as FunkInt).value)
+    }
+
+    @Test
+    fun `test tmvar try_put to full`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar, try_put_tmvar, read_tmvar}
+
+            let mvar = tmvar {init = 42}
+            perform OptimisticSTM in do
+                let success = try_put_tmvar {var = mvar, val = 99}
+                let value = read_tmvar {var = mvar}
+                {success = success, value = value}
+        """
+        val result = eval(code) as FunkRecord
+        assertFalse((result.fields["success"] as FunkBool).value)
+        assertEquals(42L, (result.fields["value"] as FunkInt).value)
+    }
+
+    @Test
+    fun `test tmvar swap`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tmvar, swap_tmvar, read_tmvar}
+
+            let mvar = tmvar {init = 10}
+            perform OptimisticSTM in do
+                let old = swap_tmvar {var = mvar, val = 20}
+                let new = read_tmvar {var = mvar}
+                {old = old, new = new}
+        """
+        val result = eval(code) as FunkRecord
+        assertEquals(10L, (result.fields["old"] as FunkInt).value)
+        assertEquals(20L, (result.fields["new"] as FunkInt).value)
+    }
+
+    // =============================================================================
+    // TQueue Tests - Unbounded STM Queue
+    // =============================================================================
+
+    @Test
+    fun `test tqueue creation and write read`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, read_tqueue}
+
+            let q = tqueue {}
+            perform OptimisticSTM in do
+                write_tqueue {q = q, val = 42}
+                read_tqueue {q = q}
+        """
+        val result = eval(code) as FunkInt
+        assertEquals(42L, result.value)
+    }
+
+    @Test
+    fun `test tqueue fifo order`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, read_tqueue}
+
+            let q = tqueue {}
+            perform OptimisticSTM in do
+                write_tqueue {q = q, val = 1}
+                write_tqueue {q = q, val = 2}
+                write_tqueue {q = q, val = 3}
+                let first = read_tqueue {q = q}
+                let second = read_tqueue {q = q}
+                let third = read_tqueue {q = q}
+                {first = first, second = second, third = third}
+        """
+        val result = eval(code) as FunkRecord
+        assertEquals(1L, (result.fields["first"] as FunkInt).value)
+        assertEquals(2L, (result.fields["second"] as FunkInt).value)
+        assertEquals(3L, (result.fields["third"] as FunkInt).value)
+    }
+
+    @Test
+    fun `test tqueue is_empty true for new queue`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tqueue, is_empty_tqueue}
+
+            let q = tqueue {}
+            perform OptimisticSTM in do
+                is_empty_tqueue {q = q}
+        """
+        val result = eval(code) as FunkBool
+        assertTrue(result.value)
+    }
+
+    @Test
+    fun `test tqueue is_empty false after write`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, is_empty_tqueue}
+
+            let q = tqueue {}
+            perform OptimisticSTM in do
+                write_tqueue {q = q, val = 1}
+                is_empty_tqueue {q = q}
+        """
+        val result = eval(code) as FunkBool
+        assertFalse(result.value)
+    }
+
+    @Test
+    fun `test tqueue try_read from empty`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tqueue, try_read_tqueue}
+
+            let q = tqueue {}
+            perform OptimisticSTM in do
+                try_read_tqueue {q = q}
+        """
+        val result = eval(code) as FunkVariant
+        assertEquals("None", result.constructor)
+    }
+
+    @Test
+    fun `test tqueue try_read from non-empty`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, try_read_tqueue}
+
+            let q = tqueue {}
+            perform OptimisticSTM in do
+                write_tqueue {q = q, val = 99}
+                try_read_tqueue {q = q}
+        """
+        val result = eval(code) as FunkVariant
+        assertEquals("Some", result.constructor)
+        val inner = (result.value as FunkRecord).fields["val"] as FunkInt
+        assertEquals(99L, inner.value)
+    }
+
+    @Test
+    fun `test tqueue peek`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, peek_tqueue, read_tqueue}
+
+            let q = tqueue {}
+            perform OptimisticSTM in do
+                write_tqueue {q = q, val = 42}
+                let peeked = peek_tqueue {q = q}
+                let read1 = read_tqueue {q = q}
+                {peeked = peeked, read1 = read1}
+        """
+        val result = eval(code) as FunkRecord
+        assertEquals(42L, (result.fields["peeked"] as FunkInt).value)
+        assertEquals(42L, (result.fields["read1"] as FunkInt).value)
+    }
+
+    // =============================================================================
+    // TBQueue Tests - Bounded STM Queue
+    // =============================================================================
+
+    @Test
+    fun `test tbqueue creation and write read`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, read_tbqueue}
+
+            let q = tbqueue {capacity = 10}
+            perform OptimisticSTM in do
+                write_tbqueue {q = q, val = 42}
+                read_tbqueue {q = q}
+        """
+        val result = eval(code) as FunkInt
+        assertEquals(42L, result.value)
+    }
+
+    @Test
+    fun `test tbqueue fifo order`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, read_tbqueue}
+
+            let q = tbqueue {capacity = 10}
+            perform OptimisticSTM in do
+                write_tbqueue {q = q, val = 1}
+                write_tbqueue {q = q, val = 2}
+                write_tbqueue {q = q, val = 3}
+                let first = read_tbqueue {q = q}
+                let second = read_tbqueue {q = q}
+                let third = read_tbqueue {q = q}
+                {first = first, second = second, third = third}
+        """
+        val result = eval(code) as FunkRecord
+        assertEquals(1L, (result.fields["first"] as FunkInt).value)
+        assertEquals(2L, (result.fields["second"] as FunkInt).value)
+        assertEquals(3L, (result.fields["third"] as FunkInt).value)
+    }
+
+    @Test
+    fun `test tbqueue try_write when full`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, try_write_tbqueue, size_tbqueue}
+
+            let q = tbqueue {capacity = 2}
+            perform OptimisticSTM in do
+                write_tbqueue {q = q, val = 1}
+                write_tbqueue {q = q, val = 2}
+                # Queue is now full (size = 2, capacity = 2)
+                let success = try_write_tbqueue {q = q, val = 3}
+                let size = size_tbqueue {q = q}
+                {success = success, size = size}
+        """
+        val result = eval(code) as FunkRecord
+        assertFalse((result.fields["success"] as FunkBool).value)
+        assertEquals(2L, (result.fields["size"] as FunkInt).value)
+    }
+
+    @Test
+    fun `test tbqueue is_full`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, is_full_tbqueue}
+
+            let q = tbqueue {capacity = 2}
+            perform OptimisticSTM in do
+                let before = is_full_tbqueue {q = q}
+                write_tbqueue {q = q, val = 1}
+                let after1 = is_full_tbqueue {q = q}
+                write_tbqueue {q = q, val = 2}
+                let after2 = is_full_tbqueue {q = q}
+                {before = before, after1 = after1, after2 = after2}
+        """
+        val result = eval(code) as FunkRecord
+        assertFalse((result.fields["before"] as FunkBool).value)
+        assertFalse((result.fields["after1"] as FunkBool).value)
+        assertTrue((result.fields["after2"] as FunkBool).value)
+    }
+
+    @Test
+    fun `test tbqueue size_tbqueue`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, read_tbqueue, size_tbqueue}
+
+            let q = tbqueue {capacity = 10}
+            perform OptimisticSTM in do
+                let s0 = size_tbqueue {q = q}
+                write_tbqueue {q = q, val = 1}
+                let s1 = size_tbqueue {q = q}
+                write_tbqueue {q = q, val = 2}
+                let s2 = size_tbqueue {q = q}
+                let _ = read_tbqueue {q = q}
+                let s3 = size_tbqueue {q = q}
+                {s0 = s0, s1 = s1, s2 = s2, s3 = s3}
+        """
+        val result = eval(code) as FunkRecord
+        assertEquals(0L, (result.fields["s0"] as FunkInt).value)
+        assertEquals(1L, (result.fields["s1"] as FunkInt).value)
+        assertEquals(2L, (result.fields["s2"] as FunkInt).value)
+        assertEquals(1L, (result.fields["s3"] as FunkInt).value)
+    }
+
+    @Test
+    fun `test tbqueue capacity_tbqueue`() {
+        val code = """
+            use std::stm::{STM, OptimisticSTM, tbqueue, capacity_tbqueue}
+
+            let q = tbqueue {capacity = 50}
+            perform OptimisticSTM in do
+                capacity_tbqueue {q = q}
+        """
+        val result = eval(code) as FunkInt
+        assertEquals(50L, result.value)
+    }
 }
