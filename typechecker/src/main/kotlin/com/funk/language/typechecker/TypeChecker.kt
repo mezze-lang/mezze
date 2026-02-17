@@ -235,6 +235,7 @@ class TypeChecker(
         val constraintGenerator = ConstraintGenerator.create(
             typeDeclarations = allTypeDeclarations,
             performerToEffect = buildResult.performerToEffect,
+            performerAddedEffects = buildResult.performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
             abilityDeclarations = allAbilityDeclarations,

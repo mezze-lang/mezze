@@ -2397,6 +2397,7 @@ class ExpressionConstraintGenerator {
             listOf(
                 "handlers: ${expr.handlers.map { it.name }}",
                 "performerToEffect map: ${context.performerToEffect}",
+                "performerAddedEffects map: ${context.performerAddedEffects}",
                 "handledEffects: $handledEffects",
                 "exprResult.type: ${exprResult.type}",
                 "exprResult.effects: ${exprResult.effects}"
@@ -2408,11 +2409,20 @@ class ExpressionConstraintGenerator {
 
         // CRITICAL: Also remove handled effects from ConstraintResult.effects
         // This is where effects are tracked during constraint generation
-        val remainingEffects = exprResult.effects - handledEffects
+        //
+        // AND: Add effects that the handlers introduce! When a handler handles one effect,
+        // it may add other effects. For example, FileLogger handles Log but adds FileSystem.
+        // These added effects need to propagate so outer performs can handle them.
+        val addedEffects = handlerEffects.flatMap { (handlerName, _) ->
+            context.performerAddedEffects[handlerName] ?: emptySet()
+        }.toSet()
+
+        val remainingEffects = (exprResult.effects - handledEffects) + addedEffects
 
         DebugLogger.debugSection(Category.ExpressionConstraints, "generatePerform result") {
             listOf(
                 "resultType after removal: $resultType",
+                "addedEffects: $addedEffects",
                 "remainingEffects: $remainingEffects"
             )
         }

@@ -39,6 +39,7 @@ class ConstraintGenerator(
     private val effectGenerator: EffectConstraintGenerator,
     private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
     private val performerToEffect: Map<String, String> = emptyMap(),
+    private val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
     private val abilityNames: Set<String> = emptySet(),
     private val effectNames: Set<String> = emptySet(),
     private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),
@@ -128,7 +129,7 @@ class ConstraintGenerator(
                     // Extend context with pattern bindings for subsequent items
                     // For simple variable bindings: extends with one binding
                     // For destructuring patterns: extends with multiple bindings
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
                     val patternResult = patternGenerator.generate(
                         item.pattern,
                         result.type,
@@ -436,7 +437,7 @@ class ConstraintGenerator(
                 }
                 is TopLevelExpression -> {
                     // Top-level expressions (for REPL)
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
                     results["_toplevel"] = expressionGenerator.generate(
                         item.expression,
                         constraintContext
@@ -495,6 +496,7 @@ class ConstraintGenerator(
             context,
             expectedType = expectedType,
             performerToEffect = performerToEffect,
+            performerAddedEffects = performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
             abilityDeclarations = abilityDeclarations,
@@ -963,6 +965,7 @@ class ConstraintGenerator(
                     bodyContext,
                     expectedType = null,  // Synthesize type, don't check against expected
                     performerToEffect = performerToEffect,
+                    performerAddedEffects = performerAddedEffects,
                     abilityNames = abilityNames,
                     effectNames = effectNames,
                     abilityDeclarations = abilityDeclarations,
@@ -1103,6 +1106,7 @@ class ConstraintGenerator(
                     bodyContext,
                     expectedType = null,
                     performerToEffect = performerToEffect,
+                    performerAddedEffects = performerAddedEffects,
                     abilityNames = abilityNames,
                     effectNames = effectNames,
                     abilityDeclarations = abilityDeclarations,
@@ -1731,6 +1735,7 @@ class ConstraintGenerator(
         fun create(
             typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
             performerToEffect: Map<String, String> = emptyMap(),
+            performerAddedEffects: Map<String, Set<String>> = emptyMap(),
             abilityNames: Set<String> = emptySet(),
             effectNames: Set<String> = emptySet(),
             abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),
@@ -1748,6 +1753,7 @@ class ConstraintGenerator(
                 effectGen,
                 typeDeclarations,
                 performerToEffect,
+                performerAddedEffects,
                 abilityNames,
                 effectNames,
                 abilityDeclarations,

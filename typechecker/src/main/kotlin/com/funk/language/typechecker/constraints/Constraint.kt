@@ -252,6 +252,7 @@ data class ConstraintContext(
     val allowedEffects: Set<String> = emptySet(),
     val currentFunction: String? = null,  // For better error messages
     val performerToEffect: Map<String, String> = emptyMap(),  // Maps handler names to effect names (e.g., Console -> Log)
+    val performerAddedEffects: Map<String, Set<String>> = emptyMap(),  // Maps handler names to effects they ADD (e.g., FileLogger -> {FileSystem})
     val abilityNames: Set<String> = emptySet(),  // Set of all ability names (e.g., Show, Eq)
     val effectNames: Set<String> = emptySet(),  // Set of all effect names (e.g., Log, FileSystem)
     val performContext: PerformExpression? = null,  // Current perform context for effect associated type substitution

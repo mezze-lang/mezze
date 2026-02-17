@@ -904,12 +904,12 @@ internal val FunkParser.performerOperationParser: Parser<PerformerOperation> get
 
                         when (functionType) {
                             is ParseResult.Success -> {
-                                // Extract param and return types from the function type
-                                val (paramType, returnType) = when (val ft = functionType.value) {
-                                    is FunctionTypeAnnotation -> Pair(ft.paramType, ft.returnType)
+                                // Extract param, return types, and effects from the function type
+                                val (paramType, returnType, effects) = when (val ft = functionType.value) {
+                                    is FunctionTypeAnnotation -> Triple(ft.paramType, ft.returnType, ft.effects)
                                     else -> {
                                         // If it's not a function type, treat it as param type with Unit return
-                                        Pair(ft, IdentifierTypeAnnotation("Unit"))
+                                        Triple(ft, IdentifierTypeAnnotation("Unit"), null)
                                     }
                                 }
 
@@ -930,7 +930,7 @@ internal val FunkParser.performerOperationParser: Parser<PerformerOperation> get
                                                     paramType = paramType,
                                                     returnType = returnType,
                                                     implementation = impl.value,
-                                                    effects = null
+                                                    effects = effects  // Now preserving effect annotations
                                                 ),
                                                 impl.remaining
                                             )

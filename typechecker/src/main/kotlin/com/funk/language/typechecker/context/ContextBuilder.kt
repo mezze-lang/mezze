@@ -36,7 +36,9 @@ class ContextBuilder {
         val typeDeclarations: Map<String, TypeDeclaration>,
         val abilityDeclarations: Map<String, AbilityDeclaration>,
         val effectDeclarations: Map<String, EffectDeclaration>,
-        val performerToEffect: Map<String, String>
+        val performerToEffect: Map<String, String>,
+        /** Maps performer names to the set of effects they ADD (not handle) */
+        val performerAddedEffects: Map<String, Set<String>> = emptyMap()
     )
 
     /**
@@ -145,13 +147,40 @@ class ContextBuilder {
             )
         }
 
+        // Build performer added effects mapping
+        // Maps performer name to the set of effects it ADDS (from operation return type signatures)
+        // e.g., FileLogger has operation with return type -> {} <FileSystem>
+        //       so FileLogger adds {"FileSystem"}
+        val performerAddedEffectsMap = (implDecls + importedImpls.values).associate { impl ->
+            impl.performerName to extractAddedEffects(impl)
+        }.filterValues { it.isNotEmpty() }
+
         return BuildResult(
             context = ctx,
             typeDeclarations = typeDecls,
             abilityDeclarations = abilityDecls,
             effectDeclarations = effectDecls,
-            performerToEffect = performerToEffectMap
+            performerToEffect = performerToEffectMap,
+            performerAddedEffects = performerAddedEffectsMap
         )
+    }
+
+    /**
+     * Extract effects that an impl handler ADDS (effects in operation signatures).
+     *
+     * Example: For `impl Log for FileLogger where {
+     *            info: { msg: String } -> {} <FileSystem> = ...
+     *          }`
+     * Returns: setOf("FileSystem")
+     *
+     * These effects come from the PerformerOperation.effects field, which is parsed
+     * from the effect annotation in the operation signature (e.g., <FileSystem>).
+     */
+    private fun extractAddedEffects(impl: ImplDeclaration): Set<String> {
+        return impl.operations.flatMap { op ->
+            // Effects are stored directly in PerformerOperation.effects
+            op.effects?.effects ?: emptyList()
+        }.toSet()
     }
 
     /**

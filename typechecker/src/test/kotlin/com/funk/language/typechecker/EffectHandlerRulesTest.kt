@@ -51,12 +51,6 @@ class EffectHandlerRulesTest {
         assertNotNull(typedProgram, "Handler with exact type match should pass")
     }
 
-    // TODO: This test is disabled because handler-added effects are not tracked during constraint generation.
-    // When FileLogger handles Log and adds FileSystem, the FileSystem effect should propagate to the outer perform.
-    // Currently, the typechecker doesn't track handler-added effects, so the outer perform sees no effects
-    // and rejects the DiskFS handler as unnecessary.
-    // To fix: implement handler-added effect tracking in ExpressionConstraints.generatePerform
-    @org.junit.jupiter.api.Disabled("Handler-added effects not yet tracked")
     @Test
     fun `test handler can add effects that propagate`() {
         val source = """
@@ -119,9 +113,6 @@ class EffectHandlerRulesTest {
         assertNotNull(typedProgram, "Handler implementing all methods should pass")
     }
 
-    // TODO: This test is disabled because handler-added effects are not tracked during constraint generation.
-    // Similar to "test handler can add effects that propagate" - DatabaseAuth adds Database effect when handling Auth.
-    @org.junit.jupiter.api.Disabled("Handler-added effects not yet tracked")
     @Test
     fun `test handler can use other effects`() {
         val source = """
