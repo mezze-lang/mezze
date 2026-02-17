@@ -12,7 +12,7 @@ import kotlin.test.assertEquals
  * Comprehensive tests for NonEmptyList operations
  * Tests the non-empty list that is guaranteed to have at least one element
  */
-@org.junit.jupiter.api.Disabled("NonEmptyList native implementations (__native_nel_*) don't exist yet in interpreter")
+@org.junit.jupiter.api.Disabled("__native_nel_* intrinsics need to be registered in TypeChecker")
 class NonEmptyListTest {
 
     private lateinit var parser: FunkParser

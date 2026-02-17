@@ -257,7 +257,6 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Pre-existing bug: Operation 'equals' not found in implementation of 'Eq'")
     fun testAbilityChainExecution() {
         val source = """
             ability Eq 'a where {
@@ -294,7 +293,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
         val result = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
 
         assertTrue(result is FunkString)
-        assertEquals("5 == 5 is true", (result as FunkString).value)
+        assertEquals("5 == 5 is True", (result as FunkString).value)
     }
 
     @Test

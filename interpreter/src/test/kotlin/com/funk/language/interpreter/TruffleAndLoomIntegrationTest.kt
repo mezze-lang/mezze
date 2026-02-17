@@ -76,7 +76,6 @@ class TruffleAndLoomIntegrationTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
     fun testConcurrentRecursiveFunctions() {
         val code = """
             $setupCode
@@ -130,7 +129,6 @@ class TruffleAndLoomIntegrationTest {
     // =============================================================================
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
     fun testClosureInSpawnedThread() {
         val code = """
             $setupCode
@@ -147,7 +145,6 @@ class TruffleAndLoomIntegrationTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
     fun testNestedClosuresWithConcurrency() {
         val code = """
             $setupCode
@@ -343,7 +340,6 @@ class TruffleAndLoomIntegrationTest {
     // =============================================================================
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load")
     fun testRecordAccessInConcurrency() {
         val code = """
             $setupCode
@@ -538,7 +534,6 @@ class TruffleAndLoomIntegrationTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load")
     fun testConcurrentStateManipulation() {
         // Tests current_thread with concurrent computations.
         // We test the core functionality (spawning threads with closures and state)
@@ -612,7 +607,6 @@ class TruffleAndLoomIntegrationTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load - virtual thread scheduler saturation")
     fun testCurrentThreadInMultipleThreads() {
         // Tests that current_thread returns different thread handles for different threads.
         // Each worker gets its own thread identity, demonstrating proper thread isolation.
@@ -663,7 +657,6 @@ class TruffleAndLoomIntegrationTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("Flaky under heavy test load")
     fun testComplexClosureChainWithConcurrency() {
         val code = """
             $setupCode

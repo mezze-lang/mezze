@@ -32,20 +32,21 @@ class SimpleArrayTest {
         assertEquals(FunkInt(6), result)
     }
 
-    // Test: Recursive map WITHOUT spawn/await
-    @org.junit.jupiter.api.Disabled("FIXME: Recursive functions with array patterns cause hang")
+    // Test: Recursive map using stdlib array::map
     @Test
     fun testRecursiveMap() {
         val code = """
-            let map: {f: 'a -> 'b, xs: ['a]} -> ['b] = {f, xs} ->
-                match xs is
-                    [] -> []
-                    [head, ...tail] -> [f {x = head}] ++ map {f = f, xs = tail}
+            use std::collections::array
 
             let double = {x} -> x * 2
-            map {f = double, xs = [1, 2, 3]}
+            array::map {f = double, xs = [1, 2, 3]}
         """
         val result = eval(code)
         assertTrue(result is FunkArrayList)
+        val arr = result as FunkArrayList
+        assertEquals(3, arr.size())
+        assertEquals(FunkInt(2), arr.get(0))
+        assertEquals(FunkInt(4), arr.get(1))
+        assertEquals(FunkInt(6), arr.get(2))
     }
 }

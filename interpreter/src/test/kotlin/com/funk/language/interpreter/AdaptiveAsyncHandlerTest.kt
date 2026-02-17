@@ -537,7 +537,6 @@ class AdaptiveAsyncHandlerTest {
         assertEquals(100L, stats.loomOperations)
     }
 
-    @org.junit.jupiter.api.Disabled("FIXME: Performance test - timing sensitive, causes flakiness")
     @Test
     fun testConcurrentStatisticsUpdate() {
         val strategy = OperationCountCheckpoint(operationCount = 5)
