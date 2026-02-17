@@ -1,6 +1,8 @@
 package com.funk.language.typechecker
 
 import com.funk.language.ast.*
+import com.funk.language.ast.hashing.FunkHash
+import com.funk.language.ast.hashing.FunkHashBuilder
 import com.funk.language.parser.FunkParser
 import com.funk.language.typechecker.debug.DebugLogger
 import com.funk.language.typechecker.debug.DebugLogger.Category
@@ -13,13 +15,21 @@ import kotlin.io.path.isRegularFile
 
 /**
  * Represents a loaded module with its exports
+ *
+ * @property name The module path (e.g., "std::int")
+ * @property filePath The file system path to the source file
+ * @property program The parsed and type-checked program
+ * @property exports Map of exported items (functions, types, etc.)
+ * @property dependencies List of module dependencies
+ * @property sourceHash Content hash of the source file (for cache invalidation)
  */
 data class Module(
     val name: String,
     val filePath: String,
     val program: Program,
     val exports: Map<String, ExportedItem>,
-    val dependencies: List<ModuleDependency>
+    val dependencies: List<ModuleDependency>,
+    val sourceHash: String? = null
 )
 
 /**
@@ -182,6 +192,32 @@ class ModuleResolver(
         }
 
         /**
+         * Check if a cached module is stale (source file has changed).
+         *
+         * @param modulePath The module path to check
+         * @param sourceContent The current source content to compare against
+         * @return true if the module needs to be reloaded, false if cache is valid
+         */
+        @JvmStatic
+        fun isModuleStale(modulePath: String, sourceContent: String): Boolean {
+            val cachedModule = getFromCache(modulePath) ?: return true  // Not cached = stale
+            val cachedHash = cachedModule.sourceHash ?: return true     // No hash = stale
+            val currentHash = FunkHashBuilder().append(sourceContent).build().toString()
+            return cachedHash != currentHash
+        }
+
+        /**
+         * Get the source hash for a cached module.
+         *
+         * @param modulePath The module path
+         * @return The source hash, or null if not cached or no hash available
+         */
+        @JvmStatic
+        fun getModuleSourceHash(modulePath: String): String? {
+            return getFromCache(modulePath)?.sourceHash
+        }
+
+        /**
          * Factory method to create a new ModuleResolver instance.
          */
         @JvmStatic
@@ -250,22 +286,11 @@ class ModuleResolver(
         if (modulePath in coreTypeModules) {
             return createEmptyModule(modulePath, "Core module skipped - types are now built-in")
         }
-        
-        // Check cache first (thread-safe) - fast path
-        getFromCache(modulePath)?.let {
-            DebugLogger.debug(Category.ModuleResolver) { "Found cached module: $modulePath" }
-            return it
-        }
 
         // Use per-module lock to prevent duplicate loading of the same module
         // This implements proper double-checked locking
         val moduleLock = getModuleLock(modulePath)
         synchronized(moduleLock) {
-            // Double-check: another thread may have loaded it while we waited for the lock
-            getFromCache(modulePath)?.let {
-                return it
-            }
-
             // Check for deprecated core modules and provide migration warnings
             checkForDeprecatedCoreModule(modulePath)
 
@@ -278,13 +303,32 @@ class ModuleResolver(
             val filePath = resolveModuleFile(modulePath)
                 ?: throw ModuleError.ModuleNotFound(modulePath, getSearchPaths(modulePath))
 
+            // Read source and compute content hash BEFORE checking cache
+            // This enables content-based cache validation
+            val source = Files.readString(filePath)
+            val sourceHash = FunkHashBuilder().append(source).build().toString()
+
+            // Check cache with content-based validation
+            getFromCache(modulePath)?.let { cachedModule ->
+                if (cachedModule.sourceHash == sourceHash) {
+                    DebugLogger.debug(Category.ModuleResolver) {
+                        "Found cached module with matching content hash: $modulePath"
+                    }
+                    return cachedModule
+                } else {
+                    DebugLogger.debug(Category.ModuleResolver) {
+                        "Cached module has stale content hash, reloading: $modulePath"
+                    }
+                    // Continue to reload the module
+                }
+            }
+
             // Mark as loading
             loadingStack.add(modulePath)
 
             try {
                 // Parse the module with file name for better error messages
                 // Create fresh parser for thread safety
-                val source = Files.readString(filePath)
                 val program = FunkParser().parse(source, file = filePath.toString())
 
                 // Don't type-check during module resolution to avoid circular dependencies
@@ -294,13 +338,14 @@ class ModuleResolver(
                 // Extract dependencies first
                 val dependencies = extractDependencies(typedProgram)
 
-                // Create module representation
+                // Create module representation with source hash for cache validation
                 val module = Module(
                     name = modulePath,
                     filePath = filePath.toString(),
                     program = typedProgram,
                     exports = extractExports(typedProgram),
-                    dependencies = dependencies
+                    dependencies = dependencies,
+                    sourceHash = sourceHash
                 )
 
                 // Cache the module (thread-safe)
@@ -328,7 +373,8 @@ class ModuleResolver(
             filePath = "built-in",
             program = Program(emptyList()),
             exports = emptyMap(),
-            dependencies = emptyList()
+            dependencies = emptyList(),
+            sourceHash = null  // Built-in modules have no source hash
         )
     }
     
@@ -720,12 +766,15 @@ class ModuleResolver(
             )
         } else {
             // Module not in cache yet, create it
+            // Note: sourceHash will be null here since we don't have access to the source
+            // This path is typically used when type-checking imported modules
             Module(
                 name = modulePath,
                 filePath = "", // Will be updated if needed
                 program = typedProgram,
                 exports = extractExports(typedProgram, typeContext),
-                dependencies = emptyList()
+                dependencies = emptyList(),
+                sourceHash = null
             )
         }
         putInCache(modulePath, updatedModule)

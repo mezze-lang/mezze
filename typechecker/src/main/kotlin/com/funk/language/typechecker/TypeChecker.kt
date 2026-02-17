@@ -20,6 +20,7 @@ import com.funk.language.typechecker.validation.TypeValidator
 import com.funk.language.typechecker.validation.ValidationResult
 import com.funk.language.typechecker.printing.ErrorFormatter
 import com.funk.language.typechecker.continuation.ContinuationTransformer
+import com.funk.language.typechecker.hashing.ContentHashComputer
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -182,12 +183,17 @@ class TypeChecker(
             parentContext
         }
 
+        // PHASE 0.5: Compute Content Hashes for Declarations
+        // Compute hashes BEFORE building context so AbilityImplInfo.contentHash is populated.
+        // This allows SubstitutionApplier to use content hashes directly instead of mangled lookup keys.
+        val hashedProgram = computeDeclarationHashes(program)
+
         // PHASE 1: Build Context
         // Pass imported impls and abilities to ContextBuilder
         // so performerToEffect map includes them and ability impl validation works with qualified names
         val contextBuilder = ContextBuilder()
         val buildResult = contextBuilder.build(
-            program = program,
+            program = hashedProgram,
             parentContext = enhancedContext,
             importedImpls = importContext?.importedImpls ?: emptyMap(),
             importedAbilities = importContext?.importedAbilities ?: emptyMap()
@@ -195,7 +201,7 @@ class TypeChecker(
         val context = buildResult.context
 
         // Build type aliases for pretty printing (include imported types)
-        cachedTypeAliases = buildTypeAliases(program, contextBuilder, importContext)
+        cachedTypeAliases = buildTypeAliases(hashedProgram, contextBuilder, importContext)
 
         // PHASE 2: Generate Constraints
         // Include both local ability declarations AND imported ability declarations
@@ -234,7 +240,7 @@ class TypeChecker(
             abilityDeclarations = allAbilityDeclarations,
             effectDeclarations = allEffectDeclarations
         )
-        val programConstraintResult = constraintGenerator.generateProgram(program, context)
+        val programConstraintResult = constraintGenerator.generateProgram(hashedProgram, context)
         val constraintResults = programConstraintResult.constraintResults
         val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
         val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
@@ -337,7 +343,15 @@ class TypeChecker(
                 val warnings = solveResult.warnings.toMutableList()
 
                 // Retrieve generated codec implementations (auto-derived Encode/Decode)
-                val generatedCodecImpls = solver.getGeneratedCodecImpls()
+                // Compute content hashes for these generated impls immediately
+                val generatedCodecImpls = solver.getGeneratedCodecImpls().mapValues { (_, impl) ->
+                    if (impl.contentHash == null) {
+                        val hash = com.funk.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(impl)
+                        impl.copy(contentHash = hash.toString())
+                    } else {
+                        impl
+                    }
+                }
 
                 val resolvedAbilities = solveResult.resolvedAbilityConstraints
                 // CRITICAL: Merge per-binding mustBeOpenRowVars with global solver's results
@@ -399,11 +413,17 @@ class TypeChecker(
                 // Add generated codec implementations to the program BEFORE applying substitution
                 // This ensures they go through the same processing as user-defined impls
                 val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
-                    Program(items = generatedCodecImpls.values.toList() + program.items)
+                    Program(items = generatedCodecImpls.values.toList() + hashedProgram.items)
                 } else {
-                    program
+                    hashedProgram
                 }
                 val typedProgram = applier.applyToProgram(programWithCodecImpls)
+
+                // Note: Content hashes were computed in Phase 0.5 for user-written declarations.
+                // Generated codec impls get their hashes computed inline in registerGeneratedCodecImpl.
+                // SubstitutionApplier now uses implementationHash directly, so we don't need
+                // updateResolvedAbilitiesWithHashes anymore.
+                val finalProgram = typedProgram
 
                 // PHASE 5: Validate Types (moved after substitution so we can check inferred types)
                 val validator = TypeValidator(context, allTypeDeclarations)
@@ -428,7 +448,7 @@ class TypeChecker(
                 }
 
                 // Then, validate the typed program (patterns, abilities, effects, etc.)
-                val validationResult = validator.validate(typedProgram, globallyResolvedConstraintResults, substitution)
+                val validationResult = validator.validate(finalProgram, globallyResolvedConstraintResults, substitution)
 
                 when (validationResult) {
                     is ValidationResult.Failure -> {
@@ -448,7 +468,7 @@ class TypeChecker(
                         // PHASE 5.5: Transform continuations
                         // Convert perform block bodies from DoExpression to StateMachineExpression
                         // This is required for continuation-based effects like Choice with AllPaths
-                        val programWithContinuations = transformContinuations(typedProgram)
+                        val programWithContinuations = transformContinuations(finalProgram)
 
                         // PHASE 6: Monomorphization
                         val monomorphizationEngine = MonomorphizationEngine.create()
@@ -677,12 +697,79 @@ class TypeChecker(
             val implInfo = TypingContext.AbilityImplInfo(
                 abilityName = implDecl.abilityName,
                 targetTypes = implDecl.targetTypes.map { typeAnnotationToString(it) },
-                sourceModule = null  // TODO: Track source module
+                sourceModule = null,  // TODO: Track source module
+                contentHash = implDecl.contentHash  // Propagate content hash from type-checked module
             )
             context = context.extendWithImpl(implKey, implInfo)
         }
 
         return context
+    }
+
+    /**
+     * Compute content hashes for all declarations in a program.
+     * This is done early (Phase 0.5) so that AbilityImplInfo.contentHash
+     * is populated when ContextBuilder processes the declarations.
+     *
+     * Note: This only computes hashes for declarations that exist in the source.
+     * Generated codec impls get their hashes computed inline in SubstitutionApplier.
+     */
+    private fun computeDeclarationHashes(program: Program): Program {
+        val updatedItems = program.items.map { item ->
+            when (item) {
+                is ImplAbilityDeclaration -> {
+                    if (item.contentHash == null) {
+                        val hash = com.funk.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(item)
+                        item.copy(contentHash = hash.toString())
+                    } else {
+                        item  // Already has hash (e.g., from import)
+                    }
+                }
+                is ImplDeclaration -> {
+                    if (item.contentHash == null) {
+                        val hash = com.funk.language.ast.hashing.ASTHasher.hashImplDeclaration(item)
+                        item.copy(contentHash = hash.toString())
+                    } else {
+                        item
+                    }
+                }
+                is LetBinding -> {
+                    if (item.contentHash == null) {
+                        val hash = com.funk.language.ast.hashing.ASTHasher.hashLetBinding(item)
+                        item.copy(contentHash = hash.toString())
+                    } else {
+                        item
+                    }
+                }
+                is TypeDeclaration -> {
+                    if (item.contentHash == null) {
+                        val hash = com.funk.language.ast.hashing.ASTHasher.hashTypeDeclaration(item)
+                        item.copy(contentHash = hash.toString())
+                    } else {
+                        item
+                    }
+                }
+                is EffectDeclaration -> {
+                    if (item.contentHash == null) {
+                        val hash = com.funk.language.ast.hashing.ASTHasher.hashEffectDeclaration(item)
+                        item.copy(contentHash = hash.toString())
+                    } else {
+                        item
+                    }
+                }
+                is AbilityDeclaration -> {
+                    if (item.contentHash == null) {
+                        val hash = com.funk.language.ast.hashing.ASTHasher.hashAbilityDeclaration(item)
+                        item.copy(contentHash = hash.toString())
+                    } else {
+                        item
+                    }
+                }
+                // Items without content hash
+                is TopLevelExpression, is UseDeclaration, is PubUseDeclaration -> item
+            }
+        }
+        return Program(items = updatedItems)
     }
 
     /**

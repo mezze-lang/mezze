@@ -42,7 +42,7 @@ class ConstraintSolver(
      *
      * When we see an Encode or Decode ability constraint for a serializable type
      * that doesn't have an explicit impl, we generate one and store it here.
-     * Key format: "${abilityName}_${formatType}_${dataType}"
+     * Key: Content hash of the generated ImplAbilityDeclaration
      */
     private val generatedCodecImpls = mutableMapOf<String, ImplAbilityDeclaration>()
     /**
@@ -933,12 +933,12 @@ class ConstraintSolver(
             }
         }
 
-        // Build implementation key: "NumAdd_Int", "Convert_Int_String", etc.
+        // Search for implementation by ability name and matching types
+        // Context is now keyed by content hash, so we search by ability name and match types
         val typeNames = typeArgs.map { getTypeName(it) }
-        val implKey = "${abilityName}_${typeNames.joinToString("_")}"
-
-        // Check if implementation exists in context
-        val hasImpl = context.getAbilityImpl(implKey) != null
+        val hasImpl = context.getAbilityImpls(abilityName).any { implInfo ->
+            implInfo.targetTypes == typeNames
+        }
 
         return hasImpl
     }
@@ -972,16 +972,6 @@ class ConstraintSolver(
             return false
         }
 
-        // Build the impl key
-        val formatName = getTypeName(formatType)
-        val dataName = getTypeName(dataType)
-        val implKey = "${abilityName}_${formatName}_${dataName}"
-
-        // Check if we've already generated this impl
-        if (generatedCodecImpls.containsKey(implKey)) {
-            return true
-        }
-
         // Generate the implementation based on ability type
         val generatedImpl = when (abilityName) {
             "Encode" -> codecGenerator.generateEncodeImpl(formatType, dataType)
@@ -991,8 +981,18 @@ class ConstraintSolver(
             else -> return false
         }
 
-        // Store the generated impl
-        generatedCodecImpls[implKey] = generatedImpl
+        // Compute content hash and use it as the key
+        val hash = com.funk.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(generatedImpl)
+        val implWithHash = generatedImpl.copy(contentHash = hash.toString())
+        val implKey = hash.toString()
+
+        // Check if we've already generated this impl (same content = same hash)
+        if (generatedCodecImpls.containsKey(implKey)) {
+            return true
+        }
+
+        // Store the generated impl keyed by content hash
+        generatedCodecImpls[implKey] = implWithHash
         return true
     }
 
@@ -1254,6 +1254,35 @@ class ConstraintSolver(
     }
 
     /**
+     * Get the type name from a TypeAnnotation for ability implementation lookup.
+     * This converts AST type annotations to string names for comparison.
+     */
+    private fun typeAnnotationToName(annotation: TypeAnnotation): String {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> annotation.name
+            is TypeApplicationAnnotation -> {
+                val args = annotation.args.map { typeAnnotationToName(it) }
+                if (args.isEmpty()) annotation.constructor else "${annotation.constructor}_${args.joinToString("_")}"
+            }
+            is FunctionTypeAnnotation -> "Function"
+            is RecordTypeAnnotation -> {
+                val fieldNames = annotation.entries.map { it.name }.sorted().joinToString("_")
+                if (fieldNames.isEmpty()) "Record" else "Record_$fieldNames"
+            }
+            is VariantTypeAnnotation -> {
+                val constructorNames = annotation.constructors.map { it.name }.sorted().joinToString("_")
+                if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
+            }
+            is ArrayTypeAnnotation -> "Array_${typeAnnotationToName(annotation.elementType)}"
+            is EffectRowAnnotation -> "EffectRow"
+            is QualifiedTypeAnnotation -> {
+                val args = annotation.args.map { typeAnnotationToName(it) }
+                if (args.isEmpty()) annotation.typeName else "${annotation.typeName}_${args.joinToString("_")}"
+            }
+        }
+    }
+
+    /**
      * Try bidirectional inference for ability constraints with type variables.
      *
      * Example: NumAdd 'b Int => look for implementations NumAdd T Int
@@ -1284,14 +1313,18 @@ class ConstraintSolver(
                 val formatTypeName = getTypeName(formatType)
 
                 // Look for generated Decode impls for this format
-                val matchingImpls = generatedCodecImpls.filter { (key, _) ->
-                    key.startsWith("Decode_${formatTypeName}_")
+                // Filter by ability name and format type (first target type)
+                val matchingImpls = generatedCodecImpls.values.filter { impl ->
+                    impl.abilityName == "Decode" &&
+                    impl.targetTypes.size >= 2 &&
+                    typeAnnotationToName(impl.targetTypes[0]) == formatTypeName
                 }
 
                 if (matchingImpls.size == 1) {
                     // Exactly one impl - we can infer the data type!
-                    val (implKey, impl) = matchingImpls.entries.first()
-                    val dataTypeName = implKey.removePrefix("Decode_${formatTypeName}_")
+                    val impl = matchingImpls.first()
+                    // Extract the data type from the impl's target types
+                    val dataTypeName = typeAnnotationToName(impl.targetTypes[1])
                     val inferredType = parseTypeName(dataTypeName)
 
                     if (inferredType != null) {

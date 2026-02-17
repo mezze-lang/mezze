@@ -1,8 +1,10 @@
 package com.funk.language.typechecker.application
 
 import com.funk.language.ast.*
+import com.funk.language.ast.hashing.ASTHasher
 import com.funk.language.typechecker.abilities.BuiltInAbilities
 import com.funk.language.typechecker.codec.CodecGenerator
+import com.funk.language.typechecker.hashing.ContentHashComputer
 import com.funk.language.typechecker.solving.Substitution
 
 /**
@@ -68,6 +70,42 @@ class SubstitutionApplier(
 
     // Track generated codec implementations that need to be added to the program
     private val generatedCodecImpls = mutableListOf<ImplAbilityDeclaration>()
+
+    // Mutable version of abilityImpls that includes generated codec impls
+    // This allows nested Encode/Decode calls to find impls generated in the same pass
+    private val mutableAbilityImpls = abilityImpls.toMutableMap()
+
+    /**
+     * Register a generated codec impl so it's available for nested calls.
+     * This is called when we generate an Encode/Decode impl, so subsequent
+     * Encode.encode/Decode.decode calls can resolve to it.
+     *
+     * IMPORTANT: We compute the content hash IMMEDIATELY so that nested calls
+     * can reference this impl by hash. This is critical for content-addressable
+     * semantics - we don't want to use mangled names.
+     */
+    private fun registerGeneratedCodecImpl(impl: ImplAbilityDeclaration): ImplAbilityDeclaration {
+        // Compute content hash immediately
+        val hash = ASTHasher.hashImplAbilityDeclaration(impl)
+        val implWithHash = impl.copy(contentHash = hash.toString())
+
+        generatedCodecImpls.add(implWithHash)
+
+        // Also add to mutableAbilityImpls so nested calls can find it
+        // Use content hash as the key (same key format as TypingContext)
+        val abilityName = impl.abilityName
+        val targetTypes = impl.targetTypes.map { com.funk.language.typechecker.hashing.ContentHashComputer.typeAnnotationToString(it) }
+        val contentHashKey = hash.toString()
+
+        mutableAbilityImpls[contentHashKey] = com.funk.language.typechecker.context.TypingContext.AbilityImplInfo(
+            abilityName = abilityName,
+            targetTypes = targetTypes,
+            sourceModule = null,
+            contentHash = contentHashKey
+        )
+
+        return implWithHash
+    }
 
     /**
      * Resolve what an uppercase identifier represents.
@@ -142,7 +180,10 @@ class SubstitutionApplier(
 
         // Add any auto-generated codec implementations to the BEGINNING of the program
         // This ensures they're registered BEFORE any code that uses them
-        val allItems = generatedCodecImpls + updatedItems
+        // IMPORTANT: Process generated impls through applyToImplAbilityDeclaration so their
+        // internal expressions get ability resolution (resolvedAbilities populated)
+        val processedCodecImpls = generatedCodecImpls.map { applyToImplAbilityDeclaration(it) }
+        val allItems = processedCodecImpls + updatedItems
         return Program(items = allItems)
     }
 
@@ -991,6 +1032,7 @@ class SubstitutionApplier(
         // This matches OldTypeChecker.kt:16483-16581 (resolveAbilitiesForFunctionCall)
         var resolvedAbilities = resolveAbilitiesForCall(updatedFunction)
 
+        // DEBUG
         // Also check if this is a direct ability method call (e.g., Show.show {val = 42})
         // In this case, we need to resolve based on the argument types, not the function type constraints
         if (resolvedAbilities.isEmpty() && updatedFunction is MemberAccess) {
@@ -1033,9 +1075,13 @@ class SubstitutionApplier(
 
         // Check if this is actually an ability (not a regular variable)
         // Look for implementations of this ability, or check if it's auto-derivable
-        val hasImpl = abilityImpls.values.any { it.abilityName == abilityName }
-        val isAutoDerivable = (abilityName == "Encode" || abilityName == "Decode")
-        if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName) && !isAutoDerivable) {
+        val hasImpl = mutableAbilityImpls.values.any { it.abilityName == abilityName }
+        val isCodecAbility = abilityName in setOf(
+            "Encode", "Decode",
+            "EncodeFormat", "DecodeFormat",
+            "StreamEncodeFormat", "StreamDecodeFormat"
+        )
+        if (!hasImpl && !BuiltinAbilities.isBuiltin(abilityName) && !isCodecAbility) {
             return resolvedAbilities
         }
 
@@ -1043,28 +1089,55 @@ class SubstitutionApplier(
         val argType = arguments.inferredType
         if (argType !is FunkType.RecordType) return resolvedAbilities
 
-        // For single-parameter abilities like Show, use the first field's type
-        // For multi-parameter abilities like Convert, we'd need more sophisticated matching
-        val targetTypes = argType.fields.values.map { substitution.apply(it) }
-        if (targetTypes.isEmpty()) return resolvedAbilities
+        // For Encode/Decode abilities, the type we need is in the "val" field specifically
+        // For other abilities like Show, use the first field's type
+        val primaryType = if (abilityName == "Encode" || abilityName == "Decode") {
+            // Encode/Decode use {val: 'a, config: 'cfg} where 'a is the data type
+            val valFieldType = argType.fields["val"]
+            if (valFieldType != null) {
+                substitution.apply(valFieldType)
+            } else {
+                // Fall back to first field if "val" not found
+                argType.fields.values.firstOrNull()?.let { substitution.apply(it) }
+            }
+        } else {
+            // For other abilities, use the first field's type
+            argType.fields.values.firstOrNull()?.let { substitution.apply(it) }
+        }
 
-        // Try to find an explicit implementation
-        val primaryType = targetTypes.first()
+        if (primaryType == null) return resolvedAbilities
 
-        // First try exact match (for single-parameter abilities)
-        var impl = findAbilityImplementation(abilityName, listOf(primaryType))
+        // For Encode/Decode, we need to search with both format type AND data type
+        // The format type comes from the EncodeFormat/DecodeFormat impl in scope
+        var impl: com.funk.language.typechecker.context.TypingContext.AbilityImplInfo? = null
 
-        // If no exact match, try partial match for multi-parameter abilities
-        // e.g., for Convert 'a 'b, find impl where first type matches
-        if (impl == null) {
-            impl = findAbilityImplementationByFirstType(abilityName, primaryType)
+        if (abilityName == "Encode" || abilityName == "Decode") {
+            // Find the format type from EncodeFormat/DecodeFormat impl
+            val formatAbility = if (abilityName == "Encode") "EncodeFormat" else "DecodeFormat"
+            val formatImpl = mutableAbilityImpls.values.find { it.abilityName == formatAbility }
+            val formatTypeName = formatImpl?.targetTypes?.firstOrNull()
+
+            if (formatTypeName != null) {
+                val formatType = FunkType.TypeApplication(formatTypeName, emptyList())
+                // Search with both format type and data type
+                impl = findAbilityImplementation(abilityName, listOf(formatType, primaryType))
+            }
+        } else {
+            // First try exact match (for single-parameter abilities)
+            impl = findAbilityImplementation(abilityName, listOf(primaryType))
+
+            // If no exact match, try partial match for multi-parameter abilities
+            // e.g., for Convert 'a 'b, find impl where first type matches
+            if (impl == null) {
+                impl = findAbilityImplementationByFirstType(abilityName, primaryType)
+            }
         }
 
         // If no match found by argument types, try to find the only implementation
         // This handles format-parameterized abilities like EncodeFormat 'repr
         // where the type parameter doesn't come from the arguments
         if (impl == null) {
-            val allImpls = abilityImpls.values.filter { it.abilityName == abilityName }
+            val allImpls = mutableAbilityImpls.values.filter { it.abilityName == abilityName }
             if (allImpls.size == 1) {
                 impl = allImpls.first()
             }
@@ -1085,30 +1158,31 @@ class SubstitutionApplier(
                 }
             }
             val key = "${abilityName}<${implTypeArgs.joinToString(", ") { prettyPrintType(it) }}>"
-            val implRef = "${abilityName}\$${impl.targetTypes.joinToString("\$")}"
+            // Content hash is now computed early (Phase 0.5) so it's available here
+            val contentHash = impl.contentHash
+                ?: throw IllegalStateException("Content hash not computed for impl: ${impl.abilityName} ${impl.targetTypes}")
             resolvedAbilities[key] = ResolvedAbility(
                 abilityName = abilityName,
                 typeArgs = implTypeArgs,
-                implementationRef = implRef,
-                isBuiltin = false
+                isBuiltin = false,
+                implementationHash = contentHash
             )
         } else if (BuiltinAbilities.isBuiltin(abilityName)) {
             // Check for built-in ability with automatic implementation
             if (BuiltinAbilities.typeHasAutomaticImplementation(primaryType, abilityName)) {
                 val key = "${abilityName}<${prettyPrintType(primaryType)}>"
-                val implRef = "builtin::${abilityName}::${getTypeNameForAbility(primaryType)}"
                 resolvedAbilities[key] = ResolvedAbility(
                     abilityName = abilityName,
                     typeArgs = listOf(primaryType),
-                    implementationRef = implRef,
                     isBuiltin = true
+                    // No implementationHash for builtins - they're handled specially by interpreter
                 )
             }
         } else if (abilityName == "Encode" || abilityName == "Decode") {
             // Auto-derive Encode/Decode for serializable types
             // First, find the format type from the EncodeFormat/DecodeFormat impl in scope
             val formatAbility = if (abilityName == "Encode") "EncodeFormat" else "DecodeFormat"
-            val formatImpl = abilityImpls.values.find { it.abilityName == formatAbility }
+            val formatImpl = mutableAbilityImpls.values.find { it.abilityName == formatAbility }
 
             // For Encode: primaryType is the data type from the argument (correct)
             // For Decode: primaryType is the format type from the argument (wrong!)
@@ -1181,7 +1255,7 @@ class SubstitutionApplier(
                     } else {
                         codecGenerator.generateDecodeImpl(formatType, nestedType)
                     }
-                    generatedCodecImpls.add(nestedImpl)
+                    registerGeneratedCodecImpl(nestedImpl)
                 }
 
                 // Generate the main implementation using the resolved (structural) type
@@ -1192,18 +1266,17 @@ class SubstitutionApplier(
                 }
 
                 // Track the generated impl for later registration
-                generatedCodecImpls.add(generatedImpl)
+                // The returned impl has its content hash computed
+                val implWithHash = registerGeneratedCodecImpl(generatedImpl)
 
-                // Create the resolved ability reference
-                // Use a stable name that matches what ASTToTruffleConverter will generate
-                val implRef = getCodecImplName(abilityName, formatTypeName, generatedImpl.targetTypes.drop(1).firstOrNull())
+                // Create the resolved ability reference using content hash
                 val key = "${abilityName}<${formatTypeName}, ${prettyPrintType(primaryType)}>"
 
                 resolvedAbilities[key] = ResolvedAbility(
                     abilityName = abilityName,
                     typeArgs = listOf(formatType, resolvedPrimaryType),
-                    implementationRef = implRef,
-                    isBuiltin = false
+                    isBuiltin = false,
+                    implementationHash = implWithHash.contentHash
                 )
             }
         }
@@ -1235,24 +1308,25 @@ class SubstitutionApplier(
             if (impl != null) {
                 // Found explicit implementation
                 val key = "${abilityName}<${typeArgs.joinToString(", ") { prettyPrintType(it) }}>"
-                val implRef = "${abilityName}\$${impl.targetTypes.joinToString("\$")}"
+                // Content hash is now computed early (Phase 0.5) so it's available here
+                val contentHash = impl.contentHash
+                    ?: throw IllegalStateException("Content hash not computed for impl: ${impl.abilityName} ${impl.targetTypes}")
                 resolvedAbilities[key] = ResolvedAbility(
                     abilityName = abilityName,
                     typeArgs = typeArgs,
-                    implementationRef = implRef,
-                    isBuiltin = false
+                    isBuiltin = false,
+                    implementationHash = contentHash
                 )
             } else if (BuiltinAbilities.isBuiltin(abilityName) && typeArgs.size == 1) {
                 // Check if it's a built-in ability with automatic implementation
                 val targetType = typeArgs[0]
                 if (BuiltinAbilities.typeHasAutomaticImplementation(targetType, abilityName)) {
                     val key = "${abilityName}<${prettyPrintType(targetType)}>"
-                    val implRef = "builtin::${abilityName}::${getTypeNameForAbility(targetType)}"
                     resolvedAbilities[key] = ResolvedAbility(
                         abilityName = abilityName,
                         typeArgs = typeArgs,
-                        implementationRef = implRef,
                         isBuiltin = true
+                        // No implementationHash for builtins
                     )
                 }
             }
@@ -1269,7 +1343,7 @@ class SubstitutionApplier(
         typeArgs: List<FunkType>
     ): com.funk.language.typechecker.context.TypingContext.AbilityImplInfo? {
         // Look for implementations of this ability
-        for ((_, implInfo) in abilityImpls) {
+        for ((_, implInfo) in mutableAbilityImpls) {
             if (implInfo.abilityName != abilityName) continue
             if (implInfo.targetTypes.size != typeArgs.size) continue
 
@@ -1298,7 +1372,7 @@ class SubstitutionApplier(
         firstType: FunkType
     ): com.funk.language.typechecker.context.TypingContext.AbilityImplInfo? {
         val firstTypeName = getTypeNameForAbility(firstType)
-        val candidates = abilityImpls.values.filter { implInfo ->
+        val candidates = mutableAbilityImpls.values.filter { implInfo ->
             implInfo.abilityName == abilityName &&
             implInfo.targetTypes.isNotEmpty() &&
             implInfo.targetTypes.first() == firstTypeName
@@ -1309,7 +1383,12 @@ class SubstitutionApplier(
     }
 
     /**
-     * Get a simple type name for ability resolution.
+     * Get a type name for ability resolution.
+     *
+     * IMPORTANT: For Record and Variant types, we include structural information
+     * (sorted field names for records, sorted constructor names for variants)
+     * to distinguish between different record/variant structures.
+     * This must match ContentHashComputer.typeAnnotationToString format.
      */
     private fun getTypeNameForAbility(type: FunkType): String {
         return when (type) {
@@ -1322,8 +1401,16 @@ class SubstitutionApplier(
             is FunkType.TypeApplication -> type.constructor
             is FunkType.ListType -> "List"
             is FunkType.ArrayType -> "Array"
-            is FunkType.RecordType -> "Record"
-            is FunkType.VariantType -> "Variant"
+            is FunkType.RecordType -> {
+                // Include sorted field names to distinguish different record structures
+                val fieldNames = type.fields.keys.sorted().joinToString("_")
+                if (fieldNames.isEmpty()) "Record" else "Record_$fieldNames"
+            }
+            is FunkType.VariantType -> {
+                // Include sorted constructor names to distinguish different variant structures
+                val constructorNames = type.constructors.keys.sorted().joinToString("_")
+                if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
+            }
             else -> type.toString()
         }
     }
@@ -1349,46 +1436,6 @@ class SubstitutionApplier(
             else -> type.toString()
         }
     }
-
-    /**
-     * Get the impl name that will match what ASTToTruffleConverter generates.
-     * This must be consistent with how the interpreter names ability implementations.
-     */
-    private fun getCodecImplName(abilityName: String, formatTypeName: String, dataTypeAnnotation: TypeAnnotation?): String {
-        val dataTypeName = getTypeAnnotationNameForCodec(dataTypeAnnotation)
-        return "${abilityName}\$${formatTypeName}\$${dataTypeName}"
-    }
-
-    /**
-     * Get a deterministic name for a type annotation for codec impl naming.
-     * This ensures consistent naming between the typechecker and interpreter.
-     */
-    private fun getTypeAnnotationNameForCodec(typeAnnotation: TypeAnnotation?): String {
-        return when (typeAnnotation) {
-            is IdentifierTypeAnnotation -> typeAnnotation.name
-            is RecordTypeAnnotation -> {
-                // Create a deterministic name for record types: "Record_field1_field2_..."
-                val fieldNames = typeAnnotation.entries.map { it.name }.sorted().joinToString("_")
-                "Record_$fieldNames"
-            }
-            is VariantTypeAnnotation -> {
-                // Create a deterministic name for variant types: "Variant_Con1_Con2_..."
-                val constructorNames = typeAnnotation.constructors.map { it.name }.sorted().joinToString("_")
-                "Variant_$constructorNames"
-            }
-            is TypeApplicationAnnotation -> {
-                // For type applications like List Int, Option String
-                if (typeAnnotation.args.isEmpty()) {
-                    typeAnnotation.constructor
-                } else {
-                    "${typeAnnotation.constructor}_${typeAnnotation.args.map { getTypeAnnotationNameForCodec(it) }.joinToString("_")}"
-                }
-            }
-            null -> "Unknown"
-            else -> typeAnnotation.toString()
-        }
-    }
-
     private fun getTypeAnnotationName(typeAnnotation: TypeAnnotation): String {
         return when (typeAnnotation) {
             is IdentifierTypeAnnotation -> typeAnnotation.name

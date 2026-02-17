@@ -1,8 +1,11 @@
 package com.funk.language.interpreter
 
 import com.funk.language.ast.Program
+import com.funk.language.ast.ImplDeclaration
+import com.funk.language.ast.ImplAbilityDeclaration
 import com.funk.language.parser.FunkParser
 import com.funk.language.typechecker.TypeChecker
+import com.funk.language.typechecker.hashing.ContentHashComputer
 import org.graalvm.polyglot.Context
 import org.graalvm.polyglot.Source
 import java.nio.file.Path
@@ -69,6 +72,10 @@ object FunkTestHelper {
     fun execute(program: Program, monomorphicInstances: Map<String, com.funk.language.ast.LetBinding>, projectRoot: Path? = null): FunkValue {
         val root = projectRoot ?: Paths.get(System.getProperty("funk.project.root", "."))
 
+        // Ensure the program has content hashes computed
+        // This handles cases where tests pass raw parsed ASTs instead of type-checked programs
+        val programWithHashes = ensureContentHashes(program)
+
         // NOTE: Do NOT clear module cache here!
         // The type-checker has already populated the cache with typed modules during type-checking.
         // Clearing it would break module imports since the interpreter expects modules to be in the typed cache.
@@ -88,7 +95,7 @@ object FunkTestHelper {
 
             // Execute the program directly by converting typed AST to Truffle nodes
             // This preserves all type information, monomorphization, etc.
-            executeProgramDirectly(program, monomorphicInstances, context, root)
+            executeProgramDirectly(programWithHashes, monomorphicInstances, context, root)
 
             // Retrieve result from FunkLanguage storage
             return FunkLanguage.getLastExecutionResult() ?: FunkNull
@@ -204,4 +211,32 @@ object FunkTestHelper {
     // The old approach of converting AST → source → re-parse was fundamentally flawed
     // because it lost all type information, monomorphization, and ability resolution.
     // Now we execute typed ASTs directly via FunkLanguage.setProgramForDirectExecution()
+
+    /**
+     * Ensure the program has content hashes computed for all declarations
+     * AND that resolved abilities/handlers have implementation hashes.
+     *
+     * For programs from the TypeChecker, hashes are already computed and consistent.
+     * For raw parsed programs (backward compatibility), we compute them fresh.
+     */
+    private fun ensureContentHashes(program: Program): Program {
+        // Check if any effect handler or ability impl is missing a content hash
+        val needsHashing = program.items.any { item ->
+            when (item) {
+                is ImplDeclaration -> item.contentHash == null
+                is ImplAbilityDeclaration -> item.contentHash == null
+                else -> false
+            }
+        }
+
+        return if (needsHashing) {
+            // Raw parsed program - compute hashes for all declarations
+            // ResolvedAbility.implementationHash is now set directly by SubstitutionApplier,
+            // so we only need to compute declaration hashes here
+            ContentHashComputer.computeHashes(program).program
+        } else {
+            // Program from TypeChecker - hashes are already computed
+            program
+        }
+    }
 }

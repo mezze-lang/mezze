@@ -37,19 +37,23 @@ import kotlinx.serialization.json.JsonClassDiscriminator
 data class ResolvedAbility(
     val abilityName: String,                    // e.g., "NumAdd"
     val typeArgs: List<FunkType>,               // e.g., [IntType]
-    val implementationRef: String,              // e.g., "std::int::NumAdd_Int_impl"
-    val isBuiltin: Boolean = false              // true for built-in abilities with automatic implementation
+    val isBuiltin: Boolean = false,             // true for built-in abilities with automatic implementation
+    val implementationHash: String? = null      // Content-addressable hash of the implementation
 )
 
 /**
- * Resolved effect handler information for direct dispatch
- * This is populated by the TypeChecker during effect resolution
+ * Resolved effect handler information for direct dispatch.
+ * This is populated by the TypeChecker during effect resolution.
+ *
+ * @property effectName The name of the effect being handled (e.g., "Console")
+ * @property performerName The name of the performer/handler (e.g., "NativeConsole")
+ * @property implDeclarationHash Content-addressable hash of the handler implementation for runtime lookup
  */
 @Serializable
 data class ResolvedEffectHandler(
     val effectName: String,
     val performerName: String,
-    val implDeclarationRef: String?  // Reference to ImplDeclaration if available
+    val implDeclarationHash: String? = null
 )
 
 // ============================================================================

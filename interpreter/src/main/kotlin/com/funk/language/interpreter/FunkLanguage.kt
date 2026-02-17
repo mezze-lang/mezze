@@ -189,19 +189,19 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 
                 // CRITICAL: Process modules BEFORE converting main program to accumulate handler mappings
                 // Load cached typed modules and extract their handler mappings
+                // Note: Hash slots are per-frame-descriptor, so cross-module lookups use context instead
                 val accumulatedHandlerMapping = mutableMapOf<String, Pair<String, String>>()
                 for (modulePath in allImportedModules) {
                     val typedModule = TypeChecker.getTypedModule(modulePath)
                     if (typedModule != null) {
-                        // Convert module to extract handler mappings (don't execute yet)
                         val moduleConverter = ASTToTruffleConverter(projectRoot = projectRoot)
                         moduleConverter.convertProgram(typedModule)
-                        // Extract handler mappings from the module converter
+                        // Extract and accumulate handler mappings
                         accumulatedHandlerMapping.putAll(moduleConverter.getHandlerMappings())
                     }
                 }
 
-                // Convert main program with accumulated handler mappings from all modules
+                // Convert main program with accumulated handler mappings
                 val converter = ASTToTruffleConverter(parentHandlerMapping = accumulatedHandlerMapping)
                 val truffleNode = converter.convertProgram(programWithMonomorphicInstances)
                 val frameDescriptor = converter.getFrameDescriptor()
@@ -261,19 +261,19 @@ class FunkLanguage : TruffleLanguage<FunkContext>() {
 
             // CRITICAL: Process modules BEFORE converting main program to accumulate handler mappings
             // Load cached typed modules and extract their handler mappings
+            // Note: Hash slots are per-frame-descriptor, so cross-module lookups use context instead
             val accumulatedHandlerMapping = mutableMapOf<String, Pair<String, String>>()
             for (modulePath in allImportedModules) {
                 val typedModule = TypeChecker.getTypedModule(modulePath)
                 if (typedModule != null) {
-                    // Convert module to extract handler mappings (don't execute yet)
                     val moduleConverter = ASTToTruffleConverter(projectRoot = projectRoot)
                     moduleConverter.convertProgram(typedModule)
-                    // Extract handler mappings from the module converter
+                    // Extract and accumulate handler mappings
                     accumulatedHandlerMapping.putAll(moduleConverter.getHandlerMappings())
                 }
             }
 
-            // Convert main program with accumulated handler mappings from all modules
+            // Convert main program with accumulated handler mappings
             val converter = ASTToTruffleConverter(parentHandlerMapping = accumulatedHandlerMapping)
             val truffleNode = converter.convertProgram(typedProgram)
             val frameDescriptor = converter.getFrameDescriptor()
@@ -474,8 +474,7 @@ class FunkTruffleRootNode(
             moduleNode.execute(moduleFrame)
 
             // After module execution, its functions are registered with unqualified names
-            // We need to also register them with qualified names (e.g., "int::abs")
-            val modulePrefix = modulePath.split("::").last() // e.g., "int" from "std::int"
+            // We need to also register them with qualified names for imports
             val moduleExports = context.locals.toMap() // Get all locally defined values
 
             // Identify which exports came from this module (pub let declarations)
@@ -491,28 +490,26 @@ class FunkTruffleRootNode(
                 .map { it.performerName }
                 .toSet()
 
-            // ALSO export ability impl declarations (e.g., impl EncodeFormat Json)
-            // These are stored with mangled names like "EncodeFormat$Json"
-            val abilityImpls = typedModule.items.filterIsInstance<ImplAbilityDeclaration>()
-                .map { impl ->
-                    val targetTypeNames = impl.targetTypes.joinToString("$") { typeAnnotation ->
-                        when (typeAnnotation) {
-                            is IdentifierTypeAnnotation -> typeAnnotation.name
-                            else -> typeAnnotation.toString()
-                        }
-                    }
-                    "${impl.abilityName}\$$targetTypeNames"
-                }
-                .toSet()
+            // Note: Ability impls (ImplAbilityDeclaration) are NOT exported by name here.
+            // They are registered by content hash in ASTToTruffleConverter.convertImplAbilityDeclaration
+            // and looked up by hash at runtime via ResolvedAbility.implementationHash.
 
-            val allExports = publicExports + publicPerformers + abilityImpls
+            val allExports = publicExports + publicPerformers
 
-            // Register public exports with qualified names
+            // Register public exports with BOTH full qualified names AND short qualified names
+            // Full path (e.g., "std::types::int::abs") - for selective imports that use full path
+            // Short path (e.g., "int::abs") - for module-level imports like `use std::int`
+            val shortPrefix = modulePath.split("::").last()  // e.g., "int" from "std::int"
             for (exportName in allExports) {
                 val exportValue = moduleExports[exportName]
                 if (exportValue != null) {
-                    val qualifiedName = "$modulePrefix::$exportName"
-                    context.defineGlobal(qualifiedName, exportValue)
+                    // Register with full qualified name (prevents collision, used by selective imports)
+                    val fullQualifiedName = "$modulePath::$exportName"
+                    context.defineGlobal(fullQualifiedName, exportValue)
+
+                    // Register with short qualified name (for backward compat with module-level imports)
+                    val shortQualifiedName = "$shortPrefix::$exportName"
+                    context.defineGlobal(shortQualifiedName, exportValue)
                 }
             }
 

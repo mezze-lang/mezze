@@ -51,13 +51,14 @@ data class TypingContext(
     /**
      * Information about an ability implementation.
      *
-     * Stored with key format: "${abilityName}_${targetType}" or "${abilityName}_${type1}_${type2}..."
-     * Examples: "Eq_String", "Convert_Int_String", "Functor_Option"
+     * Stored with content hash as the key (e.g., "a1b2c3d4e5f6...").
+     * Content hashes are computed in TypeChecker Phase 0.5 before context building.
      */
     data class AbilityImplInfo(
         val abilityName: String,
         val targetTypes: List<String>,  // Type names, e.g., ["String"], ["Int", "String"]
-        val sourceModule: String? = null
+        val sourceModule: String? = null,
+        val contentHash: String? = null  // Content hash (same as the map key)
     )
 
     /**
@@ -114,8 +115,7 @@ data class TypingContext(
     /**
      * Extend context with an ability implementation.
      *
-     * Key format: "${abilityName}_${targetType}" or "${abilityName}_${type1}_${type2}..."
-     * Examples: "Eq_String", "Convert_Int_String"
+     * Key is the content hash of the ImplAbilityDeclaration.
      */
     fun extendWithImpl(key: String, implInfo: AbilityImplInfo): TypingContext {
         return TypingContext(
@@ -126,21 +126,27 @@ data class TypingContext(
     }
 
     /**
-     * Check if an ability implementation exists.
+     * Check if an ability implementation exists by content hash.
+     *
+     * @param contentHash The content hash of the implementation
+     * @return True if implementation exists
      *
      * Checks both local and parent contexts.
      */
-    fun hasAbilityImpl(key: String): Boolean {
-        return abilityImpls.containsKey(key) || (parent?.hasAbilityImpl(key) ?: false)
+    fun hasAbilityImpl(contentHash: String): Boolean {
+        return abilityImpls.containsKey(contentHash) || (parent?.hasAbilityImpl(contentHash) ?: false)
     }
 
     /**
-     * Get ability implementation info.
+     * Get ability implementation info by content hash.
+     *
+     * @param contentHash The content hash of the implementation
+     * @return The implementation info, or null if not found
      *
      * Checks both local and parent contexts.
      */
-    fun getAbilityImpl(key: String): AbilityImplInfo? {
-        return abilityImpls[key] ?: parent?.getAbilityImpl(key)
+    fun getAbilityImpl(contentHash: String): AbilityImplInfo? {
+        return abilityImpls[contentHash] ?: parent?.getAbilityImpl(contentHash)
     }
 
     /**

@@ -349,17 +349,23 @@ class ContextBuilder {
         // Extract target type names from type annotations
         val targetTypeNames = implDecl.targetTypes.map { getTypeName(it) }
 
-        // Create impl key: "Eq_String", "Convert_Int_String", etc.
-        val implKey = "${implDecl.abilityName}_${targetTypeNames.joinToString("_")}"
+        // Use content hash as the key - no more mangled strings!
+        // Content hashes are computed in Phase 0.5 before ContextBuilder runs
+        val implKey = implDecl.contentHash
+            ?: throw IllegalStateException(
+                "Content hash not computed for impl: ${implDecl.abilityName} ${implDecl.targetTypes}. " +
+                "Ensure computeDeclarationHashes was called before ContextBuilder."
+            )
 
         // Create impl info
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = implDecl.abilityName,
             targetTypes = targetTypeNames,
-            sourceModule = null  // TODO: Track source module if needed
+            sourceModule = null,  // TODO: Track source module if needed
+            contentHash = implKey  // Same as the key
         )
 
-        // Store in context
+        // Store in context by content hash
         return ctx.extendWithImpl(implKey, implInfo)
     }
 

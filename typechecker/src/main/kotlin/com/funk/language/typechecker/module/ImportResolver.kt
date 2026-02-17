@@ -433,10 +433,13 @@ class ImportResolver(
                 impls[implKey] = impl
             }
 
-            // Extract all ability implementations
+            // Extract all ability implementations - key by content hash
             val allAbilityImpls = module.program.items.filterIsInstance<ImplAbilityDeclaration>()
             for (abilityImpl in allAbilityImpls) {
-                val implKey = "${abilityImpl.abilityName}_${abilityImpl.targetTypes.joinToString("_")}"
+                val implKey = abilityImpl.contentHash
+                    ?: throw IllegalStateException(
+                        "Content hash not computed for imported impl: ${abilityImpl.abilityName} ${abilityImpl.targetTypes}"
+                    )
                 abilityImpls[implKey] = abilityImpl
             }
         }
@@ -556,9 +559,12 @@ class ImportResolver(
                         .filterIsInstance<ImplAbilityDeclaration>()
                         .filter { it.abilityName == abilityDecl.name }
 
-                    // Add each impl with a unique key
+                    // Add each impl keyed by content hash
                     for (abilityImpl in abilityImplsList) {
-                        val implKey = "${abilityImpl.abilityName}_${abilityImpl.targetTypes.joinToString("_")}"
+                        val implKey = abilityImpl.contentHash
+                            ?: throw IllegalStateException(
+                                "Content hash not computed for imported impl: ${abilityImpl.abilityName} ${abilityImpl.targetTypes}"
+                            )
                         abilityImpls[implKey] = abilityImpl
                     }
                 }

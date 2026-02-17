@@ -399,10 +399,12 @@ class TypeValidator(
                 continue
             }
 
-            val implKey = "${abilityName}_${implTypeParts.joinToString("_")}"
-
-            // Check for exact match first
-            if (context.hasAbilityImpl(implKey)) {
+            // Check for exact match by searching impls for this ability and matching types
+            // Context is now keyed by content hash, so we search by ability name
+            val hasExactMatch = context.getAbilityImpls(abilityName).any { implInfo ->
+                implInfo.targetTypes == implTypeParts
+            }
+            if (hasExactMatch) {
                 continue
             }
 
@@ -457,18 +459,17 @@ class TypeValidator(
      * For multi-parameter abilities like Convert 'a 'b, when we only know the first type arg,
      * we look for any implementation that matches the prefix.
      *
-     * Example: Looking for Convert_Int when impl Convert_Int_String exists -> returns true
+     * Example: Looking for Convert with knownTypeParts=["Int"] when impl has targetTypes=["Int", "String"] -> returns true
      */
     private fun findMatchingMultiParameterImpl(
         abilityName: String,
         knownTypeParts: List<String>
     ): Boolean {
-        // Build prefix to search for
-        val prefix = "${abilityName}_${knownTypeParts.joinToString("_")}_"
-
-        // Check if any impl key starts with this prefix
-        return context.getAllAbilityImpls().keys.any { implKey ->
-            implKey.startsWith(prefix) || implKey == "${abilityName}_${knownTypeParts.joinToString("_")}"
+        // Search for implementations where targetTypes starts with knownTypeParts
+        return context.getAbilityImpls(abilityName).any { implInfo ->
+            // Check if the impl's target types start with our known types
+            implInfo.targetTypes.size >= knownTypeParts.size &&
+            implInfo.targetTypes.take(knownTypeParts.size) == knownTypeParts
         }
     }
 

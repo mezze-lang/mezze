@@ -64,11 +64,17 @@ data class LetBinding(
     val typeScheme: TypeScheme? = null,          // From typechecker (polymorphic type with constraints)
     val expression: Expression,
 
-    // NEW: Monomorphization tracking
+    // Monomorphization tracking
     // If this is a monomorphic instance of a generic function, these fields track it
     val isMonomorphicInstance: Boolean = false,  // true if this is a specialized version
     val originalFunctionName: String? = null,    // name of the original generic function
-    val monomorphicTypeArgs: Map<String, FunkType> = emptyMap()  // type arguments for this instance
+    val monomorphicTypeArgs: Map<String, FunkType> = emptyMap(),  // type arguments for this instance
+
+    // Content-addressable hash (populated by TypeChecker)
+    // This is a cryptographic hash of the definition's structure, used for:
+    // - Caching: same hash = same code, skip re-processing
+    // - Referencing: identify definitions independently of their names
+    val contentHash: String? = null
 ) : ProgramItem {
     /**
      * For backward compatibility - returns the variable name if pattern is a simple VariablePattern.
@@ -120,7 +126,8 @@ data class TypeDeclaration(
     val typeParams: List<String> = emptyList(),
     val definition: TypeDefinition,
     val inferredType: FunkType? = null,           // From typechecker
-    val sourceLocation: SourceLocation? = null    // For error reporting
+    val sourceLocation: SourceLocation? = null,   // For error reporting
+    val contentHash: String? = null               // Content-addressable hash
 ) : ProgramItem
 
 @Serializable
@@ -179,7 +186,8 @@ data class EffectDeclaration(
     val operations: List<EffectOperation>,
     val associatedTypes: List<String> = emptyList(),  // Associated types from 'having 'state, 'error'
     val inferredType: FunkType? = null,           // From typechecker
-    val sourceLocation: SourceLocation? = null    // For error reporting
+    val sourceLocation: SourceLocation? = null,   // For error reporting
+    val contentHash: String? = null               // Content-addressable hash
 ) : ProgramItem {
     // Backward compatibility
     val associatedType: String? get() = associatedTypes.firstOrNull()
@@ -201,7 +209,8 @@ data class ImplDeclaration(
     val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'state = Int, 'error = String'
     val operations: List<PerformerOperation>,
     val inferredType: FunkType? = null,           // From typechecker
-    val sourceLocation: SourceLocation? = null    // For error reporting
+    val sourceLocation: SourceLocation? = null,   // For error reporting
+    val contentHash: String? = null               // Content-addressable hash
 ) : ProgramItem {
     // Backward compatibility
     val associatedTypeBinding: Pair<String, TypeAnnotation>?
@@ -237,7 +246,8 @@ data class AbilityDeclaration(
     val dependencies: List<AbilityDependency> = emptyList(),  // Ability dependencies (e.g., Ord depends on Eq)
     val operations: List<AbilityOperation>,
     val inferredType: FunkType? = null,           // From typechecker
-    val sourceLocation: SourceLocation? = null    // For error reporting
+    val sourceLocation: SourceLocation? = null,   // For error reporting
+    val contentHash: String? = null               // Content-addressable hash
 ) : ProgramItem {
     // Backward compatibility
     val associatedType: String? get() = associatedTypes.firstOrNull()
@@ -286,7 +296,8 @@ data class ImplAbilityDeclaration(
     val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(), // Bindings from 'having 'item = Int, 'iter = MyIter'
     val operations: List<ImplAbilityOperation>,
     val inferredType: FunkType? = null,           // From typechecker
-    val sourceLocation: SourceLocation? = null    // For error reporting
+    val sourceLocation: SourceLocation? = null,   // For error reporting
+    val contentHash: String? = null               // Content-addressable hash
 ) : ProgramItem {
     // Full qualified ability name
     val qualifiedAbilityName: String

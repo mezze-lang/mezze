@@ -30,8 +30,8 @@ class ASTToTruffleConverter(
     private val variableSlots = mutableMapOf<String, Int>()
 
     /**
-     * Map of handler name → (effect name, implementation name)
-     * e.g., "NativeRandom" → ("Random", "Random$NativeRandom")
+     * Map of handler name → (effect name, content hash)
+     * e.g., "NativeRandom" → ("Random", "#a7f9e2c8...")
      * Initialized with parent mapping if provided (for nested converters in lambdas)
      */
     private val handlerToEffectMapping = mutableMapOf<String, Pair<String, String>>().apply {
@@ -39,6 +39,14 @@ class ASTToTruffleConverter(
             putAll(parentHandlerMapping)
         }
     }
+
+    /**
+     * Map of content hash → slot number for hash-based implementation lookup.
+     * This is ONLY for implementations defined in THIS converter's frame descriptor.
+     * Cross-module implementations are looked up via context, not frame slots.
+     * e.g., "#a7f9e2c8b1d4a6f3..." → 42
+     */
+    private val contentHashToSlot = mutableMapOf<String, Int>()
 
     /**
      * Effect declarations collected during conversion
@@ -107,17 +115,20 @@ class ASTToTruffleConverter(
             is SelectivePath -> {
                 // Selective import like: use std::effects::continuation::{Continuation, Delimited}
                 // Extract the import items and bind each one
+                val modulePath = usePath.module.joinToString("::")
                 val bindingNodes = usePath.items.map { importItem ->
                     val importedName = importItem.name
                     val localName = importItem.alias ?: importedName
                     val slot = getOrCreateSlot(localName)
+                    // Full qualified name for lookup (e.g., "std::types::int::abs")
+                    val qualifiedImportName = "$modulePath::$importedName"
 
                     object : FunkNode() {
                         override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
                             val context = getContext()
 
-                            // Look up the imported value from global context
-                            val value = context.lookupGlobal(importedName)
+                            // Look up the imported value from global context using qualified name
+                            val value = context.lookupGlobal(qualifiedImportName)
                                 ?: com.funk.language.interpreter.FunkNull
 
                             // Bind it in the current frame
@@ -161,8 +172,7 @@ class ASTToTruffleConverter(
 
     /**
      * Convert an effect implementation (ImplDeclaration) to a record containing the operations
-     * The record is stored with a mangled name like "Random$NativeRandom"
-     * AND also bound to the performer name for imports
+     * The record is bound to the performer name for imports.
      */
     private fun convertImplDeclaration(impl: ImplDeclaration): FunkNode {
         // If the implementation has parameters, we need to create a FUNCTION
@@ -186,12 +196,16 @@ class ASTToTruffleConverter(
         // Create the implementation record
         val recordNode = RecordLiteralNode(fieldNodes)
 
-        // Create a mangled name for the implementation like "Random$NativeRandom"
-        val implName = "${impl.effectName}\$${impl.performerName}"
+        // Use content hash as the primary identifier
+        val contentHash = impl.contentHash
+            ?: throw RuntimeException(
+                "Content hash required for effect handler: ${impl.effectName}/${impl.performerName}. " +
+                "Ensure the TypeChecker computed hashes before interpretation."
+            )
 
         // CRITICAL: Store the mapping so we can look up handlers by performer name
-        // This allows "perform NativeRandom in ..." to find the Random effect implementation
-        handlerToEffectMapping[impl.performerName] = impl.effectName to implName
+        // This allows "perform NativeRandom in ..." to find the effect implementation by hash
+        handlerToEffectMapping[impl.performerName] = impl.effectName to contentHash
 
         // CRITICAL: Register the performer globally so effect calls can find it
         // This allows "Log.println" to find the "Console" performer
@@ -199,35 +213,34 @@ class ASTToTruffleConverter(
             context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
         }
 
-        // Create TWO bindings:
-        // 1. Mangled name (for perform expressions)
-        val mangledSlot = getOrCreateSlot(implName)
-        val mangledBinding = SimpleWriteVariableNode(mangledSlot, recordNode, implName)
+        // Store in frame slot and context by content hash (for cross-module lookups)
+        val hashSlot = getOrCreateSlot(contentHash)
+        contentHashToSlot[contentHash] = hashSlot
 
-        // 2. Performer name (for imports like: use module::{PerformerName})
-        //    This reads from the mangled slot and writes to the performer slot
+        // Also store by performer name for imports
         val performerSlot = getOrCreateSlot(impl.performerName)
-        val performerBinding = object : FunkNode() {
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
-                // Read the value from the mangled slot
-                val value = frame.getObject(mangledSlot) as FunkValue
 
-                // Write it to the performer slot
+        return object : FunkNode() {
+            @field:Child private var recordChild = recordNode
+
+            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
+                val value = recordChild.execute(frame)
+
+                // Store in frame slots
+                frame.setObject(hashSlot, value)
                 frame.setObject(performerSlot, value)
 
-                // Also define in context for global lookups
+                // Store in context by hash (for cross-module lookups) and by name (for imports)
                 val context = getContext()
+                context.defineGlobal(contentHash, value)
                 context.defineLocal(impl.performerName, value)
 
-                // Register the performer at runtime too (for hot-reloading scenarios)
+                // Register the performer at runtime
                 context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
 
                 return value
             }
         }
-
-        // Return a sequence that executes both bindings
-        return SequenceNode(arrayOf(mangledBinding, performerBinding))
     }
 
     /**
@@ -238,11 +251,15 @@ class ASTToTruffleConverter(
      * Creates: {cont} -> { choose = {options} -> cont.fork {...}, fail = {} -> cont.abort {} }
      */
     private fun convertParameterizedImplDeclaration(impl: ImplDeclaration): FunkNode {
-        // Create mangled names for storage
-        val implName = "${impl.effectName}\$${impl.performerName}"
+        // Use content hash as the primary identifier
+        val contentHash = impl.contentHash
+            ?: throw RuntimeException(
+                "Content hash required for parameterized effect handler: ${impl.effectName}/${impl.performerName}. " +
+                "Ensure the TypeChecker computed hashes before interpretation."
+            )
 
-        // CRITICAL: Register the handler mapping so perform expressions can find it
-        handlerToEffectMapping[impl.performerName] = impl.effectName to implName
+        // CRITICAL: Register the handler mapping so perform expressions can find it BY HASH
+        handlerToEffectMapping[impl.performerName] = impl.effectName to contentHash
 
         // CRITICAL: Register the performer with the effect handler
         if (context != null) {
@@ -357,31 +374,39 @@ class ASTToTruffleConverter(
             }
         }
 
-        // Store the wrapper function with the mangled name
-        val mangledSlot = getOrCreateSlot(implName)
-        val mangledBinding = SimpleWriteVariableNode(mangledSlot, wrapperNode, implName)
+        // Store in frame slot and context by content hash (for cross-module lookups)
+        val hashSlot = getOrCreateSlot(contentHash)
+        contentHashToSlot[contentHash] = hashSlot
 
-        // Also store under performer name for imports
+        // Also store by performer name for imports
         val performerSlot = getOrCreateSlot(impl.performerName)
-        val performerBinding = object : FunkNode() {
+
+        return object : FunkNode() {
+            @field:Child private var wrapperChild = wrapperNode
+
             override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
-                val value = frame.getObject(mangledSlot) as FunkValue
+                val value = wrapperChild.execute(frame)
+
+                // Store in frame slots
+                frame.setObject(hashSlot, value)
                 frame.setObject(performerSlot, value)
 
+                // Store in context by hash (for cross-module lookups) and by name (for imports)
                 val context = getContext()
+                context.defineGlobal(contentHash, value)
                 context.defineLocal(impl.performerName, value)
+
+                // Register the performer at runtime
                 context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
 
                 return value
             }
         }
-
-        return SequenceNode(arrayOf(mangledBinding, performerBinding))
     }
 
     /**
-     * Convert an impl ability declaration to a record containing the implementations
-     * The record is stored with a mangled name like "Show$Int" (using $ to avoid user namespace conflicts)
+     * Convert an impl ability declaration to a record containing the implementations.
+     * Stored by content hash for cross-module lookups.
      */
     private fun convertImplAbilityDeclaration(impl: ImplAbilityDeclaration): FunkNode {
         val fieldNodes = mutableMapOf<String, FunkNode>()
@@ -394,48 +419,38 @@ class ASTToTruffleConverter(
         // Create the implementation record
         val recordNode = RecordLiteralNode(fieldNodes)
 
-        // Create a mangled name using $ to prevent user namespace conflicts: "Show$Int"
-        // Dollar signs are reserved for compiler/runtime use and cannot appear in user identifiers
-        val targetTypeNames = impl.targetTypes.joinToString("$") { typeAnnotation ->
-            getTypeAnnotationNameForImpl(typeAnnotation)
-        }
-        val implName = "${impl.abilityName}\$$targetTypeNames"
+        // Use content hash as the ONLY identifier - no more mangled names
+        val contentHash = impl.contentHash
+            ?: throw RuntimeException(
+                "Content hash required for ability implementation: ${impl.abilityName} for ${impl.targetTypes}. " +
+                "Ensure the TypeChecker computed hashes before interpretation."
+            )
 
-        // Store the implementation record with the mangled name
-        val slot = getOrCreateSlot(implName)
-        return SimpleWriteVariableNode(slot, recordNode, implName)
-    }
+        // Store in frame slot for local access (same-frame lookups)
+        val hashSlot = getOrCreateSlot(contentHash)
+        contentHashToSlot[contentHash] = hashSlot
 
-    /**
-     * Get a deterministic name for a type annotation for impl naming.
-     * This must match the naming scheme in SubstitutionApplier.getTypeAnnotationNameForCodec()
-     */
-    private fun getTypeAnnotationNameForImpl(typeAnnotation: TypeAnnotation): String {
-        return when (typeAnnotation) {
-            is IdentifierTypeAnnotation -> typeAnnotation.name
-            is RecordTypeAnnotation -> {
-                // Create a deterministic name for record types: "Record_field1_field2_..."
-                val fieldNames = typeAnnotation.entries.map { it.name }.sorted().joinToString("_")
-                "Record_$fieldNames"
+        // Create a node that stores in frame slot AND registers in context (for cross-module lookups)
+        // All ability impls are registered by content hash only - no mangled names needed
+        return object : FunkNode() {
+            @field:Child private var recordChild = recordNode
+
+            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
+                val value = recordChild.execute(frame)
+
+                // Store in frame slot for local access
+                frame.setObject(hashSlot, value)
+
+                // Register in context by hash for cross-module lookups
+                val context = getContext()
+                context.defineGlobal(contentHash, value)
+                context.defineLocal(contentHash, value)
+
+                return value
             }
-            is VariantTypeAnnotation -> {
-                // Create a deterministic name for variant types: "Variant_Con1_Con2_..."
-                val constructorNames = typeAnnotation.constructors.map { it.name }.sorted().joinToString("_")
-                "Variant_$constructorNames"
-            }
-            is TypeApplicationAnnotation -> {
-                // For type applications like List Int, Option String
-                if (typeAnnotation.args.isEmpty()) {
-                    typeAnnotation.constructor
-                } else {
-                    "${typeAnnotation.constructor}_${typeAnnotation.args.map { getTypeAnnotationNameForImpl(it) }.joinToString("_")}"
-                }
-            }
-            is ArrayTypeAnnotation -> "Array_${getTypeAnnotationNameForImpl(typeAnnotation.elementType)}"
-            else -> typeAnnotation.toString()
         }
     }
-    
+
     /**
      * Convert a let binding to a Truffle node
      * Supports pattern destructuring for records
@@ -1068,44 +1083,55 @@ class ASTToTruffleConverter(
                 }
             }
             } else {
-                // User-defined ability - look up the implementation directly
+                // User-defined ability - look up the implementation by content hash
 
                 // The function should be a MemberAccess like Show.show
                 if (funcCall.function is MemberAccess) {
                     val memberAccess = funcCall.function as MemberAccess
                     val operationName = memberAccess.member
-                    val implementationRef = resolvedAbility.implementationRef
+                    val implementationHash = resolvedAbility.implementationHash
+
+                    // Content hash is REQUIRED for all ability calls (including Encode/Decode)
+                    // All hashes are resolved at compile time by SubstitutionApplier
+                    val implHashRequired = implementationHash
+                        ?: throw RuntimeException(
+                            "Content hash required for ability call: ${resolvedAbility.abilityName}. " +
+                            "Ensure the TypeChecker computed hashes before interpretation."
+                        )
 
                     // Convert arguments
                     val argsNode = convertExpression(funcCall.arguments)
 
-                    // Look up the implementation record (e.g., "Show$Int")
-                    // Then access the operation field (e.g., "show")
-                    // The implementationRef might be something like "Show$Int::show" or just "Show$Int"
-                    // Let's handle both cases
-                    val implRecordName = if (implementationRef.contains("::")) {
-                        // Extract the record name before ::
-                        implementationRef.substringBefore("::")
-                    } else {
-                        implementationRef
-                    }
-
+                    // Try to get local slot by hash (fast path for same-frame implementations)
+                    val localSlot = contentHashToSlot[implHashRequired]
 
                     // Create a node that:
-                    // 1. Looks up the implementation record from context
+                    // 1. Looks up the implementation record by hash
                     // 2. Accesses the operation field
                     // 3. Calls it with the arguments
                     return object : FunkNode() {
                         @field:Child private var argumentsChild = argsNode
 
                         override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): FunkValue {
-                            // Look up the implementation record from the CURRENT runtime context
-                            // NOT the converter's compile-time context
-                            val runtimeContext = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
-                            val implRecord = runtimeContext.lookupGlobal(implRecordName)
+                            // Try local slot first (same-frame), then context lookup (cross-module)
+                            val implRecord: FunkValue = if (localSlot != null) {
+                                frame.getValue(localSlot) as? FunkValue
+                                    ?: throw com.funk.language.interpreter.FunkException(
+                                        "Null value in implementation slot for hash: $implHashRequired"
+                                    )
+                            } else {
+                                // Cross-module: look up in context by hash
+                                val runtimeContext = com.funk.language.interpreter.FunkLanguage.getCurrentContext(this)
+                                runtimeContext.lookupGlobal(implHashRequired)
+                                    ?: throw com.funk.language.interpreter.FunkException(
+                                        "Cannot find ability implementation for hash: $implHashRequired (ability: ${resolvedAbility.abilityName})"
+                                    )
+                            }
 
-                            if (implRecord == null || implRecord is com.funk.language.interpreter.FunkNull) {
-                                throw com.funk.language.interpreter.FunkException("Cannot find ability implementation: $implRecordName")
+                            if (implRecord is com.funk.language.interpreter.FunkNull) {
+                                throw com.funk.language.interpreter.FunkException(
+                                    "Cannot find ability implementation for hash: $implHashRequired"
+                                )
                             }
 
                             if (implRecord !is FunkRecord) {
@@ -1115,7 +1141,9 @@ class ASTToTruffleConverter(
                             // Get the operation from the implementation record
                             val operation = implRecord.fields[operationName]
                             if (operation == null || operation is com.funk.language.interpreter.FunkNull) {
-                                throw com.funk.language.interpreter.FunkException("Cannot find operation '$operationName' in ability implementation $implRecordName")
+                                throw com.funk.language.interpreter.FunkException(
+                                    "Cannot find operation '$operationName' in ability implementation (hash: $implHashRequired)"
+                                )
                             }
 
                             if (operation !is com.funk.language.interpreter.FunkTruffleFunction) {
@@ -1419,7 +1447,7 @@ class ASTToTruffleConverter(
 
     /**
      * Convert a monomorphic function call to a direct call node
-     * Rust-style: Look up the mangled function name directly
+     * Rust-style: Look up the resolved function name directly
      */
     private fun convertMonomorphicFunctionCall(funcCall: FunctionCall): FunkNode {
         val monomorphicName = funcCall.resolvedFunctionName!!
@@ -2002,6 +2030,9 @@ class ASTToTruffleConverter(
         // Capture the mapping for use at runtime
         val capturedMapping = handlerToEffectMapping.toMap()
 
+        // Capture the hash-to-slot mapping for O(1) frame lookups
+        val capturedHashSlots = contentHashToSlot.toMap()
+
         // CRITICAL: Pre-convert handler parameters at node construction time
         // This maps handler name -> parameter node (or null if no parameters)
         val handlerParamNodes = performExpr.handlers.associate { handler ->
@@ -2018,36 +2049,57 @@ class ASTToTruffleConverter(
                 val context = getContext()
 
 
-                // If resolvedHandlers is populated, use it
+                // If resolvedHandlers is populated, use it with hash-based lookup
                 if (performExpr.resolvedHandlers.isNotEmpty()) {
                     for (resolvedHandler in performExpr.resolvedHandlers.values) {
                         val effectName = resolvedHandler.effectName
                         val performerName = resolvedHandler.performerName
-                        val implRef = resolvedHandler.implDeclarationRef
+                        val implHash = resolvedHandler.implDeclarationHash
+                            ?: throw RuntimeException(
+                                "Content hash required for effect handler: $effectName/$performerName. " +
+                                "Ensure the TypeChecker computed hashes before interpretation."
+                            )
 
-
-                        val lookupName = implRef ?: performerName
-                        val performerValue = context.lookupGlobal(lookupName)
-                            ?: throw RuntimeException("Handler implementation not found: $lookupName (effect: $effectName, performer: $performerName)")
+                        // Try local slot first, then context lookup (for cross-module)
+                        val hashSlot = capturedHashSlots[implHash]
+                        val performerValue: FunkValue = if (hashSlot != null) {
+                            frame.getValue(hashSlot) as? FunkValue
+                                ?: throw RuntimeException(
+                                    "Handler implementation not found for hash: $implHash (effect: $effectName)"
+                                )
+                        } else {
+                            // Cross-module: look up in context by hash
+                            context.lookupGlobal(implHash)
+                                ?: throw RuntimeException(
+                                    "Handler implementation not found for hash: $implHash (effect: $effectName, performer: $performerName)"
+                                )
+                        }
 
                         runtimeHandlers[effectName] = performerValue
                     }
                 } else {
-                    // Fallback: Use the handlerToEffectMapping we built during conversion
+                    // Use the handlerToEffectMapping (contains content hashes)
                     for (handler in performExpr.handlers) {
                         val handlerName = handler.name
 
-                        // Look up the effect name and implementation name from our mapping
+                        // Look up the effect name and content hash from our mapping
                         val mapping = capturedMapping[handlerName]
                         if (mapping == null) {
                             throw RuntimeException("Handler '$handlerName' not found in effect mapping. Available handlers: ${capturedMapping.keys}")
                         }
 
-                        val (effectName, implName) = mapping
+                        val (effectName, implHash) = mapping
 
-                        // Look up the implementation (might be a function or a record)
-                        var performerValue = context.lookupGlobal(implName)
-                            ?: throw RuntimeException("Handler implementation not found: $implName for handler $handlerName")
+                        // Try local slot first, then context lookup (for cross-module)
+                        val hashSlot = capturedHashSlots[implHash]
+                        var performerValue: FunkValue = if (hashSlot != null) {
+                            frame.getValue(hashSlot) as? FunkValue
+                                ?: throw RuntimeException("Handler implementation not found for hash: $implHash (handler: $handlerName)")
+                        } else {
+                            // Cross-module: look up in context by hash
+                            context.lookupGlobal(implHash)
+                                ?: throw RuntimeException("Handler implementation not found for hash: $implHash (handler: $handlerName)")
+                        }
 
                         // If the handler has parameters (e.g., AllPaths {cont = continuation::new {}}),
                         // the performer is a FUNCTION that needs to be called with those parameters
@@ -2281,7 +2333,7 @@ class ASTToTruffleConverter(
     private fun createPatternCaseNode(patterns: Array<PatternNode>, guardNode: FunkNode?, bodyNode: FunkNode): PatternCaseNode {
         return PatternCaseNode(patterns, guardNode, bodyNode)
     }
-    
+
     private fun createFunctionCallNode(functionNode: FunkNode, argumentsNode: FunkNode): FunkNode {
         return FunctionCallNode(functionNode, argumentsNode)
     }

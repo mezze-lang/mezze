@@ -523,21 +523,16 @@ class AbilityResolver(
     private fun checkUserDefinedAbilityImpl(type: FunkType, abilityName: String): AbilityCheckResult {
         val typeName = getTypeName(type)
 
-        // Check for exact match
-        val exactImplKey = "${abilityName}_$typeName"
-        if (context.hasAbilityImpl(exactImplKey)) {
-            return AbilityCheckResult.Satisfied("User-defined impl: $exactImplKey")
-        }
-
-        // Check for partial match (multi-parameter abilities)
+        // Search for implementation by ability name and matching types
+        // (ability impls are now keyed by content hash, so we search by ability name)
         val allImpls = context.getAbilityImpls(abilityName)
         val matchingImpl = allImpls.find { impl ->
             impl.targetTypes.isNotEmpty() && impl.targetTypes.first() == typeName
         }
 
         if (matchingImpl != null) {
-            val implKey = "${matchingImpl.abilityName}_${matchingImpl.targetTypes.joinToString("_")}"
-            return AbilityCheckResult.Satisfied("User-defined impl: $implKey")
+            val implRef = matchingImpl.contentHash ?: "${matchingImpl.abilityName} ${matchingImpl.targetTypes}"
+            return AbilityCheckResult.Satisfied("User-defined impl: $implRef")
         }
 
         // Check for auto-derivable Encode/Decode abilities

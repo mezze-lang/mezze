@@ -412,28 +412,39 @@ class CodecGenerator {
         }
     }
 
-    /** Get the EncodeFormat impl record identifier for a format type */
+    /**
+     * Get the EncodeFormat ability identifier.
+     * This returns just "EncodeFormat" - the ability name itself.
+     * When used in a member access like EncodeFormat.encode_int, the SubstitutionApplier
+     * will resolve this to the correct implementation based on the format type in scope.
+     */
     private fun encodeFormatImpl(formatType: FunkType): Identifier {
-        val formatName = getFormatName(formatType)
-        return id("EncodeFormat\$$formatName")
+        // Return the ability name - SubstitutionApplier will resolve to the correct impl
+        return id("EncodeFormat")
     }
 
-    /** Get the DecodeFormat impl record identifier for a format type */
+    /**
+     * Get the DecodeFormat ability identifier.
+     * This returns just "DecodeFormat" - the ability name itself.
+     */
     private fun decodeFormatImpl(formatType: FunkType): Identifier {
-        val formatName = getFormatName(formatType)
-        return id("DecodeFormat\$$formatName")
+        return id("DecodeFormat")
     }
 
-    /** Get the StreamEncodeFormat impl record identifier for a format type */
+    /**
+     * Get the StreamEncodeFormat ability identifier.
+     * This returns just "StreamEncodeFormat" - the ability name itself.
+     */
     private fun streamEncodeFormatImpl(formatType: FunkType): Identifier {
-        val formatName = getFormatName(formatType)
-        return id("StreamEncodeFormat\$$formatName")
+        return id("StreamEncodeFormat")
     }
 
-    /** Get the StreamDecodeFormat impl record identifier for a format type */
+    /**
+     * Get the StreamDecodeFormat ability identifier.
+     * This returns just "StreamDecodeFormat" - the ability name itself.
+     */
     private fun streamDecodeFormatImpl(formatType: FunkType): Identifier {
-        val formatName = getFormatName(formatType)
-        return id("StreamDecodeFormat\$$formatName")
+        return id("StreamDecodeFormat")
     }
 
     /** Call append_path using native list operations directly */
@@ -591,8 +602,12 @@ class CodecGenerator {
     }
 
     /**
-     * Generate a direct EncodeFormat impl record lookup and method call for a value of the given type.
-     * Uses the impl record name directly (e.g., "EncodeFormat$Json") to avoid ability resolution issues.
+     * Generate a direct EncodeFormat impl method call for a value of the given type.
+     * Uses the EncodeFormat ability identifier which SubstitutionApplier resolves to the
+     * correct implementation using content hash lookup.
+     *
+     * IMPORTANT: For complex types (records, variants, etc.), this generates Encode.encode calls
+     * with inferredType set on the arguments so SubstitutionApplier can resolve the correct impl.
      */
     private fun generateDirectEncodeCall(formatType: FunkType, type: FunkType, valueExpr: Expression, fieldName: String): Expression {
         val pathExpr = appendPath(id("path"), fieldName)
@@ -638,60 +653,51 @@ class CodecGenerator {
                 val toStrCall = call(id("__native_char_to_string"), record("c" to valueExpr))
                 call(member(formatImpl, "encode_string"), record("val" to toStrCall, "path" to pathExpr))
             }
-            // For complex types, look up the specific Encode impl record
-            // Pass config (not path) - nested encode creates its own path internally
-            is FunkType.RecordType -> {
-                val implName = getEncodeImplName(formatType, type)
-                call(member(id(implName), "encode"), record("val" to valueExpr, "config" to id("config")))
-            }
-            is FunkType.ListType, is FunkType.ArrayType, is FunkType.SetType,
+            // For complex types, generate a typed Encode.encode call
+            // SubstitutionApplier will resolve this to the correct impl using content hash
+            is FunkType.RecordType, is FunkType.ListType, is FunkType.ArrayType, is FunkType.SetType,
             is FunkType.MapType, is FunkType.VariantType, is FunkType.TypeApplication -> {
-                val implName = getEncodeImplName(formatType, type)
-                call(member(id(implName), "encode"), record("val" to valueExpr, "config" to id("config")))
+                // Use typed ability call - SubstitutionApplier resolves by type
+                typedEncodeCall(type, valueExpr)
             }
             else -> {
-                // For other types, assume an impl exists with standard naming
-                val implName = getEncodeImplName(formatType, type)
-                call(member(id(implName), "encode"), record("val" to valueExpr, "config" to id("config")))
+                // For unknown types, also use typed ability call
+                typedEncodeCall(type, valueExpr)
             }
         }
     }
 
     /**
-     * Get the Encode impl record name for a type.
+     * Create a typed Encode.encode call with inferredType set on the arguments.
+     * This allows SubstitutionApplier to resolve the correct implementation.
      */
-    private fun getEncodeImplName(formatType: FunkType, type: FunkType): String {
-        val formatName = getFormatName(formatType)
-        val typeName = when (type) {
-            is FunkType.RecordType -> "Record_" + type.fields.keys.sorted().joinToString("_")
-            is FunkType.VariantType -> "Variant_" + type.constructors.keys.sorted().joinToString("_")
-            is FunkType.ListType -> "List_${getTypeNameForImpl(type.elementType)}"
-            is FunkType.ArrayType -> "Array_${getTypeNameForImpl(type.elementType)}"
-            is FunkType.SetType -> "Set_${getTypeNameForImpl(type.elementType)}"
-            is FunkType.MapType -> "Map_${getTypeNameForImpl(type.keyType)}_${getTypeNameForImpl(type.valueType)}"
-            is FunkType.TypeApplication -> type.constructor
-            else -> type.toString()
-        }
-        return "Encode\$$formatName\$$typeName"
-    }
-
-    private fun getTypeNameForImpl(type: FunkType): String {
-        return when (type) {
-            is FunkType.IntType -> "Int"
-            is FunkType.FloatType -> "Float"
-            is FunkType.StringType -> "String"
-            is FunkType.BooleanType -> "Bool"
-            is FunkType.NatType -> "Nat"
-            is FunkType.FracType -> "Frac"
-            is FunkType.CharType -> "Char"
-            is FunkType.TypeApplication -> type.constructor
-            else -> type.toString().replace(".", "_")
-        }
+    private fun typedEncodeCall(dataType: FunkType, valueExpr: Expression): FunctionCall {
+        // Create the arguments record with type information
+        val argsRecord = RecordLiteral(
+            entries = listOf(
+                RecordFieldEntry("val", valueExpr),
+                RecordFieldEntry("config", id("config"))
+            ),
+            // Set the inferredType so SubstitutionApplier can find the val field's type
+            inferredType = FunkType.RecordType(
+                fields = mapOf(
+                    "val" to dataType,
+                    "config" to FunkType.VarType(TypeVar("config", 0))  // Config type is polymorphic
+                )
+            )
+        )
+        return FunctionCall(
+            function = member(id("Encode"), "encode"),
+            arguments = argsRecord
+        )
     }
 
     /**
      * Generate a direct DecodeFormat impl record lookup and method call for a value of the given type.
      * Similar to generateDirectEncodeCall but for decoding.
+     *
+     * IMPORTANT: For complex types (records, variants, etc.), this generates Decode.decode calls
+     * with inferredType set on the arguments so SubstitutionApplier can resolve the correct impl.
      */
     private fun generateDirectDecodeCall(formatType: FunkType, type: FunkType, valueExpr: Expression, fieldName: String): Expression {
         val pathExpr = appendPath(id("path"), fieldName)
@@ -745,52 +751,60 @@ class CodecGenerator {
                     matchCase(errPat("e"), err(id("e")))
                 )
             }
-            // For complex types, look up the specific Decode impl record
-            // Pass config (not path) - nested decode creates its own path internally
-            is FunkType.RecordType -> {
-                val implName = getDecodeImplName(formatType, type)
-                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
-            }
-            is FunkType.ListType, is FunkType.ArrayType, is FunkType.SetType,
+            // For complex types, call Decode.decode and let ability resolution find the impl
+            // This allows the SubstitutionApplier to resolve the correct impl by content hash
+            is FunkType.RecordType, is FunkType.ListType, is FunkType.ArrayType, is FunkType.SetType,
             is FunkType.MapType, is FunkType.VariantType, is FunkType.TypeApplication -> {
-                val implName = getDecodeImplName(formatType, type)
-                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+                // Use Decode.decode ability call - SubstitutionApplier will resolve to correct impl
+                // CRITICAL: Set inferredType on the arguments record so ability resolution works
+                typedDecodeCall(type, valueExpr)
             }
             else -> {
-                // For other types, assume an impl exists with standard naming
-                val implName = getDecodeImplName(formatType, type)
-                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+                // For other types, use Decode.decode ability call
+                typedDecodeCall(type, valueExpr)
             }
         }
     }
 
     /**
-     * Get the Decode impl record name for a type.
+     * Create a typed Decode.decode call with inferredType set on the arguments.
+     * This allows SubstitutionApplier to resolve the correct implementation.
+     *
+     * Note: For Decode, the target type comes from the return type (Result 'a DecodeError),
+     * not from the argument. But we set the inferredType on the record so the return type
+     * can be properly resolved.
      */
-    private fun getDecodeImplName(formatType: FunkType, type: FunkType): String {
-        val formatName = getFormatName(formatType)
-        val typeName = when (type) {
-            // Primitives
-            is FunkType.IntType -> "Int"
-            is FunkType.FloatType -> "Float"
-            is FunkType.StringType -> "String"
-            is FunkType.BooleanType -> "Bool"
-            is FunkType.NatType -> "Nat"
-            is FunkType.FracType -> "Frac"
-            is FunkType.CharType -> "Char"
-            // Complex types
-            is FunkType.RecordType -> "Record_" + type.fields.keys.sorted().joinToString("_")
-            is FunkType.VariantType -> "Variant_" + type.constructors.keys.sorted().joinToString("_")
-            is FunkType.ListType -> "List_${getTypeNameForImpl(type.elementType)}"
-            is FunkType.ArrayType -> "Array_${getTypeNameForImpl(type.elementType)}"
-            is FunkType.SetType -> "Set_${getTypeNameForImpl(type.elementType)}"
-            is FunkType.SortedSetType -> "SortedSet_${getTypeNameForImpl(type.elementType)}"
-            is FunkType.MapType -> "Map_${getTypeNameForImpl(type.keyType)}_${getTypeNameForImpl(type.valueType)}"
-            is FunkType.SortedMapType -> "SortedMap_${getTypeNameForImpl(type.keyType)}_${getTypeNameForImpl(type.valueType)}"
-            is FunkType.TypeApplication -> type.constructor
-            else -> type.toString()
-        }
-        return "Decode\$$formatName\$$typeName"
+    private fun typedDecodeCall(targetType: FunkType, valueExpr: Expression): FunctionCall {
+        // Create the arguments record with type information
+        val argsRecord = RecordLiteral(
+            entries = listOf(
+                RecordFieldEntry("val", valueExpr),
+                RecordFieldEntry("config", id("config"))
+            ),
+            // For Decode, the val field contains the serialized representation (e.g., JValue)
+            // The targetType is what we want to decode TO, which affects the return type
+            inferredType = FunkType.RecordType(
+                fields = mapOf(
+                    "val" to FunkType.VarType(TypeVar("repr", 0)),  // Serialized representation
+                    "config" to FunkType.VarType(TypeVar("config", 0))
+                )
+            )
+        )
+        // Create the function call with the return type set
+        // The return type is Result targetType DecodeError
+        val decodeErrorType = FunkType.TypeApplication("DecodeError", emptyList())
+        val resultType = FunkType.VariantType(
+            constructors = mapOf(
+                "Ok" to FunkType.RecordType(fields = mapOf("val" to targetType)),
+                "Err" to FunkType.RecordType(fields = mapOf("error" to decodeErrorType))
+            ),
+            rowVar = null
+        )
+        return FunctionCall(
+            function = member(id("Decode"), "decode"),
+            arguments = argsRecord,
+            inferredType = resultType
+        )
     }
 
     /**
@@ -1573,30 +1587,16 @@ class CodecGenerator {
                     matchCase(errPat("e"), err(id("e")))
                 )
             }
-            // For complex types (nested records, variants, collections), call the specific impl directly
-            // We use the same naming scheme as getDecodeImplName to ensure consistency
-            // Pass config (not path) - nested decode creates its own path internally
-            is FunkType.RecordType -> {
-                val implName = getDecodeImplName(formatType, type)
-                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
-            }
-            is FunkType.VariantType -> {
-                val implName = getDecodeImplName(formatType, type)
-                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
-            }
-            is FunkType.ListType, is FunkType.ArrayType, is FunkType.SetType,
-            is FunkType.MapType -> {
-                val implName = getDecodeImplName(formatType, type)
-                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
-            }
-            is FunkType.TypeApplication -> {
-                val implName = getDecodeImplName(formatType, type)
-                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+            // For complex types, generate a typed Decode.decode call
+            // SubstitutionApplier will resolve this to the correct impl using content hash
+            is FunkType.RecordType, is FunkType.ListType, is FunkType.ArrayType, is FunkType.SetType,
+            is FunkType.MapType, is FunkType.VariantType, is FunkType.TypeApplication -> {
+                // Use typed ability call - SubstitutionApplier resolves by type
+                typedDecodeCall(type, valueExpr)
             }
             else -> {
-                // For unknown types, fall back to impl naming
-                val implName = getDecodeImplName(formatType, type)
-                call(member(id(implName), "decode"), record("val" to valueExpr, "config" to id("config")))
+                // For unknown types, also use typed ability call
+                typedDecodeCall(type, valueExpr)
             }
         }
     }
@@ -1658,18 +1658,13 @@ class CodecGenerator {
                 }
             }
 
-            // Use direct impl call instead of ability dispatch
-            val decodeImplName = getDecodeImplName(formatType, payloadType)
-
+            // Use typed ability call - SubstitutionApplier will resolve to content hash
             match(
                 member(id("variant_info"), "payload"),
                 matchCase(
                     somePat("payload_repr"),
                     match(
-                        call(
-                            member(id(decodeImplName), "decode"),
-                            record("val" to id("payload_repr"), "path" to id("path"))
-                        ),
+                        typedDecodeCall(payloadType, id("payload_repr")),
                         matchCase(
                             okPat("decoded_payload"),
                             ok(variantConstruction)
@@ -1706,8 +1701,7 @@ class CodecGenerator {
      * Generate decode for List types.
      */
     private fun generateListDecode(formatType: FunkType, listType: FunkType.ListType): ImplAbilityDeclaration {
-        // Get the element decoder impl name
-        val elementDecodeImplName = getDecodeImplName(formatType, listType.elementType)
+        val elementType = listType.elementType
 
         val body = match(
             call(
@@ -1722,13 +1716,8 @@ class CodecGenerator {
                         record(
                             "list" to id("repr_list"),
                             "f" to lambda(listOf("elem_repr", "idx"),
-                                call(
-                                    member(id(elementDecodeImplName), "decode"),
-                                    record(
-                                        "val" to id("elem_repr"),
-                                        "path" to appendIndex(id("path"), id("idx"))
-                                    )
-                                )
+                                // Use typed ability call for element decoding
+                                typedDecodeCall(elementType, id("elem_repr"))
                             )
                         )
                     ),
@@ -1747,13 +1736,10 @@ class CodecGenerator {
     private fun generateArrayDecode(formatType: FunkType, arrayType: FunkType.ArrayType): ImplAbilityDeclaration {
         // Decode as List[ElementType] first, then convert to Array
         val listType = FunkType.ListType(arrayType.elementType)
-        val listDecodeImplName = getDecodeImplName(formatType, listType)
 
         val body = match(
-            call(
-                member(id(listDecodeImplName), "decode"),
-                record("val" to id("val"), "path" to id("path"))
-            ),
+            // Use typed ability call for list decoding
+            typedDecodeCall(listType, id("val")),
             matchCase(
                 okPat("decoded_list"),
                 ok(call(member(id("array"), "from_list"), record("list" to id("decoded_list"))))
@@ -1767,7 +1753,7 @@ class CodecGenerator {
      * Generate decode for Set types.
      */
     private fun generateSetDecode(formatType: FunkType, setType: FunkType.SetType): ImplAbilityDeclaration {
-        val elementDecodeImplName = getDecodeImplName(formatType, setType.elementType)
+        val elementType = setType.elementType
 
         val body = match(
             call(
@@ -1782,13 +1768,8 @@ class CodecGenerator {
                         record(
                             "list" to call(member(id("set"), "to_list"), record("s" to id("repr_set"))),
                             "f" to lambda(listOf("elem_repr", "idx"),
-                                call(
-                                    member(id(elementDecodeImplName), "decode"),
-                                    record(
-                                        "val" to id("elem_repr"),
-                                        "path" to appendIndex(id("path"), id("idx"))
-                                    )
-                                )
+                                // Use typed ability call for element decoding
+                                typedDecodeCall(elementType, id("elem_repr"))
                             )
                         )
                     ),
@@ -1810,13 +1791,10 @@ class CodecGenerator {
     private fun generateSortedSetDecode(formatType: FunkType, sortedSetType: FunkType.SortedSetType): ImplAbilityDeclaration {
         // Decode as Set[ElementType] first, then convert to SortedSet
         val setType = FunkType.SetType(sortedSetType.elementType)
-        val setDecodeImplName = getDecodeImplName(formatType, setType)
 
         val body = match(
-            call(
-                member(id(setDecodeImplName), "decode"),
-                record("val" to id("val"), "path" to id("path"))
-            ),
+            // Use typed ability call for set decoding
+            typedDecodeCall(setType, id("val")),
             matchCase(
                 okPat("decoded_set"),
                 ok(call(member(id("sortedset"), "from_set"), record("s" to id("decoded_set"))))
@@ -1830,8 +1808,8 @@ class CodecGenerator {
      * Generate decode for Map types.
      */
     private fun generateMapDecode(formatType: FunkType, mapType: FunkType.MapType): ImplAbilityDeclaration {
-        val keyDecodeImplName = getDecodeImplName(formatType, mapType.keyType)
-        val valueDecodeImplName = getDecodeImplName(formatType, mapType.valueType)
+        val keyType = mapType.keyType
+        val valueType = mapType.valueType
 
         val body = match(
             call(
@@ -1847,17 +1825,13 @@ class CodecGenerator {
                             "list" to id("repr_entries"),
                             "f" to lambda(listOf("entry"),
                                 match(
-                                    call(
-                                        member(id(keyDecodeImplName), "decode"),
-                                        record("val" to member(id("entry"), "key"), "path" to id("path"))
-                                    ),
+                                    // Use typed ability call for key decoding
+                                    typedDecodeCall(keyType, member(id("entry"), "key")),
                                     matchCase(
                                         okPat("decoded_key"),
                                         match(
-                                            call(
-                                                member(id(valueDecodeImplName), "decode"),
-                                                record("val" to member(id("entry"), "value"), "path" to id("path"))
-                                            ),
+                                            // Use typed ability call for value decoding
+                                            typedDecodeCall(valueType, member(id("entry"), "value")),
                                             matchCase(
                                                 okPat("decoded_value"),
                                                 ok(record("key" to id("decoded_key"), "val" to id("decoded_value")))
@@ -1888,13 +1862,10 @@ class CodecGenerator {
     private fun generateSortedMapDecode(formatType: FunkType, sortedMapType: FunkType.SortedMapType): ImplAbilityDeclaration {
         // Decode as Map[K, V] first, then convert to SortedMap
         val mapType = FunkType.MapType(sortedMapType.keyType, sortedMapType.valueType)
-        val mapDecodeImplName = getDecodeImplName(formatType, mapType)
 
         val body = match(
-            call(
-                member(id(mapDecodeImplName), "decode"),
-                record("val" to id("val"), "path" to id("path"))
-            ),
+            // Use typed ability call for map decoding
+            typedDecodeCall(mapType, id("val")),
             matchCase(
                 okPat("decoded_map"),
                 ok(call(member(id("sortedmap"), "from_map"), record("m" to id("decoded_map"))))
@@ -1920,7 +1891,6 @@ class CodecGenerator {
      */
     private fun generateOptionDecode(formatType: FunkType, typeApp: FunkType.TypeApplication): ImplAbilityDeclaration {
         val innerType = typeApp.args.firstOrNull() ?: throw IllegalArgumentException("Option requires type argument")
-        val innerDecodeImplName = getDecodeImplName(formatType, innerType)
 
         val body = match(
             call(
@@ -1935,10 +1905,8 @@ class CodecGenerator {
                     matchCase(
                         somePat("inner_repr"),
                         match(
-                            call(
-                                member(id(innerDecodeImplName), "decode"),
-                                record("val" to id("inner_repr"), "path" to id("path"))
-                            ),
+                            // Use typed ability call for inner type decoding
+                            typedDecodeCall(innerType, id("inner_repr")),
                             matchCase(okPat("decoded_inner"), ok(some(id("decoded_inner")))),
                             matchCase(errPat("e"), err(id("e")))
                         )
@@ -1957,8 +1925,6 @@ class CodecGenerator {
         // Result[Ok, Err] has two type arguments
         val okType = typeApp.args.getOrNull(0) ?: throw IllegalArgumentException("Result requires Ok type argument")
         val errType = typeApp.args.getOrNull(1) ?: throw IllegalArgumentException("Result requires Err type argument")
-        val okDecodeImplName = getDecodeImplName(formatType, okType)
-        val errDecodeImplName = getDecodeImplName(formatType, errType)
 
         val body = match(
             call(
@@ -1977,10 +1943,8 @@ class CodecGenerator {
                         matchCase(
                             somePat("payload_repr"),
                             match(
-                                call(
-                                    member(id(okDecodeImplName), "decode"),
-                                    record("val" to id("payload_repr"), "path" to id("path"))
-                                ),
+                                // Use typed ability call for Ok type decoding
+                                typedDecodeCall(okType, id("payload_repr")),
                                 matchCase(okPat("decoded_ok"), ok(ok(id("decoded_ok")))),
                                 matchCase(errPat("e"), err(id("e")))
                             )
@@ -2008,10 +1972,8 @@ class CodecGenerator {
                             matchCase(
                                 somePat("payload_repr"),
                                 match(
-                                    call(
-                                        member(id(errDecodeImplName), "decode"),
-                                        record("val" to id("payload_repr"), "path" to id("path"))
-                                    ),
+                                    // Use typed ability call for Err type decoding
+                                    typedDecodeCall(errType, id("payload_repr")),
                                     matchCase(okPat("decoded_err"), ok(err(id("decoded_err")))),
                                     matchCase(errPat("e"), err(id("e")))
                                 )
