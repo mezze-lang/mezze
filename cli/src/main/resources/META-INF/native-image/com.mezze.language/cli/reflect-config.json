@@ -1,0 +1,110 @@
+[
+  {
+    "name": "com.mezze.language.interpreter.MezzeLanguage",
+    "methods": [
+      { "name": "<init>", "parameterTypes": [] }
+    ],
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeLanguageProvider",
+    "methods": [
+      { "name": "<init>", "parameterTypes": [] }
+    ],
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeContext",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeValue",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeInt",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeFloat",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeString",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeBool",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeRecord",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeVariant",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeFunction",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeTruffleFunction",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.mezze.language.interpreter.MezzeNull",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredMethods": true,
+    "allPublicFields": true,
+    "allDeclaredFields": true
+  }
+]

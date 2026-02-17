@@ -1,0 +1,76 @@
+# Demo: Using Log and FileSystem Effects in Mezze
+
+use std::effects::log::{Log, Console, QuietConsole}
+use std::effects::filesystem::{FileSystem, LocalDisk, MemoryFS}
+use std::int
+
+# Create a greeting message
+let create_greeting = { name } ->
+    "Hello, $(name)! Welcome to Mezze programming."
+
+# Process and log a greeting
+let process_greeting = { name } -> do
+    # Log the start
+    Log.info { msg = "Processing greeting..." }
+
+    # Create the greeting
+    let greeting = create_greeting { name = name }
+
+    # Log the greeting
+    Log.println { msg = "Generated greeting:" }
+    Log.println { msg = greeting }
+
+    # Log completion
+    Log.info { msg = "Greeting processed successfully!" }
+
+# Calculate and log a sum
+let calculate_sum = { a, b } -> do
+    Log.debug { msg = "Starting calculation..." }
+    let result = a + b
+    Log.info { msg = "Result: $(int::to_string { val = result })" }
+    result
+
+# Write to a file (demonstrates FileSystem effect)
+let write_greeting_to_file = { filename, content } -> do
+    Log.info { msg = "Writing to file: $(filename)" }
+    FileSystem.write_file { path = filename, content = content }
+    Log.info { msg = "File written successfully!" }
+
+# Main demo function
+let demo = {} -> do
+    Log.println { msg = "=== Mezze Effects Demo ===" }
+    Log.println { msg = "" }
+
+    # Demo 1: Greeting
+    Log.println { msg = "Demo 1: Greeting Processing" }
+    process_greeting { name = "Mezze Developer" }
+    Log.println { msg = "" }
+
+    # Demo 2: Calculation
+    Log.println { msg = "Demo 2: Calculation" }
+    Log.println { msg = "Calculating 42 + 58..." }
+    let sum = calculate_sum { a = 42, b = 58 }
+    Log.println { msg = int::to_string {val = sum} }
+
+    # Demo 3: File Writing
+    Log.println { msg = "Demo 3: FileSystem Effect" }
+    let greeting = create_greeting { name = "World" }
+    write_greeting_to_file { filename = "./mezze_greeting.txt", content = greeting }
+    Log.println { msg = "" }
+
+    # Demo 4: Different log levels
+    Log.println { msg = "Demo 4: Log Levels" }
+    Log.trace { msg = "This is a trace message" }
+    Log.debug { msg = "This is a debug message" }
+    Log.info { msg = "This is an info message" }
+    Log.warn { msg = "This is a warning message" }
+    Log.error { msg = "This is an error message" }
+    Log.println { msg = "" }
+
+    Log.println { msg = "=== Demo Complete ===" }
+
+# Run the demo with Console handler for Log and LocalDisk for FileSystem
+# Main must be a function so exec can call it after loading all modules
+let main = {} ->
+    perform LocalDisk in
+        perform Console in demo {}

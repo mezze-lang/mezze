@@ -1,12 +1,12 @@
-# Funk Language Support for VS Code
+# Mezze Language Support for VS Code
 
-Comprehensive syntax highlighting and language support for the Funk functional programming language.
+Comprehensive syntax highlighting and language support for the Mezze functional programming language.
 
 ## Features
 
 ### Syntax Highlighting
 
-This extension provides rich syntax highlighting for all Funk language features:
+This extension provides rich syntax highlighting for all Mezze language features:
 
 - **Keywords**: `let`, `type`, `effect`, `ability`, `impl`, `match`, `is`, `if`, `then`, `else`, `do`, `perform`, `with`, `where`, `for`, `in`, `use`, `pub`, `as`
 - **Type Variables**: `'a`, `'b`, `'t`, etc.
@@ -31,7 +31,7 @@ This extension provides rich syntax highlighting for all Funk language features:
 
 ### Code Snippets
 
-Over 35 built-in snippets for common Funk patterns:
+Over 35 built-in snippets for common Mezze patterns:
 
 - **Declarations**: `let`, `lett`, `publet`, `letd`, `letdp` (destructuring)
 - **Types**: `type`, `typeg`, `record`, `recordo`, `variant`, `variantd`, `varianto`
@@ -43,9 +43,9 @@ Over 35 built-in snippets for common Funk patterns:
 - **Calls**: `abcall` (ability method), `modcall` (module function)
 - **Utilities**: `pipe`, `section`, `interp` (string interpolation)
 
-## Funk Language Overview
+## Mezze Language Overview
 
-Funk is a pure functional programming language with:
+Mezze is a pure functional programming language with:
 
 - **Pure Functional Paradigm**: Immutable data structures and referential transparency
 - **Algebraic Effects System**: First-class effects for managing side effects declaratively
@@ -57,19 +57,19 @@ Funk is a pure functional programming language with:
 ## Syntax Examples
 
 ### Let Binding
-```funk
+```mezze
 let add = {x, y} -> x + y
 pub let result = add {x = 5, y = 3}
 ```
 
 ### Type Declaration
-```funk
+```mezze
 type Option 'a = | Some {value: 'a}, None |
 type Point = {x: Int, y: Int}
 ```
 
 ### Effect Declaration
-```funk
+```mezze
 effect State {
   get: {} -> Int <>
   put: {value: Int} -> {} <>
@@ -77,21 +77,21 @@ effect State {
 ```
 
 ### Ability Declaration
-```funk
+```mezze
 ability NumAdd 'a where {
   add: {left: 'a, right: 'a} -> 'a
 }
 ```
 
 ### Pattern Matching
-```funk
+```mezze
 match value is
   Some {value = x} -> x
   None -> 0
 ```
 
 ### Function with Effects
-```funk
+```mezze
 let computation: {x: Int} -> Int <State> = {x} ->
   do
     let current = get {}
@@ -103,9 +103,9 @@ let computation: {x: Int} -> Int <State> = {x} ->
 
 1. Open VS Code
 2. Press `Ctrl+P` / `Cmd+P` to open the Quick Open dialog
-3. Type `ext install funk-language` and press Enter
+3. Type `ext install mezze-language` and press Enter
 
-Or install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=funk-lang.funk-language).
+Or install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=mezze-lang.mz-language).
 
 ## Development
 
@@ -113,8 +113,8 @@ To contribute to this extension:
 
 ```bash
 # Clone the repository
-git clone https://github.com/funk-lang/funk.git
-cd funk/tooling/vscode-extension
+git clone https://github.com/mezze-lang/mezze.git
+cd mezze/tooling/vscode-extension
 
 # Install dependencies (if any)
 npm install
@@ -123,16 +123,16 @@ npm install
 npx vsce package
 
 # Install locally
-code --install-extension funk-language-0.3.0.vsix
+code --install-extension mezze-language-0.3.0.vsix
 ```
 
 ## Supported File Extensions
 
-- `.funk` - Funk source files
+- `.mz` - Mezze source files
 
 ## Known Issues
 
-Please report any issues on the [GitHub repository](https://github.com/funk-lang/funk/issues).
+Please report any issues on the [GitHub repository](https://github.com/mezze-lang/mezze/issues).
 
 ## Release Notes
 
@@ -175,12 +175,12 @@ Please report any issues on the [GitHub repository](https://github.com/funk-lang
 
 ## Contributing
 
-Contributions are welcome! Please see the [contributing guidelines](https://github.com/funk-lang/funk/blob/main/CONTRIBUTING.md).
+Contributions are welcome! Please see the [contributing guidelines](https://github.com/mezze-lang/mezze/blob/main/CONTRIBUTING.md).
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/funk-lang/funk/blob/main/LICENSE) for details.
+MIT License - see [LICENSE](https://github.com/mezze-lang/mezze/blob/main/LICENSE) for details.
 
 ---
 
-**Enjoy coding in Funk!** 🎵
+**Enjoy coding in Mezze!** 🎵

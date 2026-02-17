@@ -1,9 +1,9 @@
 {
-  "name": "funk-language",
-  "displayName": "Funk Language Support",
-  "description": "Comprehensive syntax highlighting and language support for the Funk functional programming language with algebraic effects",
+  "name": "mezze-language",
+  "displayName": "Mezze Language Support",
+  "description": "Comprehensive syntax highlighting and language support for the Mezze functional programming language with algebraic effects",
   "version": "0.3.1",
-  "publisher": "funk-lang",
+  "publisher": "mezze-lang",
   "engines": {
     "vscode": "^1.74.0"
   },
@@ -11,7 +11,7 @@
     "Programming Languages"
   ],
   "keywords": [
-    "funk",
+    "mezze",
     "functional",
     "effects",
     "algebraic-effects",
@@ -22,39 +22,39 @@
   "contributes": {
     "languages": [
       {
-        "id": "funk",
+        "id": "mezze",
         "aliases": [
-          "Funk",
-          "funk"
+          "Mezze",
+          "mezze"
         ],
         "extensions": [
-          ".funk"
+          ".mezze"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "funk",
-        "scopeName": "source.funk",
-        "path": "./syntaxes/funk.tmLanguage.json"
+        "language": "mezze",
+        "scopeName": "source.mezze",
+        "path": "./syntaxes/mezze.tmLanguage.json"
       }
     ],
     "snippets": [
       {
-        "language": "funk",
-        "path": "./snippets/funk.json"
+        "language": "mezze",
+        "path": "./snippets/mezze.json"
       }
     ]
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/funk-lang/funk"
+    "url": "https://github.com/mezze-lang/mezze"
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/funk-lang/funk/issues"
+    "url": "https://github.com/mezze-lang/mezze/issues"
   },
-  "homepage": "https://github.com/funk-lang/funk#readme"
+  "homepage": "https://github.com/mezze-lang/mezze#readme"
 }
 

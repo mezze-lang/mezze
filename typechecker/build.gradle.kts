@@ -32,6 +32,6 @@ tasks.test {
     systemProperty("junit.jupiter.execution.timeout.default", "60s")
     systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
 
-    // Set funk.project.root so tests can access stdlib modules
-    systemProperty("funk.project.root", rootProject.projectDir.absolutePath)
+    // Set mezze.project.root so tests can access stdlib modules
+    systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
 }

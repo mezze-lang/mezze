@@ -1,33 +1,33 @@
-# Funk Standard Library (stdlib)
+# Mezze Standard Library (stdlib)
 
-The Funk standard library provides a comprehensive set of modules for common programming tasks, organized into logical categories.
+The Mezze standard library provides a comprehensive set of modules for common programming tasks, organized into logical categories.
 
 ## Organization
 
 ```
 stdlib/std/
-├── int.funk           # Integer utilities
-├── float.funk         # Float utilities
-├── string.funk        # String operations
-├── boolean.funk       # Boolean utilities
-├── option.funk        # Optional values
-├── result.funk        # Result/error handling
-├── nat.funk           # Natural numbers (0, 1, 2, ...)
-├── frac.funk          # Fractions/rationals
+├── int.mz           # Integer utilities
+├── float.mz         # Float utilities
+├── string.mz        # String operations
+├── boolean.mz       # Boolean utilities
+├── option.mz        # Optional values
+├── result.mz        # Result/error handling
+├── nat.mz           # Natural numbers (0, 1, 2, ...)
+├── frac.mz          # Fractions/rationals
 ├── collections/       # Collection types and operations
-│   ├── array.funk
-│   ├── map.funk
-│   └── set.funk
+│   ├── array.mz
+│   ├── map.mz
+│   └── set.mz
 ├── math/              # Mathematical functions
-│   ├── core.funk
-│   ├── trig.funk
-│   └── random.funk
+│   ├── core.mz
+│   ├── trig.mz
+│   └── random.mz
 └── effects/           # Algebraic effects
-    ├── log.funk
-    ├── filesystem.funk
-    ├── time.funk
-    ├── random.funk
-    └── environment.funk
+    ├── log.mz
+    ├── filesystem.mz
+    ├── time.mz
+    ├── random.mz
+    └── environment.mz
 ```
 
 ## Module Reference
@@ -35,7 +35,7 @@ stdlib/std/
 ### Core Types
 
 **`std::option`** - Optional values
-```funk
+```mezze
 use std::option::{Some, None, map, flat_map, unwrap_or}
 
 let value = Some { val = 42 }
@@ -43,7 +43,7 @@ let result = map { opt = value, f = { x } -> x + 1 }
 ```
 
 **`std::result`** - Result type for error handling
-```funk
+```mezze
 use std::result::{Ok, Err, map, map_error, unwrap_or}
 
 let success = Ok { val = 42 }
@@ -53,7 +53,7 @@ let failure = Err { err = "Something went wrong" }
 ### Primitive Types
 
 **`std::int`** - Integer utilities
-```funk
+```mezze
 use std::int
 
 let absolute = int::abs { x = -5 }  # 5
@@ -63,7 +63,7 @@ let str = int::to_string { val = 42 }  # "42"
 ```
 
 **`std::float`** - Floating-point utilities
-```funk
+```mezze
 use std::float
 
 let rounded = float::round { x = 3.7 }  # 4.0
@@ -72,7 +72,7 @@ let str = float::to_string { val = 3.14 }  # "3.14"
 ```
 
 **`std::string`** - String operations
-```funk
+```mezze
 use std::string
 
 let upper = string::to_upper { s = "hello" }  # "HELLO"
@@ -81,7 +81,7 @@ let contains = string::contains { s = "hello", sub = "ell" }  # true
 ```
 
 **`std::boolean`** - Boolean utilities
-```funk
+```mezze
 use std::boolean
 
 let str = boolean::to_string { val = true }  # "true"
@@ -90,7 +90,7 @@ let str = boolean::to_string { val = true }  # "true"
 ### Numeric Types
 
 **`std::nat`** - Natural numbers (0, 1, 2, ...)
-```funk
+```mezze
 use std::nat
 
 let n = nat::from_int { x = 5 }  # Some (Nat 5)
@@ -98,7 +98,7 @@ let invalid = nat::from_int { x = -1 }  # None
 ```
 
 **`std::frac`** - Fractions/rationals
-```funk
+```mezze
 use std::frac
 
 let half = frac::create { num = 1, denom = 2 }
@@ -108,7 +108,7 @@ let sum = frac::add { l = half, r = half }  # 1/1
 ### Generators
 
 **`std::effects::generator`** - Continuation-based generators with associated types
-```funk
+```mezze
 use std::effects::generator::{Generator, Yieldable, next, to_list}
 
 # Define a generator using the Generator effect
@@ -142,7 +142,7 @@ let main2 = {} -> do
 ### Collections (`std::collections`)
 
 **`std::collections::array`** - Array/list operations
-```funk
+```mezze
 use std::collections::array
 
 let numbers = [1, 2, 3, 4, 5]
@@ -152,7 +152,7 @@ let sum = array::fold { xs = numbers, init = 0, f = { acc, x } -> acc + x }
 ```
 
 **`std::collections::map`** - Map/dictionary operations
-```funk
+```mezze
 use std::collections::map
 
 let m = map::empty { }
@@ -161,7 +161,7 @@ let value = map::get { m = m2, key = "foo" }  # Some 42
 ```
 
 **`std::collections::set`** - Set operations
-```funk
+```mezze
 use std::collections::set
 
 let s = set::from_array { xs = [1, 2, 3, 2, 1] }
@@ -172,7 +172,7 @@ let size = set::size { s = s }  # 3
 ### Math (`std::math`)
 
 **`std::math::core`** - Core mathematical functions
-```funk
+```mezze
 use std::math::core
 
 let root = core::sqrt { x = 16.0 }  # 4.0
@@ -181,7 +181,7 @@ let log = core::ln { x = 2.718281828 }  # ~1.0
 ```
 
 **`std::math::trig`** - Trigonometric functions
-```funk
+```mezze
 use std::math::trig
 
 let sine = trig::sin { value = trig::pi / 2.0 }  # 1.0
@@ -190,7 +190,7 @@ let radians = trig::deg_to_rad { degrees = 180.0 }  # pi
 ```
 
 **`std::math::random`** - Mathematical random utilities
-```funk
+```mezze
 use std::math::random
 
 # Used with Random effect - see effects below
@@ -201,7 +201,7 @@ use std::math::random
 Effects provide algebraic effects for side-effectful operations.
 
 **`std::effects::log`** - Logging
-```funk
+```mezze
 use std::effects::log::{Log, Console}
 
 let program = {} -> do
@@ -215,7 +215,7 @@ let main = {} ->
 ```
 
 **`std::effects::filesystem`** - File system operations
-```funk
+```mezze
 use std::effects::filesystem::{FileSystem, LocalDisk, MemoryFS}
 
 let program = {} -> do
@@ -233,7 +233,7 @@ let test = {} ->
 ```
 
 **`std::effects::time`** - Time operations
-```funk
+```mezze
 use std::effects::time::{Time, SystemTime, MockTime}
 
 let program = {} -> do
@@ -251,7 +251,7 @@ let test = {} ->
 ```
 
 **`std::effects::random`** - Random number generation
-```funk
+```mezze
 use std::effects::random::{Random, SystemRandom, SeededRandom}
 
 let program = {} -> do
@@ -269,7 +269,7 @@ let test = {} ->
 ```
 
 **`std::effects::environment`** - Environment and system info
-```funk
+```mezze
 use std::effects::environment::{Environment, SystemEnvironment}
 
 let program = {} -> do
@@ -285,21 +285,21 @@ let main = {} ->
 ## Import Styles
 
 ### Full module import
-```funk
+```mezze
 use std::int
 
 int::to_string { val = 42 }
 ```
 
 ### Selective import
-```funk
+```mezze
 use std::collections::array::{map, filter, fold}
 
 map { xs = [1, 2, 3], f = { x } -> x * 2 }
 ```
 
 ### Aliased import
-```funk
+```mezze
 use std::collections::array as arr
 
 arr::map { xs = [1, 2, 3], f = { x } -> x * 2 }
@@ -348,7 +348,7 @@ Most effect modules provide both production and testing implementations:
 
 This allows you to write testable code by swapping implementations:
 
-```funk
+```mezze
 # Production
 let main = {} ->
     perform LocalDisk in
@@ -366,9 +366,9 @@ let test = {} ->
 
 ## Building and Packaging
 
-The stdlib is automatically included when you build the Funk compiler:
+The stdlib is automatically included when you build the Mezze compiler:
 
-- **JAR**: Resources are packaged in `cli/build/libs/funk.jar`
-- **Native**: Resources are embedded in `cli/build/native/nativeCompile/funk`
+- **JAR**: Resources are packaged in `cli/build/libs/mezze.jar`
+- **Native**: Resources are embedded in `cli/build/native/nativeCompile/mezze`
 
 You don't need to distribute stdlib files separately - they're embedded in the binary!

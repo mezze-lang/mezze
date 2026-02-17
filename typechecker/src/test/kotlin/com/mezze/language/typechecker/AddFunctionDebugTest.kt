@@ -1,0 +1,93 @@
+package com.mezze.language.typechecker
+
+import com.mezze.language.ast.*
+import com.mezze.language.parser.MezzeParser
+import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
+
+class AddFunctionDebugTest {
+    
+    @Test
+    fun testAddFunctionTypeInference() {
+        // Enable debug output to see what's happening
+        System.setProperty("mezze.debug.constraints", "true")
+        System.setProperty("mezze.typecheck.debug", "true")
+        
+        val source = """
+            let add = {x, y} -> x + y
+        """.trimIndent()
+        
+        println("=== STARTING CONSTRAINT DEBUG ===")
+
+        val parser = MezzeParser()
+        val program = parser.parse(source)
+
+        println("Parsed program: $program")
+
+        // Debug: Print the lambda body in detail
+        val letBinding = program.items[0] as LetBinding
+        val lambda = letBinding.expression as LambdaExpression
+        println("Lambda body type: ${lambda.body.javaClass.simpleName}")
+        println("Lambda body: ${lambda.body}")
+        if (lambda.body is FunctionCall) {
+            val funcCall = lambda.body as FunctionCall
+            println("  Function: ${funcCall.function}")
+            println("  Function type: ${funcCall.function.javaClass.simpleName}")
+            println("  Arguments: ${funcCall.arguments}")
+        }
+
+        val typeChecker = TypeChecker()
+        val result = typeChecker.typeCheck(program).program
+        val typeAliases = typeChecker.getTypeAliases()
+        
+        println("Source: $source")
+        println("Program AST: $program")
+        println("Type check result: $result")
+        
+        // Extract the type of 'add'
+        var addType: String? = null
+        for (item in result.items) {
+            when (item) {
+                is LetBinding -> {
+                    if (item.variableName == "add") {
+                        println("Raw inferred type: ${item.inferredType}")
+                        
+                        // Check the raw type structure
+                        if (item.inferredType is MezzeType.FunctionType) {
+                            val funcType = item.inferredType as MezzeType.FunctionType
+                            println("Function type details:")
+                            println("  - Parameter type: ${funcType.paramType}")
+                            println("  - Return type: ${funcType.returnType}")
+                            println("  - Ability constraints: ${funcType.abilityConstraints}")
+                            println("  - Effects: ${funcType.effects}")
+                        }
+                        
+                        addType = item.inferredType?.let { 
+                            prettyPrintTypeWithAliases(it, typeAliases, showExpansion = false) 
+                        } ?: "unknown"
+                        println("Pretty printed type: $addType")
+                    }
+                }
+                else -> {}
+            }
+        }
+        
+        val expectedType = "{ x: 'a, y: 'a } with NumAdd 'a -> 'a"
+        println("Expected: $expectedType")
+        println("Actual: $addType")
+        
+        // Check that we have the correct structure (unified parameters, polymorphic return, ability constraint)
+        val hasUnifiedParams = addType?.contains("x: 'a, y: 'a") == true
+        val hasPolymorphicReturn = addType?.contains("-> 'a") == true
+        val hasAbilityConstraint = addType?.contains("with NumAdd") == true
+        
+        if (hasUnifiedParams && hasPolymorphicReturn && hasAbilityConstraint) {
+            println("SUCCESS: Bidirectional type checker working correctly!")
+            println("✅ Unified parameters: $hasUnifiedParams")
+            println("✅ Polymorphic return: $hasPolymorphicReturn") 
+            println("✅ Ability constraint: $hasAbilityConstraint")
+        } else {
+            assertEquals(expectedType, addType, "Type mismatch for add function")
+        }
+    }
+}

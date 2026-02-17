@@ -1,0 +1,244 @@
+# =============================================================================
+# std/async/structured.mezze - Structured Concurrency Helpers
+# =============================================================================
+
+use std::async::async::{Promise, spawn, Async}
+
+# =============================================================================
+# Parallel Execution
+# =============================================================================
+
+# Run all tasks in parallel and wait for all to complete
+# Returns list of results in same order as input tasks
+#
+# Example:
+#   let tasks = [
+#       {} -> expensive_op1 {},
+#       {} -> expensive_op2 {},
+#       {} -> expensive_op3 {}
+#   ]
+#   let results = parallel {tasks = tasks}
+#   # results = [result1, result2, result3]
+pub let parallel: {tasks: [{} -> 'a]} -> ['a] <Async> =
+    {tasks} -> do
+        # Spawn all tasks
+        let promises = map {
+            f = {task} -> spawn {computation = task},
+            list = tasks
+        }
+
+        # Await all promises
+        map {
+            f = {promise} -> Async.await {promise = promise},
+            list = promises
+        }
+
+# =============================================================================
+# Race Execution
+# =============================================================================
+
+# Run all tasks in parallel, return result of first to complete
+# Other tasks continue running (no cancellation yet)
+#
+# Example:
+#   let tasks = [
+#       {} -> fetch_from_cache {},
+#       {} -> fetch_from_db {},
+#       {} -> fetch_from_api {}
+#   ]
+#   let fastest = race {tasks = tasks}
+#   # Returns whichever completes first
+pub let race: {tasks: [{} -> 'a]} -> 'a <Async> =
+    {tasks} -> do
+        # Spawn all tasks
+        let promises = map {
+            f = {task} -> spawn {computation = task},
+            list = tasks
+        }
+
+        # Poll promises until one completes
+        # TODO: This needs native support for efficient implementation
+        # Current implementation is a placeholder
+        let first_promise = head {list = promises}
+        Async.await {promise = first_promise}
+
+# =============================================================================
+# Timeout
+# =============================================================================
+
+# Run a task with a timeout
+# Returns Option: Some {val} if completed, None if timeout
+#
+# Example:
+#   let result = with_timeout {
+#       task = {} -> slow_operation {},
+#       timeout_ms = 5000
+#   }
+#   match result is
+#       | Some {val} -> val
+#       | None -> "Timeout!"
+pub let with_timeout: {task: {} -> 'a, timeout_ms: Int} -> Option 'a <Async> =
+    {task, timeout_ms} -> do
+        use std::async::thread::{sleep}
+
+        # Create timeout task
+        let timeout_task = {} -> do
+            sleep {millis = timeout_ms}
+            None
+
+        # Race the task against timeout
+        let tasks = [
+            {} -> Some {val = task {}},
+            timeout_task
+        ]
+
+        race {tasks = tasks}
+
+# =============================================================================
+# Fan-out / Fan-in Patterns
+# =============================================================================
+
+# Map a function over a list in parallel
+# Like map, but runs all computations concurrently
+#
+# Example:
+#   let urls = ["url1", "url2", "url3"]
+#   let responses = parallel_map {
+#       f = {url} -> http_get {url = url},
+#       list = urls
+#   }
+pub let parallel_map: {f: {'a} -> 'b, list: ['a]} -> ['b] <Async> =
+    {f, list} -> do
+        let tasks = map {
+            f = {item} -> {} -> f {x = item},
+            list = list
+        }
+        parallel {tasks = tasks}
+
+# Filter a list in parallel
+# Predicate function runs concurrently for all elements
+#
+# Example:
+#   let urls = ["url1", "url2", "url3"]
+#   let valid = parallel_filter {
+#       predicate = {url} -> is_reachable {url = url},
+#       list = urls
+#   }
+pub let parallel_filter: {predicate: {'a} -> Bool, list: ['a]} -> ['a] <Async> =
+    {predicate, list} -> do
+        # Run predicate in parallel for all elements
+        let results = parallel_map {
+            f = {item} -> do
+                let keep = predicate {x = item}
+                {item = item, keep = keep}
+            ,
+            list = list
+        }
+
+        # Filter based on results
+        filter_map {
+            f = {result} ->
+                if result.keep
+                then Some {val = result.item}
+                else None
+            ,
+            list = results
+        }
+
+# =============================================================================
+# Batching
+# =============================================================================
+
+# Process list in batches with controlled concurrency
+# Limits number of concurrent operations
+#
+# Example:
+#   # Process 100 items, max 10 concurrent
+#   let results = batched {
+#       f = {item} -> process {item = item},
+#       list = items,
+#       batch_size = 10
+#   }
+pub let batched: {f: {'a} -> 'b, list: ['a], batch_size: Int} -> ['b] <Async> =
+    {f, list, batch_size} -> do
+        # Split list into batches
+        let batches = chunk {list = list, size = batch_size}
+
+        # Process each batch in parallel
+        let batch_results = map {
+            f = {batch} -> parallel_map {f = f, list = batch},
+            list = batches
+        }
+
+        # Flatten results
+        flatten {list = batch_results}
+
+# =============================================================================
+# Helper Functions (will need to be defined elsewhere)
+# =============================================================================
+
+# These are placeholders - should be in std::list or similar
+let head: {list: ['a]} -> 'a =
+    {list} -> match list is
+        | [x, ...rest] -> x
+        | [] -> panic {msg = "head of empty list"}
+
+let map: {f: {'a} -> 'b, list: ['a]} -> ['b] =
+    {f, list} -> match list is
+        | [] -> []
+        | [x, ...xs] -> [f {x = x}] ++ map {f = f, list = xs}
+
+let filter_map: {f: {'a} -> Option 'b, list: ['a]} -> ['b] =
+    {f, list} -> match list is
+        | [] -> []
+        | [x, ...xs] ->
+            match f {x = x} is
+                | Some {val} -> [val] ++ filter_map {f = f, list = xs}
+                | None -> filter_map {f = f, list = xs}
+
+let chunk: {list: ['a], size: Int} -> [['a]] =
+    {list, size} -> []  # TODO: Implement
+
+let flatten: {list: [['a]]} -> ['a] =
+    {list} -> match list is
+        | [] -> []
+        | [xs, ...rest] -> xs ++ flatten {list = rest}
+
+let panic: {msg: String} -> 'a =
+    {msg} -> __native_panic {msg = msg}
+
+# =============================================================================
+# Examples
+# =============================================================================
+
+# Example 1: Fetch multiple URLs in parallel
+let fetch_all_example: {urls: [String]} -> [String] <Async> =
+    {urls} -> parallel_map {
+        f = {url} -> http_get {url = url},
+        list = urls
+    }
+
+# Example 2: Race multiple data sources
+let fastest_source_example: {} -> String <Async> =
+    {} -> race {
+        tasks = [
+            {} -> fetch_from_cache {},
+            {} -> fetch_from_db {},
+            {} -> fetch_from_api {}
+        ]
+    }
+
+# Example 3: Process with timeout
+let safe_operation_example: {} -> Option String <Async> =
+    {} -> with_timeout {
+        task = {} -> slow_external_api {},
+        timeout_ms = 5000
+    }
+
+# Example 4: Batch processing with concurrency limit
+let batch_process_example: {items: ['a]} -> ['b] <Async> =
+    {items} -> batched {
+        f = {item} -> process_item {item = item},
+        list = items,
+        batch_size = 10  # Max 10 concurrent
+    }

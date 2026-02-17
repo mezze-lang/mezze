@@ -1,0 +1,125 @@
+# std/collections/bytes.mezze - Binary data operations
+#
+# Bytes is a built-in type for efficient binary data handling.
+# Backed by ByteArray for O(1) indexing, all operations are immutable.
+#
+# Common use cases:
+# - Binary file I/O
+# - Network protocols
+# - Cryptographic operations
+# - Binary serialization/deserialization
+
+# === Construction ===
+
+# Create an empty byte sequence
+pub let empty = {} ->
+    __native_bytes_empty {}
+
+# Create bytes from a UTF-8 string
+pub let from_string = { s } ->
+    __native_bytes_from_string { s = s }
+
+# Create bytes from an array of integers (0-255)
+pub let from_array = { arr } ->
+    __native_bytes_from_array { arr = arr }
+
+# Create bytes from a hex string (e.g., "48656c6c6f"), returns Option
+pub let from_hex = { s } ->
+    __native_bytes_from_hex { s = s }
+
+# Create bytes from a base64-encoded string, returns Option
+pub let from_base64 = { s } ->
+    __native_bytes_from_base64 { s = s }
+
+# === Basic Operations ===
+
+# Get the length of the byte sequence
+pub let length = { b } ->
+    __native_bytes_length { b = b }
+
+# Check if the byte sequence is empty
+pub let is_empty = { b } ->
+    __native_bytes_is_empty { b = b }
+
+# Get the byte at an index as an unsigned int (0-255), returns Option
+pub let get = { b, i } ->
+    __native_bytes_get { b = b, i = i }
+
+# === Slicing ===
+
+# Get a slice from start (inclusive) to end (exclusive)
+pub let slice = { b, start, end } ->
+    __native_bytes_slice { b = b, start = start, end = end }
+
+# Take the first n bytes
+pub let take = { b, n } ->
+    __native_bytes_take { b = b, n = n }
+
+# Drop the first n bytes
+pub let drop = { b, n } ->
+    __native_bytes_drop { b = b, n = n }
+
+# === Combining ===
+
+# Concatenate two byte sequences
+pub let concat = { b1, b2 } ->
+    __native_bytes_concat { b1 = b1, b2 = b2 }
+
+# Concatenate multiple byte sequences efficiently (single allocation)
+pub let concat_all = { bs } ->
+    __native_bytes_concat_all { bs = bs }
+
+# Repeat bytes n times
+pub let repeat = { b, n } ->
+    __native_bytes_repeat { b = b, n = n }
+
+# === Searching ===
+
+# Find the index of a pattern, returns Option Int
+pub let index_of = { b, pattern } ->
+    __native_bytes_index_of { b = b, pattern = pattern }
+
+# Check if bytes contains a pattern
+pub let contains = { b, pattern } ->
+    __native_bytes_contains { b = b, pattern = pattern }
+
+# Check if bytes starts with a prefix
+pub let starts_with = { b, prefix } ->
+    __native_bytes_starts_with { b = b, prefix = prefix }
+
+# Check if bytes ends with a suffix
+pub let ends_with = { b, suffix } ->
+    __native_bytes_ends_with { b = b, suffix = suffix }
+
+# === Transformations ===
+
+# Reverse the byte order
+pub let reverse = { b } ->
+    __native_bytes_reverse { b = b }
+
+# Map a function over each byte (function receives/returns 0-255 int)
+pub let map = { b, f } ->
+    __native_bytes_map { b = b, f = f }
+
+# Fold over bytes from left to right
+# f receives { acc: 'a, byte: Int } and returns 'a
+pub let fold = { b, init, f } ->
+    __native_bytes_fold { b = b, init = init, f = f }
+
+# === Conversions ===
+
+# Convert to a UTF-8 string, returns Result String String
+pub let to_string = { b } ->
+    __native_bytes_to_string { b = b }
+
+# Convert to an array of integers (0-255)
+pub let to_array = { b } ->
+    __native_bytes_to_array { b = b }
+
+# Convert to a hexadecimal string (lowercase)
+pub let to_hex = { b } ->
+    __native_bytes_to_hex { b = b }
+
+# Convert to a base64-encoded string
+pub let to_base64 = { b } ->
+    __native_bytes_to_base64 { b = b }

@@ -5,7 +5,7 @@ plugins {
 }
 
 allprojects {
-    group = "com.funk.language"
+    group = "com.mezze.language"
     version = "1.0.0"
 
     repositories {

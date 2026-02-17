@@ -17,12 +17,12 @@
     "allDeclaredMethods": true
   },
   {
-    "name": "com.funk.language.parser.FunkLexer",
+    "name": "com.mezze.language.parser.MezzeLexer",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true
   },
   {
-    "name": "com.funk.language.parser.FunkParser",
+    "name": "com.mezze.language.parser.MezzeParser",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true
   },

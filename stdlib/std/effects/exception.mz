@@ -1,0 +1,51 @@
+# std/effects/exception.mezze - Type-safe exception handling
+
+use std::control::continuation
+use std::control::continuation::{Continuation}
+
+pub effect Exception having 'error where {
+    throw: {error: 'error} -> 'a <Exception>
+}
+
+# =============================================================================
+# Built-in Handlers
+# =============================================================================
+
+# Converts exceptions to Result values (RECOMMENDED for most cases)
+# Uses suspend_with to package the Err value, signaling early return
+pub impl Exception for ToResult { cont: Continuation } having 'error = 'e where {
+    throw = {error} -> cont.suspend_with {value = Err {error}}
+}
+
+# Aborts current computation (testable, catchable by outer handlers)
+pub impl Exception for Abort { cont: Continuation } having 'error = 'e where {
+    throw = {error} -> cont.abort {}
+}
+
+# Terminates entire program immediately (fatal errors only)
+pub impl Exception for Crash having 'error = 'e where {
+    throw = {error} -> crash {msg = "Unhandled exception"}
+}
+
+# Converts to Option, discarding error details
+pub impl Exception for ToOption { cont: Continuation } having 'error = 'e where {
+    throw = {error} -> cont.suspend_with {value = None}
+}
+
+# Silently ignores all errors
+pub impl Exception for Ignore { cont: Continuation } having 'error = 'e where {
+    throw = {error} -> cont.suspend_with {value = {}}
+}
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+# Shorthand for Exception.throw
+pub let throw = {error} -> Exception.throw {error}
+
+# Convert Result to exception (opposite of ToResult handler)
+pub let unwrap = {result} ->
+    match result is
+        Ok {val} -> val
+        Err {error} -> Exception.throw {error }

@@ -1,0 +1,10 @@
+{
+  "iconDefinitions": {
+    "mezze-file": {
+      "iconPath": "./mezze-file-icon.svg"
+    }
+  },
+  "fileExtensions": {
+    "mezze": "mezze-file"
+  }
+}

@@ -4,7 +4,7 @@ plugins {
 }
 
 // Kapt is essential for Truffle interop - processes @ExportLibrary/@ExportMessage annotations
-// to generate InteropLibrary exports for FunkValue types (28 generated Java files)
+// to generate InteropLibrary exports for MezzeValue types (28 generated Java files)
 // Note: Kapt is deprecated in favor of KSP, but Truffle DSL doesn't support KSP yet
 kotlin {
     jvmToolchain(24)
@@ -50,8 +50,8 @@ tasks.test {
     // Run tests serially to avoid Truffle context conflicts
     maxParallelForks = 1
 
-    // Set funk.project.root so tests can access stdlib modules
-    systemProperty("funk.project.root", rootProject.projectDir.absolutePath)
+    // Set mezze.project.root so tests can access stdlib modules
+    systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
 
     // Increase timeout for Truffle initialization
     systemProperty("junit.jupiter.execution.timeout.default", "120s")

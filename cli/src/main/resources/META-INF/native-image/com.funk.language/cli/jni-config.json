@@ -1,8 +1,0 @@
-[
-  {
-    "name": "com.funk.language.interpreter.FunkLanguage",
-    "methods": [
-      { "name": "<init>", "parameterTypes": [] }
-    ]
-  }
-]

@@ -1,0 +1,8 @@
+[
+  {
+    "name": "com.mezze.language.interpreter.MezzeLanguage",
+    "methods": [
+      { "name": "<init>", "parameterTypes": [] }
+    ]
+  }
+]

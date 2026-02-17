@@ -1,0 +1,39 @@
+# std/math/random.mezze - Pure mathematical distribution functions
+
+use std::math::core
+use std::math::trig
+
+# Box-Muller transform for normal distribution
+# Takes two uniform random values and returns a normal distributed value
+pub let box_muller = { u1: Float, u2: Float, mean: Float, std_dev: Float } ->
+    let z0 = sqrt { value = -2.0 * ln { value = u1 } } * cos { value = 2.0 * pi * u2 }
+    mean + (std_dev * z0)
+
+# Inverse transform for exponential distribution
+pub let exponential_inverse = { u: Float, rate: Float } ->
+    (-1.0 / rate) * ln { value = u }
+
+# Linear interpolation for uniform distribution
+pub let uniform_transform = { u: Float, min: Float, max: Float } ->
+    min + (u * (max - min))
+
+# Probability density function for normal distribution
+pub let normal_pdf = { x: Float, mean: Float, std_dev: Float } ->
+    let variance = std_dev * std_dev
+    let coefficient = 1.0 / sqrt { value = 2.0 * pi * variance }
+    let exponent = -((x - mean) * (x - mean)) / (2.0 * variance)
+    coefficient * exp { value = exponent }
+
+# Cumulative distribution function approximation for normal distribution
+pub let normal_cdf_approx = { x: Float, mean: Float, std_dev: Float } ->
+    # Simplified approximation - in practice would use more accurate methods
+    let z = (x - mean) / std_dev
+    0.5 * (1.0 + tanh { value = z * sqrt { value = 2.0 / pi } })
+
+# Probability density function for exponential distribution
+pub let exponential_pdf = { x: Float, rate: Float } ->
+    if x < 0.0 then 0.0 else rate * exp { value = NumSub.neg { n = rate } * x }
+
+# Cumulative distribution function for exponential distribution
+pub let exponential_cdf = { x: Float, rate: Float } ->
+    if x < 0.0 then 0.0 else 1.0 - exp { value = NumSub.neg { n = rate } * x }

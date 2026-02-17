@@ -1,9 +1,9 @@
 {
-  "name": "funk-language",
-  "displayName": "Funk Language Support",
-  "description": "Comprehensive syntax highlighting and language support for the Funk functional programming language with algebraic effects",
+  "name": "mezze-language",
+  "displayName": "Mezze Language Support",
+  "description": "Comprehensive syntax highlighting and language support for the Mezze functional programming language with algebraic effects",
   "version": "0.3.3",
-  "publisher": "funk-lang",
+  "publisher": "mezze-lang",
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.74.0"
@@ -12,7 +12,7 @@
     "Programming Languages"
   ],
   "keywords": [
-    "funk",
+    "mezze",
     "functional",
     "effects",
     "algebraic-effects",
@@ -23,50 +23,50 @@
   "contributes": {
     "languages": [
       {
-        "id": "funk",
+        "id": "mezze",
         "aliases": [
-          "Funk",
-          "funk"
+          "Mezze",
+          "mezze"
         ],
         "extensions": [
-          ".funk"
+          ".mezze"
         ],
         "configuration": "./language-configuration.json",
         "icon": {
-          "light": "./file-icons/funk-file-icon.svg",
-          "dark": "./file-icons/funk-file-icon.svg"
+          "light": "./file-icons/mezze-file-icon.svg",
+          "dark": "./file-icons/mezze-file-icon.svg"
         }
       }
     ],
     "grammars": [
       {
-        "language": "funk",
-        "scopeName": "source.funk",
-        "path": "./syntaxes/funk.tmLanguage.json"
+        "language": "mezze",
+        "scopeName": "source.mezze",
+        "path": "./syntaxes/mezze.tmLanguage.json"
       }
     ],
     "snippets": [
       {
-        "language": "funk",
-        "path": "./snippets/funk.json"
+        "language": "mezze",
+        "path": "./snippets/mezze.json"
       }
     ],
     "iconThemes": [
       {
-        "id": "funk-icons",
-        "label": "Funk File Icons",
-        "path": "./file-icons/funk-icon-theme.json"
+        "id": "mezze-icons",
+        "label": "Mezze File Icons",
+        "path": "./file-icons/mezze-icon-theme.json"
       }
     ]
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/funk-lang/funk"
+    "url": "https://github.com/mezze-lang/mezze"
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/funk-lang/funk/issues"
+    "url": "https://github.com/mezze-lang/mezze/issues"
   },
-  "homepage": "https://github.com/funk-lang/funk#readme"
+  "homepage": "https://github.com/mezze-lang/mezze#readme"
 }
 

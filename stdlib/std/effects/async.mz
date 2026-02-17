@@ -1,0 +1,80 @@
+# std/effects/async.mezze - Promise-based async built on continuations
+
+use std::control::continuation
+use std::control::continuation::{Continuation}
+
+# Promise type - wraps a suspended continuation
+pub type Promise 'a = Promise {
+  suspended: Suspended 'a
+}
+
+# Suspended type - what continuation::suspend_with returns
+type Suspended 'a = Suspended {
+  continuation: {value: 'a} -> 'a,
+  value: 'a
+}
+
+# Async effect - Promise-based async programming
+pub effect Async where {
+  # Start async computation, returns immediately with Promise
+  async: {computation: {} -> 'a} -> Promise 'a <Async>,
+
+  # Wait for Promise to complete, blocks until ready
+  await: {promise: Promise 'a} -> 'a <Async>,
+
+  # Wait for all Promises to complete
+  await_all: {promises: [Promise 'a]} -> ['a] <Async>
+}
+
+# Implementation built on Continuation primitives
+pub impl Async for AsyncRunner { cont: Continuation } where {
+  # async - wraps computation in Promise using suspend_with
+  async = {computation} -> do
+    # Suspend with the computation result
+    let suspended = cont.suspend_with {
+      value = computation {}
+    }
+    # Wrap in Promise type
+    Promise {suspended = suspended}
+
+  # await - resumes the Promise's continuation
+  await = {promise} ->
+    cont.resume {
+      cont = promise.suspended.continuation,
+      value = promise.suspended.value
+    }
+
+  # await_all - wait for all promises sequentially
+  await_all = {promises} ->
+    __native_await_all {promises = promises}
+}
+
+# Helper: Create already-resolved Promise
+pub let resolved: {'a} -> Promise 'a = {value} ->
+  do
+    let suspended = continuation::suspend_with {value = value}
+    Promise {suspended = suspended}
+
+# Helper: Create rejected Promise
+pub let rejected: {error: 'e} -> Promise 'a = {error} ->
+  # Implementation depends on error handling design
+  __native_promise_rejected {error = error}
+
+# Usage examples:
+#
+# Basic async/await:
+# perform AsyncRunner in do
+#   let promise = Async.async {computation = {
+#     expensive_computation {}
+#   }}
+#   let result = Async.await {promise = promise}
+#   result
+#
+# Multiple concurrent operations:
+# perform AsyncRunner in do
+#   let p1 = Async.async {computation = {operation1 {}}}
+#   let p2 = Async.async {computation = {operation2 {}}}
+#   let p3 = Async.async {computation = {operation3 {}}}
+#
+#   let results = Async.await_all {promises = [p1, p2, p3]}
+#   results

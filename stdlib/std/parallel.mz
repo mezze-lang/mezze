@@ -1,0 +1,263 @@
+# std/parallel.mezze - Data Parallel Effect
+#
+# Provides data parallelism for pure computations over collections.
+# Unlike Async (task parallelism), Parallel is for CPU-bound work on data.
+#
+# Key differences from Async:
+# - Parallel: Pure functions, data decomposition, collection-oriented API
+# - Async: Effectful computations, explicit spawn/await, I/O-bound work
+#
+# Available implementations:
+# - ForkJoinParallel: Work-stealing parallelism (best for CPU-bound tasks)
+# - VirtualParallel: Virtual threads (good for mixed workloads)
+# - Sequential: Single-threaded, for testing/debugging
+#
+# Usage:
+#   use std::parallel::{Parallel, ForkJoinParallel}
+#
+#   perform ForkJoinParallel in do
+#       let results = Parallel.map {xs = large_list, f = {x} -> expensive_computation {x = x}}
+#       results
+
+# Parallel effect - data parallel operations
+pub effect Parallel where {
+    # === Core Operations ===
+
+    # Apply function to each element in parallel, results in input order
+    map: {xs: ['a], f: {x: 'a} -> 'b} -> ['b] <Parallel>,
+
+    # Run function on each element in parallel for side effects
+    for_each: {xs: ['a], f: {x: 'a} -> {}} -> {} <Parallel>,
+
+    # Filter elements with predicate evaluated in parallel
+    filter: {xs: ['a], f: {x: 'a} -> Bool} -> ['a] <Parallel>,
+
+    # Reduce collection in parallel with associative operation
+    # The operation must be associative: f(f(a, b), c) == f(a, f(b, c))
+    reduce: {xs: ['a], f: {left: 'a, right: 'a} -> 'a} -> Option 'a <Parallel>,
+
+    # Fold collection in parallel with associative combiner
+    # combine must be associative, and combine(zero, x) == x
+    fold: {xs: ['a], zero: 'b, map_fn: {x: 'a} -> 'b, combine: {left: 'b, right: 'b} -> 'b} -> 'b <Parallel>,
+
+    # === Tuple Operations ===
+
+    # Run two computations in parallel
+    both: {left: {} -> 'a, right: {} -> 'b} -> {left: 'a, right: 'b} <Parallel>,
+
+    # Run three computations in parallel
+    both3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c} -> {a: 'a, b: 'b, c: 'c} <Parallel>,
+
+    # === Search Operations ===
+
+    # Find first element matching predicate (parallel search, short-circuits)
+    find: {xs: ['a], f: {x: 'a} -> Bool} -> Option 'a <Parallel>,
+
+    # Check if any element matches predicate (parallel, short-circuits)
+    any: {xs: ['a], f: {x: 'a} -> Bool} -> Bool <Parallel>,
+
+    # Check if all elements match predicate (parallel, short-circuits)
+    all: {xs: ['a], f: {x: 'a} -> Bool} -> Bool <Parallel>,
+
+    # === Partitioning ===
+
+    # Partition elements based on predicate, returns {matching, not_matching}
+    partition: {xs: ['a], f: {x: 'a} -> Bool} -> {matching: ['a], not_matching: ['a]} <Parallel>,
+
+    # Group elements by key function
+    group_by: {xs: ['a], f: {x: 'a} -> 'k} -> [{key: 'k, values: ['a]}] <Parallel>
+}
+
+# =============================================================================
+# VirtualParallel Implementation - Virtual Threads (Default)
+# =============================================================================
+#
+# Uses Project Loom virtual threads for parallelism. Each element/task is
+# processed on its own virtual thread, with the JVM handling scheduling.
+#
+# Benefits:
+# - Scales to millions of concurrent tasks
+# - Low overhead per task
+# - Automatic work distribution by JVM scheduler
+# - Full Truffle context support for calling Mezze functions
+#
+# Example:
+#   perform VirtualParallel in do
+#       Parallel.map {xs = numbers, f = {x} -> fibonacci {n = x}}
+
+pub impl Parallel for VirtualParallel where {
+    map = {xs, f} -> __native_parallel_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_parallel_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_parallel_filter {xs = xs, f = f},
+    reduce = {xs, f} -> __native_parallel_reduce {xs = xs, f = f},
+    fold = {xs, zero, map_fn, combine} -> __native_parallel_fold {xs = xs, zero = zero, map_fn = map_fn, combine = combine},
+    both = {left, right} -> __native_parallel_both {left = left, right = right},
+    both3 = {a, b, c} -> __native_parallel_both3 {a = a, b = b, c = c},
+    find = {xs, f} -> __native_parallel_find {xs = xs, f = f},
+    any = {xs, f} -> __native_parallel_any {xs = xs, f = f},
+    all = {xs, f} -> __native_parallel_all {xs = xs, f = f},
+    partition = {xs, f} -> __native_parallel_partition {xs = xs, f = f},
+    group_by = {xs, f} -> __native_parallel_group_by {xs = xs, f = f}
+}
+
+# =============================================================================
+# VirtualParallelWith Implementation - Configurable Virtual Threads
+# =============================================================================
+#
+# Like VirtualParallel but with configurable parameters for tuning.
+#
+# Parameters:
+#   parallelism: Maximum number of concurrent virtual threads (0 = unlimited)
+#   chunk_size: Minimum elements per batch for chunked processing (1 = per-element)
+#
+# Example:
+#   perform VirtualParallelWith {parallelism = 8, chunk_size = 100} in do
+#       Parallel.map {xs = huge_list, f = {x} -> process {x = x}}
+
+pub impl Parallel for VirtualParallelWith { parallelism: Int, chunk_size: Int } where {
+    map = {xs, f} -> __native_parallel_map_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
+    for_each = {xs, f} -> __native_parallel_for_each_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
+    filter = {xs, f} -> __native_parallel_filter_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
+    reduce = {xs, f} -> __native_parallel_reduce_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
+    fold = {xs, zero, map_fn, combine} -> __native_parallel_fold_cfg {xs = xs, zero = zero, map_fn = map_fn, combine = combine, parallelism = parallelism, chunk_size = chunk_size},
+    both = {left, right} -> __native_parallel_both {left = left, right = right},
+    both3 = {a, b, c} -> __native_parallel_both3 {a = a, b = b, c = c},
+    find = {xs, f} -> __native_parallel_find_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
+    any = {xs, f} -> __native_parallel_any_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
+    all = {xs, f} -> __native_parallel_all_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
+    partition = {xs, f} -> __native_parallel_partition_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size},
+    group_by = {xs, f} -> __native_parallel_group_by_cfg {xs = xs, f = f, parallelism = parallelism, chunk_size = chunk_size}
+}
+
+# =============================================================================
+# ForkJoinParallel Implementation - True Work-Stealing Parallelism
+# =============================================================================
+#
+# Uses Java's ForkJoinPool with work-stealing for best CPU-bound performance.
+# Recursively splits work into subtasks that can be stolen by idle workers.
+#
+# Benefits:
+# - True work-stealing: idle threads steal work from busy threads
+# - Recursive task decomposition (divide-and-conquer)
+# - Optimal for CPU-bound, compute-intensive operations
+# - Configurable threshold for sequential fallback
+#
+# Parameters:
+#   threshold: Minimum elements to process sequentially (default 64)
+#   parallelism: Number of worker threads (0 = CPU count)
+#
+# Example:
+#   perform ForkJoinParallel in do
+#       Parallel.map {xs = huge_list, f = {x} -> cpu_intensive {x = x}}
+
+pub impl Parallel for ForkJoinParallel where {
+    map = {xs, f} -> __native_forkjoin_map {xs = xs, f = f, threshold = 64, parallelism = 0},
+    for_each = {xs, f} -> __native_forkjoin_for_each {xs = xs, f = f, threshold = 64, parallelism = 0},
+    filter = {xs, f} -> __native_forkjoin_filter {xs = xs, f = f, threshold = 64, parallelism = 0},
+    reduce = {xs, f} -> __native_forkjoin_reduce {xs = xs, f = f, threshold = 64, parallelism = 0},
+    fold = {xs, zero, map_fn, combine} -> __native_forkjoin_fold {xs = xs, zero = zero, map_fn = map_fn, combine = combine, threshold = 64, parallelism = 0},
+    both = {left, right} -> __native_forkjoin_both {left = left, right = right, parallelism = 0},
+    both3 = {a, b, c} -> __native_forkjoin_both3 {a = a, b = b, c = c, parallelism = 0},
+    find = {xs, f} -> __native_forkjoin_find {xs = xs, f = f, threshold = 64, parallelism = 0},
+    any = {xs, f} -> __native_forkjoin_any {xs = xs, f = f, threshold = 64, parallelism = 0},
+    all = {xs, f} -> __native_forkjoin_all {xs = xs, f = f, threshold = 64, parallelism = 0},
+    partition = {xs, f} -> __native_forkjoin_partition {xs = xs, f = f, threshold = 64, parallelism = 0},
+    group_by = {xs, f} -> __native_forkjoin_group_by {xs = xs, f = f, threshold = 64, parallelism = 0}
+}
+
+# =============================================================================
+# ForkJoinParallelWith Implementation - Configurable Work-Stealing
+# =============================================================================
+#
+# Like ForkJoinParallel but with explicit control over threshold and parallelism.
+#
+# Parameters:
+#   threshold: Below this size, tasks execute sequentially (avoids fork overhead)
+#   parallelism: Number of worker threads (0 = available processors)
+#
+# Example:
+#   perform ForkJoinParallelWith {threshold = 100, parallelism = 8} in do
+#       Parallel.map {xs = data, f = {x} -> process {x = x}}
+
+pub impl Parallel for ForkJoinParallelWith { threshold: Int, parallelism: Int } where {
+    map = {xs, f} -> __native_forkjoin_map {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
+    for_each = {xs, f} -> __native_forkjoin_for_each {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
+    filter = {xs, f} -> __native_forkjoin_filter {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
+    reduce = {xs, f} -> __native_forkjoin_reduce {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
+    fold = {xs, zero, map_fn, combine} -> __native_forkjoin_fold {xs = xs, zero = zero, map_fn = map_fn, combine = combine, threshold = threshold, parallelism = parallelism},
+    both = {left, right} -> __native_forkjoin_both {left = left, right = right, parallelism = parallelism},
+    both3 = {a, b, c} -> __native_forkjoin_both3 {a = a, b = b, c = c, parallelism = parallelism},
+    find = {xs, f} -> __native_forkjoin_find {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
+    any = {xs, f} -> __native_forkjoin_any {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
+    all = {xs, f} -> __native_forkjoin_all {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
+    partition = {xs, f} -> __native_forkjoin_partition {xs = xs, f = f, threshold = threshold, parallelism = parallelism},
+    group_by = {xs, f} -> __native_forkjoin_group_by {xs = xs, f = f, threshold = threshold, parallelism = parallelism}
+}
+
+# =============================================================================
+# Sequential Implementation - Single-Threaded
+# =============================================================================
+#
+# Executes all operations sequentially. Useful for:
+# - Testing and debugging parallel algorithms
+# - Small collections where parallelism overhead isn't worth it
+# - Deterministic execution order
+#
+# Example:
+#   perform Sequential in do
+#       Parallel.map {xs = small_list, f = {x} -> x * 2}
+
+pub impl Parallel for Sequential where {
+    map = {xs, f} -> __native_sequential_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_sequential_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_sequential_filter {xs = xs, f = f},
+    reduce = {xs, f} -> __native_sequential_reduce {xs = xs, f = f},
+    fold = {xs, zero, map_fn, combine} -> __native_sequential_fold {xs = xs, zero = zero, map_fn = map_fn, combine = combine},
+    both = {left, right} -> __native_sequential_both {left = left, right = right},
+    both3 = {a, b, c} -> __native_sequential_both3 {a = a, b = b, c = c},
+    find = {xs, f} -> __native_sequential_find {xs = xs, f = f},
+    any = {xs, f} -> __native_sequential_any {xs = xs, f = f},
+    all = {xs, f} -> __native_sequential_all {xs = xs, f = f},
+    partition = {xs, f} -> __native_sequential_partition {xs = xs, f = f},
+    group_by = {xs, f} -> __native_sequential_group_by {xs = xs, f = f}
+}
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+# Sum a list of numbers in parallel
+pub let sum: {xs: [Int]} -> Int <Parallel> = {xs} ->
+    match Parallel.reduce {xs = xs, f = {left, right} -> left + right} is
+        Some {val} -> val
+        None -> 0
+
+# Product of a list of numbers in parallel
+pub let product: {xs: [Int]} -> Int <Parallel> = {xs} ->
+    match Parallel.reduce {xs = xs, f = {left, right} -> left * right} is
+        Some {val} -> val
+        None -> 1
+
+# Count elements matching predicate in parallel
+pub let count: {xs: ['a], f: {x: 'a} -> Bool} -> Int <Parallel> = {xs, f} ->
+    Parallel.fold {
+        xs = xs,
+        zero = 0,
+        map_fn = {x} -> match f {x = x} is
+            True -> 1
+            False -> 0,
+        combine = {left, right} -> left + right
+    }
+
+# Flatten nested arrays in parallel
+pub let flatten: {xs: [['a]]} -> ['a] <Parallel> = {xs} ->
+    Parallel.fold {
+        xs = xs,
+        zero = [],
+        map_fn = {x} -> x,
+        combine = {left, right} -> __native_arraylist_concat {xs = left, ys = right}
+    }
+
+# Flat map - map then flatten in parallel
+pub let flat_map: {xs: ['a], f: {x: 'a} -> ['b]} -> ['b] <Parallel> = {xs, f} ->
+    flatten {xs = Parallel.map {xs = xs, f = f}}

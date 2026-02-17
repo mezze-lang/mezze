@@ -1,0 +1,83 @@
+# std/collections/array.mezze - Array operations
+# Note: Arrays (['a]) use ArrayList at runtime with native arraylist functions
+
+# Basic array operations (defined first for use by other functions)
+pub let length = {xs} ->
+    __native_arraylist_length { xs = xs }
+
+pub let get = {xs, i} ->
+    __native_arraylist_get { xs = xs, i = i }
+
+pub let set = {xs, i, x} ->
+    __native_arraylist_set { xs = xs, i = i, x = x }
+
+pub let add = {xs, x} ->
+    __native_arraylist_add { xs = xs, x = x }
+
+pub let remove = {xs, i} ->
+    __native_arraylist_remove { xs = xs, i = i }
+
+pub let concat = {xs, ys} ->
+    __native_arraylist_concat { xs = xs, ys = ys }
+
+# Array construction (uses add and concat above)
+pub let of = {x, xs} ->
+    concat { xs = add { xs = [], x = x }, ys = xs }
+
+pub let is_empty = {xs} ->
+    __native_arraylist_is_empty { xs = xs }
+
+# Higher-order functions
+pub let map = {xs, f} ->
+    __native_arraylist_map { xs = xs, f = f }
+
+pub let filter = {xs, p} ->
+    __native_arraylist_filter { xs = xs, p = p }
+
+pub let fold = {xs, init, f} ->
+    __native_arraylist_fold { xs = xs, init = init, f = f }
+
+pub let reduce = {xs, f} ->
+    __native_arraylist_reduce { xs = xs, f = f }
+
+# Utility functions
+pub let find = {xs, p} ->
+    __native_arraylist_find { xs = xs, p = p }
+
+pub let contains = {xs, x} ->
+    __native_arraylist_contains { xs = xs, x = x }
+
+pub let index_of = {xs, x} ->
+    __native_arraylist_index_of { xs = xs, x = x }
+
+pub let reverse = {xs} ->
+    __native_arraylist_reverse { xs = xs }
+
+pub let sort = {xs} ->
+    __native_arraylist_sort { xs = xs }
+
+pub let sort_by = {xs, cmp} ->
+    __native_arraylist_sort_by { xs = xs, cmp = cmp }
+
+# Slicing operations
+pub let slice = {xs, start, end} ->
+    __native_arraylist_slice { xs = xs, start = start, end = end }
+
+pub let take = {xs, n} ->
+    slice { xs = xs, start = 0, end = n }
+
+pub let drop = {xs, n} ->
+    slice { xs = xs, start = n, end = length { xs = xs } }
+
+pub let head = {xs} ->
+    if is_empty { xs = xs } then
+        None
+    else
+        Some { val = get { xs = xs, i = 0 } }
+
+pub let tail = {xs} ->
+    drop { xs = xs, n = 1 }
+
+# Equality
+pub let equals = {l, r} ->
+    __native_arraylist_equals { l = l, r = r }

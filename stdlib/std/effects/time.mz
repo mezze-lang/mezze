@@ -1,0 +1,88 @@
+# std/effects/time.mezze - Time and date effects
+
+# Time effect definition
+pub effect Time where {
+    # Get current timestamp in milliseconds since epoch
+    now: {} -> Int <Time>,
+
+    # Get current timestamp in nanoseconds (high precision)
+    now_nanos: {} -> Int <Time>,
+
+    # Sleep for specified milliseconds
+    sleep: { millis: Int } -> {} <Time>,
+
+    # Sleep for specified nanoseconds (high precision)
+    sleep_nanos: { nanos: Int } -> {} <Time>,
+
+    # Get current date/time components
+    current_year: {} -> Int <Time>,
+    current_month: {} -> Int <Time>,
+    current_day: {} -> Int <Time>,
+    current_hour: {} -> Int <Time>,
+    current_minute: {} -> Int <Time>,
+    current_second: {} -> Int <Time>,
+
+    # Format timestamp to string
+    format_timestamp: { timestamp: Int, format: String } -> String <Time>,
+
+    # Parse string to timestamp
+    parse_timestamp: { date_string: String, format: String } -> Int <Time>
+}
+
+# System time implementation using system clock
+pub impl Time for SystemTime where {
+    now = { } -> __native_time_now { },
+    now_nanos = { } -> __native_time_now_nanos { },
+    sleep = { millis } -> __native_time_sleep { millis = millis },
+    sleep_nanos = { nanos } -> __native_time_sleep_nanos { nanos = nanos },
+    current_year = { } -> __native_time_current_year { },
+    current_month = { } -> __native_time_current_month { },
+    current_day = { } -> __native_time_current_day { },
+    current_hour = { } -> __native_time_current_hour { },
+    current_minute = { } -> __native_time_current_minute { },
+    current_second = { } -> __native_time_current_second { },
+    format_timestamp = { timestamp, format } -> __native_time_format { timestamp = timestamp, format = format },
+    parse_timestamp = { date_string, format } -> __native_time_parse { date_string = date_string, format = format }
+}
+
+# Mock time implementation for testing (controllable time)
+pub impl Time for MockTime { fixed_time: Int } where {
+    now = { } -> fixed_time,
+    now_nanos = { } -> fixed_time * 1000000,
+    sleep = { millis } -> {},
+    sleep_nanos = { nanos } -> {},
+    current_year = { } -> __native_time_year_from_timestamp { timestamp = fixed_time },
+    current_month = { } -> __native_time_month_from_timestamp { timestamp = fixed_time },
+    current_day = { } -> __native_time_day_from_timestamp { timestamp = fixed_time },
+    current_hour = { } -> __native_time_hour_from_timestamp { timestamp = fixed_time },
+    current_minute = { } -> __native_time_minute_from_timestamp { timestamp = fixed_time },
+    current_second = { } -> __native_time_second_from_timestamp { timestamp = fixed_time },
+    format_timestamp = { timestamp, format } -> __native_time_format { timestamp = timestamp, format = format },
+    parse_timestamp = { date_string, format } -> __native_time_parse { date_string = date_string, format = format }
+}
+
+# Convenience functions
+pub let now: {} -> Int <Time> = {} -> Time.now {}
+pub let sleep: { millis: Int } -> {} <Time> = { millis } -> Time.sleep { millis = millis }
+pub let current_timestamp: {} -> Int <Time> = {} -> Time.now {}
+pub let current_date: {} -> { year: Int, month: Int, day: Int } <Time> = {} -> do
+    let year = Time.current_year {}
+    let month = Time.current_month {}
+    let day = Time.current_day {}
+    { year = year, month = month, day = day }
+
+# Usage examples:
+# 
+# Using system time:
+# perform SystemTime in do {
+#     let start = now { }
+#     sleep { millis = 1000 }
+#     let end = now { }
+#     end - start  # Should be ~1000ms
+# }
+#
+# Using mock time for testing:
+# perform MockTime { fixed_time = 1640995200000 } in do {
+#     let timestamp = now { }  # Always returns 1640995200000
+#     current_date { }  # Returns date components for that timestamp
+# }

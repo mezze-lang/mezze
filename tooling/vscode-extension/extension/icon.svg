@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <defs>
-    <linearGradient id="funkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="mezzeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#0D0520;stop-opacity:1" />
       <stop offset="50%" style="stop-color:#3B0D7D;stop-opacity:1" />
       <stop offset="100%" style="stop-color:#EC4899;stop-opacity:1" />
     </linearGradient>
   </defs>
   <!-- Background rounded square -->
-  <rect x="8" y="8" width="112" height="112" rx="20" ry="20" fill="url(#funkGradient)"/>
+  <rect x="8" y="8" width="112" height="112" rx="20" ry="20" fill="url(#mezzeGradient)"/>
   <!-- Stylized italic f (like mathematical 𝑓) -->
   <text x="64" y="58"
         font-family="Georgia, Times, serif"

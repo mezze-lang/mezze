@@ -8,8 +8,8 @@ plugins {
 }
 
 application {
-    mainClass.set("com.funk.language.cli.MainKt")
-    applicationName = "funk"
+    mainClass.set("com.mezze.language.cli.MainKt")
+    applicationName = "mez"
 }
 
 kotlin {
@@ -40,10 +40,10 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.28.0") // tar.gz handling
 }
 
-// Include stdlib funk files as resources in the JAR
+// Include stdlib mezze files as resources in the JAR
 tasks.named<ProcessResources>("processResources") {
     from(project.rootDir.resolve("stdlib")) {
-        include("**/*.funk")
+        include("**/*.mz")
         into("stdlib")
     }
 
@@ -51,24 +51,24 @@ tasks.named<ProcessResources>("processResources") {
     doLast {
         val resourcesDir = sourceSets.main.get().output.resourcesDir
         if (resourcesDir != null) {
-            val markerFile = File(resourcesDir, "funk-project-root.txt")
+            val markerFile = File(resourcesDir, "mezze-project-root.txt")
             markerFile.writeText(project.rootDir.absolutePath)
         }
     }
 }
 
 tasks.shadowJar {
-    archiveFileName.set("funk.jar")
+    archiveFileName.set("mezze.jar")
     mergeServiceFiles()
 }
 
-// Task to build standalone JARs with Truffle runtime for compiled Funk programs
+// Task to build standalone JARs with Truffle runtime for compiled Mezze programs
 tasks.register<Jar>("buildStandaloneJar") {
     group = "build"
-    description = "Build a standalone JAR with Truffle runtime for a Funk program"
+    description = "Build a standalone JAR with Truffle runtime for a Mezze program"
     
     // Configure dynamically based on project properties
-    val programName = project.findProperty("programName")?.toString() ?: "funk-program"
+    val programName = project.findProperty("programName")?.toString() ?: "mezze-program"
     val tempDirPath = project.findProperty("tempDir")?.toString()
     val outputFilePath = project.findProperty("outputFile")?.toString()
     
@@ -102,10 +102,10 @@ tasks.register<Jar>("buildStandaloneJar") {
     
     manifest {
         attributes(
-            "Main-Class" to "com.funk.standalone.Main",
-            "Implementation-Title" to "Funk Compiled Program",
+            "Main-Class" to "com.mezze.standalone.Main",
+            "Implementation-Title" to "Mezze Compiled Program",
             "Implementation-Version" to "1.0.0",
-            "Created-By" to "Funk Compiler"
+            "Created-By" to "Mezze Compiler"
         )
     }
     
@@ -119,8 +119,8 @@ tasks.register<Jar>("buildStandaloneJar") {
 graalvmNative {
     binaries {
         named("main") {
-            imageName.set("funk")
-            mainClass.set("com.funk.language.cli.MainKt")
+            imageName.set("mezze")
+            mainClass.set("com.mezze.language.cli.MainKt")
 
             // Get zlib path from environment or use default
             val zlibLibPath = System.getenv("ZLIB_LIB_PATH") ?: ""
@@ -148,7 +148,7 @@ graalvmNative {
                 "-H:IncludeResources=META-INF/services/.*",
 
                 // Include stdlib as resources (embedded in native binary)
-                "-H:IncludeResources=stdlib/.*\\.funk",
+                "-H:IncludeResources=stdlib/.*\\.mz",
 
                 // Include all charsets for language support
                 "-H:+AddAllCharsets",
@@ -157,11 +157,11 @@ graalvmNative {
                 "-H:+PrintClassInitialization",
                 
                 // Initialize our language classes at build time
-                "--initialize-at-build-time=com.funk.language.interpreter.FunkLanguageProvider",
-                "--initialize-at-build-time=com.funk.language.interpreter.FunkValueGen\$InteropLibraryExports",
+                "--initialize-at-build-time=com.mezze.language.interpreter.MezzeLanguageProvider",
+                "--initialize-at-build-time=com.mezze.language.interpreter.MezzeValueGen\$InteropLibraryExports",
 
                 // Initialize all our interpreter classes at build time (safer approach)
-                "--initialize-at-build-time=com.funk.language.interpreter",
+                "--initialize-at-build-time=com.mezze.language.interpreter",
 
                 // Initialize kotlin and kotlinx classes at build time
                 // Required for AST serialization and related static initializers

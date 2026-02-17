@@ -57,7 +57,7 @@ in
 
   scripts = {
     build.exec = ''
-      echo "🔨 Building Funk language..."
+      echo "🔨 Building Mezze language..."
       gradle build
     '';
 
@@ -71,36 +71,36 @@ in
       gradle test
     '';
 
-    funk-dev.exec = ''
-      if [ ! -f "./cli/build/libs/funk.jar" ]; then
+    mezze-dev.exec = ''
+      if [ ! -f "./cli/build/libs/mezze.jar" ]; then
         echo "❌ JAR not found. Building it first..."
         gradle build
       fi
       java $JAVA_OPTS \
         -Dpolyglot.engine.WarnInterpreterOnly=false \
         -Dtruffle.TruffleRuntime=com.oracle.truffle.api.impl.DefaultTruffleRuntime \
-        -jar ./cli/build/libs/funk.jar "$@"
+        -jar ./cli/build/libs/mezze.jar "$@"
     '';
 
     build-native.exec = ''
-      echo "🚀 Building native Funk binary..."
+      echo "🚀 Building native Mezze binary..."
       export PATH="${graalvm-oracle-linux-prebuilt}/bin:${pkgs.gcc}/bin:$PATH"
       export ZLIB_LIB_PATH="${pkgs.zlib}/lib"
 
       gradle build
       gradle :cli:nativeCompile
 
-      if [ -f "./cli/build/native/nativeCompile/funk" ]; then
-        echo "✅ Native binary built: ./cli/build/native/nativeCompile/funk"
-        echo "📊 Size: $(du -h ./cli/build/native/nativeCompile/funk | cut -f1)"
+      if [ -f "./cli/build/native/nativeCompile/mezze" ]; then
+        echo "✅ Native binary built: ./cli/build/native/nativeCompile/mezze"
+        echo "📊 Size: $(du -h ./cli/build/native/nativeCompile/mezze | cut -f1)"
       else
         echo "❌ Native compilation failed"
         exit 1
       fi
     '';
 
-    funk.exec = ''
-      NATIVE_BINARY="./cli/build/native/nativeCompile/funk"
+    mezze.exec = ''
+      NATIVE_BINARY="./cli/build/native/nativeCompile/mezze"
       if [ -f "$NATIVE_BINARY" ]; then
         "$NATIVE_BINARY" "$@"
       else
@@ -126,25 +126,25 @@ in
   };
 
   enterShell = ''
-    echo "🚀 Funk Language Development Environment"
+    echo "🚀 Mezze Language Development Environment"
     echo ""
     echo "📦 Build Commands:"
     echo "  build        - Build the project"
     echo "  clean        - Clean build artifacts"
     echo "  test         - Run tests"
     echo ""
-    echo "🎯 Funk CLI:"
-    echo "  funk-dev     - Development CLI (JAR, faster builds)"
-    echo "  funk         - Native binary CLI (production)"
+    echo "🎯 Mezze CLI:"
+    echo "  mezze-dev     - Development CLI (JAR, faster builds)"
+    echo "  mezze         - Native binary CLI (production)"
     echo "  build-native - Build native binary"
     echo ""
     echo "🛠️  Tooling:"
     echo "  vscode-install - Package and install VSCode extension"
     echo ""
     echo "📝 Examples:"
-    echo "  funk-dev parse examples/basic/hello_world.funk"
-    echo "  funk-dev check examples/functions/lambda_examples.funk"
-    echo "  funk-dev exec examples/variants/color_examples.funk"
+    echo "  mezze-dev parse examples/basic/hello_world.mezze"
+    echo "  mezze-dev check examples/functions/lambda_examples.mezze"
+    echo "  mezze-dev exec examples/variants/color_examples.mezze"
     echo ""
   '';
 

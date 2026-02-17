@@ -1,11 +1,11 @@
-# Funk Programming Language
+# Mezze Programming Language
 
 <div align="center">
 
 **A modern functional programming language with powerful pattern matching and algebraic effects**
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/your-org/funk)
-[![Tests](https://img.shields.io/badge/tests-577%20passing-brightgreen.svg)](https://github.com/your-org/funk)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/your-org/mezze)
+[![Tests](https://img.shields.io/badge/tests-577%20passing-brightgreen.svg)](https://github.com/your-org/mezze)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [**🚀 Quick Start**](#quick-start) • [**📚 Documentation**](./docs/) • [**🎯 Examples**](./examples/) • [**🔧 Installation**](#installation)
@@ -14,11 +14,11 @@
 
 ---
 
-## ✨ What Makes Funk Special?
+## ✨ What Makes Mezze Special?
 
-Funk is designed around **powerful pattern matching** with a clean, modern syntax that makes complex data transformations intuitive and safe.
+Mezze is designed around **powerful pattern matching** with a clean, modern syntax that makes complex data transformations intuitive and safe.
 
-```funk
+```mezze
 type Result = | Success { data: String }, Error { code: Int, message: String } |
 
 let handleResult = {result: Result} -> match result is
@@ -44,22 +44,22 @@ let handleResult = {result: Result} -> match result is
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/funk.git
-cd funk
+git clone https://github.com/your-org/mezze.git
+cd mezze
 
 # Build the project
 gradle build
 
 # Verify installation
-funk-dev --version
+mezze-dev --version
 ```
 
 ### Your First Program
 
-Create `hello.funk`:
-```funk
-# Welcome to Funk!
-let greeting = "Hello, Funk!"
+Create `hello.mz`:
+```mezze
+# Welcome to Mezze!
+let greeting = "Hello, Mezze!"
 let audience = "World"
 let message = "$(greeting), $(audience)! 🎉"
 
@@ -68,13 +68,13 @@ message
 
 Run it:
 ```bash
-funk-dev exec hello.funk
-# Output: Hello, Funk!, World! 🎉
+mezze-dev exec hello.mz
+# Output: Hello, Mezze!, World! 🎉
 ```
 
 ### Pattern Matching in Action
 
-```funk
+```mezze
 type Weather = | Sunny { temp: Int }, Rainy, Cloudy, Snowy { temp: Int } |
 
 let planActivity = {weather: Weather} -> match weather is
@@ -89,7 +89,7 @@ let today = Sunny { temp = 28 }
 planActivity {weather = today}  # "🏖️ Beach day!"
 ```
 
-## 📚 Learn Funk
+## 📚 Learn Mezze
 
 ### 🎓 Learning Path
 
@@ -100,7 +100,7 @@ planActivity {weather = today}  # "🏖️ Beach day!"
 
 ### 📁 Documentation Structure
 
-- **[📚 Language Guide](./docs/language-guide/)** - Learn Funk step by step
+- **[📚 Language Guide](./docs/language-guide/)** - Learn Mezze step by step
 - **[📖 Reference](./docs/reference/)** - Complete technical reference  
 - **[🎯 Tutorials](./docs/tutorials/)** - Project-based learning
 - **[💡 Examples](./examples/)** - Organized code samples
@@ -119,7 +119,7 @@ planActivity {weather = today}  # "🏖️ Beach day!"
 ### Project Structure
 
 ```
-funk/
+mezze/
 ├── 📚 docs/                    # Documentation
 ├── 🎯 examples/                # Code examples  
 ├── 🏗️  ast/                    # Abstract Syntax Tree
@@ -149,7 +149,7 @@ gradle :interpreter:test
 
 ### Testing
 
-Funk has comprehensive test coverage:
+Mezze has comprehensive test coverage:
 
 - **✅ Parser Tests**: Syntax parsing and AST generation
 - **✅ Typechecker Tests**: 325+ tests for type inference and exhaustiveness  
@@ -170,7 +170,7 @@ gradle :interpreter:test
 
 ### Pattern Matching Evolution
 
-```funk
+```mezze
 # ❌ Old syntax (deprecated)
 match value {
   | Pattern -> result
@@ -183,7 +183,7 @@ match value is
 
 ### Multiple Patterns
 
-```funk
+```mezze
 type Status = | Success, Info, Warning, Error, Critical |
 
 let severity = {status: Status} -> match status is
@@ -194,7 +194,7 @@ let severity = {status: Status} -> match status is
 
 ### Guard Conditions with Logic
 
-```funk
+```mezze
 type User = | User { age: Int, premium: Boolean, verified: Boolean } |
 
 let accessLevel = {user: User} -> match user is
@@ -206,7 +206,7 @@ let accessLevel = {user: User} -> match user is
 
 ### Exhaustiveness Checking
 
-```funk
+```mezze
 type Color = | Red, Green, Blue |
 
 # ✅ Exhaustive - compiles successfully
@@ -270,6 +270,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 [**🚀 Get Started**](./docs/language-guide/getting-started.md) • [**📚 Read the Docs**](./docs/) • [**🎯 Try Examples**](./examples/)
 
-**Made with ❤️ by the Funk team**
+**Made with ❤️ by the Mezze team**
 
 </div>

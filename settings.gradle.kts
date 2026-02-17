@@ -1,4 +1,4 @@
-rootProject.name = "funk"
+rootProject.name = "mezze"
 
 include("ast")
 include("parser")

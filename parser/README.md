@@ -1,10 +1,10 @@
-# ParserV2 - Parser Combinator Implementation for Funk
+# ParserV2 - Parser Combinator Implementation for Mezze
 
 **🎉 Status: PRODUCTION READY** | **100% V1 Compatible** | **Ability System Supported** | **17/17 V1 Tests Passing**
 
 ## Overview
 
-ParserV2 is a **complete, production-ready** rewrite of the Funk language parser using parser combinators instead of ANTLR. This implementation solves critical ambiguity issues that ANTLR grammar couldn't handle, particularly the disambiguation between lambda expressions and record literals.
+ParserV2 is a **complete, production-ready** rewrite of the Mezze language parser using parser combinators instead of ANTLR. This implementation solves critical ambiguity issues that ANTLR grammar couldn't handle, particularly the disambiguation between lambda expressions and record literals.
 
 **ParserV2 is now a drop-in replacement for v1** with superior test coverage (100% vs v1's 88%).
 
@@ -14,7 +14,7 @@ The original ANTLR-based parser struggled with fundamental syntax ambiguities:
 
 ### The Core Problem: `{x}` Ambiguity
 
-In Funk, the syntax `{x}` can mean two different things:
+In Mezze, the syntax `{x}` can mean two different things:
 - **Lambda expression**: `{x} -> x + 1` - a function with parameter x
 - **Record literal**: `{x}` - record with field x (punning syntax)
 
@@ -46,7 +46,7 @@ ANTLR cannot disambiguate this without unbounded lookahead. ParserV2 solves this
 - **Lambda expressions**: `{x} -> x + 1`, `{x, y} -> x + y`, `{} -> 42`
 - **Record literals**: `{a = 1, b = 2}`, `{x}` (punning)
 - **Multiline records**:
-  ```funk
+  ```mezze
   {
     x = 1,
     y = 2
@@ -57,7 +57,7 @@ ANTLR cannot disambiguate this without unbounded lookahead. ParserV2 solves this
 - **Chained operations**: `obj.method {args}`
 - **If-else**: `if condition then expr else expr`
 - **Match expressions**:
-  ```funk
+  ```mezze
   match value is
       Some { val } -> val
       None -> 0
@@ -146,11 +146,11 @@ Test suites:
 - `V1CompatibilityTest` (17 tests): Full v1 feature coverage
 - `AbilityParserTest` (8 tests): Ability system support
 - `AbilityDependencyParserTest` (7 tests, 1 disabled): Dependency parsing
-- `FunkParserV2Test` (59 tests): Comprehensive coverage of all features
+- `MezzeParserV2Test` (59 tests): Comprehensive coverage of all features
 
 ### V1 Compatibility Verified
 
-All core Funk language features tested and working:
+All core Mezze language features tested and working:
 - ✅ Lambda expressions and disambiguation
 - ✅ All operators and precedence
 - ✅ Do expressions
@@ -164,7 +164,7 @@ All core Funk language features tested and working:
 ## Usage
 
 ```kotlin
-val parser = FunkParserV2()
+val parser = MezzeParserV2()
 try {
     val program = parser.parse(sourceCode)
     // program is a Program AST with untyped expressions
@@ -177,7 +177,7 @@ try {
 
 ### Lambda vs Record
 
-```funk
+```mezze
 // Lambda - has arrow
 let f = {x} -> x + 1
 
@@ -190,7 +190,7 @@ let result = f {x = 5}
 
 ### Match Expression
 
-```funk
+```mezze
 let unwrap = {opt: (Option Int)} -> Int =
     match opt is
         Some { val } -> val
@@ -199,7 +199,7 @@ let unwrap = {opt: (Option Int)} -> Int =
 
 ### Chained Member Access and Calls
 
-```funk
+```mezze
 let result = obj.field1.field2.method {x = 1, y = 2}
 ```
 
@@ -253,4 +253,4 @@ When adding new syntax features:
 
 ## License
 
-Part of the Funk programming language project.
+Part of the Mezze programming language project.

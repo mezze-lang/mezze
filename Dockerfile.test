@@ -1,4 +1,4 @@
-# Dockerfile for testing Funk CLI portability
+# Dockerfile for testing Mezze CLI portability
 FROM ubuntu:24.04
 
 # Install basic utilities and Java 24 dependencies
@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GraalVM 24.0.2 to match local environment
-# This includes java, javac, and jar - everything we need for funk build!
+# This includes java, javac, and jar - everything we need for mezze build!
 RUN mkdir -p /opt/graalvm && \
     cd /opt/graalvm && \
     wget -q https://download.oracle.com/graalvm/24/archive/graalvm-jdk-24.0.2_linux-aarch64_bin.tar.gz && \
@@ -20,26 +20,26 @@ RUN mkdir -p /opt/graalvm && \
 ENV JAVA_HOME=/opt/graalvm/current
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
-# No additional dependencies needed! funk build uses only javac + jar (included in GraalVM)
+# No additional dependencies needed! mezze build uses only javac + jar (included in GraalVM)
 
 # Create a test user (not root)
-RUN useradd -m -s /bin/bash funkuser
+RUN useradd -m -s /bin/bash mezzeuser
 
 # Create test project directory
-WORKDIR /home/funkuser/test_project
+WORKDIR /home/mezzeuser/test_project
 
 # Copy test project files
-COPY docker-test-project/ /home/funkuser/test_project/
+COPY docker-test-project/ /home/mezzeuser/test_project/
 
 # Set ownership
-RUN chown -R funkuser:funkuser /home/funkuser
+RUN chown -R mezzeuser:mezzeuser /home/mezzeuser
 
 # Switch to test user
-USER funkuser
+USER mezzeuser
 
 # This will be the location where we copy the CLI
-# We'll copy it to /home/funkuser/funk-cli during testing
-ENV PATH="/home/funkuser/funk-cli/bin:${PATH}"
+# We'll copy it to /home/mezzeuser/mezze-cli during testing
+ENV PATH="/home/mezzeuser/mezze-cli/bin:${PATH}"
 
 # Default command
 CMD ["/bin/bash"]

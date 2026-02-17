@@ -1,0 +1,53 @@
+# std/math/trig.mezze - Trigonometric functions
+
+use std::math::core
+
+# Basic trigonometric functions
+pub let sin = { n: Float } ->
+    __native_float_sin { n = n }
+
+pub let cos = { n: Float } ->
+    __native_float_cos { n = n }
+
+pub let tan = { n: Float } ->
+    __native_float_tan { n = n }
+
+# Inverse trigonometric functions
+pub let asin = { n: Float } ->
+    __native_float_asin { n = n }
+
+pub let acos = { n: Float } ->
+    __native_float_acos { n = n }
+
+pub let atan = { n: Float } ->
+    __native_float_atan { n = n }
+
+pub let atan2 = { y: Float, x: Float } ->
+    __native_float_atan2 { y = y, x = x }
+
+# Mathematical constants
+pub let pi = 3.141592653589793
+pub let e = 2.718281828459045
+
+# Utility functions
+pub let degrees_to_radians = { degrees: Float } ->
+    degrees * (pi / 180.0)
+
+pub let radians_to_degrees = { radians: Float } ->
+    radians * (180.0 / pi)
+
+# Additional trigonometric functions
+pub let tanh = { n: Float } -> do
+    let exp_pos = core::exp { n = n }
+    let exp_neg = core::exp { n = NumSub.neg { n = n } }
+    (exp_pos - exp_neg) / (exp_pos + exp_neg)
+
+pub let sinh = { n: Float } -> do
+    let exp_pos = core::exp { n = n }
+    let exp_neg = core::exp { n = NumSub.neg { n = n } }
+    (exp_pos - exp_neg) / 2.0
+
+pub let cosh = { n: Float } -> do
+    let exp_pos = core::exp { n = n }
+    let exp_neg = core::exp { n = NumSub.neg { n = n } }
+    (exp_pos + exp_neg) / 2.0
