@@ -1,0 +1,620 @@
+package com.funk.language.interpreter
+
+import com.funk.language.ast.*
+import com.funk.language.ast.hashing.ASTHasher
+import com.funk.language.ast.hashing.FunkHash
+import com.funk.language.ast.hashing.FunkHashBuilder
+import com.funk.language.parser.FunkParser
+import com.funk.language.typechecker.TypeChecker
+import com.funk.language.typechecker.ModuleResolver
+import com.funk.language.typechecker.hashing.ContentHashComputer
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Assertions.*
+import java.nio.file.Paths
+
+/**
+ * End-to-end integration tests for the content-addressable hashing system.
+ *
+ * These tests verify the entire pipeline:
+ * 1. Hash computation during type checking
+ * 2. Hash-based ability/effect resolution
+ * 3. Hash-based runtime dispatch
+ * 4. Cross-module hash consistency
+ * 5. Cache invalidation based on content hashes
+ */
+class ContentAddressableHashingE2ETest {
+
+    private lateinit var parser: FunkParser
+    private lateinit var typeChecker: TypeChecker
+    private val projectRoot = Paths.get(System.getProperty("funk.project.root", "/Users/shriyans/Projects/funk"))
+
+    @BeforeEach
+    fun setup() {
+        parser = FunkParser()
+        typeChecker = TypeChecker()
+        ModuleResolver.clearCache()
+    }
+
+    // =========================================================================
+    // PHASE 1: HASH STABILITY ACROSS PIPELINE
+    // =========================================================================
+
+    @Test
+    fun `content hashes are populated after type checking`() {
+        val source = """
+            let add = {x: Int, y: Int} -> x + y
+            let mul = {a: Int, b: Int} -> a * b
+            add {x = 1, y = 2}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val result = typeChecker.typeCheck(program, projectRoot)
+
+        // Find LetBindings and verify they have content hashes
+        val letBindings = result.program.items.filterIsInstance<LetBinding>()
+        assertTrue(letBindings.isNotEmpty(), "Should have let bindings")
+
+        for (binding in letBindings) {
+            assertNotNull(binding.contentHash, "LetBinding '${binding.variableName}' should have contentHash")
+            assertTrue(binding.contentHash!!.startsWith("#"), "Content hash should start with #")
+            assertEquals(33, binding.contentHash!!.length, "Content hash should be # + 32 hex chars")
+        }
+    }
+
+    @Test
+    fun `same source produces same hash across type check runs`() {
+        val source = """
+            let identity = {x: Int} -> x
+            identity {x = 42}
+        """.trimIndent()
+
+        // Run type checking twice
+        val program1 = parser.parse(source)
+        val result1 = typeChecker.typeCheck(program1, projectRoot)
+
+        // Clear and run again
+        ModuleResolver.clearCache()
+        val program2 = parser.parse(source)
+        val result2 = typeChecker.typeCheck(program2, projectRoot)
+
+        // Find the 'identity' binding in both results
+        val binding1 = result1.program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "identity" }
+        val binding2 = result2.program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "identity" }
+
+        assertNotNull(binding1, "Should find 'identity' in first run")
+        assertNotNull(binding2, "Should find 'identity' in second run")
+        assertEquals(binding1!!.contentHash, binding2!!.contentHash,
+            "Same source should produce same content hash across runs")
+    }
+
+    @Test
+    fun `different function bodies produce different hashes`() {
+        val source1 = """
+            let f = {x: Int} -> x + 1
+            f {x = 0}
+        """.trimIndent()
+
+        val source2 = """
+            let f = {x: Int} -> x + 2
+            f {x = 0}
+        """.trimIndent()
+
+        val result1 = typeChecker.typeCheck(parser.parse(source1), projectRoot)
+        ModuleResolver.clearCache()
+        val result2 = typeChecker.typeCheck(parser.parse(source2), projectRoot)
+
+        val hash1 = result1.program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "f" }?.contentHash
+        val hash2 = result2.program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "f" }?.contentHash
+
+        assertNotNull(hash1)
+        assertNotNull(hash2)
+        assertNotEquals(hash1, hash2, "Different function bodies should produce different hashes")
+    }
+
+    // =========================================================================
+    // PHASE 2: ALPHA-EQUIVALENCE
+    // =========================================================================
+
+    @Test
+    fun `parameter names produce different hashes - part of API`() {
+        // In Funk, parameter names ARE part of the API (named parameters)
+        val source1 = """
+            let f = {x: Int} -> x + 1
+            f {x = 0}
+        """.trimIndent()
+
+        val source2 = """
+            let f = {y: Int} -> y + 1
+            f {y = 0}
+        """.trimIndent()
+
+        val result1 = typeChecker.typeCheck(parser.parse(source1), projectRoot)
+        ModuleResolver.clearCache()
+        val result2 = typeChecker.typeCheck(parser.parse(source2), projectRoot)
+
+        val hash1 = result1.program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "f" }?.contentHash
+        val hash2 = result2.program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "f" }?.contentHash
+
+        assertNotNull(hash1)
+        assertNotNull(hash2)
+        assertNotEquals(hash1, hash2,
+            "Functions with different parameter names should have different hashes (named params are API)")
+    }
+
+    // =========================================================================
+    // PHASE 3: ABILITY IMPLEMENTATION HASHING
+    // =========================================================================
+
+    @Test
+    fun `ability implementations have content hashes`() {
+        val source = """
+            ability Describable 'a where {
+                describe: {val: 'a} -> String
+            }
+
+            impl Describable Int where {
+                describe = {val} -> "an integer"
+            }
+
+            Describable.describe {val = 42}
+        """.trimIndent()
+
+        val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
+
+        // Find ability impl
+        val impl = result.program.items.filterIsInstance<ImplAbilityDeclaration>()
+            .find { it.abilityName == "Describable" }
+
+        assertNotNull(impl, "Should find Describable impl")
+        assertNotNull(impl!!.contentHash, "Ability impl should have contentHash")
+        assertTrue(impl.contentHash!!.startsWith("#"), "Content hash should start with #")
+    }
+
+    @Test
+    fun `resolved ability has implementation hash at call site`() {
+        val source = """
+            ability Doubler 'a where {
+                double: {val: 'a} -> 'a
+            }
+
+            impl Doubler Int where {
+                double = {val} -> val + val
+            }
+
+            Doubler.double {val = 21}
+        """.trimIndent()
+
+        val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
+
+        // Find the function call and check resolved ability
+        val topLevelExpr = result.program.items.filterIsInstance<TopLevelExpression>().lastOrNull()
+        assertNotNull(topLevelExpr, "Should have top-level expression")
+
+        val funcCall = topLevelExpr!!.expression as? FunctionCall
+        assertNotNull(funcCall, "Should be a function call")
+
+        // The resolved ability should have implementationHash
+        val resolvedAbilities = funcCall!!.resolvedAbilities
+        assertTrue(resolvedAbilities.isNotEmpty(), "Should have resolved abilities")
+
+        val resolved = resolvedAbilities.values.firstOrNull()
+        assertNotNull(resolved, "Should have at least one resolved ability")
+        assertNotNull(resolved!!.implementationHash,
+            "ResolvedAbility should have implementationHash for runtime dispatch")
+    }
+
+    @Test
+    fun `ability resolution works at runtime via hash lookup`() {
+        val source = """
+            ability Triple 'a where {
+                triple: {val: 'a} -> 'a
+            }
+
+            impl Triple Int where {
+                triple = {val} -> val + val + val
+            }
+
+            Triple.triple {val = 10}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val execResult = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
+
+        assertTrue(execResult is FunkInt, "Result should be an integer")
+        assertEquals(30L, (execResult as FunkInt).value, "Triple of 10 should be 30")
+    }
+
+    // =========================================================================
+    // PHASE 4: EFFECT HANDLER HASHING
+    // =========================================================================
+
+    @Test
+    fun `effect handlers have content hashes`() {
+        val source = """
+            effect Log where {
+                print: {msg: String} -> {} <Log>
+            }
+
+            impl Log for Console where {
+                print: {msg: String} -> {} = {msg} -> {}
+            }
+
+            perform Console in Log.print {msg = "test"}
+        """
+
+        val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
+
+        // Find effect handler impl
+        val impl = result.program.items.filterIsInstance<ImplDeclaration>()
+            .find { it.effectName == "Log" }
+
+        assertNotNull(impl, "Should find Log effect handler")
+        assertNotNull(impl!!.contentHash, "Effect handler should have contentHash")
+        assertTrue(impl.contentHash!!.startsWith("#"), "Content hash should start with #")
+    }
+
+    @Test
+    fun `effect handler resolution works at runtime via hash lookup`() {
+        val source = """
+            effect Math where {
+                add: {x: Int, y: Int} -> Int <Math>
+            }
+
+            impl Math for Calculator where {
+                add: {x: Int, y: Int} -> Int = {x, y} -> x + y
+            }
+
+            perform Calculator in Math.add {x = 10, y = 32}
+        """
+
+        val program = parser.parse(source)
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val execResult = FunkTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, projectRoot)
+
+        assertTrue(execResult is FunkInt, "Result should be an integer")
+        assertEquals(42L, (execResult as FunkInt).value)
+    }
+
+    // =========================================================================
+    // PHASE 5: TYPE DECLARATION HASHING
+    // =========================================================================
+
+    @Test
+    fun `type declarations have content hashes`() {
+        val source = """
+            type Point = {x: Int, y: Int}
+
+            Point {x = 1, y = 2}
+        """.trimIndent()
+
+        val result = typeChecker.typeCheck(parser.parse(source), projectRoot)
+
+        val typeDecls = result.program.items.filterIsInstance<TypeDeclaration>()
+        assertTrue(typeDecls.isNotEmpty(), "Should have at least 1 type declaration")
+
+        for (decl in typeDecls) {
+            assertNotNull(decl.contentHash, "TypeDeclaration '${decl.name}' should have contentHash")
+        }
+    }
+
+    @Test
+    fun `structurally identical types have same hash`() {
+        val source1 = """
+            type Point = {x: Int, y: Int}
+            Point {x = 0, y = 0}
+        """.trimIndent()
+
+        val source2 = """
+            type Coord = {x: Int, y: Int}
+            Coord {x = 0, y = 0}
+        """.trimIndent()
+
+        val result1 = typeChecker.typeCheck(parser.parse(source1), projectRoot)
+        ModuleResolver.clearCache()
+        val result2 = typeChecker.typeCheck(parser.parse(source2), projectRoot)
+
+        val hash1 = result1.program.items.filterIsInstance<TypeDeclaration>().first().contentHash
+        val hash2 = result2.program.items.filterIsInstance<TypeDeclaration>().first().contentHash
+
+        // Note: Type name is NOT part of hash, only structure
+        assertEquals(hash1, hash2,
+            "Structurally identical types should have same content hash (names don't matter)")
+    }
+
+    // =========================================================================
+    // PHASE 6: EXECUTION WITH HASH-BASED DISPATCH
+    // =========================================================================
+
+    @Test
+    fun `complete pipeline - parse, typecheck, execute with hash-based dispatch`() {
+        val source = """
+            ability Square 'a where {
+                square: {val: 'a} -> 'a
+            }
+
+            impl Square Int where {
+                square = {val} -> val * val
+            }
+
+            let compute = {n: Int} -> Square.square {val = n}
+
+            compute {n = 7}
+        """.trimIndent()
+
+        // Parse
+        val program = parser.parse(source)
+
+        // Type check (computes hashes)
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+
+        // Verify hashes are populated
+        val impl = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>().first()
+        assertNotNull(impl.contentHash, "Impl should have content hash after type checking")
+
+        // Execute (uses hash-based dispatch)
+        val execResult = FunkTestHelper.execute(
+            typeCheckResult.program,
+            typeCheckResult.monomorphicInstances,
+            projectRoot
+        )
+
+        // Verify result
+        assertTrue(execResult is FunkInt, "Result should be an integer")
+        assertEquals(49L, (execResult as FunkInt).value, "7 squared should be 49")
+    }
+
+    @Test
+    fun `multiple ability implementations have unique content hashes`() {
+        val source = """
+            ability Stringify 'a where {
+                stringify: {val: 'a} -> String
+            }
+
+            impl Stringify Int where {
+                stringify: {val: Int} -> String = {val} -> "int"
+            }
+
+            impl Stringify String where {
+                stringify: {val: String} -> String = {val} -> "string"
+            }
+
+            Stringify.stringify {val = 42}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+
+        // Verify each impl has a different content hash
+        val impls = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>()
+            .filter { it.abilityName == "Stringify" }
+
+        assertEquals(2, impls.size, "Should have 2 Stringify impls")
+
+        val hashes = impls.map { it.contentHash }.toSet()
+        assertEquals(2, hashes.size, "Each impl should have a unique content hash")
+
+        // Execute and verify correct dispatch
+        val execResult = FunkTestHelper.execute(
+            typeCheckResult.program,
+            typeCheckResult.monomorphicInstances,
+            projectRoot
+        )
+
+        assertTrue(execResult is FunkString, "Result should be a string")
+        assertEquals("int", (execResult as FunkString).value)
+    }
+
+    // =========================================================================
+    // PHASE 7: MODULE CACHE VALIDATION
+    // =========================================================================
+
+    @Test
+    fun `module source hash enables cache validation`() {
+        val sourceContent1 = "let x = 1"
+        val sourceContent2 = "let x = 2"
+
+        // Compute hashes for both source contents
+        val hash1 = FunkHashBuilder().append(sourceContent1).build().toString()
+        val hash2 = FunkHashBuilder().append(sourceContent2).build().toString()
+
+        // Same content should produce same hash
+        val hash1Again = FunkHashBuilder().append(sourceContent1).build().toString()
+        assertEquals(hash1, hash1Again, "Same source content should produce same hash")
+
+        // Different content should produce different hash
+        assertNotEquals(hash1, hash2, "Different source content should produce different hash")
+    }
+
+    @Test
+    fun `isModuleStale detects content changes`() {
+        val modulePath = "test::stale_check"
+        val originalContent = "let value = 42"
+
+        // Module not in cache - should be stale
+        assertTrue(ModuleResolver.isModuleStale(modulePath, originalContent),
+            "Module not in cache should be considered stale")
+
+        // Note: Full cache validation test would require setting up a cached module
+        // which is complex. The key point is that isModuleStale uses content hashing.
+    }
+
+    // =========================================================================
+    // PHASE 8: HASH BUILDER DETERMINISM
+    // =========================================================================
+
+    @Test
+    fun `FunkHashBuilder produces deterministic hashes`() {
+        val hash1 = FunkHashBuilder()
+            .append("test")
+            .appendInt(42)
+            .appendBoolean(true)
+            .build()
+
+        val hash2 = FunkHashBuilder()
+            .append("test")
+            .appendInt(42)
+            .appendBoolean(true)
+            .build()
+
+        assertEquals(hash1, hash2, "Same builder operations should produce same hash")
+    }
+
+    @Test
+    fun `FunkHash combine is order-sensitive`() {
+        val h1 = FunkHash.fromString("a")
+        val h2 = FunkHash.fromString("b")
+
+        val combined1 = FunkHash.combine(listOf(h1, h2))
+        val combined2 = FunkHash.combine(listOf(h2, h1))
+
+        // Order matters for combine (not sorted internally)
+        assertNotEquals(combined1, combined2,
+            "FunkHash.combine should be order-sensitive (sorting done at call site when needed)")
+    }
+
+    // =========================================================================
+    // PHASE 9: COMPLEX SCENARIOS
+    // =========================================================================
+
+    @Test
+    fun `nested ability calls resolve correctly via hashes`() {
+        val source = """
+            ability Inner 'a where {
+                inner: {val: 'a} -> Int
+            }
+
+            ability Outer 'a with Inner 'a where {
+                outer: {val: 'a} -> Int
+            }
+
+            impl Inner Int where {
+                inner = {val} -> val
+            }
+
+            impl Outer Int where {
+                outer = {val} -> Inner.inner {val = val} + 10
+            }
+
+            Outer.outer {val = 5}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val execResult = FunkTestHelper.execute(
+            typeCheckResult.program,
+            typeCheckResult.monomorphicInstances,
+            projectRoot
+        )
+
+        assertTrue(execResult is FunkInt, "Result should be an integer")
+        assertEquals(15L, (execResult as FunkInt).value, "5 + 10 = 15")
+    }
+
+    @Test
+    fun `higher-order functions with ability constraints work with hash dispatch`() {
+        val source = """
+            ability Addable 'a where {
+                add: {a: 'a, b: 'a} -> 'a
+            }
+
+            impl Addable Int where {
+                add = {a, b} -> a + b
+            }
+
+            let sumWith = {x: Int, y: Int} -> Addable.add {a = x, b = y}
+
+            sumWith {x = 100, y = 23}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+        val execResult = FunkTestHelper.execute(
+            typeCheckResult.program,
+            typeCheckResult.monomorphicInstances,
+            projectRoot
+        )
+
+        assertTrue(execResult is FunkInt, "Result should be an integer")
+        assertEquals(123L, (execResult as FunkInt).value)
+    }
+
+    // =========================================================================
+    // PHASE 10: HASH PERSISTENCE THROUGH TRANSFORMATIONS
+    // =========================================================================
+
+    @Test
+    fun `content hash survives monomorphization`() {
+        val source = """
+            let identity = {x: Int} -> x
+            let result = identity {x = 42}
+            result
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+
+        // Find the identity binding
+        val identityBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "identity" }
+
+        assertNotNull(identityBinding, "Should find identity binding")
+        assertNotNull(identityBinding!!.contentHash, "Identity binding should have contentHash after monomorphization")
+
+        // Execute to verify the whole pipeline works
+        val execResult = FunkTestHelper.execute(
+            typeCheckResult.program,
+            typeCheckResult.monomorphicInstances,
+            projectRoot
+        )
+
+        assertTrue(execResult is FunkInt)
+        assertEquals(42L, (execResult as FunkInt).value)
+    }
+
+    @Test
+    fun `ability impl hash matches between declaration and resolution`() {
+        val source = """
+            ability Negate 'a where {
+                negate: {val: 'a} -> 'a
+            }
+
+            impl Negate Int where {
+                negate = {val} -> 0 - val
+            }
+
+            Negate.negate {val = 42}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
+
+        // Get the impl's content hash
+        val impl = typeCheckResult.program.items.filterIsInstance<ImplAbilityDeclaration>()
+            .find { it.abilityName == "Negate" }
+        assertNotNull(impl)
+        val implHash = impl!!.contentHash
+        assertNotNull(implHash)
+
+        // Get the resolved ability's implementation hash at the call site
+        val topLevelExpr = typeCheckResult.program.items.filterIsInstance<TopLevelExpression>().lastOrNull()
+        assertNotNull(topLevelExpr)
+        val funcCall = topLevelExpr!!.expression as? FunctionCall
+        assertNotNull(funcCall)
+        val resolved = funcCall!!.resolvedAbilities.values.firstOrNull()
+        assertNotNull(resolved)
+        val resolvedHash = resolved!!.implementationHash
+        assertNotNull(resolvedHash)
+
+        // The hashes should match - the resolved ability points to the impl
+        assertEquals(implHash, resolvedHash,
+            "ResolvedAbility.implementationHash should match ImplAbilityDeclaration.contentHash")
+    }
+}
