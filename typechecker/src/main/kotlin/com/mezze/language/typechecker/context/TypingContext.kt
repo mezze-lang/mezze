@@ -19,6 +19,13 @@ data class TypingContext(
     private val bindings: Map<String, Binding>,
     private val abilityImpls: Map<String, AbilityImplInfo> = emptyMap(),  // Keyed by content hash
     private val abilityImplsByName: Map<String, List<String>> = emptyMap(),  // Secondary index: abilityName -> [contentHash]
+    // Dedicated maps for ability/effect operation types (replaces "${name}_ability" pattern)
+    private val abilityOperationTypes: Map<String, MezzeType> = emptyMap(),  // abilityName -> RecordType of operations
+    private val effectOperationTypes: Map<String, MezzeType> = emptyMap(),   // effectName -> RecordType of operations
+    // Dedicated map for performer associated types (replaces "${name}_performer" pattern)
+    // Keyed by content hash for cross-module safety
+    private val performerAssociatedTypes: Map<String, PerformerTypeInfo> = emptyMap(),  // contentHash -> associated types
+    private val performerAssociatedTypesByName: Map<String, List<String>> = emptyMap(),  // performerName -> [contentHash] index
     val parent: TypingContext? = null
 ) {
     /**
@@ -64,6 +71,22 @@ data class TypingContext(
     )
 
     /**
+     * Information about a performer's associated types.
+     *
+     * Stored with content hash as the key for cross-module safety.
+     * Example: For `impl State for Counter having 'state = Int`:
+     * - performerName = "Counter"
+     * - effectName = "State"
+     * - associatedTypes = RecordType({'state -> Int})
+     */
+    data class PerformerTypeInfo(
+        val performerName: String,
+        val effectName: String,
+        val associatedTypes: MezzeType,  // RecordType with associated type bindings
+        val contentHash: String? = null
+    )
+
+    /**
      * Look up a variable in this context or parent contexts.
      * Returns sealed type - no nulls, exhaustive when required!
      */
@@ -82,12 +105,7 @@ data class TypingContext(
      * Returns NEW context, does not mutate!
      */
     fun extend(name: String, binding: Binding): TypingContext {
-        return TypingContext(
-            bindings = bindings + (name to binding),
-            abilityImpls = abilityImpls,  // Preserve ability impls
-            abilityImplsByName = abilityImplsByName,  // Preserve secondary index
-            parent = parent
-        )
+        return copy(bindings = bindings + (name to binding))
     }
 
     /**
@@ -108,12 +126,7 @@ data class TypingContext(
      * Extend context with multiple bindings at once
      */
     fun extendAll(newBindings: Map<String, Binding>): TypingContext {
-        return TypingContext(
-            bindings = bindings + newBindings,
-            abilityImpls = abilityImpls,  // Preserve ability impls
-            abilityImplsByName = abilityImplsByName,  // Preserve secondary index
-            parent = parent
-        )
+        return copy(bindings = bindings + newBindings)
     }
 
     /**
@@ -127,11 +140,9 @@ data class TypingContext(
         val existingHashes = abilityImplsByName[implInfo.abilityName] ?: emptyList()
         val newImplsByName = abilityImplsByName + (implInfo.abilityName to (existingHashes + key))
 
-        return TypingContext(
-            bindings = bindings,
+        return copy(
             abilityImpls = abilityImpls + (key to implInfo),
-            abilityImplsByName = newImplsByName,
-            parent = parent
+            abilityImplsByName = newImplsByName
         )
     }
 
@@ -191,6 +202,73 @@ data class TypingContext(
         return parentImpls + abilityImpls  // Local impls override parent impls
     }
 
+    // ========================================================================
+    // ABILITY/EFFECT OPERATION TYPES
+    // ========================================================================
+
+    /**
+     * Get ability operation types (the RecordType of its operations).
+     * Used for qualified access like Show.display.
+     */
+    fun getAbilityOperationType(abilityName: String): MezzeType? {
+        return abilityOperationTypes[abilityName] ?: parent?.getAbilityOperationType(abilityName)
+    }
+
+    /**
+     * Get effect operation types (the RecordType of its operations).
+     * Used for qualified access like Log.write.
+     */
+    fun getEffectOperationType(effectName: String): MezzeType? {
+        return effectOperationTypes[effectName] ?: parent?.getEffectOperationType(effectName)
+    }
+
+    /**
+     * Extend context with ability operation types.
+     */
+    fun extendWithAbilityOperationType(abilityName: String, operationType: MezzeType): TypingContext {
+        return copy(abilityOperationTypes = abilityOperationTypes + (abilityName to operationType))
+    }
+
+    /**
+     * Extend context with effect operation types.
+     */
+    fun extendWithEffectOperationType(effectName: String, operationType: MezzeType): TypingContext {
+        return copy(effectOperationTypes = effectOperationTypes + (effectName to operationType))
+    }
+
+    // ========================================================================
+    // PERFORMER ASSOCIATED TYPES
+    // ========================================================================
+
+    /**
+     * Get performer associated types by content hash.
+     */
+    fun getPerformerTypeInfo(contentHash: String): PerformerTypeInfo? {
+        return performerAssociatedTypes[contentHash] ?: parent?.getPerformerTypeInfo(contentHash)
+    }
+
+    /**
+     * Get performer associated types by performer name.
+     * Returns all matching infos (for cross-module scenarios).
+     */
+    fun getPerformerTypeInfosByName(performerName: String): List<PerformerTypeInfo> {
+        val localHashes = performerAssociatedTypesByName[performerName] ?: emptyList()
+        val localInfos = localHashes.mapNotNull { performerAssociatedTypes[it] }
+        val parentInfos = parent?.getPerformerTypeInfosByName(performerName) ?: emptyList()
+        return localInfos + parentInfos
+    }
+
+    /**
+     * Extend context with performer associated types.
+     */
+    fun extendWithPerformerTypeInfo(contentHash: String, info: PerformerTypeInfo): TypingContext {
+        val existingHashes = performerAssociatedTypesByName[info.performerName] ?: emptyList()
+        return copy(
+            performerAssociatedTypes = performerAssociatedTypes + (contentHash to info),
+            performerAssociatedTypesByName = performerAssociatedTypesByName + (info.performerName to (existingHashes + contentHash))
+        )
+    }
+
     /**
      * Create a nested scope - new context with this as parent
      */
@@ -199,6 +277,10 @@ data class TypingContext(
             bindings = emptyMap(),
             abilityImpls = emptyMap(),  // Start with empty impls (inherit via parent)
             abilityImplsByName = emptyMap(),  // Start with empty secondary index (inherit via parent)
+            abilityOperationTypes = emptyMap(),
+            effectOperationTypes = emptyMap(),
+            performerAssociatedTypes = emptyMap(),
+            performerAssociatedTypesByName = emptyMap(),
             parent = this
         )
     }
@@ -233,7 +315,16 @@ data class TypingContext(
         /**
          * Empty context - starting point
          */
-        val empty = TypingContext(emptyMap(), emptyMap(), emptyMap(), null)
+        val empty = TypingContext(
+            bindings = emptyMap(),
+            abilityImpls = emptyMap(),
+            abilityImplsByName = emptyMap(),
+            abilityOperationTypes = emptyMap(),
+            effectOperationTypes = emptyMap(),
+            performerAssociatedTypes = emptyMap(),
+            performerAssociatedTypesByName = emptyMap(),
+            parent = null
+        )
 
         /**
          * Create context from map (for testing)

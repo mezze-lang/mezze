@@ -633,25 +633,21 @@ class ExpressionConstraintGenerator {
                 }
             }
 
-            // Check if this is a user-defined ability
-            val abilityKey = "${receiverName}_ability"
-            when (val lookup = context.typingContext.lookup(abilityKey)) {
-                is TypingContext.LookupResult.Found -> {
-                    // Check if this is an effect (effects are stored as _ability too)
-                    // We can distinguish by checking if receiverName is in effectDeclarations
-                    // For now, check if it's an ability or effect by trying both
+            // Check if this is a user-defined ability (using dedicated map)
+            val abilityOperationType = context.typingContext.getAbilityOperationType(receiverName)
+            if (abilityOperationType != null) {
+                val binding = TypingContext.Binding.Monomorphic(abilityOperationType)
+                return generateAbilityMethodCall(expr, receiverName, binding, context)
+            }
 
-                    // Try effect operation first (if it produces suspended type)
-                    val effectResult = tryGenerateEffectOperationCall(expr, receiverName, lookup.binding, context)
-                    if (effectResult != null) {
-                        return effectResult
-                    }
-
-                    // Otherwise, treat as ability method call
-                    return generateAbilityMethodCall(expr, receiverName, lookup.binding, context)
-                }
-                is TypingContext.LookupResult.NotFound -> {
-                    // Not an ability or effect, continue to check performer
+            // Check if this is an effect (using dedicated map)
+            val effectOperationType = context.typingContext.getEffectOperationType(receiverName)
+            if (effectOperationType != null) {
+                val binding = TypingContext.Binding.Monomorphic(effectOperationType)
+                // Try effect operation first (if it produces suspended type)
+                val effectResult = tryGenerateEffectOperationCall(expr, receiverName, binding, context)
+                if (effectResult != null) {
+                    return effectResult
                 }
             }
 
@@ -659,18 +655,14 @@ class ExpressionConstraintGenerator {
             // Performers implement effects, so we need to look up the effect and its operations
             val effectName = context.performerToEffect[receiverName]
             if (effectName != null) {
-                // This is a performer - look up the effect operations
-                val effectKey = "${effectName}_ability"
-                when (val effectLookup = context.typingContext.lookup(effectKey)) {
-                    is TypingContext.LookupResult.Found -> {
-                        // Generate performer method call - similar to effect operation but bound to specific performer
-                        val performerResult = tryGeneratePerformerMethodCall(expr, receiverName, effectName, effectLookup.binding, context)
-                        if (performerResult != null) {
-                            return performerResult
-                        }
-                    }
-                    is TypingContext.LookupResult.NotFound -> {
-                        // Effect not found - will be caught later
+                // This is a performer - look up the effect operations using dedicated map
+                val effectOpsType = context.typingContext.getEffectOperationType(effectName)
+                if (effectOpsType != null) {
+                    val effectBinding = TypingContext.Binding.Monomorphic(effectOpsType)
+                    // Generate performer method call - similar to effect operation but bound to specific performer
+                    val performerResult = tryGeneratePerformerMethodCall(expr, receiverName, effectName, effectBinding, context)
+                    if (performerResult != null) {
+                        return performerResult
                     }
                 }
             }
@@ -939,28 +931,20 @@ class ExpressionConstraintGenerator {
             }
 
             if (performerName != null) {
-                // Get the performer's associated type bindings
-                val performerKey = "${performerName}_performer"
-                when (val lookup = context.typingContext.lookup(performerKey)) {
-                    is TypingContext.LookupResult.Found -> {
-                        // Performer bindings are stored as a RecordType with associated type bindings
-                        val performerBinding = lookup.binding
-                        val performerType = when (performerBinding) {
-                            is TypingContext.Binding.Monomorphic -> performerBinding.type
-                            is TypingContext.Binding.Polymorphic -> performerBinding.scheme.type
-                        }
+                // Get the performer's associated type bindings using dedicated map
+                val performerInfos = context.typingContext.getPerformerTypeInfosByName(performerName)
+                if (performerInfos.isNotEmpty()) {
+                    // Use the first matching performer (usually there's only one per name in a program)
+                    val performerInfo = performerInfos.first()
+                    val performerType = performerInfo.associatedTypes
 
-                        if (performerType is MezzeType.RecordType) {
-                            // Substitute associated types in the operation type
-                            // The performer's type has fields like: {env -> String}
-                            instantiatedOperationType = substituteAssociatedTypesInType(
-                                instantiatedOperationType,
-                                performerType.fields
-                            )
-                        }
-                    }
-                    is TypingContext.LookupResult.NotFound -> {
-                        // Performer not registered - might happen for some tests
+                    if (performerType is MezzeType.RecordType) {
+                        // Substitute associated types in the operation type
+                        // The performer's type has fields like: {env -> String}
+                        instantiatedOperationType = substituteAssociatedTypesInType(
+                            instantiatedOperationType,
+                            performerType.fields
+                        )
                     }
                 }
             }
@@ -1014,27 +998,19 @@ class ExpressionConstraintGenerator {
         val operationName = expr.member
         val operationType = effectType.fields[operationName] ?: return null
 
-        // Get the performer's associated type bindings (if any)
+        // Get the performer's associated type bindings (if any) using dedicated map
         var instantiatedOperationType = operationType
-        val performerKey = "${performerName}_performer"
-        when (val lookup = context.typingContext.lookup(performerKey)) {
-            is TypingContext.LookupResult.Found -> {
-                val performerBinding = lookup.binding
-                val performerType = when (performerBinding) {
-                    is TypingContext.Binding.Monomorphic -> performerBinding.type
-                    is TypingContext.Binding.Polymorphic -> performerBinding.scheme.type
-                }
+        val performerInfos = context.typingContext.getPerformerTypeInfosByName(performerName)
+        if (performerInfos.isNotEmpty()) {
+            val performerInfo = performerInfos.first()
+            val performerType = performerInfo.associatedTypes
 
-                if (performerType is MezzeType.RecordType) {
-                    // Substitute associated types in the operation type
-                    instantiatedOperationType = substituteAssociatedTypesInType(
-                        instantiatedOperationType,
-                        performerType.fields
-                    )
-                }
-            }
-            is TypingContext.LookupResult.NotFound -> {
-                // No associated type bindings - use operation type as-is
+            if (performerType is MezzeType.RecordType) {
+                // Substitute associated types in the operation type
+                instantiatedOperationType = substituteAssociatedTypesInType(
+                    instantiatedOperationType,
+                    performerType.fields
+                )
             }
         }
 
@@ -2303,13 +2279,11 @@ class ExpressionConstraintGenerator {
             } else {
                 // Handler not in performerToEffect - check if it exists in context
                 // Performers can be imported from modules where they might not be tracked
-                // Check both with and without the _performer suffix
-                val performerKey = "${handler.name}_performer"
+                // Check using dedicated performer map
                 val handlerLookup = context.typingContext.lookup(handler.name)
-                val performerKeyLookup = context.typingContext.lookup(performerKey)
+                val performerInfos = context.typingContext.getPerformerTypeInfosByName(handler.name)
 
-                if (handlerLookup is TypingContext.LookupResult.Found ||
-                    performerKeyLookup is TypingContext.LookupResult.Found) {
+                if (handlerLookup is TypingContext.LookupResult.Found || performerInfos.isNotEmpty()) {
                     // Performer exists in context (imported), allow it but we can't track effect
                     // Skip adding to handlerEffects - imported performers are permissive
                 } else {
@@ -2569,25 +2543,16 @@ class ExpressionConstraintGenerator {
         val effectName = expr.effectName
         val operationName = expr.operationName
 
-        // Look up effect type from context
-        val effectKey = "${effectName}_ability"
-        val effectBinding = when (val lookup = context.typingContext.lookup(effectKey)) {
-            is TypingContext.LookupResult.Found -> lookup.binding
-            is TypingContext.LookupResult.NotFound -> {
-                // Effect not found - return error with fresh type var
-                return ConstraintResult(
-                    type = MezzeType.VarType(TypeVar.fresh()),
-                    constraints = emptyList(),
-                    effects = setOf(effectName),
-                    undefinedVariables = listOf(ConstraintResult.UndefinedVariable(effectName, expr.sourceLocation))
-                )
-            }
-        }
-
-        // Get effect type from binding
-        val effectType = when (effectBinding) {
-            is TypingContext.Binding.Monomorphic -> effectBinding.type
-            is TypingContext.Binding.Polymorphic -> effectBinding.scheme.instantiate().type
+        // Look up effect type from context using dedicated map
+        val effectType = context.typingContext.getEffectOperationType(effectName)
+        if (effectType == null) {
+            // Effect not found - return error with fresh type var
+            return ConstraintResult(
+                type = MezzeType.VarType(TypeVar.fresh()),
+                constraints = emptyList(),
+                effects = setOf(effectName),
+                undefinedVariables = listOf(ConstraintResult.UndefinedVariable(effectName, expr.sourceLocation))
+            )
         }
 
         // Effect should be stored as RecordType with operations as fields
@@ -2623,24 +2588,16 @@ class ExpressionConstraintGenerator {
             }
 
             if (performerName != null) {
-                // Get the performer's associated type bindings
-                val performerKey = "${performerName}_performer"
-                when (val lookup = context.typingContext.lookup(performerKey)) {
-                    is TypingContext.LookupResult.Found -> {
-                        val performerBinding = lookup.binding
-                        val performerType = when (performerBinding) {
-                            is TypingContext.Binding.Monomorphic -> performerBinding.type
-                            is TypingContext.Binding.Polymorphic -> performerBinding.scheme.type
-                        }
-                        if (performerType is MezzeType.RecordType) {
-                            instantiatedOperationType = substituteAssociatedTypesInType(
-                                instantiatedOperationType,
-                                performerType.fields
-                            )
-                        }
-                    }
-                    is TypingContext.LookupResult.NotFound -> {
-                        // Performer not registered - continue without substitution
+                // Get the performer's associated type bindings using dedicated map
+                val performerInfos = context.typingContext.getPerformerTypeInfosByName(performerName)
+                if (performerInfos.isNotEmpty()) {
+                    val performerInfo = performerInfos.first()
+                    val performerType = performerInfo.associatedTypes
+                    if (performerType is MezzeType.RecordType) {
+                        instantiatedOperationType = substituteAssociatedTypesInType(
+                            instantiatedOperationType,
+                            performerType.fields
+                        )
                     }
                 }
             }

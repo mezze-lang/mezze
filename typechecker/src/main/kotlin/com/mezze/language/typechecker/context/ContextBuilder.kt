@@ -309,7 +309,8 @@ class ContextBuilder {
                 op.name to functionType
             }
         )
-        result = result.extendMono("${abilityDecl.name}_ability", abilityRecordType)
+        // Use dedicated map instead of "${name}_ability" pattern
+        result = result.extendWithAbilityOperationType(abilityDecl.name, abilityRecordType)
 
         return result
     }
@@ -343,7 +344,8 @@ class ContextBuilder {
                 op.name to plainFunctionType
             }
         )
-        result = result.extendMono("${effectDecl.name}_ability", effectRecordType)
+        // Use dedicated map instead of "${name}_ability" pattern
+        result = result.extendWithEffectOperationType(effectDecl.name, effectRecordType)
 
         return result
     }
@@ -355,8 +357,8 @@ class ContextBuilder {
      * for type substitution during effect operation calls.
      *
      * Example: For `impl State for Counter having 'state = Int`, stores:
-     * - Key: "Counter_performer"
-     * - Value: RecordType with fields {'env -> String}
+     * - Key: content hash of ImplDeclaration
+     * - Value: PerformerTypeInfo with RecordType containing {'state -> Int}
      */
     private fun addEffectPerformer(
         ctx: TypingContext,
@@ -390,7 +392,21 @@ class ContextBuilder {
                 }
             )
 
-            return ctx.extendMono("${implDecl.performerName}_performer", performerType)
+            // Use content hash as the key for cross-module safety
+            val contentHash = implDecl.contentHash
+                ?: throw IllegalStateException(
+                    "Content hash not computed for impl: ${implDecl.performerName}. " +
+                    "Ensure computeDeclarationHashes was called before ContextBuilder."
+                )
+
+            val performerInfo = TypingContext.PerformerTypeInfo(
+                performerName = implDecl.performerName,
+                effectName = implDecl.effectName,
+                associatedTypes = performerType,
+                contentHash = contentHash
+            )
+
+            return ctx.extendWithPerformerTypeInfo(contentHash, performerInfo)
         }
 
         return ctx
