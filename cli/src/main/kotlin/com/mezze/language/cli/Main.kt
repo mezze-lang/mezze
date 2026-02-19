@@ -833,6 +833,36 @@ private fun handleExecCommand(args: List<String>) {
         )
         println(formattedError)
         kotlin.system.exitProcess(1)
+    } catch (e: com.mezze.language.typechecker.module.ModuleError.ExportNotFound) {
+        // Pretty-print export not found error with source context
+        println("❌ Module Error [Export Not Found]")
+        println("━".repeat(50))
+        e.sourceLocation?.let { loc ->
+            println("   --> ${loc.file ?: fileName}:${loc.line}:${loc.column}")
+            // Show source code snippet
+            val lines = source.lines()
+            if (loc.line > 0 && loc.line <= lines.size) {
+                val lineNum = loc.line
+                val lineContent = lines[lineNum - 1]
+                println("    |")
+                println("${lineNum.toString().padStart(3)} | $lineContent")
+                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}^")
+            }
+            println()
+        }
+        println("Error: Export '${e.exportName}' not found in module '${e.modulePath}'")
+        println()
+        println("💡 Suggestions:")
+        println("   - Check the export name spelling")
+        println("   - Verify the module exports this item with 'pub'")
+        println("   - Use 'use ${e.modulePath}' to see available exports")
+        kotlin.system.exitProcess(1)
+    } catch (e: com.mezze.language.typechecker.module.ModuleError) {
+        // Handle other module errors with source location if available
+        println("❌ Module Error")
+        println("━".repeat(50))
+        println("Error: ${e.message ?: "Unknown module error"}")
+        kotlin.system.exitProcess(1)
     }
 
     // Handle type-check failure

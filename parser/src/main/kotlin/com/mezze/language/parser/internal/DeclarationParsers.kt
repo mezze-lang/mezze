@@ -1608,7 +1608,24 @@ internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Vi
                                             currentStream = nextSegment.remaining
                                             // Continue loop
                                         }
-                                        is ParseResult.Failure -> return nextSegment
+                                        is ParseResult.Failure -> {
+                                            // Check if user tried to use a keyword in the path
+                                            val currentToken = nextStream.current()
+                                            val keywords = listOf(
+                                                TokenType.EFFECT, TokenType.TYPE, TokenType.ABILITY,
+                                                TokenType.IMPL, TokenType.LET, TokenType.MATCH,
+                                                TokenType.IF, TokenType.DO, TokenType.PERFORM
+                                            )
+                                            if (currentToken != null && currentToken.type in keywords) {
+                                                return nextStream.failure(
+                                                    "'${currentToken.text}' is a reserved keyword and cannot be used in module paths.\n" +
+                                                    "   The module is likely named differently. Try:\n" +
+                                                    "   • 'std::effects::...' instead of 'std::effect::...'\n" +
+                                                    "   • Check the module documentation for the correct path"
+                                                )
+                                            }
+                                            return nextSegment
+                                        }
                                     }
                                 }
                                 is ParseResult.Failure -> {

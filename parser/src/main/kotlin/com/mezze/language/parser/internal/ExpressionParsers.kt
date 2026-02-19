@@ -516,23 +516,46 @@ internal val MezzeParser.primaryExpression: Parser<Expression>
     get() = { stream ->
         // Check for common mistakes and provide helpful error messages
         val current = stream.current()
-        if (current?.type == TokenType.LET) {
-            stream.failure(
-                "Cannot use 'let' here. To sequence multiple statements, wrap them in a 'do' block"
-            )
-        } else {
-            Parsers.oneOf(
-                performExpression,
-                doExpression,
-                matchExpression,
-                ifExpression,
-                literalExpression,
-                atPlaceholderExpression,  // @ placeholder for pipe operator
-                identifierExpression,
-                arrayLiteral,
-                lambdaOrRecordExpression,  // <-- THIS IS THE KEY!
-                parenExpression
-            )(stream)
+        val next = stream.peek(1)
+
+        when {
+            current?.type == TokenType.LET -> {
+                stream.failure(
+                    "Cannot use 'let' here. To sequence multiple statements, wrap them in a 'do' block"
+                )
+            }
+            // Check for () which is a common mistake from other languages
+            current?.type == TokenType.LPAREN && next?.type == TokenType.RPAREN -> {
+                val afterParen = stream.advance(2)
+                val afterParenToken = afterParen.current()
+                if (afterParenToken?.type == TokenType.ARROW) {
+                    stream.failure(
+                        "Invalid lambda syntax: '() ->' is not valid in Mezze.\n" +
+                        "   Use '{}' for a no-argument lambda: {} -> expression\n" +
+                        "   Or with arguments: {x, y} -> expression"
+                    )
+                } else {
+                    stream.failure(
+                        "Empty parentheses '()' are not valid in Mezze.\n" +
+                        "   • Use '{}' for an empty record\n" +
+                        "   • Use '{} -> expr' for a no-argument lambda"
+                    )
+                }
+            }
+            else -> {
+                Parsers.oneOf(
+                    performExpression,
+                    doExpression,
+                    matchExpression,
+                    ifExpression,
+                    literalExpression,
+                    atPlaceholderExpression,  // @ placeholder for pipe operator
+                    identifierExpression,
+                    arrayLiteral,
+                    lambdaOrRecordExpression,  // <-- THIS IS THE KEY!
+                    parenExpression
+                )(stream)
+            }
         }
     }
 
@@ -1782,11 +1805,34 @@ internal val MezzeParser.literalExpression: Parser<Expression>
 
 internal val MezzeParser.parenExpression: Parser<Expression>
     get() = { stream ->
-        Parsers.between(
-            tok(TokenType.LPAREN),
-            expression,
-            tok(TokenType.RPAREN)
-        )(stream)
+        // Check for common mistake: () used as unit/empty tuple (not valid in Mezze)
+        val current = stream.current()
+        val next = stream.peek(1)
+        if (current?.type == TokenType.LPAREN && next?.type == TokenType.RPAREN) {
+            // User wrote () - this is a common mistake from other languages
+            val afterParen = stream.advance(2)
+            val afterArrow = afterParen.current()
+            if (afterArrow?.type == TokenType.ARROW) {
+                // User wrote () -> ... which looks like a lambda
+                stream.failure(
+                    "Invalid lambda syntax: '()' is not valid. Use '{}' for a no-argument lambda.\n" +
+                    "   Example: {} -> expression\n" +
+                    "   Or with arguments: {x, y} -> expression"
+                )
+            } else {
+                stream.failure(
+                    "Empty parentheses '()' are not valid. Did you mean:\n" +
+                    "   • '{}' for an empty record\n" +
+                    "   • '{} -> expr' for a no-argument lambda"
+                )
+            }
+        } else {
+            Parsers.between(
+                tok(TokenType.LPAREN),
+                expression,
+                tok(TokenType.RPAREN)
+            )(stream)
+        }
     }
 
 // Helper function for keyword parsing
