@@ -18,7 +18,7 @@
 pub newtype Chan 'a = Chan __NativeChannel
 
 # Channel effect - typed channel communication operations
-pub effect Channel where {
+effect Channel where {
     # Send a value to a channel (blocks if buffer full)
     send: { ch: Chan 'a, value: 'a } -> {} <Channel>,
 

@@ -3,7 +3,7 @@
 # Inspect is a special ability that is available for ALL types
 # It's automatically implemented for all types (similar to Debug in Rust)
 # NOTE: This is an ABILITY, not an effect! Abilities are always available without imports.
-pub ability Inspect 'a where {
+ability Inspect 'a where {
     to_str: { val: 'a } -> String
 }
 

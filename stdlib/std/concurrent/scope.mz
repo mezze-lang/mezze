@@ -16,7 +16,7 @@
 use std::effects::concurrency::{Concurrency, Loom}
 
 # Scope effect - structured concurrency with automatic awaiting
-pub effect Scope where {
+effect Scope where {
     # Fork a task within this scope
     # The task will be automatically awaited when the scope exits
     fork: { task: {} -> 'a } -> {} <Scope, Concurrency>,

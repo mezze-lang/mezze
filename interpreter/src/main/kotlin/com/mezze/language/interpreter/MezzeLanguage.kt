@@ -544,10 +544,85 @@ class MezzeTruffleRootNode(
             // Fall back to filesystem (for development)
             return projectRoot.resolve(relativePath).toFile()
         } else {
-            // User modules are relative to project root
+            // User modules: search in src/, lib/, root, and .deps/mezze/
+            // (consistent with type checker's ModuleResolver)
             val relativePath = parts.joinToString("/") + ".mz"
-            return projectRoot.resolve(relativePath).toFile()
+
+            // Find the actual project root by looking for Mezze.toml
+            val actualProjectRoot = findUserProjectRoot(projectRoot)
+
+            // Search in local project directories first
+            val localSearchPaths = listOf(
+                actualProjectRoot.resolve("src").resolve(relativePath),
+                actualProjectRoot.resolve("lib").resolve(relativePath),
+                actualProjectRoot.resolve(relativePath)
+            )
+
+            for (path in localSearchPaths) {
+                val file = path.toFile()
+                if (file.exists() && file.isFile) {
+                    return file
+                }
+            }
+
+            // Search in .deps/mezze/ for downloaded dependencies
+            // For a module path like "json::parser", we look in:
+            //   .deps/mezze/json-*/src/parser.mz
+            //   .deps/mezze/json-*/parser.mz
+            if (parts.isNotEmpty()) {
+                val packageName = parts[0]
+                val restOfPath = if (parts.size > 1) parts.drop(1).joinToString("/") + ".mz" else "$packageName.mz"
+                val depsDir = actualProjectRoot.resolve(".deps/mezze")
+
+                if (java.nio.file.Files.exists(depsDir) && java.nio.file.Files.isDirectory(depsDir)) {
+                    // Find directories matching {packageName}-* (e.g., json-1.2.0)
+                    java.nio.file.Files.list(depsDir).use { stream ->
+                        val matchingDirs = stream
+                            .filter { java.nio.file.Files.isDirectory(it) }
+                            .filter { it.fileName.toString().startsWith("$packageName-") }
+                            .toList()
+
+                        for (depDir in matchingDirs) {
+                            val depSearchPaths = listOf(
+                                depDir.resolve("src").resolve(restOfPath),
+                                depDir.resolve(restOfPath)
+                            )
+
+                            for (path in depSearchPaths) {
+                                if (java.nio.file.Files.exists(path) && java.nio.file.Files.isRegularFile(path)) {
+                                    return path.toFile()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Return the first local path for error message
+            return localSearchPaths.last().toFile()
         }
+    }
+
+    /**
+     * Find the user project root by looking for Mezze.toml in current and parent directories.
+     */
+    private fun findUserProjectRoot(startPath: java.nio.file.Path): java.nio.file.Path {
+        var current = startPath.toAbsolutePath()
+
+        // Look for Mezze.toml in current and parent directories (up to 10 levels)
+        for (i in 0..10) {
+            val mezzeToml = current.resolve("Mezze.toml")
+            if (java.nio.file.Files.exists(mezzeToml) && java.nio.file.Files.isRegularFile(mezzeToml)) {
+                return current
+            }
+
+            val parent = current.parent
+            if (parent == null || parent == current) break
+            current = parent
+        }
+
+        // Fallback to the original start path
+        return startPath.toAbsolutePath()
     }
 
     override fun getName(): String = "mezze-program"

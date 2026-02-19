@@ -76,39 +76,57 @@ sealed class ModuleError(message: String) : Exception(message) {
     data class ParseError(val modulePath: String, val error: String) : 
         ModuleError("Failed to parse module $modulePath: $error")
     
-    data class InternalModuleAccess(val fromModule: String, val toModule: String) :
-        ModuleError("Module $fromModule cannot access internal module $toModule")
+    data class InternalModuleAccess(
+        val fromModule: String,
+        val toModule: String,
+        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
+    ) : ModuleError(
+        if (fromModule.isEmpty())
+            "Cannot access internal module '$toModule' from outside its package"
+        else
+            "Module '$fromModule' cannot access internal module '$toModule'"
+    )
     
-    data class ExportNotFound(val modulePath: String, val exportName: String) :
-        ModuleError("Export '$exportName' not found in module '$modulePath'")
+    data class ExportNotFound(
+        val modulePath: String,
+        val exportName: String,
+        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
+    ) : ModuleError("Export '$exportName' not found in module '$modulePath'")
     
     data class DeprecatedCoreModule(val modulePath: String, val suggestion: String) :
         ModuleError("Deprecated core module: $modulePath. $suggestion")
 }
 
 /**
- * Find the project root by looking for stdlib directory
+ * Find the project root for user module resolution.
+ *
+ * This function looks for Mezze.toml (user projects) to determine the project root.
+ * It does NOT look for stdlib - stdlib resolution is handled separately.
+ *
+ * @param startPath The path to start searching from (typically the source file's directory)
+ * @return The project root path (directory containing Mezze.toml), or the startPath if not found
  */
 private fun findProjectRoot(startPath: Path = Paths.get(".")): Path {
     var current = startPath.toAbsolutePath()
 
     DebugLogger.debug(Category.ModuleResolver) { "Finding project root, starting from: $current" }
 
-    // Look for stdlib directory in current and parent directories
-    for (i in 0..5) { // Check up to 5 levels up
-        val stdlibPath = current.resolve("stdlib")
-        DebugLogger.debug(Category.ModuleResolver) { "Checking for stdlib at: $stdlibPath (exists: ${Files.exists(stdlibPath)})" }
-        if (Files.exists(stdlibPath) && Files.isDirectory(stdlibPath)) {
-            DebugLogger.debug(Category.ModuleResolver) { "Found project root: $current" }
+    // Look for Mezze.toml in current and parent directories
+    // This is how user projects are identified
+    for (i in 0..10) { // Check up to 10 levels up
+        val mezzeToml = current.resolve("Mezze.toml")
+        if (Files.exists(mezzeToml) && Files.isRegularFile(mezzeToml)) {
+            DebugLogger.debug(Category.ModuleResolver) { "Found project root (Mezze.toml): $current" }
             return current
         }
+
         val parent = current.parent
         if (parent == null || parent == current) break
         current = parent
     }
 
-    // Fallback to current directory
-    DebugLogger.debug(Category.ModuleResolver) { "Using fallback project root: ${startPath.toAbsolutePath()}" }
+    // Fallback to start path if no Mezze.toml found
+    DebugLogger.debug(Category.ModuleResolver) { "No Mezze.toml found, using fallback project root: ${startPath.toAbsolutePath()}" }
     return startPath.toAbsolutePath()
 }
 
@@ -454,19 +472,54 @@ class ModuleResolver(
         }
         
         // Regular module resolution for non-std modules
-        val searchRoots = listOf(
+        // First, search in local project directories
+        val localSearchRoots = listOf(
             projectRoot.resolve("src"),
             projectRoot.resolve("lib"),
             projectRoot
         )
-        
-        for (root in searchRoots) {
+
+        for (root in localSearchRoots) {
             val filePath = root.resolve(segments.joinToString("/") + ".mz")
             if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
                 return filePath
             }
         }
-        
+
+        // Then, search in .deps/mezze/ for downloaded dependencies
+        // For a module path like "json::parser", we look in:
+        //   .deps/mezze/json-*/src/parser.mz
+        //   .deps/mezze/json-*/parser.mz
+        if (segments.isNotEmpty()) {
+            val packageName = segments[0]
+            val restOfPath = if (segments.size > 1) segments.drop(1).joinToString("/") + ".mz" else "$packageName.mz"
+            val depsDir = projectRoot.resolve(".deps/mezze")
+
+            if (Files.exists(depsDir) && Files.isDirectory(depsDir)) {
+                // Find directories matching {packageName}-* (e.g., json-1.2.0)
+                Files.list(depsDir).use { stream ->
+                    val matchingDirs = stream
+                        .filter { Files.isDirectory(it) }
+                        .filter { it.fileName.toString().startsWith("$packageName-") }
+                        .toList()
+
+                    for (depDir in matchingDirs) {
+                        // Search in src/ and root of the dependency
+                        val searchPaths = listOf(
+                            depDir.resolve("src").resolve(restOfPath),
+                            depDir.resolve(restOfPath)
+                        )
+
+                        for (path in searchPaths) {
+                            if (Files.exists(path) && Files.isRegularFile(path)) {
+                                return path
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         return null
     }
     
@@ -494,11 +547,14 @@ class ModuleResolver(
             )
         }
         
-        // Regular search paths
+        // Regular search paths (including .deps/mezze/)
+        val packageName = segments[0]
         return listOf(
             "src/${segments.joinToString("/")}.mz",
             "lib/${segments.joinToString("/")}.mz",
-            "${segments.joinToString("/")}.mz"
+            "${segments.joinToString("/")}.mz",
+            ".deps/mezze/$packageName-*/src/...",
+            ".deps/mezze/$packageName-*/..."
         )
     }
     
@@ -555,20 +611,19 @@ class ModuleResolver(
                     }
                 }
                 is EffectDeclaration -> {
-                    if (item.visibility == Visibility.PUBLIC) {
-                        // Priority: 1) TypeChecker context, 2) inferredType from AST, 3) fresh var
-                        val fromContext = typeContext?.get(item.name)
-                        val fromInferred = item.inferredType
-                        val mezzeType = fromContext ?: fromInferred ?: MezzeType.VarType(TypeVar.fresh())
+                    // Effects are ALWAYS public - no visibility check needed
+                    // Priority: 1) TypeChecker context, 2) inferredType from AST, 3) fresh var
+                    val fromContext = typeContext?.get(item.name)
+                    val fromInferred = item.inferredType
+                    val mezzeType = fromContext ?: fromInferred ?: MezzeType.VarType(TypeVar.fresh())
 
-                        // Export the effect type so it can be referenced (e.g., Log.info)
-                        exports[item.name] = ExportedItem(
-                            name = item.name,
-                            type = ExportedItemType.EFFECT,
-                            mezzeType = mezzeType,
-                            originalName = item.name
-                        )
-                    }
+                    // Export the effect type so it can be referenced (e.g., Log.info)
+                    exports[item.name] = ExportedItem(
+                        name = item.name,
+                        type = ExportedItemType.EFFECT,
+                        mezzeType = mezzeType,
+                        originalName = item.name
+                    )
                 }
                 is ImplDeclaration -> {
                     // Export handler names (performer names) from impl declarations
@@ -589,20 +644,19 @@ class ModuleResolver(
                     )
                 }
                 is AbilityDeclaration -> {
+                    // Abilities are ALWAYS public - no visibility check needed
                     // Export ability declarations so they can be imported by other modules
                     // This enables qualified ability names like `codec::EncodeFormat` in impl blocks
-                    if (item.visibility == Visibility.PUBLIC) {
-                        val fromContext = typeContext?.get(item.name)
-                        val fromInferred = item.inferredType
-                        val mezzeType = fromContext ?: fromInferred ?: MezzeType.VarType(TypeVar.fresh())
+                    val fromContext = typeContext?.get(item.name)
+                    val fromInferred = item.inferredType
+                    val mezzeType = fromContext ?: fromInferred ?: MezzeType.VarType(TypeVar.fresh())
 
-                        exports[item.name] = ExportedItem(
-                            name = item.name,
-                            type = ExportedItemType.ABILITY,
-                            mezzeType = mezzeType,
-                            originalName = item.name
-                        )
-                    }
+                    exports[item.name] = ExportedItem(
+                        name = item.name,
+                        type = ExportedItemType.ABILITY,
+                        mezzeType = mezzeType,
+                        originalName = item.name
+                    )
                 }
                 else -> {
                     // Other items (ImplAbilityDeclaration, TopLevelExpression, etc.) are not exported
@@ -705,19 +759,46 @@ class ModuleResolver(
     }
     
     /**
-     * Check if a module can access internal modules of another module
+     * Check if a module can access internal/private modules of another module.
+     *
+     * Convention (Gleam-inspired):
+     * - `internal/` and `private/` folders are internal by default
+     * - Internal modules can only be accessed by modules in the same parent hierarchy
+     * - This is recursive: `foo::internal::bar` can only be accessed by modules under `foo::`
+     *
+     * Examples:
+     * - `math::internal::helpers` can only be accessed by modules under `math::`
+     * - `mylib::private::utils` can only be accessed by modules under `mylib::`
+     * - `app::internal::deep::nested` can only be accessed by modules under `app::`
      */
     fun canAccessInternal(fromModule: String, toModule: String): Boolean {
-        // Internal modules can only be accessed by modules in the same parent hierarchy
-        // For example: math::internal::helpers can only be accessed by modules under math::
+        // Check for internal or private folder markers in the module path
+        val internalMarkers = listOf("::internal::", "::private::", "::internal", "::private")
 
-        if (!toModule.contains("::internal::")) {
+        // Find the first internal/private marker in the path
+        var markerIndex = -1
+        var markerLength = 0
+        for (marker in internalMarkers) {
+            val idx = toModule.indexOf(marker)
+            if (idx >= 0 && (markerIndex < 0 || idx < markerIndex)) {
+                markerIndex = idx
+                markerLength = marker.length
+            }
+        }
+
+        // Also check if the module path STARTS with internal/ or private/
+        // This handles top-level internal modules
+        if (toModule.startsWith("internal::") || toModule.startsWith("private::")) {
+            // Top-level internal modules cannot be accessed from outside
+            return false
+        }
+
+        if (markerIndex < 0) {
             return true // Not an internal module, access allowed
         }
 
-        // Extract the parent module path from the internal module
-        val internalIndex = toModule.indexOf("::internal::")
-        val parentModule = toModule.substring(0, internalIndex)
+        // Extract the parent module path (everything before the internal/private marker)
+        val parentModule = toModule.substring(0, markerIndex)
 
         // Empty fromModule means a top-level script, which CANNOT access internal modules
         if (fromModule.isEmpty()) {
@@ -725,7 +806,9 @@ class ModuleResolver(
         }
 
         // Allow access if the fromModule is within the same parent hierarchy
-        return fromModule.startsWith("$parentModule::")
+        // e.g., "math::ops" can access "math::internal::helpers"
+        // e.g., "math::internal::other" can access "math::internal::helpers"
+        return fromModule.startsWith("$parentModule::") || fromModule == parentModule
     }
     
     /**

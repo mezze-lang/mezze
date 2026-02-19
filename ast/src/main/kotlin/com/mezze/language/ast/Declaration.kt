@@ -331,11 +331,13 @@ data class TopLevelExpression(
 @Serializable
 data class UseDeclaration(
     val path: UsePath,
-    val alias: String? = null
+    val alias: String? = null,
+    val sourceLocation: SourceLocation? = null
 ) : ProgramItem
 
 @Serializable
 data class PubUseDeclaration(
     val path: UsePath,
-    val alias: String? = null
+    val alias: String? = null,
+    val sourceLocation: SourceLocation? = null
 ) : ProgramItem

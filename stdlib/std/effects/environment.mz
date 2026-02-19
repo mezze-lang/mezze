@@ -1,6 +1,6 @@
 # std/effects/environment.mezze - Environment and system information effects
 
-pub effect Environment where {
+effect Environment where {
     # Get environment variable
     get_env: { name: String } -> Option String <Environment>,
 

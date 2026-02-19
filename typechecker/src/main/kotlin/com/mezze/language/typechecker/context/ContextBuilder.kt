@@ -49,12 +49,14 @@ class ContextBuilder {
      * @param parentContext Optional parent context (for nested scopes/modules)
      * @param importedImpls Optional imported effect implementations (from module imports)
      * @param importedAbilities Optional imported ability declarations (for validating ability impls with qualified names)
+     * @param importedTypes Optional imported type declarations (for orphan rule validation)
      */
     fun build(
         program: Program,
         parentContext: TypingContext = TypingContext.empty,
         importedImpls: Map<String, com.mezze.language.ast.ImplDeclaration> = emptyMap(),
-        importedAbilities: Map<String, AbilityDeclaration> = emptyMap()
+        importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),
+        importedTypes: Map<String, TypeDeclaration> = emptyMap()
     ): BuildResult {
         // VALIDATION PHASE 1: Check for duplicate declarations BEFORE building context
         // This catches errors early and provides clear error messages
@@ -144,6 +146,23 @@ class ContextBuilder {
             AbilityValidator.validateAbilityImplementation(
                 impl = abilityImplDecl,
                 abilityDeclarations = allAbilityDecls
+            )
+        }
+
+        // 4. Validate orphan rules for ability implementations
+        // An impl must be in the same module as either the ability or one of the target types
+        val localAbilityNames = abilityDecls.keys
+        val localTypeNames = typeDecls.keys
+        val importedAbilityNames = importedAbilities.keys
+        val importedTypeNames = importedTypes.keys
+
+        for (abilityImplDecl in abilityImplDecls) {
+            AbilityValidator.validateOrphanRules(
+                impl = abilityImplDecl,
+                localAbilityNames = localAbilityNames,
+                localTypeNames = localTypeNames,
+                importedAbilityNames = importedAbilityNames,
+                importedTypeNames = importedTypeNames
             )
         }
 
@@ -239,7 +258,8 @@ class ContextBuilder {
 
             MezzeType.VariantType(
                 constructors = constructors,
-                rowVar = null
+                rowVar = null,
+                typeName = typeDecl.name  // Track the type alias name
             )
         } else {
             // Polymorphic variant: Result 'a 'b

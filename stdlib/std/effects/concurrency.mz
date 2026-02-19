@@ -3,7 +3,7 @@
 use std::effects::async::{Promise, AsyncRunner}
 
 # Concurrency effect - spawn computations on virtual threads
-pub effect Concurrency where {
+effect Concurrency where {
   # Spawn computation on new virtual thread, returns Promise
   spawn: {computation: {} -> 'a} -> Promise 'a <Concurrency>,
 

@@ -521,9 +521,10 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         val ast = parser.parse(source, file = file.name)
         val parseTime = (System.nanoTime() - startTime) / 1_000_000.0
 
-        val typeCheckProjectRoot = System.getProperty("mezze.project.root")?.let {
-            java.nio.file.Paths.get(it)
-        } ?: file.toPath().parent ?: file.toPath()
+        // Use the source file's directory for module resolution
+        // This allows the ModuleResolver to find Mezze.toml in parent directories
+        // Note: mezze.project.root is for stdlib location, NOT for user module resolution
+        val typeCheckProjectRoot = file.toPath().toAbsolutePath().parent ?: file.toPath().toAbsolutePath()
 
         val typeCheckStart = System.nanoTime()
         val typeChecker = TypeChecker()
@@ -547,6 +548,70 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         println("❌ Parse Error")
         println("━".repeat(50))
         println(e.message)
+        kotlin.system.exitProcess(1)
+    } catch (e: com.mezze.language.typechecker.module.ModuleError.InternalModuleAccess) {
+        // Pretty-print internal module access error with source context
+        println("❌ Module Error [Internal Module Access]")
+        println("━".repeat(50))
+        e.sourceLocation?.let { loc ->
+            println()
+            println("   --> ${loc.file ?: file.name}:${loc.line}:${loc.column}")
+            // Show source code snippet
+            val lines = source.lines()
+            if (loc.line > 0 && loc.line <= lines.size) {
+                val lineNum = loc.line
+                val lineContent = lines[lineNum - 1]
+                println("    |")
+                println("${lineNum.toString().padStart(3)} | $lineContent")
+                println("    | ${" ".repeat(loc.column - 1)}^ here")
+                println("    |")
+            }
+        }
+        println()
+        println("Error: ${e.message}")
+        println()
+
+        val internalFolder = when {
+            e.toModule.contains("::internal::") || e.toModule.contains("::internal") -> "internal/"
+            e.toModule.contains("::private::") || e.toModule.contains("::private") -> "private/"
+            else -> "internal/"
+        }
+        println("The '$internalFolder' folder convention means this module is")
+        println("only accessible from within its parent package.")
+        println()
+        println("Suggestions:")
+        println("   - Move the code that needs this module into the parent package")
+        println("   - Move the module out of the '$internalFolder' folder to make it public")
+        println("   - Create a public API that wraps the internal functionality")
+        kotlin.system.exitProcess(1)
+    } catch (e: com.mezze.language.typechecker.module.ModuleError.ExportNotFound) {
+        // Pretty-print export not found error with source context
+        println("❌ Module Error [Export Not Found]")
+        println("━".repeat(50))
+        e.sourceLocation?.let { loc ->
+            println("   --> ${loc.file ?: file.name}:${loc.line}:${loc.column}")
+            // Show source code snippet
+            val lines = source.lines()
+            if (loc.line > 0 && loc.line <= lines.size) {
+                val lineNum = loc.line
+                val lineContent = lines[lineNum - 1]
+                println("    |")
+                println("${lineNum.toString().padStart(3)} | $lineContent")
+                println("    | ${" ".repeat(loc.column - 1)}^")
+            }
+            println()
+        }
+        println("Error: Export '${e.exportName}' not found in module '${e.modulePath}'")
+        println()
+        println("💡 Suggestions:")
+        println("   - Check the export name spelling")
+        println("   - Verify the module exports this item with 'pub'")
+        println("   - Use 'use ${e.modulePath}' to see available exports")
+        kotlin.system.exitProcess(1)
+    } catch (e: com.mezze.language.typechecker.module.ModuleError) {
+        // Handle other module errors
+        println("❌ Module Error:")
+        println(e.message ?: "Unknown module error")
         kotlin.system.exitProcess(1)
     } catch (e: Exception) {
         println("❌ Error:")
@@ -739,13 +804,13 @@ private fun handleExecCommand(args: List<String>) {
     val fileName = filePath?.fileName?.toString()
     val ast = parser.parse(source, file = fileName)
 
-    // Get the project root for type checking (prioritize auto-detected)
-    val typeCheckProjectRoot = System.getProperty("mezze.project.root")?.let {
-        java.nio.file.Paths.get(it)
-    } ?: if (filePath != null) {
-        filePath.parent ?: filePath
+    // Use the source file's directory for module resolution
+    // This allows the ModuleResolver to find Mezze.toml in parent directories
+    // Note: mezze.project.root is for stdlib location, NOT for user module resolution
+    val typeCheckProjectRoot = if (filePath != null) {
+        filePath.toAbsolutePath().parent ?: filePath.toAbsolutePath()
     } else {
-        java.nio.file.Paths.get(".")
+        java.nio.file.Paths.get(".").toAbsolutePath()
     }
 
     // Type-check with main validation: main must be {} -> {} <*>
@@ -823,13 +888,12 @@ private fun handleExecCommand(args: List<String>) {
         // Execute using the interpreter directly with the already type-checked AST
         val interpreter = com.mezze.language.interpreter.MezzeInterpreter(skipParserSetup = false)
 
-        // Get the project root (prioritize auto-detected, then file path, then current dir)
-        val projectRootPath = System.getProperty("mezze.project.root")?.let {
-            java.nio.file.Paths.get(it)
-        } ?: if (filePath != null) {
-            filePath.parent ?: filePath
+        // Use the source file's directory for module resolution
+        // This allows the interpreter to find modules relative to the source file
+        val projectRootPath = if (filePath != null) {
+            filePath.toAbsolutePath().parent ?: filePath.toAbsolutePath()
         } else {
-            java.nio.file.Paths.get(".")
+            java.nio.file.Paths.get(".").toAbsolutePath()
         }
 
         val result = interpreter.execute(programToExecute, projectRootPath, successResult.monomorphicInstances)
@@ -1139,45 +1203,39 @@ private fun copyStdlib(tempDir: File) {
 
     // Try to extract stdlib from embedded resources first (works anywhere)
     try {
-        // Use the Main class's classLoader to ensure we get resources from the CLI JAR
         val classLoader = Thread.currentThread().contextClassLoader ?: object {}.javaClass.classLoader
 
-        // We need to explicitly list them since we can't list resources in a JAR
-        val knownStdlibPaths = listOf(
-            "std/bool.mz", "std/result.mz", "std/frac.mz", "std/nat.mz", "std/option.mz",
-            "std/async.mz", "std/async/thread.mz", "std/async/async.mz", "std/async/structured.mz",
-            "std/math/core.mz", "std/math/random.mz", "std/math/trig.mz",
-            "std/collections/list.mz", "std/collections/array.mz", "std/collections/map.mz",
-            "std/collections/set.mz", "std/effects/log.mz", "std/effects/choice.mz",
-            "std/effects/async.mz", "std/effects/concurrency.mz", "std/effects/early_return.mz",
-            "std/effects/exception.mz", "std/effects/environment.mz", "std/effects/compile_time.mz",
-            "std/effects/composite_logger.mz", "std/codec/json.mz"
-        )
+        // Read the manifest file generated at build time (lists all stdlib files)
+        val manifestStream = classLoader.getResourceAsStream("stdlib/MANIFEST.txt")
+        if (manifestStream != null) {
+            val stdlibPaths = manifestStream.bufferedReader().readLines()
+                .filter { it.isNotBlank() }
 
-        var copiedCount = 0
-        for (path in knownStdlibPaths) {
-            val resourcePath = "stdlib/$path"
-            val inputStream = classLoader.getResourceAsStream(resourcePath)
-            if (inputStream != null) {
-                val destFile = File(stdlibDest, path)
-                destFile.parentFile?.mkdirs()
-                destFile.outputStream().use { output ->
-                    inputStream.copyTo(output)
+            var copiedCount = 0
+            for (path in stdlibPaths) {
+                val resourcePath = "stdlib/$path"
+                val inputStream = classLoader.getResourceAsStream(resourcePath)
+                if (inputStream != null) {
+                    val destFile = File(stdlibDest, path)
+                    destFile.parentFile?.mkdirs()
+                    destFile.outputStream().use { output ->
+                        inputStream.copyTo(output)
+                    }
+                    copiedCount++
                 }
-                copiedCount++
+            }
+
+            if (copiedCount > 0) {
+                println("Copied stdlib files from embedded resources ($copiedCount files)")
+                return
             }
         }
 
-        if (copiedCount > 0) {
-            println("📦 Copied stdlib files from embedded resources ($copiedCount files)")
-            return
-        }
-
-        // If we got 0 files, print debug info
-        println("⚠️ Could not find stdlib resources in JAR, trying filesystem...")
+        // If manifest not found or no files copied, print debug info
+        println("Could not find stdlib manifest in JAR, trying filesystem...")
     } catch (e: Exception) {
         // Fall back to filesystem if resource extraction fails
-        println("⚠️ Exception while extracting stdlib: ${e.message}, trying filesystem...")
+        println("Exception while extracting stdlib: ${e.message}, trying filesystem...")
     }
 
     // Fallback: Try to copy from filesystem (for development)
@@ -1189,7 +1247,7 @@ private fun copyStdlib(tempDir: File) {
         val stdlibSource = File(projectRoot, "stdlib")
         if (stdlibSource.exists()) {
             stdlibSource.copyRecursively(stdlibDest, overwrite = true)
-            println("📦 Copied stdlib files from filesystem")
+            println("Copied stdlib files from filesystem")
             return
         }
     }

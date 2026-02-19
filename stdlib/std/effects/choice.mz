@@ -5,7 +5,7 @@ use std::control::continuation
 # Choice effect - explore multiple computation paths
 # When you choose between options, all paths are explored
 # When you fail, that path is abandoned (backtracking)
-pub effect Choice where {
+effect Choice where {
     # Choose one value from multiple options
     # Returns a single value (the effect handler explores all paths)
     choose: { options: ['a] } -> 'a <Choice>,

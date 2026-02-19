@@ -363,6 +363,88 @@ object AbilityValidator {
     }
 
     /**
+     * Validate orphan rules for ability implementation.
+     *
+     * An impl is an "orphan" if:
+     * - The ability is NOT defined in the current module, AND
+     * - NONE of the target types are defined in the current module
+     *
+     * Following Rust/Roc coherence rules:
+     * - impl Ability Type must be in the same module as either the ability or one of the types
+     * - This prevents third-party modules from defining impls for types they don't own
+     *
+     * @param impl The ability implementation to validate
+     * @param localAbilityNames Set of ability names defined in the current module
+     * @param localTypeNames Set of type names defined in the current module
+     * @param importedAbilityNames Set of ability names imported from other modules
+     * @param importedTypeNames Set of type names imported from other modules
+     * @throws TypeCheckError if the impl is an orphan
+     */
+    fun validateOrphanRules(
+        impl: ImplAbilityDeclaration,
+        localAbilityNames: Set<String>,
+        localTypeNames: Set<String>,
+        importedAbilityNames: Set<String>,
+        importedTypeNames: Set<String>
+    ) {
+        val abilityName = impl.abilityName
+
+        // Check if ability is defined locally
+        val isAbilityLocal = localAbilityNames.contains(abilityName)
+
+        // Check if ability is imported (from another module)
+        val isAbilityImported = importedAbilityNames.contains(abilityName)
+
+        // If ability is not found anywhere, skip orphan check (will fail ability lookup later)
+        if (!isAbilityLocal && !isAbilityImported) {
+            return  // Let validateAbilityImplementation handle "ability not found"
+        }
+
+        // If ability is local, this impl is valid (in same module as ability)
+        if (isAbilityLocal) {
+            return  // Valid: impl is in same module as ability declaration
+        }
+
+        // Ability is imported - check if any target type is local
+        val targetTypeNames = impl.targetTypes.map { getTypeNameFromAnnotation(it) }
+
+        // Check if any target type is defined locally
+        val hasLocalTargetType = targetTypeNames.any { typeName ->
+            localTypeNames.contains(typeName)
+        }
+
+        if (hasLocalTargetType) {
+            return  // Valid: impl is in same module as at least one target type
+        }
+
+        // At this point, both ability and all types are imported - this is an orphan impl
+        val typesList = targetTypeNames.joinToString(", ")
+        throw TypeCheckError(
+            "Orphan impl: cannot implement imported ability '$abilityName' for types [$typesList] " +
+            "in this module. An impl must be in the same module as either the ability declaration " +
+            "or at least one of the target types. Move this impl to the module where '$abilityName' " +
+            "or one of [$typesList] is defined.",
+            impl.sourceLocation
+        )
+    }
+
+    /**
+     * Extract type name from a type annotation for orphan rule checking.
+     */
+    private fun getTypeNameFromAnnotation(annotation: TypeAnnotation): String {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> annotation.name.removePrefix("'")
+            is TypeApplicationAnnotation -> annotation.constructor
+            is QualifiedTypeAnnotation -> annotation.typeName
+            is RecordTypeAnnotation -> "Record"
+            is VariantTypeAnnotation -> "Variant"
+            is FunctionTypeAnnotation -> "Function"
+            is ArrayTypeAnnotation -> "Array"
+            is EffectRowAnnotation -> "EffectRow"
+        }
+    }
+
+    /**
      * Validate ability dependencies to detect circular dependencies.
      *
      * Checks:

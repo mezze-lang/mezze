@@ -4,7 +4,7 @@ use std::math::core
 use std::math::trig
 
 # Random effect definition
-pub effect Random where {
+effect Random where {
     random_float: {} -> Float <Random>,
     random_int: { min: Int, max: Int } -> Int <Random>,
     random_nat: { max: Nat } -> Nat <Random>,

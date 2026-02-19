@@ -47,12 +47,26 @@ tasks.named<ProcessResources>("processResources") {
         into("stdlib")
     }
 
-    // Create a marker file with the project root path for auto-detection
+    // Generate a manifest of all stdlib files for runtime discovery
     doLast {
         val resourcesDir = sourceSets.main.get().output.resourcesDir
         if (resourcesDir != null) {
+            // Create marker file with project root path for auto-detection
             val markerFile = File(resourcesDir, "mezze-project-root.txt")
             markerFile.writeText(project.rootDir.absolutePath)
+
+            // Generate stdlib manifest - list all .mz files relative to stdlib/
+            val stdlibDir = project.rootDir.resolve("stdlib")
+            val stdlibFiles = fileTree(stdlibDir) {
+                include("**/*.mz")
+            }.files.map { file ->
+                file.relativeTo(stdlibDir).path
+            }.sorted()
+
+            val manifestFile = File(resourcesDir, "stdlib/MANIFEST.txt")
+            manifestFile.parentFile?.mkdirs()
+            manifestFile.writeText(stdlibFiles.joinToString("\n"))
+            println("Generated stdlib manifest with ${stdlibFiles.size} files")
         }
     }
 }

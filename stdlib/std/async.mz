@@ -36,7 +36,7 @@ pub newtype Scope 'a = Scope __NativeScope
 pub type AsyncError = | AsyncFailed { msg: String }, AsyncCancelled, AsyncTimedOut { ms: Int } |
 
 # Async effect - unified async operations
-pub effect Async where {
+effect Async where {
     # Spawn a computation, returns immediately with Promise
     spawn: {f: {} -> 'a} -> Promise 'a <Async>,
 

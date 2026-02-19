@@ -131,11 +131,11 @@ class ImportResolver(
         return when (val path = use.path) {
             is ModulePath -> {
                 // Import all exports: use module
-                processModulePath(path, use.alias, isPublic)
+                processModulePath(path, use.alias, isPublic, use.sourceLocation)
             }
             is SelectivePath -> {
                 // Import specific items: use module::{foo, bar}
-                processSelectivePath(path, isPublic)
+                processSelectivePath(path, isPublic, use.sourceLocation)
             }
         }
     }
@@ -151,7 +151,8 @@ class ImportResolver(
     private fun processModulePath(
         path: ModulePath,
         alias: String?,
-        isPublic: Boolean
+        isPublic: Boolean,
+        sourceLocation: com.mezze.language.ast.SourceLocation? = null
     ): ProcessResult {
         val modulePath = path.segments.joinToString("::")
 
@@ -159,7 +160,7 @@ class ImportResolver(
         // Top-level imports (fromModule = "") cannot access internal modules
         if (!loader.getResolver().canAccessInternal("", modulePath)) {
             return ProcessResult.Failure(
-                listOf(ModuleError.InternalModuleAccess("", modulePath))
+                listOf(ModuleError.InternalModuleAccess("", modulePath, sourceLocation))
             )
         }
 
@@ -225,7 +226,8 @@ class ImportResolver(
      */
     private fun processSelectivePath(
         path: SelectivePath,
-        isPublic: Boolean
+        isPublic: Boolean,
+        sourceLocation: com.mezze.language.ast.SourceLocation? = null
     ): ProcessResult {
         val modulePath = path.module.joinToString("::")
 
@@ -233,7 +235,7 @@ class ImportResolver(
         // Top-level imports (fromModule = "") cannot access internal modules
         if (!loader.getResolver().canAccessInternal("", modulePath)) {
             return ProcessResult.Failure(
-                listOf(ModuleError.InternalModuleAccess("", modulePath))
+                listOf(ModuleError.InternalModuleAccess("", modulePath, sourceLocation))
             )
         }
 
@@ -286,7 +288,8 @@ class ImportResolver(
                         missingItems.map { itemName ->
                             ModuleError.ExportNotFound(
                                 modulePath = modulePath,
-                                exportName = itemName
+                                exportName = itemName,
+                                sourceLocation = sourceLocation
                             )
                         }
                     )
@@ -544,6 +547,17 @@ class ImportResolver(
                         impls[implKey] = impl
                     }
                 }
+
+                // ALSO check if this is a direct performer import (e.g., Console)
+                // When importing a performer directly (not via effect), we need to find
+                // the impl declaration where performerName matches the imported item
+                val performerImpl = module.program.items
+                    .filterIsInstance<ImplDeclaration>()
+                    .find { it.performerName == item.name }
+
+                if (performerImpl != null && !impls.containsKey(item.name)) {
+                    impls[item.name] = performerImpl
+                }
             }
 
             // Extract ImplAbilityDeclarations for imported abilities
@@ -567,6 +581,21 @@ class ImportResolver(
                             )
                         abilityImpls[implKey] = abilityImpl
                     }
+                }
+            }
+
+            // ALSO import all ability impls from the module, even if the ability
+            // is defined elsewhere. This allows impls to be defined in separate
+            // modules from their abilities (e.g., Show in abilities/show.mz,
+            // impl Show Int in impls/show_impls.mz).
+            // When we import from impls/show_impls.mz, we want to pick up those impls.
+            val allModuleAbilityImpls = module.program.items
+                .filterIsInstance<ImplAbilityDeclaration>()
+
+            for (abilityImpl in allModuleAbilityImpls) {
+                val implKey = abilityImpl.contentHash
+                if (implKey != null && !abilityImpls.containsKey(implKey)) {
+                    abilityImpls[implKey] = abilityImpl
                 }
             }
         }

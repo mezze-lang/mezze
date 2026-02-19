@@ -34,7 +34,7 @@ class QualifiedAbilityImplTest {
     fun `parsing qualified ability names in impl`() {
         // Test that the parser correctly parses qualified ability names
         val source = """
-            pub ability Printable 'a where {
+            ability Printable 'a where {
                 print: {value: 'a} -> String
             }
 
@@ -58,7 +58,7 @@ class QualifiedAbilityImplTest {
     fun `impl with qualified ability name from imported module`() {
         // Create a module that exports an ability
         val abilityModule = """
-            pub ability Serializable 'a where {
+            ability Serializable 'a where {
                 serialize: {value: 'a} -> String
             }
         """.trimIndent()
@@ -68,15 +68,21 @@ class QualifiedAbilityImplTest {
         Files.writeString(srcDir.resolve("serializer.mz"), abilityModule)
 
         // Create main module that imports the module and implements the ability with qualified name
+        // We need to define a LOCAL type to impl for, since we can't impl imported ability for built-in types (orphan rule)
         val mainModule = """
             use serializer
 
-            # Implement using qualified ability name
-            impl serializer::Serializable Int where {
-                serialize = {value} -> "serialized_int"
+            # Define a local type
+            type MyInt = | MyInt { val: Int } |
+
+            # Implement using qualified ability name for LOCAL type (valid - not an orphan)
+            impl serializer::Serializable MyInt where {
+                serialize: { value: MyInt } -> String = { value } ->
+                    match value is
+                        MyInt { val } -> "serialized_int"
             }
 
-            let test = 42
+            let test = MyInt { val = 42 }
         """.trimIndent()
 
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
@@ -106,7 +112,7 @@ class QualifiedAbilityImplTest {
         Files.createDirectories(srcDir)
 
         val codecModule = """
-            pub ability Encoder 'a where {
+            ability Encoder 'a where {
                 encode: {value: 'a} -> String
             }
         """.trimIndent()
@@ -114,14 +120,20 @@ class QualifiedAbilityImplTest {
         Files.writeString(srcDir.resolve("codec.mz"), codecModule)
 
         // Create main module using the codec module
+        // We need to define a LOCAL type to impl for, since we can't impl imported ability for built-in types (orphan rule)
         val mainModule = """
             use codec
 
-            impl codec::Encoder Int where {
-                encode = {value} -> "encoded"
+            # Define a local type
+            type MyData = | MyData { val: String } |
+
+            impl codec::Encoder MyData where {
+                encode: { value: MyData } -> String = { value } ->
+                    match value is
+                        MyData { val } -> "encoded"
             }
 
-            let x = 1
+            let x = MyData { val = "test" }
         """.trimIndent()
 
         Files.writeString(srcDir.resolve("main.mz"), mainModule)

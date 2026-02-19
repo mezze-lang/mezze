@@ -1076,6 +1076,80 @@ class ConstraintGenerator(
             val expectedParamType = substituteTypeParams(declParamType, fullSubstitution)
             val expectedReturnType = substituteTypeParams(declReturnType, fullSubstitution)
 
+            // CRITICAL: Validate impl operation type annotations match effect declaration
+            // If the impl provides EXPLICIT type annotations, they must match the expected types
+            // Both parameter names AND types must match exactly (after associated type substitution)
+            // For return types, the base type must match but effect annotations can differ
+            // (impl can remove effects or transform them)
+            //
+            // NOTE: When an operation has no explicit type annotation (e.g., `ask = {} -> "hello"`),
+            // the parser sets placeholder types (empty records). We detect these placeholders and skip
+            // validation, letting the body type inference handle type checking.
+            val implParamTypeAnnotation = implOp.paramType
+            val isPlaceholderParamType = implParamTypeAnnotation is RecordTypeAnnotation &&
+                implParamTypeAnnotation.entries.isEmpty() && implParamTypeAnnotation.restField == null
+
+            if (implParamTypeAnnotation != null && !isPlaceholderParamType) {
+                val implParamType = convertTypeAnnotation(implParamTypeAnnotation)
+                // Parameter names AND types must match exactly
+                // Use full unification which checks both field names and types
+                val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(baseContext, typeDeclarations, abilityDeclarations)
+                val unificationResult = unificationSolver.solve(
+                    listOf(Constraint.Equality(implParamType, expectedParamType, "Effect param type validation"))
+                )
+                if (unificationResult is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure) {
+                    val implTypeStr = com.mezze.language.ast.prettyPrintType(implParamType)
+                    val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedParamType)
+                    throw com.mezze.language.typechecker.TypeCheckError(
+                        "Effect impl '${impl.performerName}' operation '${implOp.name}' has wrong parameter type: " +
+                        "expected $expectedTypeStr (from effect '${impl.effectName}'), " +
+                        "but impl declares $implTypeStr. " +
+                        "Parameter names and types must match exactly.",
+                        implOp.implementation.sourceLocation
+                    )
+                }
+            }
+
+            val implReturnTypeAnnotation = implOp.returnType
+            val isPlaceholderReturnType = implReturnTypeAnnotation is RecordTypeAnnotation &&
+                implReturnTypeAnnotation.entries.isEmpty() && implReturnTypeAnnotation.restField == null
+
+            if (implReturnTypeAnnotation != null && !isPlaceholderReturnType) {
+                val implReturnType = convertTypeAnnotation(implReturnTypeAnnotation)
+                // For return types, the base type must match but we don't check effects here
+                // (impl can remove effects or transform them - this is handled elsewhere)
+                val unificationSolver = com.mezze.language.typechecker.solving.ConstraintSolver(baseContext, typeDeclarations, abilityDeclarations)
+                val unificationResult = unificationSolver.solve(
+                    listOf(Constraint.Equality(implReturnType, expectedReturnType, "Effect return type validation"))
+                )
+                if (unificationResult is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure) {
+                    val implTypeStr = com.mezze.language.ast.prettyPrintType(implReturnType)
+                    val expectedTypeStr = com.mezze.language.ast.prettyPrintType(expectedReturnType)
+                    throw com.mezze.language.typechecker.TypeCheckError(
+                        "Effect impl '${impl.performerName}' operation '${implOp.name}' has wrong return type: " +
+                        "expected $expectedTypeStr (from effect '${impl.effectName}'), " +
+                        "but impl declares $implTypeStr.",
+                        implOp.implementation.sourceLocation
+                    )
+                }
+            }
+
+            // CRITICAL: Effect impl operation CANNOT have the same effect in its effect annotation
+            // The impl is supposed to HANDLE the effect, not require it - that would be circular
+            // e.g., impl Log for Console where { info: { msg: String } -> {} <Log> = ... } is INVALID
+            // but  impl Log for Console where { info: { msg: String } -> {} <IO> = ... } is OK (transformed)
+            // and  impl Log for Console where { info: { msg: String } -> {} = ... } is OK (handled/removed)
+            val implEffects = implOp.effects
+            if (implEffects != null && impl.effectName in implEffects.effects) {
+                throw com.mezze.language.typechecker.TypeCheckError(
+                    "Effect impl '${impl.performerName}' operation '${implOp.name}' cannot require " +
+                    "the same effect '${impl.effectName}' it is implementing. " +
+                    "The impl should handle the effect, not propagate it. " +
+                    "Either remove '${impl.effectName}' from the effect annotation or transform it to a different effect.",
+                    implOp.implementation.sourceLocation
+                )
+            }
+
             // Type-check the implementation body (must be a lambda)
             if (implOp.implementation is LambdaExpression) {
                 val lambda = implOp.implementation as LambdaExpression

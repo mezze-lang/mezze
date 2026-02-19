@@ -37,6 +37,39 @@ object DuplicateDeclarationValidator {
         validateDuplicateAbilities(program)
         validateDuplicateAbilityImpls(program)
         validateDuplicateVariables(program)
+        validateNoPubOnAlwaysPublicDeclarations(program)
+    }
+
+    /**
+     * Validate that pub is not used on abilities, effects, and their impls.
+     * These are always public by default - the pub keyword is unnecessary.
+     */
+    private fun validateNoPubOnAlwaysPublicDeclarations(program: Program) {
+        for (item in program.items) {
+            when (item) {
+                is AbilityDeclaration -> {
+                    if (item.visibility == Visibility.PUBLIC) {
+                        throw TypeCheckError(
+                            "The 'pub' keyword is not needed for ability '${item.name}'. " +
+                            "Abilities are always public by default. Remove the 'pub' keyword.",
+                            item.sourceLocation
+                        )
+                    }
+                }
+                is EffectDeclaration -> {
+                    if (item.visibility == Visibility.PUBLIC) {
+                        throw TypeCheckError(
+                            "The 'pub' keyword is not needed for effect '${item.name}'. " +
+                            "Effects are always public by default. Remove the 'pub' keyword.",
+                            item.sourceLocation
+                        )
+                    }
+                }
+                // Note: ImplDeclaration and ImplAbilityDeclaration don't have visibility fields
+                // in the AST, so they already can't have pub keyword
+                else -> {}
+            }
+        }
     }
 
     /**

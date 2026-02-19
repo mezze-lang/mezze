@@ -3,7 +3,7 @@
 use std::control::continuation
 use std::control::continuation::{Continuation}
 
-pub effect Exception having 'error where {
+effect Exception having 'error where {
     throw: {error: 'error} -> 'a <Exception>
 }
 

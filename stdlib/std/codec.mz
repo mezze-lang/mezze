@@ -67,19 +67,19 @@ pub type Entry 'k 'v = {key: 'k, value: 'v}
 
 # User-facing ability for encoding values to a format's intermediate representation
 # TypeChecker auto-generates implementations for serializable types
-pub ability Encode 'repr 'a where {
+ability Encode 'repr 'a where {
     encode: {val: 'a, config: CodecConfig} -> (Result 'repr EncodeError)
 }
 
 # User-facing ability for decoding values from a format's intermediate representation
 # TypeChecker auto-generates implementations for serializable types
-pub ability Decode 'repr 'a where {
+ability Decode 'repr 'a where {
     decode: {val: 'repr, config: CodecConfig} -> (Result 'a DecodeError)
 }
 
 # Format author ability - defines how to encode primitive values and structures
 # to the format's intermediate representation (e.g., Json variant)
-pub ability EncodeFormat 'repr where {
+ability EncodeFormat 'repr where {
     # Atoms (6 hooks)
     encode_int: {val: Int, path: List String} -> (Result 'repr EncodeError),
     encode_float: {val: Float, path: List String} -> (Result 'repr EncodeError),
@@ -110,7 +110,7 @@ pub ability EncodeFormat 'repr where {
 
 # Format author ability - defines how to decode values from the format's
 # intermediate representation back to Mezze types
-pub ability DecodeFormat 'repr where {
+ability DecodeFormat 'repr where {
     # Atoms (6 hooks)
     decode_int: {val: 'repr, path: List String} -> (Result Int DecodeError),
     decode_float: {val: 'repr, path: List String} -> (Result Float DecodeError),
@@ -144,19 +144,19 @@ pub ability DecodeFormat 'repr where {
 
 # User-facing ability for streaming encoding directly to ByteBuffer
 # Avoids building intermediate representation - better for large data
-pub ability StreamEncode 'format 'a where {
+ability StreamEncode 'format 'a where {
     stream_encode: {value: 'a, buffer: ByteBuffer, path: List String} -> (Result ByteBuffer EncodeError)
 }
 
 # User-facing ability for streaming decoding directly from Bytes
 # Returns the decoded value and the new offset position
-pub ability StreamDecode 'format 'a where {
+ability StreamDecode 'format 'a where {
     stream_decode: {bytes: Bytes, offset: Int, path: List String} -> (Result {value: 'a, offset: Int} DecodeError)
 }
 
 # Format author ability for streaming encoding
 # Writes directly to ByteBuffer without intermediate representation
-pub ability StreamEncodeFormat 'format where {
+ability StreamEncodeFormat 'format where {
     # Atoms (6 hooks)
     stream_int: {value: Int, buffer: ByteBuffer, path: List String} -> (Result ByteBuffer EncodeError),
     stream_float: {value: Float, buffer: ByteBuffer, path: List String} -> (Result ByteBuffer EncodeError),
@@ -195,7 +195,7 @@ pub ability StreamEncodeFormat 'format where {
 
 # Format author ability for streaming decoding
 # Reads directly from Bytes with offset tracking
-pub ability StreamDecodeFormat 'format where {
+ability StreamDecodeFormat 'format where {
     # Atoms (6 hooks)
     stream_decode_int: {bytes: Bytes, offset: Int, path: List String} -> (Result {value: Int, offset: Int} DecodeError),
     stream_decode_float: {bytes: Bytes, offset: Int, path: List String} -> (Result {value: Float, offset: Int} DecodeError),

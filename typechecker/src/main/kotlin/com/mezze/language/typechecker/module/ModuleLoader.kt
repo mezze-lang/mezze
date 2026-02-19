@@ -259,7 +259,8 @@ class ModuleLoader(
             )
             is ResolverModuleError.ExportNotFound -> ModuleError.ExportNotFound(
                 modulePath = error.modulePath,
-                exportName = error.exportName
+                exportName = error.exportName,
+                sourceLocation = error.sourceLocation
             )
             else -> {
                 // Fallback for other error types

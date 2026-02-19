@@ -51,7 +51,7 @@ pub let deref: {var: TVar 'a} -> 'a =
     {var} -> __native_tvar_deref {var = var}
 
 # STM effect - Transactional operations
-pub effect STM where {
+effect STM where {
     # Read a TVar's value within the transaction
     # Tracked for conflict detection at commit time
     #

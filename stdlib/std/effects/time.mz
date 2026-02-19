@@ -1,7 +1,7 @@
 # std/effects/time.mezze - Time and date effects
 
 # Time effect definition
-pub effect Time where {
+effect Time where {
     # Get current timestamp in milliseconds since epoch
     now: {} -> Int <Time>,
 

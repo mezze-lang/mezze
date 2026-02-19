@@ -1,6 +1,6 @@
 # std/effects/log.mezze - Logging effects
 
-pub effect Log where {
+effect Log where {
     info: { msg: String } -> {} <Log>,
     warn: { msg: String } -> {} <Log>,
     error: { msg: String } -> {} <Log>,

@@ -490,9 +490,14 @@ class AbilityResolver(
             is MezzeType.SortedSetType -> "SortedSet_${getTypeName(type.elementType)}"
             is MezzeType.MapType -> "Map_${getTypeName(type.keyType)}_${getTypeName(type.valueType)}"
             is MezzeType.FunctionType -> "Function"
-            is MezzeType.RecordType -> "Record"
+            is MezzeType.RecordType -> {
+                // Use typeName if available (e.g., "Person" for `type Person = { ... }`)
+                type.typeName ?: "Record"
+            }
             is MezzeType.VariantType -> {
-                if (BuiltInAbilities.isBoolVariant(type)) {
+                // Use typeName if available (e.g., "Person" for `type Person = | ... |`)
+                // Otherwise fall back to structural naming
+                type.typeName ?: if (BuiltInAbilities.isBoolVariant(type)) {
                     "Bool"
                 } else {
                     "Variant_${type.constructors.keys.sorted().joinToString("_")}"
@@ -523,11 +528,29 @@ class AbilityResolver(
     private fun checkUserDefinedAbilityImpl(type: MezzeType, abilityName: String): AbilityCheckResult {
         val typeName = getTypeName(type)
 
+        // Build list of possible type names to search for
+        // For variant types, also try the constructor name if it's a single-constructor variant
+        val possibleTypeNames = mutableListOf(typeName)
+
+        // For variant types without a typeName set, try each constructor name
+        // This handles cases like `type Person = | Person { ... } |` where the impl uses "Person"
+        if (type is MezzeType.VariantType && type.typeName == null) {
+            // If single constructor, it's likely a type alias - try that name too
+            if (type.constructors.size == 1) {
+                possibleTypeNames.add(type.constructors.keys.first())
+            }
+            // Also try all constructor names in case one matches
+            possibleTypeNames.addAll(type.constructors.keys)
+        }
+
+        // For record types without a typeName set, there's no good fallback
+        // The user must define the impl with the structural type or use a type alias
+
         // Search for implementation by ability name and matching types
         // (ability impls are now keyed by content hash, so we search by ability name)
         val allImpls = context.getAbilityImpls(abilityName)
         val matchingImpl = allImpls.find { impl ->
-            impl.targetTypes.isNotEmpty() && impl.targetTypes.first() == typeName
+            impl.targetTypes.isNotEmpty() && possibleTypeNames.any { it == impl.targetTypes.first() }
         }
 
         if (matchingImpl != null) {

@@ -25,7 +25,7 @@ newtype Thread = Thread __NativeThread
 
 # Single async effect - can be implemented in multiple ways
 # Note: Return type will be the unwrapped promise value
-pub effect Async where {
+effect Async where {
     await: {promise: Promise} -> 'a <Async>
 }
 

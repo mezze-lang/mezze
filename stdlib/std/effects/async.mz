@@ -15,7 +15,7 @@ type Suspended 'a = Suspended {
 }
 
 # Async effect - Promise-based async programming
-pub effect Async where {
+effect Async where {
   # Start async computation, returns immediately with Promise
   async: {computation: {} -> 'a} -> Promise 'a <Async>,
 

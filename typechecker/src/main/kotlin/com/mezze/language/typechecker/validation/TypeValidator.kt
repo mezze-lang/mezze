@@ -571,17 +571,21 @@ class TypeValidator(
             is MezzeType.VarType -> type.variable.name  // Still polymorphic
 
             is MezzeType.VariantType -> {
-                // Special case: Bool variant
-                if (type.constructors.keys == setOf("True", "False")) {
+                // Use typeName if available, otherwise check for Bool or use constructor name
+                type.typeName ?: if (type.constructors.keys == setOf("True", "False")) {
                     "Bool"
+                } else if (type.constructors.size == 1) {
+                    // Single constructor variant - likely a type alias
+                    type.constructors.keys.first()
                 } else {
-                    "Variant"
+                    // Use sorted constructor names for consistent naming
+                    "Variant_${type.constructors.keys.sorted().joinToString("_")}"
                 }
             }
 
             is MezzeType.RecordType -> {
-                // For record types, extract the field types (used for ability method arguments)
-                type.fields.values.firstOrNull()?.let { getTypeNameForAbility(it) } ?: "Record"
+                // Use typeName if available
+                type.typeName ?: "Record"
             }
 
             is MezzeType.TypeApplication -> {

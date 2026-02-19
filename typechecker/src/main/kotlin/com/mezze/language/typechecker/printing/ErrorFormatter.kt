@@ -727,13 +727,38 @@ object ErrorFormatter {
         return buildString {
             appendLine("❌ Module Error [Export Not Found]")
             appendLine("━".repeat(50))
-            appendLine()
-            appendLine("Error: ${error.message}")
+
+            // Show source location if available
+            error.sourceLocation?.let { loc ->
+                val fileInfo = loc.file ?: "<input>"
+                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
+
+                // Try to show source code snippet if we can
+                loc.file?.let { filePath ->
+                    try {
+                        val file = java.io.File(filePath)
+                        if (file.exists()) {
+                            val lines = file.readLines()
+                            if (loc.line > 0 && loc.line <= lines.size) {
+                                val line = lines[loc.line - 1]
+                                appendLine("    |")
+                                appendLine("${loc.line.toString().padStart(3)} | $line")
+                                appendLine("    | ${" ".repeat(loc.column - 1)}^")
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // Ignore file read errors
+                    }
+                }
+                appendLine()
+            }
+
+            appendLine("Error: Export '${error.exportName}' not found in module '${error.modulePath}'")
             appendLine()
             appendLine("💡 Suggestions:")
             appendLine("   - Check the export name spelling")
-            appendLine("   - Verify the module exports this item")
-            appendLine("   - Use 'use module_path' to import all exports")
+            appendLine("   - Verify the module exports this item with 'pub'")
+            appendLine("   - Use 'use ${error.modulePath}' to see available exports")
         }.trim()
     }
 
@@ -741,12 +766,34 @@ object ErrorFormatter {
         return buildString {
             appendLine("❌ Module Error [Internal Module Access]")
             appendLine("━".repeat(50))
+
+            // Show source location if available
+            error.sourceLocation?.let { loc ->
+                appendLine()
+                val fileInfo = loc.file?.let { " --> $it" } ?: ""
+                appendLine("$fileInfo:${loc.line}:${loc.column}")
+            }
+
             appendLine()
             appendLine("Error: ${error.message}")
             appendLine()
-            appendLine("💡 Suggestions:")
-            appendLine("   - Internal modules can only be accessed from their parent module")
-            appendLine("   - Move the code to the parent module or make the module public")
+
+            // Extract the internal folder name for better suggestions
+            val internalFolder = when {
+                error.toModule.contains("::internal::") -> "internal/"
+                error.toModule.contains("::private::") -> "private/"
+                error.toModule.startsWith("internal::") -> "internal/"
+                error.toModule.startsWith("private::") -> "private/"
+                else -> "internal/"
+            }
+
+            appendLine("💡 The '$internalFolder' folder convention means this module is")
+            appendLine("   only accessible from within its parent package.")
+            appendLine()
+            appendLine("Suggestions:")
+            appendLine("   - Move the code that needs this module into the parent package")
+            appendLine("   - Move the module out of the '$internalFolder' folder to make it public")
+            appendLine("   - Create a public API that wraps the internal functionality")
         }.trim()
     }
 }

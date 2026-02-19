@@ -8,29 +8,58 @@ import java.io.File
  * Handle `mezze init` command to create a new Mezze package
  *
  * Usage:
- *   mezze init              # Interactive mode
- *   mezze init --lib        # Create library package
- *   mezze init --app        # Create app package
- *   mezze init --lib --app  # Create both library and app
+ *   mezze init <name>              # Interactive mode - creates folder <name>
+ *   mezze init <name> --lib        # Create library package
+ *   mezze init <name> --app        # Create app package
+ *   mezze init <name> --lib --app  # Create both library and app
  */
 class InitCommand {
 
     fun execute(args: List<String>, currentDir: File = File(System.getProperty("user.dir"))) {
-        // Parse flags
+        // Parse flags and project name
         val hasLibFlag = args.contains("--lib")
         val hasAppFlag = args.contains("--app")
 
-        // Check if Mezze.toml already exists
-        val mezzeToml = File(currentDir, "Mezze.toml")
-        if (mezzeToml.exists()) {
-            println("❌ Error: Mezze.toml already exists in this directory")
+        // Get project name (first non-flag argument)
+        val projectName = args.firstOrNull { !it.startsWith("--") }
+
+        if (projectName == null) {
+            println("❌ Error: Please provide a project name")
             println()
-            println("This directory is already a Mezze package.")
-            println("Location: ${mezzeToml.absolutePath}")
+            println("Usage: mez init <project-name> [--lib] [--app]")
             println()
-            println("💡 If you want to create a new package, run 'mezze init' in a different directory.")
+            println("Examples:")
+            println("  mez init my_project          # Interactive mode")
+            println("  mez init my_project --lib    # Create library package")
+            println("  mez init my_project --app    # Create app package")
             return
         }
+
+        // Create target directory
+        val targetDir = File(currentDir, projectName)
+
+        // Check if folder already exists
+        if (targetDir.exists()) {
+            println("❌ Error: Folder '$projectName' already exists")
+            println()
+            println("Location: ${targetDir.absolutePath}")
+            println()
+            println("💡 Please choose a different name or remove the existing folder.")
+            return
+        }
+
+        // Create the project folder
+        if (!targetDir.mkdirs()) {
+            println("❌ Error: Failed to create folder '$projectName'")
+            return
+        }
+
+        println("Creating project in ${targetDir.absolutePath}")
+        println()
+
+        // Use targetDir instead of currentDir from here on
+        val projectDir = targetDir
+        val mezzeToml = File(projectDir, "Mezze.toml")
 
         // Determine package type
         val createLib: Boolean
@@ -95,8 +124,8 @@ class InitCommand {
 
         println()
 
-        // Get package name from directory name
-        val packageName = currentDir.name.lowercase().replace("-", "_")
+        // Get package name from project name
+        val packageName = projectName.lowercase().replace("-", "_")
 
         try {
             validatePackageName(packageName)
@@ -117,7 +146,7 @@ class InitCommand {
         println("  ✅ Created Mezze.toml")
 
         // Create directory structure
-        val srcDir = File(currentDir, "src")
+        val srcDir = File(projectDir, "src")
         if (!srcDir.exists()) {
             srcDir.mkdirs()
             println("  ✅ Created src/")
@@ -138,7 +167,7 @@ class InitCommand {
         }
 
         // Create .gitignore
-        val gitignore = File(currentDir, ".gitignore")
+        val gitignore = File(projectDir, ".gitignore")
         if (!gitignore.exists()) {
             createGitignore(gitignore)
             println("  ✅ Created .gitignore")
@@ -149,22 +178,20 @@ class InitCommand {
         println()
 
         // Show next steps
+        println("📝 Next steps:")
+        println("   cd $projectName")
         if (createLib && !createApp) {
-            println("📝 Next steps:")
-            println("   1. Add public functions to src/lib.mz")
-            println("   2. Run 'mezze check' to type check your code")
-            println("   3. Other packages can import your library with: use $packageName")
+            println("   # Edit src/lib.mz to add your library functions")
+            println("   mez check        # Type check your code")
         } else if (createApp && !createLib) {
-            println("📝 Next steps:")
-            println("   1. Edit src/app.mz to add your application logic")
-            println("   2. Run 'mezze exec' to execute your app")
-            println("   3. Run 'mezze compile' to create a standalone JAR")
+            println("   # Edit src/app.mz to add your application logic")
+            println("   mez dev          # Run your app")
+            println("   mez build        # Create a standalone JAR")
         } else {
-            println("📝 Next steps:")
-            println("   1. Add public functions to src/lib.mz")
-            println("   2. Edit src/app.mz to add your CLI tool logic")
-            println("   3. Run 'mezze exec' to execute your app")
-            println("   4. Other packages can import your library with: use $packageName")
+            println("   # Edit src/lib.mz to add your library functions")
+            println("   # Edit src/app.mz to add your CLI tool logic")
+            println("   mez dev          # Run your app")
+            println("   mez build        # Create a standalone JAR")
         }
     }
 

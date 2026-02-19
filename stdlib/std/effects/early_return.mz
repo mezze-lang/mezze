@@ -3,7 +3,7 @@
 use std::control::continuation
 use std::control::continuation::{Continuation}
 
-pub effect Return having 'result where {
+effect Return having 'result where {
     return: {val: 'result} -> 'a <Return>
 }
 

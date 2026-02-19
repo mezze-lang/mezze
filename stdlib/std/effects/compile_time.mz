@@ -1,7 +1,7 @@
 # std/effects/compile_time.mezze - Compile-time evaluation effect
 
 # CompileTime effect - execute code during compilation
-pub effect CompileTime where {
+effect CompileTime where {
   # Evaluate computation at compile time
   # Result is embedded in bytecode
   eval: {computation: {} -> 'a} -> 'a <CompileTime>,

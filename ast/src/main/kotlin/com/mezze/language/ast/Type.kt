@@ -101,13 +101,14 @@ sealed interface MezzeType {
     @Serializable
     data class RecordType(
         val fields: Map<String, MezzeType>,
-        val rowVar: RowVar? = null // null = closed, non-null = open
+        val rowVar: RowVar? = null, // null = closed, non-null = open
+        val typeName: String? = null // Original type alias name (e.g., "Person" for `type Person = { ... }`)
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 
         override fun toString(): String = safeToString(
-            "RecordType",
+            typeName ?: "RecordType",
             truncatedContent = { "${fields.size} fields" },
             fullContent = { "${fields.keys.take(3)}${if (fields.size > 3) "..." else ""}" }
         )
@@ -117,13 +118,14 @@ sealed interface MezzeType {
     @Serializable
     data class VariantType(
         val constructors: Map<String, MezzeType?>, // null = no data, MezzeType = constructor data
-        val rowVar: RowVar? = null // null = closed, non-null = open
+        val rowVar: RowVar? = null, // null = closed, non-null = open
+        val typeName: String? = null // Original type alias name (e.g., "Person" for `type Person = | ... |`)
     ) : MezzeType {
         val isOpen: Boolean get() = rowVar != null
         val isClosed: Boolean get() = rowVar == null
 
         override fun toString(): String = safeToString(
-            "VariantType",
+            typeName ?: "VariantType",
             truncatedContent = { "${constructors.size} constructors" },
             fullContent = { "${constructors.keys.take(3)}${if (constructors.size > 3) "..." else ""}" }
         )

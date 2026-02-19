@@ -20,7 +20,7 @@
 #       results
 
 # Parallel effect - data parallel operations
-pub effect Parallel where {
+effect Parallel where {
     # === Core Operations ===
 
     # Apply function to each element in parallel, results in input order

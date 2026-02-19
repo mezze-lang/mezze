@@ -936,11 +936,47 @@ class ConstraintSolver(
         // Search for implementation by ability name and matching types
         // Context is now keyed by content hash, so we search by ability name and match types
         val typeNames = typeArgs.map { getTypeName(it) }
+
+        // Build alternative type names for variant types that might match by constructor name
+        val alternativeTypeNames = typeArgs.mapIndexed { index, type ->
+            if (type is MezzeType.VariantType && type.typeName == null) {
+                // Include all constructor names as alternatives
+                type.constructors.keys.toList()
+            } else {
+                listOf(typeNames[index])
+            }
+        }
+
         val hasImpl = context.getAbilityImpls(abilityName).any { implInfo ->
-            implInfo.targetTypes == typeNames
+            // Check exact match first
+            if (implInfo.targetTypes == typeNames) return@any true
+
+            // Check if any combination of alternative names matches
+            if (alternativeTypeNames.all { it.size == 1 }) {
+                // No alternatives, already checked above
+                false
+            } else {
+                // Check all combinations
+                matchesWithAlternatives(implInfo.targetTypes, alternativeTypeNames)
+            }
         }
 
         return hasImpl
+    }
+
+    /**
+     * Check if impl target types match with alternatives.
+     * For each position, checks if any of the alternative names match.
+     */
+    private fun matchesWithAlternatives(
+        implTargetTypes: List<String>,
+        alternativeTypeNames: List<List<String>>
+    ): Boolean {
+        if (implTargetTypes.size != alternativeTypeNames.size) return false
+
+        return implTargetTypes.zip(alternativeTypeNames).all { (implType, alternatives) ->
+            alternatives.contains(implType)
+        }
     }
 
     /**
@@ -1237,16 +1273,21 @@ class ConstraintSolver(
             is MezzeType.SortedSetType -> "SortedSet_${getTypeName(type.elementType)}"
             is MezzeType.MapType -> "Map_${getTypeName(type.keyType)}_${getTypeName(type.valueType)}"
             is MezzeType.VariantType -> {
-                // Check if this is the Bool type (True | False)
-                if (isBoolVariant(type)) {
+                // Use typeName if available, otherwise check for Bool or use generated name
+                type.typeName ?: if (isBoolVariant(type)) {
                     "Bool"
+                } else if (type.constructors.size == 1) {
+                    // Single constructor variant - likely a type alias, use constructor name
+                    type.constructors.keys.first()
                 } else {
                     // For other variant types, use a generated name
-                    // This is a simplification - ideally we'd look up the type alias
                     "Variant_${type.constructors.keys.sorted().joinToString("_")}"
                 }
             }
-            is MezzeType.RecordType -> "Record"
+            is MezzeType.RecordType -> {
+                // Use typeName if available
+                type.typeName ?: "Record"
+            }
             is MezzeType.FunctionType -> "Function"
             is MezzeType.SuspendedType -> getTypeName(type.valueType)
             else -> type.toString()
@@ -2439,10 +2480,13 @@ class ConstraintSolver(
             is MezzeType.ByteBufferType -> "ByteBuffer"
             is MezzeType.CharType -> "Char"
             is MezzeType.FunctionType -> "{...} -> ..."
-            is MezzeType.RecordType -> "{${type.fields.keys.take(3).joinToString()}}"
+            is MezzeType.RecordType -> {
+                // Use typeName if available
+                type.typeName ?: "{${type.fields.keys.take(3).joinToString()}}"
+            }
             is MezzeType.VariantType -> {
-                // Recognize Bool variant type specially
-                if (type.constructors.keys == setOf("True", "False")) {
+                // Use typeName if available, otherwise recognize Bool variant or use constructor names
+                type.typeName ?: if (type.constructors.keys == setOf("True", "False")) {
                     "Bool"
                 } else {
                     "[${type.constructors.keys.take(3).joinToString()}]"

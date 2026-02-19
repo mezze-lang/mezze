@@ -106,13 +106,20 @@ sealed class ModuleError(override val message: String) : Exception(message) {
 
     data class ExportNotFound(
         val modulePath: String,
-        val exportName: String
+        val exportName: String,
+        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
     ) : ModuleError("Export '$exportName' not found in module '$modulePath'")
 
     data class InternalModuleAccess(
         val fromModule: String,
-        val toModule: String
-    ) : ModuleError("Module $fromModule cannot access internal module $toModule")
+        val toModule: String,
+        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
+    ) : ModuleError(
+        if (fromModule.isEmpty())
+            "Cannot access internal module '$toModule' from outside its package"
+        else
+            "Module '$fromModule' cannot access internal module '$toModule'"
+    )
 }
 
 // ============================================================================

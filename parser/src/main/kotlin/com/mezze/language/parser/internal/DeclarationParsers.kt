@@ -1538,6 +1538,13 @@ internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Vi
         val useToken = tok(TokenType.USE)(stream)
         return when (useToken) {
             is ParseResult.Success -> {
+                // Capture source location from the 'use' keyword
+                // Note: file name will be set later when the file context is known
+                val useSourceLocation = SourceLocation(
+                    useToken.value.line,
+                    useToken.value.column,
+                    null  // File name not available at parse time
+                )
                 val stream1 = skipNewlines(useToken.remaining)
 
                 // Parse the path segments separated by ::
@@ -1579,9 +1586,9 @@ internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Vi
                                                         val path = SelectivePath(pathSegments, items.value)
                                                         ParseResult.Success(
                                                             if (visibility == Visibility.PUBLIC) {
-                                                                PubUseDeclaration(path, null)
+                                                                PubUseDeclaration(path, null, useSourceLocation)
                                                             } else {
-                                                                UseDeclaration(path, null)
+                                                                UseDeclaration(path, null, useSourceLocation)
                                                             },
                                                             rbrace.remaining
                                                         )
@@ -1628,9 +1635,9 @@ internal fun MezzeParser.parseUseDeclaration(stream: TokenStream, visibility: Vi
                                     val path = ModulePath(pathSegments)
                                     return ParseResult.Success(
                                         if (visibility == Visibility.PUBLIC) {
-                                            PubUseDeclaration(path, alias)
+                                            PubUseDeclaration(path, alias, useSourceLocation)
                                         } else {
-                                            UseDeclaration(path, alias)
+                                            UseDeclaration(path, alias, useSourceLocation)
                                         },
                                         currentStream
                                     )

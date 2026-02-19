@@ -189,14 +189,15 @@ class TypeChecker(
         val hashedProgram = computeDeclarationHashes(program)
 
         // PHASE 1: Build Context
-        // Pass imported impls and abilities to ContextBuilder
+        // Pass imported impls, abilities, and types to ContextBuilder
         // so performerToEffect map includes them and ability impl validation works with qualified names
         val contextBuilder = ContextBuilder()
         val buildResult = contextBuilder.build(
             program = hashedProgram,
             parentContext = enhancedContext,
             importedImpls = importContext?.importedImpls ?: emptyMap(),
-            importedAbilities = importContext?.importedAbilities ?: emptyMap()
+            importedAbilities = importContext?.importedAbilities ?: emptyMap(),
+            importedTypes = importContext?.importedTypes ?: emptyMap()
         )
         val context = buildResult.context
 
@@ -266,9 +267,20 @@ class TypeChecker(
             val allVariables = context.getAllBindings()
             val errors = undefinedVars.map { undefinedVar ->
                 // Special case: Check if this is an ability or effect being used as a value
+                // Use allAbilityDeclarations and allEffectDeclarations which include imports
                 val isBuiltInAbility = com.mezze.language.typechecker.abilities.BuiltInAbilities.isBuiltInAbility(undefinedVar.name)
-                val isUserDefinedAbility = buildResult.abilityDeclarations.containsKey(undefinedVar.name)
-                val isEffect = buildResult.effectDeclarations.containsKey(undefinedVar.name)
+                val isUserDefinedAbility = allAbilityDeclarations.containsKey(undefinedVar.name)
+                val isEffect = allEffectDeclarations.containsKey(undefinedVar.name)
+
+                // Check if this matches any ability operation name (including imported abilities)
+                val matchingAbilityOp = allAbilityDeclarations.entries.firstOrNull { (_, ability) ->
+                    ability.operations.any { it.name == undefinedVar.name }
+                }
+
+                // Check if this matches any effect operation name (including imported effects)
+                val matchingEffectOp = allEffectDeclarations.entries.firstOrNull { (_, effect) ->
+                    effect.operations.any { it.name == undefinedVar.name }
+                }
 
                 val message = if (isBuiltInAbility || isUserDefinedAbility) {
                     "Ability '${undefinedVar.name}' cannot be used as a value. " +
@@ -276,6 +288,16 @@ class TypeChecker(
                 } else if (isEffect) {
                     "Effect '${undefinedVar.name}' cannot be used as a value. " +
                     "Did you mean to access an operation like ${undefinedVar.name}.operation_name?"
+                } else if (matchingAbilityOp != null) {
+                    // User wrote "show" instead of "Show.show"
+                    val abilityName = matchingAbilityOp.key
+                    "Undefined variable: ${undefinedVar.name}. " +
+                    "Did you mean to call an ability method? Use: $abilityName.${undefinedVar.name}"
+                } else if (matchingEffectOp != null) {
+                    // User wrote "println" instead of "Log.println"
+                    val effectName = matchingEffectOp.key
+                    "Undefined variable: ${undefinedVar.name}. " +
+                    "Did you mean to call an effect operation? Use: $effectName.${undefinedVar.name}"
                 } else {
                     val similarNames = validator.findSimilarNames(undefinedVar.name, allVariables.keys.toList())
                     buildString {
@@ -824,7 +846,8 @@ class TypeChecker(
                     }
                     MezzeType.VariantType(
                         constructors = constructors,
-                        rowVar = if (def.isOpen) RowVar.fresh() else null
+                        rowVar = if (def.isOpen) RowVar.fresh() else null,
+                        typeName = item.name  // Track the type alias name
                     )
                 }
                 is RecordDefinition -> {
@@ -834,7 +857,8 @@ class TypeChecker(
                     }
                     MezzeType.RecordType(
                         fields = fields,
-                        rowVar = if (def.isOpen) RowVar.fresh() else null
+                        rowVar = if (def.isOpen) RowVar.fresh() else null,
+                        typeName = item.name  // Track the type alias name
                     )
                 }
                 else -> null
