@@ -1461,28 +1461,6 @@ class SubstitutionApplier(
             else -> type.toString()
         }
     }
-    private fun getTypeAnnotationName(typeAnnotation: TypeAnnotation): String {
-        return when (typeAnnotation) {
-            is IdentifierTypeAnnotation -> typeAnnotation.name
-            is TypeApplicationAnnotation -> {
-                // For type applications like Option<Int> or Json (with no args)
-                if (typeAnnotation.args.isEmpty()) {
-                    typeAnnotation.constructor
-                } else {
-                    "${typeAnnotation.constructor}_${typeAnnotation.args.map { getTypeAnnotationName(it) }.joinToString("_")}"
-                }
-            }
-            is RecordTypeAnnotation -> {
-                val fieldNames = typeAnnotation.entries.map { it.name }.sorted().joinToString("_")
-                "Record_$fieldNames"
-            }
-            is VariantTypeAnnotation -> {
-                val constructorNames = typeAnnotation.constructors.map { it.name }.sorted().joinToString("_")
-                "Variant_$constructorNames"
-            }
-            else -> typeAnnotation.toString()
-        }
-    }
 
     /**
      * Collect all nested types that need Encode/Decode implementations.
