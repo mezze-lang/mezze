@@ -147,7 +147,23 @@ graalvmNative {
                 "--no-fallback",
                 "-H:+ReportExceptionStackTraces",
                 "-H:+AllowVMInspection",
-                "-H:-CheckToolchain"
+                "-H:-CheckToolchain",
+
+                // ========== SIZE OPTIMIZATIONS ==========
+                // Optimize for size over speed (-Os equivalent)
+                "-O2",  // Use -Os for even smaller binary (but slower)
+
+                // Strip debug symbols (significant size reduction)
+                "-H:-IncludeMethodData",  // Don't include method metadata
+
+                // Exclude JFR (Java Flight Recorder) - saves ~1MB
+                "-H:-AllowJRTFileSystem",
+
+                // Exclude locales we don't need (keep only English)
+                "-H:IncludeLocales=en",
+
+                // Exclude JMX/management features
+                "-H:-EnableAllSecurityServices"
             )
 
             // Add zlib library path if available
@@ -164,12 +180,9 @@ graalvmNative {
                 // Include stdlib as resources (embedded in native binary)
                 "-H:IncludeResources=stdlib/.*\\.mz",
 
-                // Include all charsets for language support
-                "-H:+AddAllCharsets",
-                
-                // Debug output
-                "-H:+PrintClassInitialization",
-                
+                // Remove: "-H:+AddAllCharsets" - only include needed charsets
+                // This saves several MB by not including all charset encoders
+
                 // Initialize our language classes at build time
                 "--initialize-at-build-time=com.mezze.language.interpreter.MezzeLanguageProvider",
                 "--initialize-at-build-time=com.mezze.language.interpreter.MezzeValueGen\$InteropLibraryExports",
