@@ -284,12 +284,14 @@ class ImportResolver(
                 }
 
                 if (missingItems.isNotEmpty()) {
+                    val availableExports = module.exports.keys.toList().sorted()
                     return ProcessResult.Failure(
                         missingItems.map { itemName ->
                             ModuleError.ExportNotFound(
                                 modulePath = modulePath,
                                 exportName = itemName,
-                                sourceLocation = sourceLocation
+                                sourceLocation = sourceLocation,
+                                availableExports = availableExports
                             )
                         }
                     )

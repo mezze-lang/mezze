@@ -172,7 +172,8 @@ sealed class ModuleError(message: String) : Exception(message) {
     data class ExportNotFound(
         val modulePath: String,
         val exportName: String,
-        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
+        val sourceLocation: com.mezze.language.ast.SourceLocation? = null,
+        val availableExports: List<String> = emptyList()
     ) : ModuleError("Export '$exportName' not found in module '$modulePath'")
     
     data class DeprecatedCoreModule(val modulePath: String, val suggestion: String) :

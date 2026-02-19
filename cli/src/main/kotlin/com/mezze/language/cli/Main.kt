@@ -597,16 +597,40 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
                 val lineContent = lines[lineNum - 1]
                 println("    |")
                 println("${lineNum.toString().padStart(3)} | $lineContent")
-                println("    | ${" ".repeat(loc.column - 1)}^")
+                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}^")
             }
             println()
         }
         println("Error: Export '${e.exportName}' not found in module '${e.modulePath}'")
         println()
-        println("💡 Suggestions:")
-        println("   - Check the export name spelling")
-        println("   - Verify the module exports this item with 'pub'")
-        println("   - Use 'use ${e.modulePath}' to see available exports")
+
+        // Find similar exports using Levenshtein distance
+        val similarExports = e.availableExports
+            .map { it to levenshteinDistance(e.exportName.lowercase(), it.lowercase()) }
+            .filter { it.second <= 3 }  // Max distance of 3
+            .sortedBy { it.second }
+            .take(5)
+            .map { it.first }
+
+        if (similarExports.isNotEmpty()) {
+            println("💡 Did you mean:")
+            similarExports.forEach { println("   • $it") }
+            println()
+        }
+
+        if (e.availableExports.isNotEmpty()) {
+            println("📦 Available exports from '${e.modulePath}':")
+            val displayExports = if (e.availableExports.size > 10) {
+                e.availableExports.take(10) + listOf("... and ${e.availableExports.size - 10} more")
+            } else {
+                e.availableExports
+            }
+            displayExports.forEach { println("   • $it") }
+        } else {
+            println("💡 Suggestions:")
+            println("   - Check the export name spelling")
+            println("   - Verify the module exports this item with 'pub'")
+        }
         kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.typechecker.module.ModuleError) {
         // Handle other module errors
@@ -852,10 +876,34 @@ private fun handleExecCommand(args: List<String>) {
         }
         println("Error: Export '${e.exportName}' not found in module '${e.modulePath}'")
         println()
-        println("💡 Suggestions:")
-        println("   - Check the export name spelling")
-        println("   - Verify the module exports this item with 'pub'")
-        println("   - Use 'use ${e.modulePath}' to see available exports")
+
+        // Find similar exports using Levenshtein distance
+        val similarExports = e.availableExports
+            .map { it to levenshteinDistance(e.exportName.lowercase(), it.lowercase()) }
+            .filter { it.second <= 3 }  // Max distance of 3
+            .sortedBy { it.second }
+            .take(5)
+            .map { it.first }
+
+        if (similarExports.isNotEmpty()) {
+            println("💡 Did you mean:")
+            similarExports.forEach { println("   • $it") }
+            println()
+        }
+
+        if (e.availableExports.isNotEmpty()) {
+            println("📦 Available exports from '${e.modulePath}':")
+            val displayExports = if (e.availableExports.size > 10) {
+                e.availableExports.take(10) + listOf("... and ${e.availableExports.size - 10} more")
+            } else {
+                e.availableExports
+            }
+            displayExports.forEach { println("   • $it") }
+        } else {
+            println("💡 Suggestions:")
+            println("   - Check the export name spelling")
+            println("   - Verify the module exports this item with 'pub'")
+        }
         kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.typechecker.module.ModuleError) {
         // Handle other module errors with source location if available
@@ -1571,6 +1619,31 @@ private fun printGeneralError(error: Exception) {
         println("🐛 Debug Information:")
         error.printStackTrace()
     }
+}
+
+/**
+ * Compute Levenshtein distance between two strings.
+ * Used for "did you mean?" suggestions.
+ */
+private fun levenshteinDistance(s1: String, s2: String): Int {
+    val m = s1.length
+    val n = s2.length
+    val dp = Array(m + 1) { IntArray(n + 1) }
+
+    for (i in 0..m) dp[i][0] = i
+    for (j in 0..n) dp[0][j] = j
+
+    for (i in 1..m) {
+        for (j in 1..n) {
+            val cost = if (s1[i - 1] == s2[j - 1]) 0 else 1
+            dp[i][j] = minOf(
+                dp[i - 1][j] + 1,      // deletion
+                dp[i][j - 1] + 1,      // insertion
+                dp[i - 1][j - 1] + cost // substitution
+            )
+        }
+    }
+    return dp[m][n]
 }
 
 private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<String, TypeAliasInfo>) {
