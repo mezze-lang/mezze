@@ -147,7 +147,10 @@ graalvmNative {
                 "--no-fallback",
                 "-H:+ReportExceptionStackTraces",
                 "-H:+AllowVMInspection",
-                "-H:-CheckToolchain"
+                "-H:-CheckToolchain",
+
+                // Optimization level (smaller binary + faster code)
+                "-O2"
             )
 
             // Add zlib library path if available
