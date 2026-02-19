@@ -60,4 +60,4 @@ debug_*.txt
 *.bak[0-9]
 
 # ai tools
-.claude
+.claudedocker-test-project/build_test.jar
