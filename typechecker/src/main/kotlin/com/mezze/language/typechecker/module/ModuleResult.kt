@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.module
 
 import com.mezze.language.ast.*
+import com.mezze.language.typechecker.ProgramIndex
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.solving.Substitution
 
@@ -53,7 +54,8 @@ data class LoadedModule(
     val filePath: String,              // Physical file path
     val program: Program,              // Parsed AST
     val exports: Map<String, ExportedItem>,  // Exported items (types may be incomplete)
-    val dependencies: List<String>     // Module dependencies (module paths)
+    val dependencies: List<String>,     // Module dependencies (module paths)
+    val index: ProgramIndex = ProgramIndex.EMPTY  // Pre-computed index for O(1) declaration lookups
 )
 
 /**

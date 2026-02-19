@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.module
 import com.mezze.language.typechecker.ModuleResolver
 import com.mezze.language.typechecker.Module as ResolverModule
 import com.mezze.language.typechecker.ModuleError as ResolverModuleError
+import com.mezze.language.typechecker.ProgramIndex
 import java.nio.file.Paths
 
 /**
@@ -222,7 +223,8 @@ class ModuleLoader(
                     visibility = exportedItem.visibility
                 )
             },
-            dependencies = resolverModule.dependencies.map { it.modulePath }
+            dependencies = resolverModule.dependencies.map { it.modulePath },
+            index = resolverModule.index
         )
     }
 

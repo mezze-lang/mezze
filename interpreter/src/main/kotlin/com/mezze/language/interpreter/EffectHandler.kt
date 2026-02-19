@@ -20,6 +20,12 @@ class EffectHandler {
     // e.g., "Console" -> "Log", "ToResult" -> "Exception"
     // Thread-safe: ConcurrentHashMap for concurrent access
     private val performerToEffect = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    // Inverted index: effect -> [performers]
+    // Enables O(1) lookup in getPerformersForEffect instead of O(N) filter
+    // e.g., "Log" -> ["Console", "FileLogger"]
+    // Thread-safe: ConcurrentHashMap with CopyOnWriteArrayList values
+    private val effectToPerformers = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CopyOnWriteArrayList<String>>()
     
     /**
      * Register a global effect declaration
@@ -31,9 +37,14 @@ class EffectHandler {
     /**
      * Register that a performer implements an effect
      * e.g., registerPerformer("Console", "Log") means Console implements Log
+     * Updates both forward and inverted indexes for O(1) bidirectional lookup.
      */
     fun registerPerformer(performerName: String, effectName: String) {
         performerToEffect[performerName] = effectName
+        // Update inverted index
+        effectToPerformers.computeIfAbsent(effectName) {
+            java.util.concurrent.CopyOnWriteArrayList()
+        }.addIfAbsent(performerName)
     }
 
     /**
@@ -46,11 +57,10 @@ class EffectHandler {
     /**
      * Get all performers that implement a given effect
      * e.g., getPerformersForEffect("Log") returns ["Console"]
+     * O(1) lookup via inverted index instead of O(N) filter.
      */
     fun getPerformersForEffect(effectName: String): List<String> {
-        return performerToEffect.entries
-            .filter { it.value == effectName }
-            .map { it.key }
+        return effectToPerformers[effectName] ?: emptyList()
     }
     
     /**
@@ -360,5 +370,6 @@ class EffectHandler {
         globalEffects.clear()
         handlerStack.get().clear()
         performerToEffect.clear()
+        effectToPerformers.clear()
     }
 }

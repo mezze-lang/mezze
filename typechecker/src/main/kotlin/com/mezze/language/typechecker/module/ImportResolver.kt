@@ -347,11 +347,8 @@ class ImportResolver(
                     )
                 }
                 ExportedItemType.TYPE -> {
-                    // CRITICAL FIX: Extract actual TypeDeclaration from the module
-                    // This allows TypeApplication expansion (e.g., Continuation field access)
-                    val typeDecl = module?.program?.items
-                        ?.filterIsInstance<TypeDeclaration>()
-                        ?.find { it.name == export.originalName }
+                    // O(1) lookup via module index (replaces O(N) filterIsInstance().find())
+                    val typeDecl = module?.index?.typeDeclarations?.get(export.originalName)
 
                     if (typeDecl != null) {
                         // CRITICAL: Store under ORIGINAL name (not qualified name)!
@@ -379,11 +376,8 @@ class ImportResolver(
                     )
                 }
                 ExportedItemType.ABILITY -> {
-                    // CRITICAL: Extract actual AbilityDeclaration from the module
-                    // This allows ability lookup by qualified name (e.g., codec::EncodeFormat)
-                    val abilityDecl = module?.program?.items
-                        ?.filterIsInstance<AbilityDeclaration>()
-                        ?.find { it.name == export.originalName }
+                    // O(1) lookup via module index (replaces O(N) filterIsInstance().find())
+                    val abilityDecl = module?.index?.abilityDeclarations?.get(export.originalName)
 
                     if (abilityDecl != null) {
                         // Store under the qualified name for lookup
@@ -402,10 +396,8 @@ class ImportResolver(
                     )
                 }
                 ExportedItemType.EFFECT -> {
-                    // CRITICAL: Extract actual EffectDeclaration from the module
-                    val effectDecl = module?.program?.items
-                        ?.filterIsInstance<EffectDeclaration>()
-                        ?.find { it.name == export.originalName }
+                    // O(1) lookup via module index (replaces O(N) filterIsInstance().find())
+                    val effectDecl = module?.index?.effectDeclarations?.get(export.originalName)
 
                     if (effectDecl != null) {
                         // Store under the qualified name for lookup
@@ -428,23 +420,13 @@ class ImportResolver(
 
         // CRITICAL: Extract ALL impl declarations and ability impls from the module
         // These are always imported along with their effects/abilities
+        // O(1) via index instead of O(N) filterIsInstance scans
         if (module != null) {
-            // Extract all impl declarations (effect handlers)
-            val allImpls = module.program.items.filterIsInstance<ImplDeclaration>()
-            for (impl in allImpls) {
-                val implKey = impl.performerName
-                impls[implKey] = impl
-            }
+            // Use index for O(1) access to all impl declarations (effect handlers)
+            impls.putAll(module.index.implsByPerformer)
 
-            // Extract all ability implementations - key by content hash
-            val allAbilityImpls = module.program.items.filterIsInstance<ImplAbilityDeclaration>()
-            for (abilityImpl in allAbilityImpls) {
-                val implKey = abilityImpl.contentHash
-                    ?: throw IllegalStateException(
-                        "Content hash not computed for imported impl: ${abilityImpl.abilityName} ${abilityImpl.targetTypes}"
-                    )
-                abilityImpls[implKey] = abilityImpl
-            }
+            // Use index for O(1) access to all ability implementations - already keyed by hash
+            abilityImpls.putAll(module.index.abilityImplsByHash)
         }
 
         return ModuleImportContext(
@@ -495,28 +477,22 @@ class ImportResolver(
                     )
                 }
                 ExportedItemType.TYPE -> {
-                    // Extract TypeDeclaration from module program
-                    val typeDecl = module?.program?.items
-                        ?.filterIsInstance<TypeDeclaration>()
-                        ?.find { it.name == item.name }
+                    // O(1) lookup via module index
+                    val typeDecl = module?.index?.typeDeclarations?.get(item.name)
                     if (typeDecl != null) {
                         types[localName] = typeDecl
                     }
                 }
                 ExportedItemType.ABILITY -> {
-                    // Extract AbilityDeclaration from module program
-                    val abilityDecl = module?.program?.items
-                        ?.filterIsInstance<AbilityDeclaration>()
-                        ?.find { it.name == item.name }
+                    // O(1) lookup via module index
+                    val abilityDecl = module?.index?.abilityDeclarations?.get(item.name)
                     if (abilityDecl != null) {
                         abilities[localName] = abilityDecl
                     }
                 }
                 ExportedItemType.EFFECT -> {
-                    // Extract EffectDeclaration from module program
-                    val effectDecl = module?.program?.items
-                        ?.filterIsInstance<EffectDeclaration>()
-                        ?.find { it.name == item.name }
+                    // O(1) lookup via module index
+                    val effectDecl = module?.index?.effectDeclarations?.get(item.name)
                     if (effectDecl != null) {
                         effects[localName] = effectDecl
                     }
@@ -526,35 +502,28 @@ class ImportResolver(
 
         // CRITICAL: Also extract ImplDeclarations for the imported items
         // These are needed to build the performerToEffect mapping
+        // All lookups via O(1) index instead of O(N) filterIsInstance scans
         if (module != null) {
-            // Extract ALL impl declarations for imported effects
+            val index = module.index
+
+            // Extract impl declarations for imported effects
             // (Handlers are associated with effects, not exported separately)
             for (item in items) {
-                // Check if this is an effect import
-                val effectDecl = module.program.items
-                    .filterIsInstance<EffectDeclaration>()
-                    .find { it.name == item.name }
+                // O(1) check if this is an effect import
+                val effectDecl = index.effectDeclarations[item.name]
 
                 if (effectDecl != null) {
-                    // Find all impl declarations for this effect
-                    val effectImpls = module.program.items
-                        .filterIsInstance<ImplDeclaration>()
-                        .filter { it.effectName == effectDecl.name }
+                    // O(1) lookup of all impl declarations for this effect
+                    val effectImpls = index.implsByEffect[effectDecl.name] ?: emptyList()
 
                     // Add each impl with a unique key (performerName)
                     for (impl in effectImpls) {
-                        val implKey = impl.performerName  // Use performer name as key
-                        impls[implKey] = impl
+                        impls[impl.performerName] = impl
                     }
                 }
 
-                // ALSO check if this is a direct performer import (e.g., Console)
-                // When importing a performer directly (not via effect), we need to find
-                // the impl declaration where performerName matches the imported item
-                val performerImpl = module.program.items
-                    .filterIsInstance<ImplDeclaration>()
-                    .find { it.performerName == item.name }
-
+                // O(1) check if this is a direct performer import (e.g., Console)
+                val performerImpl = index.implsByPerformer[item.name]
                 if (performerImpl != null && !impls.containsKey(item.name)) {
                     impls[item.name] = performerImpl
                 }
@@ -562,16 +531,12 @@ class ImportResolver(
 
             // Extract ImplAbilityDeclarations for imported abilities
             for (item in items) {
-                // Check if this is an ability import
-                val abilityDecl = module.program.items
-                    .filterIsInstance<AbilityDeclaration>()
-                    .find { it.name == item.name }
+                // O(1) check if this is an ability import
+                val abilityDecl = index.abilityDeclarations[item.name]
 
                 if (abilityDecl != null) {
-                    // Find all impl declarations for this ability
-                    val abilityImplsList = module.program.items
-                        .filterIsInstance<ImplAbilityDeclaration>()
-                        .filter { it.abilityName == abilityDecl.name }
+                    // O(1) lookup of all impl declarations for this ability
+                    val abilityImplsList = index.abilityImplsByAbility[abilityDecl.name] ?: emptyList()
 
                     // Add each impl keyed by content hash
                     for (abilityImpl in abilityImplsList) {
@@ -588,16 +553,8 @@ class ImportResolver(
             // is defined elsewhere. This allows impls to be defined in separate
             // modules from their abilities (e.g., Show in abilities/show.mz,
             // impl Show Int in impls/show_impls.mz).
-            // When we import from impls/show_impls.mz, we want to pick up those impls.
-            val allModuleAbilityImpls = module.program.items
-                .filterIsInstance<ImplAbilityDeclaration>()
-
-            for (abilityImpl in allModuleAbilityImpls) {
-                val implKey = abilityImpl.contentHash
-                if (implKey != null && !abilityImpls.containsKey(implKey)) {
-                    abilityImpls[implKey] = abilityImpl
-                }
-            }
+            // O(1) access via index instead of filterIsInstance scan
+            abilityImpls.putAll(index.abilityImplsByHash)
         }
 
         return ModuleImportContext(

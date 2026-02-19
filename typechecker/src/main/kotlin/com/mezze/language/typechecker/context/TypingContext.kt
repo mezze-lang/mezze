@@ -13,10 +13,12 @@ import com.mezze.language.ast.*
  * - Scoped: supports nested scopes via parent chain
  * - Type-safe: lookup returns sealed type, not nullable
  * - Fast: backed by persistent map for efficient extension
+ * - O(1) ability lookup: secondary index by ability name
  */
 data class TypingContext(
     private val bindings: Map<String, Binding>,
-    private val abilityImpls: Map<String, AbilityImplInfo> = emptyMap(),  // NEW: Track ability implementations
+    private val abilityImpls: Map<String, AbilityImplInfo> = emptyMap(),  // Keyed by content hash
+    private val abilityImplsByName: Map<String, List<String>> = emptyMap(),  // Secondary index: abilityName -> [contentHash]
     val parent: TypingContext? = null
 ) {
     /**
@@ -83,6 +85,7 @@ data class TypingContext(
         return TypingContext(
             bindings = bindings + (name to binding),
             abilityImpls = abilityImpls,  // Preserve ability impls
+            abilityImplsByName = abilityImplsByName,  // Preserve secondary index
             parent = parent
         )
     }
@@ -108,6 +111,7 @@ data class TypingContext(
         return TypingContext(
             bindings = bindings + newBindings,
             abilityImpls = abilityImpls,  // Preserve ability impls
+            abilityImplsByName = abilityImplsByName,  // Preserve secondary index
             parent = parent
         )
     }
@@ -116,11 +120,17 @@ data class TypingContext(
      * Extend context with an ability implementation.
      *
      * Key is the content hash of the ImplAbilityDeclaration.
+     * Updates both primary (by hash) and secondary (by name) indexes.
      */
     fun extendWithImpl(key: String, implInfo: AbilityImplInfo): TypingContext {
+        // Update secondary index: abilityName -> [contentHash]
+        val existingHashes = abilityImplsByName[implInfo.abilityName] ?: emptyList()
+        val newImplsByName = abilityImplsByName + (implInfo.abilityName to (existingHashes + key))
+
         return TypingContext(
             bindings = bindings,
             abilityImpls = abilityImpls + (key to implInfo),
+            abilityImplsByName = newImplsByName,
             parent = parent
         )
     }
@@ -160,10 +170,13 @@ data class TypingContext(
      * - Convert_String_Int
      * - Convert_Float_String
      *
+     * Uses secondary index for O(1) lookup instead of O(N) filter.
      * Checks both local and parent contexts.
      */
     fun getAbilityImpls(abilityName: String): List<AbilityImplInfo> {
-        val localImpls = abilityImpls.values.filter { it.abilityName == abilityName }
+        // O(1) lookup via secondary index instead of O(N) filter
+        val localHashes = abilityImplsByName[abilityName] ?: emptyList()
+        val localImpls = localHashes.mapNotNull { abilityImpls[it] }
         val parentImpls = parent?.getAbilityImpls(abilityName) ?: emptyList()
         return localImpls + parentImpls
     }
@@ -185,6 +198,7 @@ data class TypingContext(
         return TypingContext(
             bindings = emptyMap(),
             abilityImpls = emptyMap(),  // Start with empty impls (inherit via parent)
+            abilityImplsByName = emptyMap(),  // Start with empty secondary index (inherit via parent)
             parent = this
         )
     }
@@ -219,7 +233,7 @@ data class TypingContext(
         /**
          * Empty context - starting point
          */
-        val empty = TypingContext(emptyMap(), emptyMap(), null)
+        val empty = TypingContext(emptyMap(), emptyMap(), emptyMap(), null)
 
         /**
          * Create context from map (for testing)
@@ -229,7 +243,8 @@ data class TypingContext(
                 bindings = bindings.mapValues { (_, type) ->
                     Binding.Monomorphic(type)
                 },
-                abilityImpls = emptyMap()
+                abilityImpls = emptyMap(),
+                abilityImplsByName = emptyMap()
             )
         }
     }

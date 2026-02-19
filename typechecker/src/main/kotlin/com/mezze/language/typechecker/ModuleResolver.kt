@@ -14,6 +14,86 @@ import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 
 /**
+ * Pre-computed index for O(1) lookup of program declarations.
+ *
+ * Built once per module during loading, eliminates O(N) filterIsInstance().find() scans
+ * throughout the codebase - particularly in ImportResolver.
+ *
+ * @property typeDeclarations Type declarations by name
+ * @property abilityDeclarations Ability declarations by name
+ * @property effectDeclarations Effect declarations by name
+ * @property implsByPerformer Impl declarations indexed by performer name
+ * @property implsByEffect Impl declarations grouped by effect name
+ * @property abilityImplsByAbility Ability impls grouped by ability name
+ * @property letBindings Let bindings by variable name (simple bindings only)
+ * @property useDeclarations All use declarations
+ * @property pubUseDeclarations All pub use declarations
+ */
+data class ProgramIndex(
+    val typeDeclarations: Map<String, TypeDeclaration>,
+    val abilityDeclarations: Map<String, AbilityDeclaration>,
+    val effectDeclarations: Map<String, EffectDeclaration>,
+    val implsByPerformer: Map<String, ImplDeclaration>,
+    val implsByEffect: Map<String, List<ImplDeclaration>>,
+    val abilityImplsByAbility: Map<String, List<ImplAbilityDeclaration>>,
+    val abilityImplsByHash: Map<String, ImplAbilityDeclaration>,
+    val letBindings: Map<String, LetBinding>,
+    val useDeclarations: List<UseDeclaration>,
+    val pubUseDeclarations: List<PubUseDeclaration>
+) {
+    companion object {
+        /**
+         * Build an index from a program.
+         * Called once during module loading, all subsequent lookups are O(1).
+         */
+        fun build(program: Program): ProgramIndex {
+            val items = program.items
+
+            // Pre-filter by type once
+            val typeDecls = items.filterIsInstance<TypeDeclaration>()
+            val abilityDecls = items.filterIsInstance<AbilityDeclaration>()
+            val effectDecls = items.filterIsInstance<EffectDeclaration>()
+            val implDecls = items.filterIsInstance<ImplDeclaration>()
+            val abilityImplDecls = items.filterIsInstance<ImplAbilityDeclaration>()
+            val letBindingDecls = items.filterIsInstance<LetBinding>()
+
+            return ProgramIndex(
+                typeDeclarations = typeDecls.associateBy { it.name },
+                abilityDeclarations = abilityDecls.associateBy { it.name },
+                effectDeclarations = effectDecls.associateBy { it.name },
+                implsByPerformer = implDecls.associateBy { it.performerName },
+                implsByEffect = implDecls.groupBy { it.effectName },
+                abilityImplsByAbility = abilityImplDecls.groupBy { it.abilityName },
+                abilityImplsByHash = abilityImplDecls.mapNotNull { impl ->
+                    impl.contentHash?.let { hash -> hash to impl }
+                }.toMap(),
+                letBindings = letBindingDecls
+                    .filter { it.isSimpleBinding }
+                    .associateBy { it.variableName },
+                useDeclarations = items.filterIsInstance<UseDeclaration>(),
+                pubUseDeclarations = items.filterIsInstance<PubUseDeclaration>()
+            )
+        }
+
+        /**
+         * Empty index for built-in modules that have no declarations.
+         */
+        val EMPTY = ProgramIndex(
+            typeDeclarations = emptyMap(),
+            abilityDeclarations = emptyMap(),
+            effectDeclarations = emptyMap(),
+            implsByPerformer = emptyMap(),
+            implsByEffect = emptyMap(),
+            abilityImplsByAbility = emptyMap(),
+            abilityImplsByHash = emptyMap(),
+            letBindings = emptyMap(),
+            useDeclarations = emptyList(),
+            pubUseDeclarations = emptyList()
+        )
+    }
+}
+
+/**
  * Represents a loaded module with its exports
  *
  * @property name The module path (e.g., "std::int")
@@ -22,6 +102,7 @@ import kotlin.io.path.isRegularFile
  * @property exports Map of exported items (functions, types, etc.)
  * @property dependencies List of module dependencies
  * @property sourceHash Content hash of the source file (for cache invalidation)
+ * @property index Pre-computed index for O(1) declaration lookups
  */
 data class Module(
     val name: String,
@@ -29,7 +110,8 @@ data class Module(
     val program: Program,
     val exports: Map<String, ExportedItem>,
     val dependencies: List<ModuleDependency>,
-    val sourceHash: String? = null
+    val sourceHash: String? = null,
+    val index: ProgramIndex = ProgramIndex.EMPTY
 )
 
 /**
@@ -356,6 +438,9 @@ class ModuleResolver(
                 // Extract dependencies first
                 val dependencies = extractDependencies(typedProgram)
 
+                // Build program index for O(1) declaration lookups
+                val programIndex = ProgramIndex.build(typedProgram)
+
                 // Create module representation with source hash for cache validation
                 val module = Module(
                     name = modulePath,
@@ -363,7 +448,8 @@ class ModuleResolver(
                     program = typedProgram,
                     exports = extractExports(typedProgram),
                     dependencies = dependencies,
-                    sourceHash = sourceHash
+                    sourceHash = sourceHash,
+                    index = programIndex
                 )
 
                 // Cache the module (thread-safe)
@@ -392,7 +478,8 @@ class ModuleResolver(
             program = Program(emptyList()),
             exports = emptyMap(),
             dependencies = emptyList(),
-            sourceHash = null  // Built-in modules have no source hash
+            sourceHash = null,  // Built-in modules have no source hash
+            index = ProgramIndex.EMPTY
         )
     }
     
@@ -842,10 +929,14 @@ class ModuleResolver(
         }
 
         val module = getFromCache(modulePath)
+        // Rebuild index with the new typed program
+        val updatedIndex = ProgramIndex.build(typedProgram)
+
         val updatedModule = if (module != null) {
             module.copy(
                 program = typedProgram,
-                exports = extractExports(typedProgram, typeContext)
+                exports = extractExports(typedProgram, typeContext),
+                index = updatedIndex
             )
         } else {
             // Module not in cache yet, create it
@@ -857,7 +948,8 @@ class ModuleResolver(
                 program = typedProgram,
                 exports = extractExports(typedProgram, typeContext),
                 dependencies = emptyList(),
-                sourceHash = null
+                sourceHash = null,
+                index = updatedIndex
             )
         }
         putInCache(modulePath, updatedModule)
