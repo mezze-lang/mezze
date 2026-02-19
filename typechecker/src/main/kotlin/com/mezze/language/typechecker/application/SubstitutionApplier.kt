@@ -88,6 +88,16 @@ class SubstitutionApplier(
     // This allows nested Encode/Decode calls to find impls generated in the same pass
     private val mutableAbilityImpls = abilityImpls.toMutableMap()
 
+    // Secondary index: abilityName -> list of content hashes for O(1) lookup
+    // Mirrors TypingContext.abilityImplsByName pattern
+    private val mutableAbilityImplsByName: MutableMap<String, MutableList<String>> = run {
+        val index = mutableMapOf<String, MutableList<String>>()
+        for ((hash, info) in abilityImpls) {
+            index.getOrPut(info.abilityName) { mutableListOf() }.add(hash)
+        }
+        index
+    }
+
     /**
      * Register a generated codec impl so it's available for nested calls.
      * This is called when we generate an Encode/Decode impl, so subsequent
@@ -116,6 +126,9 @@ class SubstitutionApplier(
             sourceModule = null,
             contentHash = contentHashKey
         )
+
+        // Update secondary index for O(1) lookup by ability name
+        mutableAbilityImplsByName.getOrPut(abilityName) { mutableListOf() }.add(contentHashKey)
 
         return implWithHash
     }
@@ -1145,9 +1158,10 @@ class SubstitutionApplier(
         // This handles format-parameterized abilities like EncodeFormat 'repr
         // where the type parameter doesn't come from the arguments
         if (impl == null) {
-            val allImpls = mutableAbilityImpls.values.filter { it.abilityName == abilityName }
-            if (allImpls.size == 1) {
-                impl = allImpls.first()
+            // O(1) lookup via secondary index instead of O(N) filter
+            val implHashes = mutableAbilityImplsByName[abilityName] ?: emptyList()
+            if (implHashes.size == 1) {
+                impl = mutableAbilityImpls[implHashes.first()]
             }
         }
 
@@ -1380,10 +1394,13 @@ class SubstitutionApplier(
         firstType: MezzeType
     ): com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo? {
         val firstTypeName = getTypeNameForAbility(firstType)
-        val candidates = mutableAbilityImpls.values.filter { implInfo ->
-            implInfo.abilityName == abilityName &&
-            implInfo.targetTypes.isNotEmpty() &&
-            implInfo.targetTypes.first() == firstTypeName
+        // O(1) lookup via secondary index, then filter the smaller list
+        val implHashes = mutableAbilityImplsByName[abilityName] ?: return null
+        val candidates = implHashes.mapNotNull { hash ->
+            mutableAbilityImpls[hash]?.takeIf { implInfo ->
+                implInfo.targetTypes.isNotEmpty() &&
+                implInfo.targetTypes.first() == firstTypeName
+            }
         }
         // If there's exactly one candidate, use it
         // If there are multiple, we can't disambiguate without more context
