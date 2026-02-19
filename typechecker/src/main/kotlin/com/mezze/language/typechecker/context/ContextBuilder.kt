@@ -38,7 +38,9 @@ class ContextBuilder {
         val effectDeclarations: Map<String, EffectDeclaration>,
         val performerToEffect: Map<String, String>,
         /** Maps performer names to the set of effects they ADD (not handle) */
-        val performerAddedEffects: Map<String, Set<String>> = emptyMap()
+        val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
+        /** Maps performer names to their ImplDeclaration (for content hash lookup) */
+        val implDeclarations: Map<String, ImplDeclaration> = emptyMap()
     )
 
     /**
@@ -174,13 +176,19 @@ class ContextBuilder {
             impl.performerName to extractAddedEffects(impl)
         }.filterValues { it.isNotEmpty() }
 
+        // Build implDeclarations map: performer name -> ImplDeclaration
+        // Include both local impls and imported impls
+        val implDeclarationsMap = (implDecls.associateBy { it.performerName }) +
+            importedImpls.mapValues { (_, impl) -> impl }
+
         return BuildResult(
             context = ctx,
             typeDeclarations = typeDecls,
             abilityDeclarations = abilityDecls,
             effectDeclarations = effectDecls,
             performerToEffect = performerToEffectMap,
-            performerAddedEffects = performerAddedEffectsMap
+            performerAddedEffects = performerAddedEffectsMap,
+            implDeclarations = implDeclarationsMap
         )
     }
 

@@ -263,7 +263,12 @@ class TypeChecker(
         // (If we wait until validation, constraint solving might fail first on those type variables)
         val undefinedVars = constraintResults.values.flatMap { it.undefinedVariables }
         if (undefinedVars.isNotEmpty()) {
-            val validator = TypeValidator(context, allTypeDeclarations)
+            val validator = TypeValidator(
+                context,
+                allTypeDeclarations,
+                allEffectDeclarations,
+                buildResult.implDeclarations
+            )
             val allVariables = context.getAllBindings()
             val errors = undefinedVars.map { undefinedVar ->
                 // Special case: Check if this is an ability or effect being used as a value
@@ -446,7 +451,8 @@ class TypeChecker(
                     allAbilityDeclarations,  // For resolving ability references (including imported)
                     allEffectDeclarations,  // For resolving effect references
                     allTypeDeclarations,  // For resolving variant constructors
-                    tailCallLocations  // TCO: Locations of self-recursive tail calls
+                    tailCallLocations,  // TCO: Locations of self-recursive tail calls
+                    buildResult.implDeclarations  // For populating resolvedHandlers with content hashes
                 )
                 // Add generated codec implementations to the program BEFORE applying substitution
                 // This ensures they go through the same processing as user-defined impls
@@ -464,7 +470,12 @@ class TypeChecker(
                 val finalProgram = typedProgram
 
                 // PHASE 5: Validate Types (moved after substitution so we can check inferred types)
-                val validator = TypeValidator(context, allTypeDeclarations)
+                val validator = TypeValidator(
+                    context,
+                    allTypeDeclarations,
+                    allEffectDeclarations,
+                    buildResult.implDeclarations
+                )
 
                 // First, validate the constraints (like HasConstructor)
                 val constraintValidation = validator.validateConstraints(allConstraints, substitution)

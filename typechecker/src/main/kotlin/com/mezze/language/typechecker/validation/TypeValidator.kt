@@ -35,7 +35,9 @@ import com.mezze.language.typechecker.codec.CodecGenerator
  */
 class TypeValidator(
     private val context: TypingContext,
-    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap()
+    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
+    private val effectDeclarations: Map<String, EffectDeclaration> = emptyMap(),
+    private val implDeclarations: Map<String, ImplDeclaration> = emptyMap()
 ) {
     private val abilityResolver = AbilityResolver(context)
     private val effectValidator = EffectValidator(context)
@@ -176,9 +178,8 @@ class TypeValidator(
                 }
 
                 is ImplDeclaration -> {
-                    // Find corresponding effect declaration
-                    val effectDecl = program.items.filterIsInstance<EffectDeclaration>()
-                        .find { it.name == item.effectName }
+                    // Find corresponding effect declaration using O(1) map lookup
+                    val effectDecl = effectDeclarations[item.effectName]
 
                     if (effectDecl != null) {
                         val implErrors = effectValidator.validateEffectImpl(item, effectDecl)
@@ -193,10 +194,7 @@ class TypeValidator(
         }
 
         // Validate perform expressions (handler type compatibility)
-        val implDeclarations = program.items.filterIsInstance<ImplDeclaration>()
-            .associateBy { it.performerName }
-        val effectDeclarations = program.items.filterIsInstance<EffectDeclaration>()
-            .associateBy { it.name }
+        // Use the pre-built maps passed to constructor for O(1) lookups
         // Build map of function definitions for looking up function bodies
         val functionDefinitions = buildFunctionDefinitions(program)
         for (item in program.items) {
@@ -856,13 +854,15 @@ class TypeValidator(
      */
     fun validateMainForExecution(
         program: Program,
-        substitution: Substitution
+        substitution: Substitution,
+        letBindings: Map<String, LetBinding>? = null
     ): ValidationError? {
-        // Find the main binding
-        val mainBinding = program.items.filterIsInstance<LetBinding>()
-            .find { binding ->
-                binding.isSimpleBinding && binding.variableName == "main"
-            }
+        // Find the main binding using O(1) map lookup if available, else scan
+        val mainBinding = letBindings?.get("main")
+            ?: program.items.filterIsInstance<LetBinding>()
+                .find { binding ->
+                    binding.isSimpleBinding && binding.variableName == "main"
+                }
 
         if (mainBinding == null) {
             return ValidationError.MainFunctionTypeError(

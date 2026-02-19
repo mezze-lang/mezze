@@ -39,7 +39,9 @@ class SubstitutionApplier(
     private val effectDeclarations: Map<String, EffectDeclaration> = emptyMap(),
     private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
     // TCO: Source locations of self-recursive tail calls
-    private val tailCallLocations: Set<SourceLocation> = emptySet()
+    private val tailCallLocations: Set<SourceLocation> = emptySet(),
+    // ImplDeclarations for populating resolvedHandlers with content hashes
+    private val implDeclarations: Map<String, ImplDeclaration> = emptyMap()
 ) {
     // Compute variants that must stay open by resolving type vars with substitution
     // This handles the case where per-binding solving created different row vars than global solving
@@ -60,6 +62,17 @@ class SubstitutionApplier(
         // For now, we use a simpler approach
         emptyMap<String, Set<Set<String>>>()
     }
+
+    // Pre-built index of variant constructor names for O(1) lookup
+    // Built once at initialization time from typeDeclarations
+    private val variantConstructorIndex: Set<String> by lazy {
+        typeDeclarations.values.asSequence()
+            .mapNotNull { it.definition as? VariantDefinition }
+            .flatMap { it.constructors.asSequence() }
+            .map { it.name }
+            .toSet()
+    }
+
     // Mutable context for tracking identifier types during traversal
     // This mimics OldTypeChecker's context map (OldTypeChecker.kt:1900-1910)
     // Maps identifier names to their types
@@ -137,14 +150,9 @@ class SubstitutionApplier(
             return ConstructorResolution.HandlerReference(name, effectName)
         }
 
-        // Check variant constructors - look through type declarations
-        for ((_, typeDecl) in typeDeclarations) {
-            val definition = typeDecl.definition
-            if (definition is VariantDefinition) {
-                if (definition.constructors.any { it.name == name }) {
-                    return ConstructorResolution.VariantConstructor
-                }
-            }
+        // Check variant constructors using O(1) index lookup
+        if (variantConstructorIndex.contains(name)) {
+            return ConstructorResolution.VariantConstructor
         }
 
         // Cannot determine - leave unresolved
@@ -1685,9 +1693,25 @@ class SubstitutionApplier(
             expr.inferredType?.let { substitution.apply(it) }
         }
 
+        // Build resolvedHandlers map for O(1) runtime dispatch
+        // Maps effect name -> ResolvedEffectHandler with content hash
+        val resolvedHandlers = expr.handlers.mapNotNull { handler ->
+            val performerName = handler.name
+            val effectName = performerToEffect[performerName] ?: return@mapNotNull null
+            val implDecl = implDeclarations[performerName] ?: return@mapNotNull null
+            val implHash = implDecl.contentHash ?: return@mapNotNull null
+
+            effectName to ResolvedEffectHandler(
+                effectName = effectName,
+                performerName = performerName,
+                implDeclarationHash = implHash
+            )
+        }.toMap()
+
         return expr.copy(
             expression = updatedExpression,
-            inferredType = resultType
+            inferredType = resultType,
+            resolvedHandlers = resolvedHandlers
         )
     }
 

@@ -2062,7 +2062,7 @@ class ASTToTruffleConverter(
 
                         // Try local slot first, then context lookup (for cross-module)
                         val hashSlot = capturedHashSlots[implHash]
-                        val performerValue: MezzeValue = if (hashSlot != null) {
+                        var performerValue: MezzeValue = if (hashSlot != null) {
                             frame.getValue(hashSlot) as? MezzeValue
                                 ?: throw RuntimeException(
                                     "Handler implementation not found for hash: $implHash (effect: $effectName)"
@@ -2073,6 +2073,41 @@ class ASTToTruffleConverter(
                                 ?: throw RuntimeException(
                                     "Handler implementation not found for hash: $implHash (effect: $effectName, performer: $performerName)"
                                 )
+                        }
+
+                        // CRITICAL: Handle parameterized handlers (e.g., AllPaths {cont = ...})
+                        // Look up parameters by performer name from the original handlers list
+                        val paramsNode = handlerParamNodes[performerName]
+                        if (paramsNode != null) {
+                            // Evaluate the pre-converted parameter node
+                            val paramsValue = paramsNode.execute(frame)
+
+                            if (paramsValue !is MezzeRecord) {
+                                throw RuntimeException("Handler parameters must be a record, got: ${paramsValue::class.simpleName}")
+                            }
+
+                            // Check if the performer is a function (parameterized implementation)
+                            when (performerValue) {
+                                is com.mezze.language.interpreter.NativeMezzeFunction -> {
+                                    // Native wrapper function - call it with the parameters
+                                    performerValue = performerValue.call(listOf(paramsValue))
+                                }
+                                is com.mezze.language.interpreter.MezzeTruffleFunction -> {
+                                    // Truffle function - call via CallTarget
+                                    performerValue = performerValue.callTarget.call(
+                                        paramsValue,
+                                        performerValue.closureVariables,
+                                        performerValue.lexicalScope,
+                                        performerValue.lexicalScopeSlotMap
+                                    ) as MezzeValue
+                                }
+                                else -> {
+                                    // Fallback: Old behavior for non-parameterized handlers
+                                    for ((paramName, paramValue) in paramsValue.fields) {
+                                        context.defineLocal(paramName, paramValue)
+                                    }
+                                }
+                            }
                         }
 
                         runtimeHandlers[effectName] = performerValue
