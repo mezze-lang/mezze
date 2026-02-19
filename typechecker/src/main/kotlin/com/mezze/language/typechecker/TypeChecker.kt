@@ -329,6 +329,15 @@ class TypeChecker(
             return TypeCheckResult.Failure(errors)
         }
 
+        // Collect unused variable warnings (these are warnings, not errors)
+        val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
+            val locationInfo = unused.sourceLocation?.let { " at line ${it.line}" } ?: ""
+            "Unused variable '${unused.name}'$locationInfo. Prefix with '_' to suppress this warning."
+        }
+
+        // Collect pattern-related warnings (e.g., float literal patterns)
+        val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }
+
         // Collect all constraints from all bindings (including ability constraints)
         // IMPORTANT: Filter out HasConstructor and HasField constraints!
         // These structural constraints are already solved during per-binding constraint solving
@@ -364,6 +373,12 @@ class TypeChecker(
                 // Continue to validation
                 val substitution = solveResult.substitution
                 val warnings = solveResult.warnings.toMutableList()
+
+                // Add unused variable warnings
+                warnings.addAll(unusedVarWarnings)
+
+                // Add pattern-related warnings
+                warnings.addAll(patternWarnings)
 
                 // Retrieve generated codec implementations (auto-derived Encode/Decode)
                 // Compute content hashes for these generated impls immediately

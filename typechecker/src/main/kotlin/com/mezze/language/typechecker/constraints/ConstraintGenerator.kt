@@ -1863,5 +1863,6 @@ class ConstraintGenerator(
  */
 data class PatternConstraintResult(
     val bindings: Map<String, MezzeType>,
-    val constraints: List<Constraint>
+    val constraints: List<Constraint>,
+    val warnings: List<String> = emptyList()
 )

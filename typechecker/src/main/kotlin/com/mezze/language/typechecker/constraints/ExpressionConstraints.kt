@@ -241,9 +241,14 @@ class ExpressionConstraintGenerator {
                             is MezzeType.SuspendedType -> ConstraintResult(
                                 type = type,
                                 constraints = emptyList(),
-                                effects = type.effects.effects  // Propagate effects from SuspendedType
+                                effects = type.effects.effects,  // Propagate effects from SuspendedType
+                                usedVariables = setOf(expr.name)  // Track variable usage
                             )
-                            else -> ConstraintResult.simple(type)
+                            else -> ConstraintResult(
+                                type = type,
+                                constraints = emptyList(),
+                                usedVariables = setOf(expr.name)  // Track variable usage
+                            )
                         }
                     }
                     is TypingContext.Binding.Polymorphic -> {
@@ -273,7 +278,8 @@ class ExpressionConstraintGenerator {
                             type = type,
                             constraints = emptyList(),
                             effects = effects,
-                            abilityConstraints = abilityConstraints
+                            abilityConstraints = abilityConstraints,
+                            usedVariables = setOf(expr.name)  // Track variable usage
                         )
                     }
                 }
@@ -1644,12 +1650,16 @@ class ExpressionConstraintGenerator {
         // CRITICAL: Propagate ability constraints from body
         // These will be added to the FunctionType during generalization
         // TCO: Propagate tail calls from body
+        // WARNINGS: Propagate pattern warnings and unused variables from body
         return ConstraintResult(
             type = functionType,
             constraints = bodyResult.constraints,
             abilityConstraints = bodyResult.abilityConstraints,
             undefinedVariables = bodyResult.undefinedVariables,
-            tailCalls = bodyResult.tailCalls
+            tailCalls = bodyResult.tailCalls,
+            usedVariables = bodyResult.usedVariables,
+            unusedVariables = bodyResult.unusedVariables,
+            patternWarnings = bodyResult.patternWarnings
         )
     }
 
@@ -1996,6 +2006,10 @@ class ExpressionConstraintGenerator {
         // TCO: Track tail calls from case bodies
         val tailCalls = mutableSetOf<SourceLocation>()
         tailCalls.addAll(scrutineeResult.tailCalls)
+        // Track unused pattern bindings (warnings)
+        val unusedVars = mutableListOf<ConstraintResult.UnusedVariable>()
+        // Track pattern-related warnings (e.g., float literal patterns)
+        val patternWarnings = mutableListOf<String>()
 
         // Step 2: Check for wildcards - if present, scrutinee must be open variant
         // IMPORTANT: Only check TOP-LEVEL patterns for wildcards/variables.
@@ -2030,12 +2044,14 @@ class ExpressionConstraintGenerator {
             val firstPattern = matchCase.patterns.first()
             val patternResult = patternGenerator.generate(firstPattern, scrutineeResult.type, context, expr.sourceLocation)
             constraints.addAll(patternResult.constraints)
+            patternWarnings.addAll(patternResult.warnings)
 
             // For additional patterns in or-pattern, just add constraints (don't use bindings)
             // Note: In a complete implementation, we should verify that or-patterns bind the same variables
             for (pattern in matchCase.patterns.drop(1)) {
                 val orPatternResult = patternGenerator.generate(pattern, scrutineeResult.type, context, expr.sourceLocation)
                 constraints.addAll(orPatternResult.constraints)
+                patternWarnings.addAll(orPatternResult.warnings)
             }
 
             // Extend context with pattern bindings for the case body
@@ -2080,6 +2096,21 @@ class ExpressionConstraintGenerator {
             duplicateBindings.addAll(caseBodyResult.duplicateBindings)
             tailCalls.addAll(caseBodyResult.tailCalls)
 
+            // Check for unused pattern bindings
+            // Variables starting with _ are intentionally unused (convention)
+            val usedVarsInBody = caseBodyResult.usedVariables +
+                (guard?.let { generate(it, caseContext).usedVariables } ?: emptySet())
+            for ((varName, _) in patternResult.bindings) {
+                if (!varName.startsWith("_") && varName !in usedVarsInBody) {
+                    unusedVars.add(
+                        ConstraintResult.UnusedVariable(
+                            name = varName,
+                            sourceLocation = expr.sourceLocation
+                        )
+                    )
+                }
+            }
+
             caseResultTypes.add(caseBodyResult.type)
         }
 
@@ -2107,7 +2138,9 @@ class ExpressionConstraintGenerator {
             abilityConstraints = abilityConstraints,
             undefinedVariables = undefinedVars,
             duplicateBindings = duplicateBindings,
-            tailCalls = tailCalls
+            tailCalls = tailCalls,
+            unusedVariables = unusedVars,
+            patternWarnings = patternWarnings
         )
     }
 

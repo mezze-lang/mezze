@@ -139,6 +139,23 @@ sealed interface Constraint {
         val context: String? = null,
         override val sourceLocation: SourceLocation? = null
     ) : Constraint
+
+    /**
+     * Constraint for exhaustive record pattern matching.
+     *
+     * Generated when a closed record pattern (no ...) is used, requiring
+     * that all fields of the record type are covered by the pattern.
+     *
+     * @param recordType The record type being matched
+     * @param patternFields The field names that appear in the pattern
+     * @param context Human-readable context
+     */
+    data class RecordPatternExhaustive(
+        val recordType: MezzeType,
+        val patternFields: Set<String>,
+        val context: String? = null,
+        override val sourceLocation: SourceLocation? = null
+    ) : Constraint
 }
 
 /**
@@ -157,7 +174,10 @@ data class ConstraintResult(
     val abilityConstraints: List<Constraint.AbilityRequired> = emptyList(),  // Ability requirements
     val undefinedVariables: List<UndefinedVariable> = emptyList(),  // Undefined variables found during constraint generation
     val duplicateBindings: List<DuplicateBinding> = emptyList(),  // Duplicate bindings found during constraint generation
-    val tailCalls: Set<SourceLocation> = emptySet()  // TCO: Source locations of self-recursive tail calls
+    val tailCalls: Set<SourceLocation> = emptySet(),  // TCO: Source locations of self-recursive tail calls
+    val usedVariables: Set<String> = emptySet(),  // Variables that were referenced in this expression
+    val unusedVariables: List<UnusedVariable> = emptyList(),  // Unused pattern bindings (warnings)
+    val patternWarnings: List<String> = emptyList()  // Warnings from pattern analysis (e.g., float literal patterns)
 ) {
     /**
      * Information about an undefined variable.
@@ -171,6 +191,14 @@ data class ConstraintResult(
      * Information about a duplicate binding.
      */
     data class DuplicateBinding(
+        val name: String,
+        val sourceLocation: SourceLocation?
+    )
+
+    /**
+     * Information about an unused variable binding (warning).
+     */
+    data class UnusedVariable(
         val name: String,
         val sourceLocation: SourceLocation?
     )
@@ -196,7 +224,10 @@ data class ConstraintResult(
                 abilityConstraints = results.flatMap { it.abilityConstraints },
                 undefinedVariables = results.flatMap { it.undefinedVariables },
                 duplicateBindings = results.flatMap { it.duplicateBindings },
-                tailCalls = results.flatMap { it.tailCalls }.toSet()
+                tailCalls = results.flatMap { it.tailCalls }.toSet(),
+                usedVariables = results.flatMap { it.usedVariables }.toSet(),
+                unusedVariables = results.flatMap { it.unusedVariables },
+                patternWarnings = results.flatMap { it.patternWarnings }
             )
         }
 

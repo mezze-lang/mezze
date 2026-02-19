@@ -85,8 +85,12 @@ object SourceContext {
 
         // Calculate the width needed for line numbers
         val lineNumberWidth = endLine.toString().length
+        // Gutter line: needs to align with content lines which have " $lineNumStr | "
+        // That's: 1 space + lineNumberWidth chars + " |" = lineNumberWidth + 3 chars before the |
+        // We want spaces before |, so: lineNumberWidth + 2 spaces, then |
+        val gutterLine = " ".repeat(lineNumberWidth + 2) + "|"
 
-        sb.appendLine("    |")
+        sb.appendLine(gutterLine)
 
         // Show lines with context
         for (lineNum in startLine..endLine) {
@@ -100,17 +104,17 @@ object SourceContext {
                 sb.appendLine(" $lineNumStr | $displayContent")
 
                 // Show error pointer - calculate visual column accounting for tabs
-                val padding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
+                val pointerPadding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
                 val visualColumn = calculateVisualColumn(lineContent, errorColumn)
                 val pointer = " ".repeat(maxOf(0, visualColumn - 1)) + "^"
-                sb.appendLine("$padding$pointer")
+                sb.appendLine("$pointerPadding$pointer")
             } else {
                 // Context line
                 sb.appendLine(" $lineNumStr | $displayContent")
             }
         }
 
-        sb.appendLine("    |")
+        sb.appendLine(gutterLine)
 
         return sb.toString()
     }
@@ -174,8 +178,10 @@ object SourceContext {
 
         // Calculate the width needed for line numbers
         val lineNumberWidth = endLine.toString().length
+        // Gutter line: needs to align with content lines which have " $lineNumStr | "
+        val gutterLine = " ".repeat(lineNumberWidth + 2) + "|"
 
-        sb.appendLine("    |")
+        sb.appendLine(gutterLine)
 
         // Show lines with context
         for (lineNum in startLine..endLine) {
@@ -189,17 +195,17 @@ object SourceContext {
                 sb.appendLine(" $lineNumStr | $displayContent")
 
                 // Show error underline - calculate visual column accounting for tabs
-                val padding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
+                val pointerPadding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
                 val visualColumn = calculateVisualColumn(lineContent, errorColumn)
                 val underline = " ".repeat(maxOf(0, visualColumn - 1)) + "^".repeat(maxOf(1, spanLength))
-                sb.appendLine("$padding$underline")
+                sb.appendLine("$pointerPadding$underline")
             } else {
                 // Context line
                 sb.appendLine(" $lineNumStr | $displayContent")
             }
         }
 
-        sb.appendLine("    |")
+        sb.appendLine(gutterLine)
 
         return sb.toString()
     }

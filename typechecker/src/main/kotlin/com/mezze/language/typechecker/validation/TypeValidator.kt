@@ -323,6 +323,10 @@ class TypeValidator(
                 is Constraint.MustBeOpen -> {
                     // This was handled during solving and substitution application
                 }
+
+                is Constraint.RecordPatternExhaustive -> {
+                    // This was handled during solving
+                }
             }
         }
 

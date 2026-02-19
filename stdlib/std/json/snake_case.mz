@@ -1,15 +1,15 @@
 # std/json/snake_case.mezze - JSON codec with snake_case field names (DEPRECATED)
 #
-# NOTE: This module is deprecated. Use std::json::repr with config instead:
+# NOTE: This module is deprecated. Use std::json with config instead:
 #
-#   use std::json::repr
+#   use std::json
 #   use std::codec::{Encode}
 #
 #   let user = {userName = "Alice", createdAt = "2024-01-01"}
 #   let result = Encode.encode {val = user, config = {field_transform = SnakeCase}}
 #   # Result: {"user_name": "Alice", "created_at": "2024-01-01"}
 #
-# This module simply re-exports std::json::repr for backwards compatibility.
+# This module simply re-exports std::json for backwards compatibility.
 # The SnakeCase transformation is now handled via the config parameter.
 
-use std::json::repr
+use std::json

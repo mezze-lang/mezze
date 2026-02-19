@@ -249,7 +249,12 @@ object ErrorPrettyPrinter {
         // Calculate the width needed for line numbers
         val lineNumberWidth = endLine.toString().length
 
-        sb.appendLine("    |")
+        // Gutter line: needs to align with content lines which have " $lineNumStr | "
+        // That's: 1 space + lineNumberWidth chars + " |" = lineNumberWidth + 3 chars before the |
+        // We want spaces before |, so: lineNumberWidth + 2 spaces, then |
+        val gutterLine = " ".repeat(lineNumberWidth + 2) + "|"
+
+        sb.appendLine(gutterLine)
 
         // Show lines with context
         for (lineNum in startLine..endLine) {
@@ -270,11 +275,11 @@ object ErrorPrettyPrinter {
             }
         }
 
-        sb.appendLine("    |")
+        sb.appendLine(gutterLine)
 
         return sb.toString()
     }
-    
+
     private fun isBuiltinModuleName(moduleName: String): Boolean {
         return when (moduleName) {
             "abilities", "operators", "primitives" -> true

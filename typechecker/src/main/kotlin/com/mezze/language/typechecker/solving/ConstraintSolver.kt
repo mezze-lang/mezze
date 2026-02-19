@@ -746,6 +746,7 @@ class ConstraintSolver(
             is Constraint.HasField -> solveHasField(constraint, currentSubst)
             is Constraint.HasConstructor -> solveHasConstructor(constraint, currentSubst)
             is Constraint.MustBeOpen -> solveMustBeOpen(constraint, currentSubst)
+            is Constraint.RecordPatternExhaustive -> solveRecordPatternExhaustive(constraint, currentSubst)
         }
     }
 
@@ -771,7 +772,56 @@ class ConstraintSolver(
                 // Validation happens after all equality constraints are solved in solve()
                 ConstraintResult.Success(result.substitution)
             }
-            is UnificationResult.Failure -> ConstraintResult.Failure(result.message)
+            is UnificationResult.Failure -> {
+                // Detect literal vs variant mismatch for better error message
+                val constraintContext = constraint.context ?: ""
+                val type1 = constraint.left
+                val type2 = constraint.right
+
+                if (constraintContext.contains("Literal pattern")) {
+                    // Check if one side is a variant type
+                    val variantType = when {
+                        type1 is MezzeType.VariantType -> type1
+                        type2 is MezzeType.VariantType -> type2
+                        else -> null
+                    }
+
+                    if (variantType != null) {
+                        val constructors = variantType.constructors.keys.sorted()
+                        val firstConstructor = constructors.firstOrNull() ?: "ConstructorName"
+                        return ConstraintResult.Failure(
+                            "Cannot match variant type [${constructors.joinToString(", ")}] with a literal pattern. " +
+                            "Use a constructor pattern like '$firstConstructor' instead."
+                        )
+                    }
+
+                    // Check for TypeApplication (named type like Option, Result)
+                    val typeApp = when {
+                        type1 is MezzeType.TypeApplication -> type1
+                        type2 is MezzeType.TypeApplication -> type2
+                        else -> null
+                    }
+
+                    if (typeApp != null) {
+                        return ConstraintResult.Failure(
+                            "Cannot match type '${typeApp.constructor}' with a literal pattern. " +
+                            "Use a constructor pattern instead."
+                        )
+                    }
+                }
+
+                // Check for List vs Array confusion
+                if (constraintContext.contains("Array pattern")) {
+                    if (type1 is MezzeType.ListType || type2 is MezzeType.ListType) {
+                        return ConstraintResult.Failure(
+                            "Cannot use array pattern syntax [a, b, ...] with List type. " +
+                            "Use constructor patterns 'Cons { head, tail }' and 'Nil' instead."
+                        )
+                    }
+                }
+
+                ConstraintResult.Failure(result.message)
+            }
         }
     }
 
@@ -1642,6 +1692,55 @@ class ConstraintSolver(
     }
 
     /**
+     * Solve a record pattern exhaustiveness constraint.
+     *
+     * Verifies that a closed record pattern (without ...) covers all fields of the record type.
+     * This is needed when the record type was unknown at pattern generation time.
+     */
+    private fun solveRecordPatternExhaustive(
+        constraint: Constraint.RecordPatternExhaustive,
+        currentSubst: Substitution
+    ): ConstraintResult {
+        // Resolve the record type through the substitution
+        val resolvedType = currentSubst.apply(constraint.recordType)
+
+        // If it's still a type variable, we can't check exhaustiveness yet
+        // This will be re-checked later when the type is known
+        if (resolvedType is MezzeType.VarType) {
+            // Can't determine exhaustiveness yet - defer
+            return ConstraintResult.Success(Substitution.empty)
+        }
+
+        // Handle TypeApplication (named record types)
+        val recordType = when (resolvedType) {
+            is MezzeType.RecordType -> resolvedType
+            is MezzeType.TypeApplication -> {
+                expandTypeApplicationToRecord(resolvedType, typeDeclarations) ?: run {
+                    // Not a record type - this will be caught by HasField constraints
+                    return ConstraintResult.Success(Substitution.empty)
+                }
+            }
+            else -> {
+                // Not a record type - error will be reported by other constraints
+                return ConstraintResult.Success(Substitution.empty)
+            }
+        }
+
+        val recordFieldNames = recordType.fields.keys
+        val uncoveredFields = recordFieldNames - constraint.patternFields
+
+        if (uncoveredFields.isNotEmpty()) {
+            val fieldList = uncoveredFields.sorted().joinToString(", ")
+            return ConstraintResult.Failure(
+                "Non-exhaustive record pattern: missing field${if (uncoveredFields.size > 1) "s" else ""} $fieldList. " +
+                "Use { ${constraint.patternFields.joinToString(", ")}, ... } to ignore extra fields."
+            )
+        }
+
+        return ConstraintResult.Success(Substitution.empty)
+    }
+
+    /**
      * Solve a field access constraint: record has field with type
      *
      * Ensures the record type has the specified field.
@@ -2112,18 +2211,30 @@ class ConstraintSolver(
                 }
             }
 
-            // Create an open variant during constraint solving
+            // PATTERN CONTEXT: For pattern matching, we still want to allow row polymorphism
+            // The unknown constructor check should only happen when the scrutinee has a
+            // DECLARED type (like Color in `{c: Color} -> match c is ...`).
+            // When the scrutinee type is inferred (like `{x} -> match x is ...`), we should
+            // allow creating open variants for row polymorphism.
+            //
+            // The detection of "unknown constructor in declared type" happens elsewhere:
+            // - In solveHasConstructorForVariantType() when the variant is already resolved
+            // - During validation when the scrutinee's type is known
+            //
+            // Here, the scrutinee is still a type variable, so we create an open variant.
+            // This enables row polymorphism where the variant type is inferred from patterns.
+
+            // BOTH PATTERN AND EXPRESSION CONTEXT: Create an open variant during constraint solving
             // This is only for constructors that don't belong to any known type declaration
-            // The variant will be closed later if it came from pattern matching without wildcard
+            // The variant will be closed later based on usage
             val newRowVar = RowVar.fresh()
             val newVariant = MezzeType.VariantType(
                 constructors = mapOf(constructorName to expectedPayloadType),
                 rowVar = newRowVar  // Open so additional constructors can be added
             )
 
-            // Track that this row variable came from pattern matching (if applicable)
-            // Pattern-based row vars will be closed at the end of constraint solving
-            // unless there's a wildcard pattern
+            // PATTERN CONTEXT: Track the row var so it can be closed later
+            // Pattern-created variants should be closed unless there's a wildcard (MustBeOpen)
             if (isPatternContext) {
                 patternBasedRowVars.add(newRowVar)
             }
@@ -2210,7 +2321,8 @@ class ConstraintSolver(
             if (expectedPayloadType != null) {
                 if (actualPayloadType == null) {
                     return ConstraintResult.Failure(
-                        "Constructor '$constructorName' does not have a payload, but expected ${formatType(expectedPayloadType)}"
+                        "Constructor '$constructorName' does not have a payload. " +
+                        "Remove the pattern '{ ... }' after '$constructorName' since it's a unit variant."
                     )
                 }
 
@@ -2445,6 +2557,13 @@ class ConstraintSolver(
                 context = constraint.context,
                 sourceLocation = constraint.sourceLocation
             )
+
+            is Constraint.RecordPatternExhaustive -> Constraint.RecordPatternExhaustive(
+                recordType = substitution.apply(constraint.recordType),
+                patternFields = constraint.patternFields,
+                context = constraint.context,
+                sourceLocation = constraint.sourceLocation
+            )
         }
     }
 
@@ -2460,6 +2579,7 @@ class ConstraintSolver(
             is Constraint.HasField -> this.context
             is Constraint.HasConstructor -> this.context
             is Constraint.MustBeOpen -> this.context
+            is Constraint.RecordPatternExhaustive -> this.context
         }
     }
 
@@ -2468,7 +2588,7 @@ class ConstraintSolver(
      */
     private fun formatType(type: MezzeType): String {
         return when (type) {
-            is MezzeType.VarType -> type.variable.toString()
+            is MezzeType.VarType -> "'${('a'.code + (type.variable.id % 26)).toChar()}"  // Show as 'a, 'b, etc.
             is MezzeType.IntType -> "Int"
             is MezzeType.FloatType -> "Float"
             is MezzeType.StringType -> "String"
@@ -2755,5 +2875,30 @@ class ConstraintSolver(
                 )
             }
         }
+    }
+
+    /**
+     * Calculate Levenshtein distance between two strings.
+     * Used for suggesting similar names when a constructor/type is not found.
+     */
+    private fun levenshteinDistance(s1: String, s2: String): Int {
+        val m = s1.length
+        val n = s2.length
+        val dp = Array(m + 1) { IntArray(n + 1) }
+
+        for (i in 0..m) dp[i][0] = i
+        for (j in 0..n) dp[0][j] = j
+
+        for (i in 1..m) {
+            for (j in 1..n) {
+                val cost = if (s1[i - 1] == s2[j - 1]) 0 else 1
+                dp[i][j] = minOf(
+                    dp[i - 1][j] + 1,      // deletion
+                    dp[i][j - 1] + 1,      // insertion
+                    dp[i - 1][j - 1] + cost // substitution
+                )
+            }
+        }
+        return dp[m][n]
     }
 }

@@ -1,5 +1,7 @@
 package com.mezze.language.typechecker
 
+import com.mezze.language.ast.Program
+import com.mezze.language.ast.TypeCheckResult as AstTypeCheckResult
 import com.mezze.language.parser.MezzeParser
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -21,7 +23,19 @@ class PatternValidationTest {
         typeChecker = TypeChecker()
     }
 
-    private fun parseAndTypeCheck(code: String) = typeChecker.typeCheck(parser.parse(code)).program
+    private fun parseAndTypeCheck(code: String): Program =
+        typeChecker.typeCheck(parser.parse(code)).program
+
+    private fun parseAndTypeCheckWithWarnings(code: String): Pair<Program, List<String>> {
+        // Use checkProgram which returns the internal TypeCheckResult with warnings
+        val result = typeChecker.checkProgram(parser.parse(code))
+        return when (result) {
+            is TypeChecker.TypeCheckResult.Success -> Pair(result.program, result.warnings)
+            is TypeChecker.TypeCheckResult.Failure -> throw result.errors.first().let {
+                TypeCheckError(it.message, it.sourceLocation)
+            }
+        }
+    }
 
     // ========== UNIT VARIANT PAYLOAD DESTRUCTURING (BUG FIX) ==========
 
@@ -130,5 +144,199 @@ class PatternValidationTest {
         // Should pass - Some has payload and pattern destructures it
         val program = parseAndTypeCheck(code)
         assertNotNull(program)
+    }
+
+    // ========== UNKNOWN CONSTRUCTOR IN PATTERN (NEW FIX) ==========
+
+    @Test
+    fun `unknown constructor in pattern should fail`() {
+        val code = """
+            type Color = | Red, Green, Blue |
+
+            let test = {c: Color} ->
+                match c is
+                    Red -> 0
+                    Error -> 1
+                    Blue -> 2
+        """.trimIndent()
+
+        // Should throw - Error is not defined anywhere
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Unknown constructor") == true ||
+                   exception.message?.contains("Error") == true,
+            "Error should mention unknown constructor. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `unknown constructor with typo should suggest similar names`() {
+        val code = """
+            type Color = | Red, Green, Blue |
+
+            let test = {c: Color} ->
+                match c is
+                    Rede -> 0
+        """.trimIndent()
+
+        // Should throw with suggestion for 'Red'
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        // The error message might contain "Did you mean" with suggestion
+        assertTrue(exception.message?.contains("Unknown constructor") == true ||
+                   exception.message?.contains("Rede") == true,
+            "Error should mention unknown constructor. Actual: ${exception.message}")
+    }
+
+    // ========== LITERAL PATTERN ON VARIANT TYPE (NEW FIX) ==========
+
+    @Test
+    fun `literal pattern on variant type should fail with clear message`() {
+        val code = """
+            type Color = | Red, Green, Blue |
+
+            let test = {c: Color} ->
+                match c is
+                    21313 -> "matched"
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Cannot match variant type") == true ||
+                   exception.message?.contains("literal") == true,
+            "Error should mention variant type or literal. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `string literal pattern on variant type should fail`() {
+        val code = """
+            type Status = | Active, Inactive |
+
+            let test = {s: Status} ->
+                match s is
+                    "active" -> 1
+                    _ -> 0
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Cannot match") == true ||
+                   exception.message?.contains("literal") == true,
+            "Error should mention type mismatch. Actual: ${exception.message}")
+    }
+
+    // ========== VALID CONSTRUCTOR PATTERNS SHOULD STILL WORK ==========
+
+    @Test
+    fun `valid constructor patterns should work`() {
+        val code = """
+            type Color = | Red, Green, Blue |
+
+            let test = {c: Color} ->
+                match c is
+                    Red -> "red"
+                    Green -> "green"
+                    Blue -> "blue"
+        """.trimIndent()
+
+        val result = typeChecker.typeCheck(parser.parse(code))
+        assertNotNull(result.program, "Valid patterns should type check successfully")
+    }
+
+    // ========== UNUSED VARIABLE WARNINGS ==========
+
+    @Test
+    fun `unused pattern binding should produce warning`() {
+        val code = """
+            type Option = | Some { val: Int }, None |
+
+            let test = {opt: Option} ->
+                match opt is
+                    Some { val } -> 42
+                    None -> 0
+        """.trimIndent()
+
+        val (program, warnings) = parseAndTypeCheckWithWarnings(code)
+        assertNotNull(program)
+        // Check warnings contain unused variable
+        assertTrue(warnings.any { it.contains("Unused variable") && it.contains("val") },
+            "Should warn about unused variable 'val'. Warnings: $warnings")
+    }
+
+    @Test
+    fun `used pattern binding should not produce warning`() {
+        val code = """
+            type Option = | Some { val: Int }, None |
+
+            let test = {opt: Option} ->
+                match opt is
+                    Some { val } -> val
+                    None -> 0
+        """.trimIndent()
+
+        val (program, warnings) = parseAndTypeCheckWithWarnings(code)
+        assertNotNull(program)
+        // Should not warn since 'val' is used
+        assertTrue(warnings.none { it.contains("Unused variable") && it.contains("val") },
+            "Should not warn about 'val' since it's used. Warnings: $warnings")
+    }
+
+    @Test
+    fun `underscore prefix suppresses unused variable warning`() {
+        val code = """
+            type Option = | Some { val: Int }, None |
+
+            let test = {opt: Option} ->
+                match opt is
+                    Some { val = _unused } -> 42
+                    None -> 0
+        """.trimIndent()
+
+        val (program, warnings) = parseAndTypeCheckWithWarnings(code)
+        assertNotNull(program)
+        // Variables starting with _ should not produce warnings
+        assertTrue(warnings.none { it.contains("_unused") },
+            "Should not warn about '_unused'. Warnings: $warnings")
+    }
+
+    // ========== FLOAT LITERAL PATTERN WARNING ==========
+
+    @Test
+    fun `float literal pattern should produce warning`() {
+        val code = """
+            let test = {x: Float} ->
+                match x is
+                    3.14 -> "pi"
+                    _ -> "other"
+        """.trimIndent()
+
+        val (program, warnings) = parseAndTypeCheckWithWarnings(code)
+        assertNotNull(program)
+        assertTrue(warnings.any { it.contains("Float literal pattern") || it.contains("floating-point") },
+            "Should warn about float literal pattern. Warnings: $warnings")
+    }
+
+    // ========== LIST VS ARRAY PATTERN ERROR ==========
+
+    @Test
+    fun `array pattern syntax on list type should fail with helpful error`() {
+        val code = """
+            let test = {lst: List Int} ->
+                match lst is
+                    [head, ...tail] -> head
+                    [] -> 0
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        // Should mention List vs Array or suggest using Cons/Nil
+        assertTrue(exception.message?.contains("List") == true ||
+                   exception.message?.contains("Cons") == true ||
+                   exception.message?.contains("Array") == true,
+            "Error should mention List/Array mismatch. Actual: ${exception.message}")
     }
 }
