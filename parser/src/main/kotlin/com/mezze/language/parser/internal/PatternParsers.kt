@@ -274,10 +274,19 @@ internal val MezzeParser.literalPattern: Parser<Pattern>
                 } else {
                     text
                 }
-                ParseResult.Success(
-                    LiteralPattern(StringLiteralValue(value)),
-                    stream.advance()
-                )
+                val location = tokenLocation(token, currentFile)
+
+                // Check if this is a string interpolation pattern (has unescaped $()
+                if (hasUnescapedInterpolation(value)) {
+                    parseStringInterpolationPattern(value, stream.advance(), location)
+                } else {
+                    // Simple string literal pattern - process escape sequences
+                    val processedValue = processEscapeSequences(value)
+                    ParseResult.Success(
+                        LiteralPattern(StringLiteralValue(processedValue)),
+                        stream.advance()
+                    )
+                }
             }
             TokenType.BOOLEAN -> {
                 val value = token.text == "true"

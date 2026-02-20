@@ -1379,9 +1379,9 @@ class TypeValidator(
                 when (pattern) {
                     is ConstructorPattern -> {
                         // CRITICAL: Only count as covered if there's no guard condition
-                        // Guards make coverage conditional
+                        // Guards and if-let bindings make coverage conditional
                         // Matches OldTypeChecker.kt lines 8112-8118
-                        if (case.guard == null) {
+                        if (case.guard == null && case.ifLetBindings.isEmpty()) {
                             coveredConstructors.add(pattern.constructor)
                         }
 
@@ -1400,15 +1400,15 @@ class TypeValidator(
                         }
                     }
                     is WildcardPattern -> {
-                        // Only count as wildcard if there's no guard condition
+                        // Only count as wildcard if there's no guard or if-let condition
                         // Matches OldTypeChecker.kt lines 8119-8123
-                        if (case.guard == null) {
+                        if (case.guard == null && case.ifLetBindings.isEmpty()) {
                             hasWildcard = true
                         }
                     }
                     is VariablePattern -> {
-                        // Variable patterns also act as wildcards if no guard
-                        if (case.guard == null) {
+                        // Variable patterns also act as wildcards if no guard or if-let
+                        if (case.guard == null && case.ifLetBindings.isEmpty()) {
                             hasWildcard = true
                         }
                     }
@@ -1416,7 +1416,7 @@ class TypeValidator(
                         // SPECIAL CASE: Boolean literal patterns cover Bool constructors
                         // Bool is defined as | True, False | but we use true/false literals
                         // So we need to map boolean literal patterns to Bool constructors
-                        if (case.guard == null && pattern.value is BooleanLiteralValue) {
+                        if (case.guard == null && case.ifLetBindings.isEmpty() && pattern.value is BooleanLiteralValue) {
                             val boolLit = pattern.value as BooleanLiteralValue
                             val constructorName = if (boolLit.value) "True" else "False"
                             coveredConstructors.add(constructorName)
@@ -1425,6 +1425,10 @@ class TypeValidator(
                     }
                     is RecordPattern, is ArrayPattern -> {
                         // Other patterns don't cover specific constructors
+                    }
+                    is StringInterpolationPattern -> {
+                        // String interpolation patterns don't cover variant constructors
+                        // They can only match String type values
                     }
                 }
             }
@@ -1474,7 +1478,7 @@ class TypeValidator(
             // Find the wildcard pattern to report its location
             for (case in matchExpr.cases) {
                 for (pattern in case.patterns) {
-                    if ((pattern is WildcardPattern || pattern is VariablePattern) && case.guard == null) {
+                    if ((pattern is WildcardPattern || pattern is VariablePattern) && case.guard == null && case.ifLetBindings.isEmpty()) {
                         errors.add(
                             ValidationError.UnreachablePattern(
                                 pattern = pattern,
@@ -1525,8 +1529,10 @@ class TypeValidator(
                 continue
             }
 
-            // Check if this case makes subsequent patterns unreachable (no guard required)
-            if (case.guard == null) {
+            // Check if this case makes subsequent patterns unreachable
+            // A case is only exhaustive if it has no guard AND no if-let bindings
+            // (guards and if-let bindings can fail, so subsequent cases may still be reachable)
+            if (case.guard == null && case.ifLetBindings.isEmpty()) {
                 for (pattern in case.patterns) {
                     // Wildcard and variable patterns are exhaustive - they match everything
                     if (pattern is WildcardPattern || pattern is VariablePattern) {
@@ -1721,8 +1727,10 @@ class TypeValidator(
             is VariablePattern,
             is WildcardPattern,
             is LiteralPattern,
-            is ArrayPattern -> {
-                // These patterns don't need exhaustiveness checking
+            is ArrayPattern,
+            is StringInterpolationPattern -> {
+                // These patterns don't need exhaustiveness checking here
+                // (StringInterpolationPattern is refutable, but that's checked elsewhere)
                 emptyList()
             }
         }

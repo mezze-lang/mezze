@@ -224,6 +224,9 @@ class InternalBindingRenamer {
                 addPatternBindings(pattern)
             }
 
+            // Rename patterns while env still has the bindings
+            val newPatterns = case.patterns.map { renamePattern(it) }
+
             // Rename guard and body
             val newGuard = case.guard?.let { renameExpr(it) }
             val newBody = renameExpr(case.expression)
@@ -233,7 +236,7 @@ class InternalBindingRenamer {
             env.putAll(savedEnv)
 
             MatchCase(
-                patterns = case.patterns.map { renamePattern(it) },
+                patterns = newPatterns,
                 guard = newGuard,
                 expression = newBody
             )
@@ -363,6 +366,23 @@ class InternalBindingRenamer {
                     }
                 }
             }
+            is StringInterpolationPattern -> {
+                // Add bindings for capture variables
+                for (part in pattern.parts) {
+                    when (part) {
+                        is StringPatternCapture -> {
+                            if (part.variableName !in parameterNames) {
+                                val index = "#$counter"
+                                env[part.variableName] = index
+                                counter++
+                            }
+                        }
+                        is StringPatternLiteral -> {
+                            // No binding
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -398,6 +418,22 @@ class InternalBindingRenamer {
             restPattern = pattern.restPattern?.let { name ->
                 env[name] ?: name
             }
+        )
+        is StringInterpolationPattern -> StringInterpolationPattern(
+            parts = pattern.parts.map { part ->
+                when (part) {
+                    is StringPatternCapture -> {
+                        val renamed = env[part.variableName]
+                        if (renamed != null) {
+                            StringPatternCapture(renamed)
+                        } else {
+                            part  // Parameter or external - keep as-is
+                        }
+                    }
+                    is StringPatternLiteral -> part
+                }
+            },
+            sourceLocation = pattern.sourceLocation
         )
     }
 

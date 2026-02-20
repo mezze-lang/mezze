@@ -2061,6 +2061,35 @@ class ExpressionConstraintGenerator {
                 )
             }
 
+            // Process if-let bindings
+            // if let Pattern = Expression extends the context and adds constraints
+            for (ifLetBinding in matchCase.ifLetBindings) {
+                // Generate constraints for the binding expression
+                // TCO: If-let expression is NOT in tail position
+                val bindingExprResult = generate(ifLetBinding.expression, caseContext.notInTailPosition())
+                constraints.addAll(bindingExprResult.constraints)
+                undefinedVars.addAll(bindingExprResult.undefinedVariables)
+                abilityConstraints.addAll(bindingExprResult.abilityConstraints)
+                effects.addAll(bindingExprResult.effects)
+                performed = performed || bindingExprResult.performed
+                duplicateBindings.addAll(bindingExprResult.duplicateBindings)
+
+                // Generate pattern constraints for the if-let pattern against the expression type
+                val ifLetPatternResult = patternGenerator.generate(
+                    ifLetBinding.pattern,
+                    bindingExprResult.type,
+                    caseContext,
+                    ifLetBinding.sourceLocation
+                )
+                constraints.addAll(ifLetPatternResult.constraints)
+                patternWarnings.addAll(ifLetPatternResult.warnings)
+
+                // Extend context with bindings from the if-let pattern
+                for ((varName, varType) in ifLetPatternResult.bindings) {
+                    caseContext = caseContext.extend(varName, varType)
+                }
+            }
+
             // Generate constraints for case body with extended context
             // TCO: Case body inherits tail position from context
             val caseBodyResult = generate(matchCase.expression, caseContext)

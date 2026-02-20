@@ -50,15 +50,48 @@ class PatternMatchNode(
 }
 
 /**
+ * Represents an if-let binding in a match guard.
+ * Evaluates an expression and tries to match it against a pattern.
+ * If the pattern matches, binds variables to the frame; otherwise returns null (failure).
+ */
+@NodeInfo(shortName = "if-let-binding")
+class IfLetBindingNode(
+    @field:Child private var expressionNode: MezzeNode,
+    @field:Child private var patternNode: PatternNode
+) : MezzeNode() {
+
+    override fun execute(frame: VirtualFrame): MezzeValue {
+        throw UnsupportedOperationException("IfLetBindingNode should not be executed directly")
+    }
+
+    /**
+     * Try to match the if-let binding.
+     * @return true if the pattern matches and bindings were made, false otherwise
+     */
+    fun tryMatch(frame: VirtualFrame): Boolean {
+        val value = expressionNode.execute(frame)
+        return when (value) {
+            is MezzeInt -> patternNode.matchesInt(frame, value)
+            is MezzeString -> patternNode.matchesString(frame, value)
+            is MezzeBool -> patternNode.matchesBoolean(frame, value)
+            is MezzeVariant -> patternNode.matchesVariant(frame, value)
+            is MezzeRecord -> patternNode.matchesRecord(frame, value)
+            else -> patternNode.matchesGeneric(frame, value)
+        }
+    }
+}
+
+/**
  * Individual pattern case node
  */
 @NodeInfo(shortName = "pattern-case")
 class PatternCaseNode(
     @field:Children private val patterns: Array<PatternNode>,
     @field:Child private var guardNode: MezzeNode?,
-    @field:Child private var bodyNode: MezzeNode
+    @field:Child private var bodyNode: MezzeNode,
+    @field:Children private val ifLetBindings: Array<IfLetBindingNode> = emptyArray()
 ) : MezzeNode() {
-    
+
     override fun execute(frame: VirtualFrame): MezzeValue {
         throw UnsupportedOperationException("PatternCaseNode should not be executed directly")
     }
@@ -136,9 +169,16 @@ class PatternCaseNode(
     }
     
     /**
-     * Execute the case body with optional guard check
+     * Execute the case body with optional guard and if-let binding checks
      */
     private fun executeWithGuard(frame: VirtualFrame, value: MezzeValue): MezzeValue? {
+        // Check if-let bindings first (they may add bindings used by guard)
+        for (ifLetBinding in ifLetBindings) {
+            if (!ifLetBinding.tryMatch(frame)) {
+                return null // If-let binding failed, try next pattern
+            }
+        }
+
         // Check guard condition if present
         if (guardNode != null) {
             val guardResult = guardNode!!.execute(frame)
@@ -150,7 +190,7 @@ class PatternCaseNode(
                 return null // Guard failed, try next pattern
             }
         }
-        
+
         return bodyNode.execute(frame)
     }
 }
@@ -508,5 +548,159 @@ class ArrayPatternNode(
         // but don't bind the rest elements
 
         return true
+    }
+}
+
+/**
+ * String interpolation pattern node (matches strings with embedded captures)
+ * Examples:
+ * - "hello $(name)" -> matches "hello world", binds name = "world"
+ * - "$(a)-$(b)" -> matches "foo-bar", binds a = "foo", b = "bar"
+ * - "prefix-$(middle)-suffix" -> matches "prefix-value-suffix", binds middle = "value"
+ */
+@NodeInfo(shortName = "string-interpolation-pattern")
+class StringInterpolationPatternNode(
+    private val parts: List<StringPatternPart>,
+    private val variableSlots: Map<String, Int>  // Pre-allocated slots for capture variables
+) : PatternNode() {
+
+    /**
+     * A part of a string interpolation pattern - either a literal string or a capture.
+     */
+    sealed interface StringPatternPart {
+        data class Literal(val value: String) : StringPatternPart
+        data class Capture(val variableName: String) : StringPatternPart
+    }
+
+    override fun matchesInt(frame: VirtualFrame, value: MezzeInt): Boolean = false
+    override fun matchesBoolean(frame: VirtualFrame, value: MezzeBool): Boolean = false
+    override fun matchesVariant(frame: VirtualFrame, value: MezzeVariant): Boolean = false
+    override fun matchesRecord(frame: VirtualFrame, value: MezzeRecord): Boolean = false
+    override fun matchesGeneric(frame: VirtualFrame, value: MezzeValue): Boolean {
+        return when (value) {
+            is MezzeString -> matchesString(frame, value)
+            else -> false
+        }
+    }
+
+    override fun matchesString(frame: VirtualFrame, value: MezzeString): Boolean {
+        val inputString = value.value
+        val captureValues = mutableMapOf<String, String>()
+
+        // Try to match the string against the pattern
+        val matched = matchPattern(inputString, 0, 0, captureValues)
+
+        if (!matched) {
+            return false
+        }
+
+        // Bind all captured values to their variable slots
+        for ((varName, capturedValue) in captureValues) {
+            val slot = variableSlots[varName] ?: return false
+            frame.setObject(slot, MezzeString(capturedValue))
+        }
+
+        return true
+    }
+
+    /**
+     * Recursively match the pattern against the input string.
+     *
+     * @param input The input string to match
+     * @param inputPos Current position in the input string
+     * @param partIndex Current pattern part index
+     * @param captures Map to store captured values
+     * @return true if the pattern matches from this position
+     */
+    private fun matchPattern(
+        input: String,
+        inputPos: Int,
+        partIndex: Int,
+        captures: MutableMap<String, String>
+    ): Boolean {
+        // If we've processed all parts, we should be at the end of the input
+        if (partIndex >= parts.size) {
+            return inputPos == input.length
+        }
+
+        val part = parts[partIndex]
+
+        when (part) {
+            is StringPatternPart.Literal -> {
+                // Literal must match exactly
+                val literal = part.value
+                if (inputPos + literal.length > input.length) {
+                    return false
+                }
+                if (!input.regionMatches(inputPos, literal, 0, literal.length)) {
+                    return false
+                }
+                // Continue matching after the literal
+                return matchPattern(input, inputPos + literal.length, partIndex + 1, captures)
+            }
+
+            is StringPatternPart.Capture -> {
+                // Capture matches a portion of the string
+                // We need to find where the next literal starts (if any)
+                val nextPart = parts.getOrNull(partIndex + 1)
+
+                when (nextPart) {
+                    null -> {
+                        // This is the last part - capture the rest of the string
+                        captures[part.variableName] = input.substring(inputPos)
+                        return true
+                    }
+
+                    is StringPatternPart.Literal -> {
+                        // Find the next occurrence of the literal to determine capture bounds
+                        // We try the earliest match first (greedy-first doesn't work for patterns)
+                        val nextLiteral = nextPart.value
+                        var searchPos = inputPos
+
+                        while (true) {
+                            val literalPos = input.indexOf(nextLiteral, searchPos)
+                            if (literalPos == -1) {
+                                // Literal not found - pattern doesn't match
+                                return false
+                            }
+
+                            // Try capturing everything up to this literal position
+                            val capturedValue = input.substring(inputPos, literalPos)
+                            val savedCaptures = captures.toMap()
+                            captures[part.variableName] = capturedValue
+
+                            // Try to match the rest of the pattern
+                            if (matchPattern(input, literalPos, partIndex + 1, captures)) {
+                                return true
+                            }
+
+                            // Backtrack and try next occurrence
+                            captures.clear()
+                            captures.putAll(savedCaptures)
+                            searchPos = literalPos + 1
+                        }
+                    }
+
+                    is StringPatternPart.Capture -> {
+                        // Adjacent captures - this shouldn't happen due to parser validation
+                        // But if it does, we need to handle it
+                        // For now, try all possible split points
+                        for (splitPos in inputPos..input.length) {
+                            val capturedValue = input.substring(inputPos, splitPos)
+                            val savedCaptures = captures.toMap()
+                            captures[part.variableName] = capturedValue
+
+                            if (matchPattern(input, splitPos, partIndex + 1, captures)) {
+                                return true
+                            }
+
+                            captures.clear()
+                            captures.putAll(savedCaptures)
+                        }
+                        return false
+                    }
+                }
+            }
+        }
     }
 }

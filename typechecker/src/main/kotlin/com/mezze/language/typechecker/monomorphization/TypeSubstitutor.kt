@@ -278,10 +278,15 @@ class TypeSubstitutor(
     private fun applyToMatch(expr: MatchExpression, substitutedType: MezzeType?): MatchExpression {
         val updatedExpression = apply(expr.expression)
         val updatedCases = expr.cases.map { case ->
+            // Also apply to if-let bindings
+            val updatedIfLetBindings = case.ifLetBindings.map { binding ->
+                binding.copy(expression = apply(binding.expression))
+            }
             MatchCase(
                 patterns = case.patterns, // Patterns don't need substitution
                 guard = case.guard?.let { apply(it) },
-                expression = apply(case.expression)
+                expression = apply(case.expression),
+                ifLetBindings = updatedIfLetBindings
             )
         }
         return expr.copy(

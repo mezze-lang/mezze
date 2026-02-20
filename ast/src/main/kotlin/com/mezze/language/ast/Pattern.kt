@@ -79,6 +79,50 @@ data class ArrayPattern(
 ) : Pattern
 
 /**
+ * String interpolation pattern for matching and extracting parts of strings.
+ *
+ * Examples:
+ *   "hello $(name)" -> matches "hello world" with name = "world"
+ *   "$(a)-$(b)-$(c)" -> matches "x-y-z" with a = "x", b = "y", c = "z"
+ *   "prefix-$(x)-suffix" -> matches "prefix-foo-suffix" with x = "foo"
+ *
+ * Key restrictions (unlike expression string interpolation):
+ *   - Only variable names allowed in captures, not expressions
+ *   - Each capture binds a String value
+ *   - Adjacent captures without separator are not allowed
+ *
+ * Matching behavior:
+ *   - Literal parts must match exactly
+ *   - Captures are non-greedy (left-to-right), except the last which is greedy
+ *   - Escape \$( to match literal "$("
+ */
+@Serializable
+data class StringInterpolationPattern(
+    val parts: List<StringPatternPart>,
+    val sourceLocation: SourceLocation? = null
+) : Pattern
+
+/**
+ * A part of a string interpolation pattern - either a literal segment or a capture.
+ */
+@Serializable
+@JsonClassDiscriminator("stringPatternPartKind")
+sealed interface StringPatternPart
+
+/**
+ * A literal string segment that must match exactly.
+ */
+@Serializable
+data class StringPatternLiteral(val value: String) : StringPatternPart
+
+/**
+ * A variable capture that binds the matched portion to a variable name.
+ * The variable will have type String.
+ */
+@Serializable
+data class StringPatternCapture(val variableName: String) : StringPatternPart
+
+/**
  * Represents literal values that can appear in patterns
  */
 @Serializable
@@ -126,6 +170,7 @@ fun Pattern.isIrrefutable(): Boolean = when (this) {
     is ConstructorPattern -> false  // Variant constructors can fail to match
     is LiteralPattern -> false      // Literal values can fail to match
     is ArrayPattern -> false        // Array patterns can fail to match (length mismatch)
+    is StringInterpolationPattern -> false  // String patterns can fail to match
 }
 
 /**
@@ -146,6 +191,12 @@ fun Pattern.extractBindings(): List<String> = when (this) {
         val restBinding = restPattern?.let { listOf(it) } ?: emptyList()
         elementBindings + restBinding
     }
+    is StringInterpolationPattern -> parts.mapNotNull { part ->
+        when (part) {
+            is StringPatternCapture -> part.variableName
+            is StringPatternLiteral -> null
+        }
+    }
 }
 
 /**
@@ -158,4 +209,5 @@ fun Pattern.kindDescription(): String = when (this) {
     is ConstructorPattern -> "constructor pattern"
     is LiteralPattern -> "literal pattern"
     is ArrayPattern -> "array pattern"
+    is StringInterpolationPattern -> "string interpolation pattern"
 }

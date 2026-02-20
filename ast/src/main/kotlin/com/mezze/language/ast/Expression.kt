@@ -487,8 +487,26 @@ data class MatchExpression(
 @Serializable
 data class MatchCase(
     val patterns: List<Pattern>,        // Multiple patterns for | syntax
-    val guard: Expression? = null,      // Optional guard condition
-    val expression: Expression
+    val guard: Expression? = null,      // Optional guard condition (boolean)
+    val expression: Expression,
+    val ifLetBindings: List<IfLetGuard> = emptyList()  // Optional if let bindings
+)
+
+/**
+ * Represents an "if let" binding in a match guard.
+ *
+ * Syntax: `if let Pattern = Expression`
+ * Example: `if let Some {val = x} = lookup {key = k}`
+ *
+ * The pattern must match for the guard to pass, and any bindings
+ * introduced by the pattern are available in subsequent guards
+ * and the case body.
+ */
+@Serializable
+data class IfLetGuard(
+    val pattern: Pattern,
+    val expression: Expression,
+    val sourceLocation: SourceLocation? = null
 )
 
 // ============================================================================

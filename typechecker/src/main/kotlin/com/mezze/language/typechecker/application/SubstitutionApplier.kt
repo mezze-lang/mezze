@@ -1606,7 +1606,11 @@ class SubstitutionApplier(
         val updatedCases = expr.cases.map { case ->
             val updatedGuard = case.guard?.let { applyToExpression(it) }
             val updatedExpr = applyToExpression(case.expression)
-            MatchCase(case.patterns, updatedGuard, updatedExpr)
+            // Also apply substitution to if-let bindings
+            val updatedIfLetBindings = case.ifLetBindings.map { binding ->
+                binding.copy(expression = applyToExpression(binding.expression))
+            }
+            MatchCase(case.patterns, updatedGuard, updatedExpr, updatedIfLetBindings)
         }
         // CRITICAL FIX: Compute type based on match result, don't rely on expr.inferredType being set
         // All match case expressions must have the same type, so use the first case's type

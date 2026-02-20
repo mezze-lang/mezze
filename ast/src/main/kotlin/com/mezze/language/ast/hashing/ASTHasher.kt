@@ -442,6 +442,22 @@ object ASTHasher {
                 // Rest pattern name is excluded (alpha-renamed)
                 builder.appendBoolean(pattern.restPattern != null)
             }
+            is StringInterpolationPattern -> {
+                builder.append(byteArrayOf(HashTags.STRING_INTERPOLATION_PATTERN))
+                // Hash the parts - literal values are structural, capture variable names are excluded
+                builder.appendList(pattern.parts) { part ->
+                    when (part) {
+                        is StringPatternLiteral -> {
+                            appendBoolean(false)  // not a capture
+                            append(part.value)
+                        }
+                        is StringPatternCapture -> {
+                            appendBoolean(true)  // is a capture
+                            // Variable name is excluded for alpha-invariance
+                        }
+                    }
+                }
+            }
         }
     }
 

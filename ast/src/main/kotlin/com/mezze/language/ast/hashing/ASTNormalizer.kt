@@ -281,6 +281,7 @@ object ASTNormalizer {
             elements = pattern.elements.map { normalizePattern(it) },
             restPattern = pattern.restPattern
         )
+        is StringInterpolationPattern -> pattern  // String pattern parts are already normalized (just strings and names)
     }
 
     // =========================================================================

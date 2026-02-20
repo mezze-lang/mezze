@@ -46,6 +46,7 @@ class PatternConstraintGenerator {
             is RecordPattern -> generateRecord(pattern, scrutineeType, context, sourceLocation)
             is LiteralPattern -> generateLiteral(pattern, scrutineeType, context, sourceLocation)
             is ArrayPattern -> generateArray(pattern, scrutineeType, context, sourceLocation)
+            is StringInterpolationPattern -> generateStringInterpolation(pattern, scrutineeType, context, sourceLocation)
         }
     }
 
@@ -162,6 +163,83 @@ class PatternConstraintGenerator {
         is FloatLiteralValue -> "float literal '${value.value}'"
         is StringLiteralValue -> "string literal \"${value.value}\""
         is BooleanLiteralValue -> "boolean literal '${value.value}'"
+    }
+
+    // ========================================================================
+    // STRING INTERPOLATION PATTERNS
+    // ========================================================================
+
+    /**
+     * Generate constraints for a string interpolation pattern.
+     *
+     * String interpolation patterns match strings with embedded captures:
+     * - "prefix-$(name)-suffix" captures the middle portion as `name`
+     * - "$(greeting), $(target)!" captures two portions
+     *
+     * Constraints:
+     * - Scrutinee must be of type String
+     * - All captured variables are bound as String type
+     *
+     * This is a refutable pattern - it only matches if the literal parts match.
+     */
+    private fun generateStringInterpolation(
+        pattern: StringInterpolationPattern,
+        scrutineeType: MezzeType,
+        context: ConstraintContext,
+        sourceLocation: SourceLocation? = null
+    ): PatternConstraintResult {
+        val bindings = mutableMapOf<String, MezzeType>()
+        val constraints = mutableListOf<Constraint>()
+
+        // Early detection: Check if scrutinee is a variant type (for better error messages)
+        if (scrutineeType is MezzeType.VariantType) {
+            val constructors = scrutineeType.constructors.keys.sorted()
+            throw TypeCheckError(
+                "Cannot match variant type [${constructors.joinToString(", ")}] with a string interpolation pattern. " +
+                "Use a constructor pattern like '${constructors.firstOrNull() ?: "ConstructorName"}' instead.",
+                sourceLocation ?: pattern.sourceLocation,
+                errorType = ErrorType.INVALID_PATTERN
+            )
+        }
+
+        // Early detection: Check if scrutinee is a TypeApplication (named type)
+        if (scrutineeType is MezzeType.TypeApplication) {
+            throw TypeCheckError(
+                "Cannot match type '${scrutineeType.constructor}' with a string interpolation pattern. " +
+                "String patterns can only match String type values.",
+                sourceLocation ?: pattern.sourceLocation,
+                errorType = ErrorType.INVALID_PATTERN
+            )
+        }
+
+        // Scrutinee must be String type
+        constraints.add(
+            Constraint.Equality(
+                left = scrutineeType,
+                right = MezzeType.StringType,
+                context = "String interpolation pattern requires String type",
+                sourceLocation = sourceLocation ?: pattern.sourceLocation
+            )
+        )
+
+        // Extract bindings from capture parts
+        // Each capture binds its variable name to String type
+        for (part in pattern.parts) {
+            when (part) {
+                is StringPatternCapture -> {
+                    // Each capture variable is bound to String type
+                    bindings[part.variableName] = MezzeType.StringType
+                }
+                is StringPatternLiteral -> {
+                    // Literal parts don't introduce bindings
+                }
+            }
+        }
+
+        return PatternConstraintResult(
+            bindings = bindings,
+            constraints = constraints
+        )
     }
 
     // ========================================================================

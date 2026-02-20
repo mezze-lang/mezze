@@ -390,6 +390,7 @@ object HashTags {
     const val TUPLE_PATTERN: Byte = 0x29
     const val ARRAY_PATTERN: Byte = 0x2A
     const val REST_PATTERN: Byte = 0x2B
+    const val STRING_INTERPOLATION_PATTERN: Byte = 0x2C
 
     // Types
     const val TYPE_VAR: Byte = 0x30

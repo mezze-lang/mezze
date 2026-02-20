@@ -111,6 +111,98 @@ internal fun MezzeParser.lookAheadForArrowAfterBrace(stream: TokenStream): Boole
 }
 
 /**
+ * Expression parser specifically for if-let bindings in match guards.
+ *
+ * In the context `if let Pattern = Expression -> body`, the `->` after the expression
+ * belongs to the match case, NOT to a lambda. This parser treats all `{...}` after
+ * an identifier as function call arguments, never as lambda starts.
+ *
+ * This is necessary because normal expression parsing would see `getValue {x = n} -> v`
+ * and think `{x = n} -> v` is a lambda (due to lookAheadForArrowAfterBrace).
+ */
+internal val MezzeParser.ifLetBindingExpression: Parser<Expression>
+    get() = { stream ->
+        // Parse using the special postfix that doesn't use arrow lookahead
+        ifLetPostfixExpression(stream)
+    }
+
+/**
+ * Postfix expression parser for if-let contexts.
+ * Always treats {..} after an identifier as function arguments, never as lambda.
+ */
+internal val MezzeParser.ifLetPostfixExpression: Parser<Expression>
+    get() = { stream ->
+        var result: ParseResult<Expression> = primaryExpression(stream)
+
+        while (result is ParseResult.Success) {
+            val currentStream = result.remaining
+            val token = currentStream.current()
+
+            when (token?.type) {
+                TokenType.LBRACE -> {
+                    // In if-let context: always treat as function call/variant, never lambda
+                    val args = recordLiteral(currentStream)
+                    result = when (args) {
+                        is ParseResult.Success -> {
+                            val expr = result.value
+                            when {
+                                expr is Identifier && expr.name.firstOrNull()?.isUpperCase() == true -> {
+                                    // Variant construction: Some {val = 42}
+                                    ParseResult.Success(
+                                        VariantConstruction(
+                                            constructor = expr.name,
+                                            value = args.value,
+                                            sourceLocation = expr.sourceLocation
+                                        ),
+                                        args.remaining
+                                    )
+                                }
+                                expr is VariantConstruction -> {
+                                    ParseResult.Success(
+                                        expr.copy(value = args.value),
+                                        args.remaining
+                                    )
+                                }
+                                else -> {
+                                    // Regular function call: f {x = 1}
+                                    ParseResult.Success(
+                                        FunctionCall(
+                                            result.value,
+                                            args.value,
+                                            sourceLocation = result.value.sourceLocation
+                                        ),
+                                        args.remaining
+                                    )
+                                }
+                            }
+                        }
+                        is ParseResult.Failure -> break
+                    }
+                }
+                TokenType.DOT -> {
+                    // Member access: obj.field
+                    val dotStream = currentStream.advance()
+                    val member = identifierParser(dotStream)
+                    result = when (member) {
+                        is ParseResult.Success -> ParseResult.Success(
+                            MemberAccess(
+                                result.value,
+                                member.value.text,
+                                sourceLocation = result.value.sourceLocation
+                            ),
+                            member.remaining
+                        )
+                        is ParseResult.Failure -> break
+                    }
+                }
+                else -> break
+            }
+        }
+
+        result
+    }
+
+/**
  * Lambda or record expression parser.
  * This is the key to solving the ambiguity!
  *
@@ -974,42 +1066,55 @@ internal val MezzeParser.matchCase: Parser<MatchCase>
 
                 val stream2 = currentStream
 
-                // Check for optional guard: if <expression>
+                // Check for optional guard: if <expression> or if let bindings
                 val ifToken = keyword("if", TokenType.IF)(stream2)
 
                 when (ifToken) {
                     is ParseResult.Success -> {
-                        // Parse guard expression
                         val stream3 = skipNewlines(ifToken.remaining)
-                        val guardExp = expression(stream3)
 
-                        when (guardExp) {
+                        // Check for 'let' keyword (if-let guard)
+                        val letCheck = tok(TokenType.LET)(stream3)
+
+                        when (letCheck) {
                             is ParseResult.Success -> {
-                                // Have guard, now parse -> and result expression
-                                val streamBeforeArrow = skipNewlines(guardExp.remaining)
-                                val arrow = tok(TokenType.ARROW)(streamBeforeArrow)
+                                // Parse if-let bindings (can be multiple: if let P1 = E1 if let P2 = E2 ...)
+                                parseIfLetBindingsAndBody(patterns, letCheck.remaining, letCheck.value)
+                            }
+                            is ParseResult.Failure -> {
+                                // No 'let', parse as regular guard expression
+                                val guardExp = expression(stream3)
 
-                                when (arrow) {
+                                when (guardExp) {
                                     is ParseResult.Success -> {
-                                        val stream4 = skipNewlines(arrow.remaining)
-                                        val expr = expression(stream4)
+                                        // Have guard, now parse -> and result expression
+                                        val streamBeforeArrow = skipNewlines(guardExp.remaining)
+                                        val arrow = tok(TokenType.ARROW)(streamBeforeArrow)
 
-                                        when (expr) {
-                                            is ParseResult.Success -> ParseResult.Success(
-                                                MatchCase(
-                                                    patterns,
-                                                    guardExp.value,  // Guard expression
-                                                    expr.value
-                                                ),
-                                                expr.remaining
-                                            )
-                                            is ParseResult.Failure -> expr
+                                        when (arrow) {
+                                            is ParseResult.Success -> {
+                                                val stream4 = skipNewlines(arrow.remaining)
+                                                val expr = expression(stream4)
+
+                                                when (expr) {
+                                                    is ParseResult.Success -> ParseResult.Success(
+                                                        MatchCase(
+                                                            patterns,
+                                                            guardExp.value,  // Guard expression
+                                                            expr.value,
+                                                            emptyList()  // No if-let bindings
+                                                        ),
+                                                        expr.remaining
+                                                    )
+                                                    is ParseResult.Failure -> expr
+                                                }
+                                            }
+                                            is ParseResult.Failure -> arrow
                                         }
                                     }
-                                    is ParseResult.Failure -> arrow
+                                    is ParseResult.Failure -> guardExp
                                 }
                             }
-                            is ParseResult.Failure -> guardExp
                         }
                     }
                     is ParseResult.Failure -> {
@@ -1027,7 +1132,8 @@ internal val MezzeParser.matchCase: Parser<MatchCase>
                                         MatchCase(
                                             patterns,
                                             null,  // No guard
-                                            expr.value
+                                            expr.value,
+                                            emptyList()  // No if-let bindings
                                         ),
                                         expr.remaining
                                     )
@@ -1042,6 +1148,182 @@ internal val MezzeParser.matchCase: Parser<MatchCase>
             is ParseResult.Failure -> firstPattern
         }
     }
+
+/**
+ * Helper function to parse a single if-let binding: Pattern = Expression
+ * Returns a pair of (IfLetGuard, remaining stream)
+ */
+private fun MezzeParser.parseIfLetBinding(
+    stream: TokenStream,
+    letToken: Token
+): ParseResult<Pair<IfLetGuard, TokenStream>> {
+    val patternStream = skipNewlines(stream)
+    val patternResult = patternParser(patternStream)
+
+    return when (patternResult) {
+        is ParseResult.Success -> {
+            val afterPattern = skipNewlines(patternResult.remaining)
+            val eqToken = tok(TokenType.ASSIGN)(afterPattern)
+
+            when (eqToken) {
+                is ParseResult.Success -> {
+                    val afterEq = skipNewlines(eqToken.remaining)
+                    // Parse expression using special if-let parser that doesn't confuse {} with lambda
+                    val bindingExpr = ifLetBindingExpression(afterEq)
+
+                    when (bindingExpr) {
+                        is ParseResult.Success -> {
+                            val ifLetBinding = IfLetGuard(
+                                pattern = patternResult.value,
+                                expression = bindingExpr.value,
+                                sourceLocation = SourceLocation(
+                                    letToken.line,
+                                    letToken.column,
+                                    null
+                                )
+                            )
+                            ParseResult.Success(
+                                Pair(ifLetBinding, bindingExpr.remaining),
+                                bindingExpr.remaining
+                            )
+                        }
+                        is ParseResult.Failure -> ParseResult.Failure(
+                            bindingExpr.message,
+                            bindingExpr.position,
+                            bindingExpr.line,
+                            bindingExpr.column
+                        )
+                    }
+                }
+                is ParseResult.Failure -> {
+                    ParseResult.Failure(
+                        "Expected '=' after pattern in 'if let' guard",
+                        eqToken.position,
+                        eqToken.line,
+                        eqToken.column
+                    )
+                }
+            }
+        }
+        is ParseResult.Failure -> {
+            ParseResult.Failure(
+                "Expected pattern after 'let' in 'if let' guard",
+                patternResult.position,
+                patternResult.line,
+                patternResult.column
+            )
+        }
+    }
+}
+
+/**
+ * Helper function to parse multiple if-let bindings followed by -> and body expression.
+ * Syntax: if let P1 = E1 && let P2 = E2 && ... -> body
+ */
+private fun MezzeParser.parseIfLetBindingsAndBody(
+    patterns: List<Pattern>,
+    firstBindingStream: TokenStream,
+    firstLetToken: Token
+): ParseResult<MatchCase> {
+    val ifLetBindings = mutableListOf<IfLetGuard>()
+
+    // Parse first binding
+    val firstBindingResult = parseIfLetBinding(firstBindingStream, firstLetToken)
+    when (firstBindingResult) {
+        is ParseResult.Success -> {
+            ifLetBindings.add(firstBindingResult.value.first)
+            var currentStream = firstBindingResult.value.second
+
+            // Parse additional if let bindings separated by &&
+            while (true) {
+                val nextStream = skipNewlines(currentStream)
+                // Check for && followed by let
+                val andToken = tok(TokenType.AND)(nextStream)
+                when (andToken) {
+                    is ParseResult.Success -> {
+                        val afterAnd = skipNewlines(andToken.remaining)
+                        val nextLetToken = tok(TokenType.LET)(afterAnd)
+                        when (nextLetToken) {
+                            is ParseResult.Success -> {
+                                val nextBindingResult = parseIfLetBinding(nextLetToken.remaining, nextLetToken.value)
+                                when (nextBindingResult) {
+                                    is ParseResult.Success -> {
+                                        ifLetBindings.add(nextBindingResult.value.first)
+                                        currentStream = nextBindingResult.value.second
+                                    }
+                                    is ParseResult.Failure -> {
+                                        return ParseResult.Failure(
+                                            nextBindingResult.message,
+                                            nextBindingResult.position,
+                                            nextBindingResult.line,
+                                            nextBindingResult.column
+                                        )
+                                    }
+                                }
+                            }
+                            is ParseResult.Failure -> {
+                                // && without let - this is an error in this context
+                                return ParseResult.Failure(
+                                    "Expected 'let' after '&&' in if-let chain",
+                                    nextLetToken.position,
+                                    nextLetToken.line,
+                                    nextLetToken.column
+                                )
+                            }
+                        }
+                    }
+                    is ParseResult.Failure -> break  // No more &&, done with bindings
+                }
+            }
+
+            // Now parse -> and result expression
+            val streamBeforeArrow = skipNewlines(currentStream)
+
+            // Check for || which is not allowed in if-let chains - give helpful error
+            val orCheck = tok(TokenType.OR)(streamBeforeArrow)
+            if (orCheck is ParseResult.Success) {
+                return ParseResult.Failure(
+                    "Cannot use '||' to chain if-let bindings. Use '&&' instead. " +
+                    "Example: if let Some {val = a} = expr1 && let Some {val = b} = expr2",
+                    orCheck.value.position,
+                    orCheck.value.line,
+                    orCheck.value.column
+                )
+            }
+
+            val arrow = tok(TokenType.ARROW)(streamBeforeArrow)
+
+            return when (arrow) {
+                is ParseResult.Success -> {
+                    val stream4 = skipNewlines(arrow.remaining)
+                    val expr = expression(stream4)
+
+                    when (expr) {
+                        is ParseResult.Success -> ParseResult.Success(
+                            MatchCase(
+                                patterns,
+                                null,  // No additional guard expression
+                                expr.value,
+                                ifLetBindings.toList()
+                            ),
+                            expr.remaining
+                        )
+                        is ParseResult.Failure -> expr
+                    }
+                }
+                is ParseResult.Failure -> arrow
+            }
+        }
+        is ParseResult.Failure -> {
+            return ParseResult.Failure(
+                firstBindingResult.message,
+                firstBindingResult.position,
+                firstBindingResult.line,
+                firstBindingResult.column
+            )
+        }
+    }
+}
 
     // Expression with operator precedence
 internal val MezzeParser.expression: Parser<Expression>

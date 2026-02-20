@@ -720,8 +720,22 @@ class ASTToTruffleConverter(
         val patterns = matchCase.patterns.map { convertPattern(it) }.toTypedArray()
         val guardNode = matchCase.guard?.let { convertExpression(it) }
         val bodyNode = convertExpression(matchCase.expression)
-        
-        return createPatternCaseNode(patterns, guardNode, bodyNode)
+
+        // Convert if-let bindings
+        val ifLetBindingNodes = matchCase.ifLetBindings.map { binding ->
+            convertIfLetBinding(binding)
+        }.toTypedArray()
+
+        return createPatternCaseNode(patterns, guardNode, bodyNode, ifLetBindingNodes)
+    }
+
+    /**
+     * Convert an if-let binding to an IfLetBindingNode
+     */
+    private fun convertIfLetBinding(binding: IfLetGuard): IfLetBindingNode {
+        val expressionNode = convertExpression(binding.expression)
+        val patternNode = convertPattern(binding.pattern)
+        return IfLetBindingNode(expressionNode, patternNode)
     }
     
     /**
@@ -790,6 +804,27 @@ class ASTToTruffleConverter(
                 val restSlot = restPatternName?.let { getOrCreateSlot(it) }
 
                 ArrayPatternNode(elementPatterns, restPatternName, elementSlots, restSlot)
+            }
+            is StringInterpolationPattern -> {
+                // String interpolation pattern matches strings with embedded captures
+                // Examples: "hello $(name)", "$(a)-$(b)", "prefix-$(middle)-suffix"
+
+                // Convert AST pattern parts to interpreter pattern parts
+                val parts = pattern.parts.map { part ->
+                    when (part) {
+                        is StringPatternLiteral -> StringInterpolationPatternNode.StringPatternPart.Literal(part.value)
+                        is StringPatternCapture -> StringInterpolationPatternNode.StringPatternPart.Capture(part.variableName)
+                    }
+                }
+
+                // Pre-allocate slots for capture variables
+                val variableSlots = pattern.parts
+                    .filterIsInstance<StringPatternCapture>()
+                    .associate { capture ->
+                        capture.variableName to getOrCreateSlot(capture.variableName)
+                    }
+
+                StringInterpolationPatternNode(parts, variableSlots)
             }
         }
     }
@@ -2365,8 +2400,13 @@ class ASTToTruffleConverter(
         return PatternMatchNode(valueNode, caseNodes)
     }
     
-    private fun createPatternCaseNode(patterns: Array<PatternNode>, guardNode: MezzeNode?, bodyNode: MezzeNode): PatternCaseNode {
-        return PatternCaseNode(patterns, guardNode, bodyNode)
+    private fun createPatternCaseNode(
+        patterns: Array<PatternNode>,
+        guardNode: MezzeNode?,
+        bodyNode: MezzeNode,
+        ifLetBindings: Array<IfLetBindingNode> = emptyArray()
+    ): PatternCaseNode {
+        return PatternCaseNode(patterns, guardNode, bodyNode, ifLetBindings)
     }
 
     private fun createFunctionCallNode(functionNode: MezzeNode, argumentsNode: MezzeNode): MezzeNode {

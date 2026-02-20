@@ -495,6 +495,127 @@ class MezzeParser(
             stream
         )
     }
+
+    /**
+     * Parse a string interpolation pattern.
+     *
+     * Unlike expression interpolation which allows full expressions inside $(),
+     * pattern interpolation only allows variable names (identifiers).
+     *
+     * Examples:
+     *   "hello $(name)"     -> matches "hello world" with name = "world"
+     *   "$(a)-$(b)-$(c)"    -> matches "x-y-z" with a = "x", b = "y", c = "z"
+     *   "prefix-$(x)-suffix" -> matches "prefix-foo-suffix" with x = "foo"
+     *
+     * Restrictions:
+     *   - Only variable names allowed inside $(), not expressions
+     *   - Adjacent captures without separator are not allowed
+     *   - Each capture binds a String value
+     */
+    internal fun parseStringInterpolationPattern(
+        content: String,
+        stream: TokenStream,
+        location: SourceLocation? = null
+    ): ParseResult<Pattern> {
+        val parts = mutableListOf<StringPatternPart>()
+        var i = 0
+        val currentStringPart = StringBuilder()
+        var lastWasCapture = false
+
+        while (i < content.length) {
+            if (content[i] == '\\' && i + 1 < content.length) {
+                // Handle escape sequence
+                when (content[i + 1]) {
+                    'n' -> { currentStringPart.append('\n'); i += 2 }
+                    't' -> { currentStringPart.append('\t'); i += 2 }
+                    'r' -> { currentStringPart.append('\r'); i += 2 }
+                    '\\' -> { currentStringPart.append('\\'); i += 2 }
+                    '"' -> { currentStringPart.append('"'); i += 2 }
+                    '$' -> { currentStringPart.append('$'); i += 2 }  // Escaped $, not interpolation
+                    else -> { currentStringPart.append(content[i]); i++ }
+                }
+                lastWasCapture = false
+            } else if (content[i] == '$' && i + 1 < content.length && content[i + 1] == '(') {
+                // Found unescaped interpolation start
+                // Check for adjacent captures (not allowed)
+                if (lastWasCapture && currentStringPart.isEmpty()) {
+                    return stream.failure(
+                        "Adjacent captures without separator are not allowed in string patterns. " +
+                        "Add a literal separator between captures, e.g., \"$(a)-$(b)\" instead of \"$(a)$(b)\"."
+                    )
+                }
+
+                // Add any accumulated string part
+                if (currentStringPart.isNotEmpty()) {
+                    parts.add(StringPatternLiteral(currentStringPart.toString()))
+                    currentStringPart.clear()
+                }
+
+                // Find the matching closing paren
+                i += 2  // Skip "$("
+                val varStart = i
+
+                // Skip whitespace before variable name
+                while (i < content.length && content[i].isWhitespace()) {
+                    i++
+                }
+
+                // Parse variable name (identifier)
+                val varNameStart = i
+                if (i >= content.length || !(content[i].isLetter() || content[i] == '_')) {
+                    return stream.failure(
+                        "Expected variable name after '$(' in string pattern. " +
+                        "Only variable names are allowed in pattern captures, not expressions."
+                    )
+                }
+
+                while (i < content.length && (content[i].isLetterOrDigit() || content[i] == '_')) {
+                    i++
+                }
+                val varName = content.substring(varNameStart, i)
+
+                // Skip whitespace after variable name
+                while (i < content.length && content[i].isWhitespace()) {
+                    i++
+                }
+
+                // Expect closing paren
+                if (i >= content.length || content[i] != ')') {
+                    val found = if (i < content.length) "'${content[i]}'" else "end of string"
+                    return stream.failure(
+                        "Expected ')' after variable name '$varName' in string pattern capture, but found $found. " +
+                        "Pattern captures must contain only a variable name, e.g., \"$(name)\"."
+                    )
+                }
+                i++  // Skip ')'
+
+                parts.add(StringPatternCapture(varName))
+                lastWasCapture = true
+            } else {
+                currentStringPart.append(content[i])
+                i++
+                lastWasCapture = false
+            }
+        }
+
+        // Add any remaining string part
+        if (currentStringPart.isNotEmpty()) {
+            parts.add(StringPatternLiteral(currentStringPart.toString()))
+        }
+
+        // If we only have one StringPatternLiteral, it's actually not a pattern (edge case after escape processing)
+        if (parts.size == 1 && parts[0] is StringPatternLiteral) {
+            return ParseResult.Success(
+                LiteralPattern(StringLiteralValue((parts[0] as StringPatternLiteral).value)),
+                stream
+            )
+        }
+
+        return ParseResult.Success(
+            StringInterpolationPattern(parts = parts, sourceLocation = location),
+            stream
+        )
+    }
 }
 
 /**
