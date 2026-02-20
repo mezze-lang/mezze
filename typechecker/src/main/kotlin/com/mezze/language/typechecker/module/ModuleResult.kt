@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.module
 
 import com.mezze.language.ast.*
+import com.mezze.language.ast.hashing.MezzeHash
 import com.mezze.language.typechecker.ProgramIndex
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.solving.Substitution
@@ -66,9 +67,10 @@ data class LoadedModule(
 data class ExportedItem(
     val name: String,                  // Export name
     val type: ExportedItemType,        // What kind of item (function, type, etc.)
-    val mezzeType: MezzeType,            // Type of the item
+    val mezzeType: MezzeType,          // Type of the item
     val originalName: String,          // Original name in module (before aliasing)
-    val visibility: Visibility = Visibility.PUBLIC
+    val visibility: Visibility = Visibility.PUBLIC,
+    val contentHash: MezzeHash? = null // Content hash for content-addressed lookup
 )
 
 /**
@@ -264,9 +266,10 @@ data class ImportedBinding(
     val name: String,                  // Local name (may be aliased)
     val originalName: String,          // Original name in source module
     val modulePath: String,            // Source module path
-    val type: MezzeType,                // Type of the binding
+    val type: MezzeType,               // Type of the binding
     val isQualified: Boolean = false,  // true for qualified imports (module::name)
-    val sourceLocation: SourceLocation? = null
+    val sourceLocation: SourceLocation? = null,
+    val contentHash: MezzeHash? = null // Content hash for content-addressed lookup
 )
 
 // ============================================================================

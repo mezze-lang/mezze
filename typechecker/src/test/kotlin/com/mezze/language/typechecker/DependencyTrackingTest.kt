@@ -5,9 +5,12 @@ import com.mezze.language.typechecker.dependencies.DefinitionRef
 import com.mezze.language.typechecker.dependencies.DependencyGraph
 import com.mezze.language.typechecker.dependencies.DependencyGraphBuilder
 import com.mezze.language.typechecker.dependencies.DependencyTracker
+import com.mezze.language.typechecker.dependencies.NameRegistry
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 /**
  * Tests for dependency tracking infrastructure.
@@ -158,5 +161,152 @@ class DependencyTrackingTest {
 
         assertEquals("foo", localRef.qualifiedName)
         assertEquals("std::list::map", qualifiedRef.qualifiedName)
+    }
+
+    // ========================================================================
+    // NameRegistry Tests
+    // ========================================================================
+
+    @Test
+    fun `NameRegistry basic registration and lookup`() {
+        val registry = NameRegistry()
+
+        val hashFoo = hashOf("foo_content")
+        val hashBar = hashOf("bar_content")
+
+        registry.register(null, "foo", hashFoo)
+        registry.register("std::list", "map", hashBar)
+
+        // Forward lookup
+        assertEquals(hashFoo, registry.getHash(null, "foo"))
+        assertEquals(hashBar, registry.getHash("std::list", "map"))
+        assertNull(registry.getHash(null, "unknown"))
+
+        // Qualified name lookup
+        assertEquals(hashFoo, registry.getHash("foo"))
+        assertEquals(hashBar, registry.getHash("std::list::map"))
+    }
+
+    @Test
+    fun `NameRegistry reverse lookup returns all aliases`() {
+        val registry = NameRegistry()
+
+        val hash = hashOf("shared_content")
+
+        // Register multiple names for the same hash (aliases)
+        registry.register(null, "myFunc", hash)
+        registry.register("module", "alias1", hash)
+        registry.register("other::module", "alias2", hash)
+
+        val names = registry.getNames(hash)
+
+        assertEquals(3, names.size)
+        assertTrue(names.any { it.name == "myFunc" && it.modulePath == null })
+        assertTrue(names.any { it.name == "alias1" && it.modulePath == "module" })
+        assertTrue(names.any { it.name == "alias2" && it.modulePath == "other::module" })
+    }
+
+    @Test
+    fun `NameRegistry updating a name removes old mapping`() {
+        val registry = NameRegistry()
+
+        val hash1 = hashOf("version1")
+        val hash2 = hashOf("version2")
+
+        // Register initial mapping
+        registry.register(null, "myFunc", hash1)
+        assertEquals(hash1, registry.getHash(null, "myFunc"))
+        assertEquals(setOf(NameRegistry.QualifiedName(null, "myFunc")), registry.getNames(hash1))
+
+        // Update to new hash (simulates editing a function)
+        registry.register(null, "myFunc", hash2)
+        assertEquals(hash2, registry.getHash(null, "myFunc"))
+
+        // Old hash should no longer have this name
+        assertTrue(registry.getNames(hash1).isEmpty())
+
+        // New hash should have the name
+        assertEquals(setOf(NameRegistry.QualifiedName(null, "myFunc")), registry.getNames(hash2))
+    }
+
+    @Test
+    fun `NameRegistry remove operations`() {
+        val registry = NameRegistry()
+
+        val hash = hashOf("content")
+        registry.register(null, "foo", hash)
+        registry.register("mod", "bar", hash)
+
+        // Remove one name
+        val removedHash = registry.removeName(null, "foo")
+        assertEquals(hash, removedHash)
+        assertFalse(registry.hasName(null, "foo"))
+        assertTrue(registry.hasName("mod", "bar"))
+
+        // Hash still exists with remaining name
+        assertTrue(registry.hasHash(hash))
+        assertEquals(1, registry.getNames(hash).size)
+
+        // Remove all names for hash
+        val removedNames = registry.removeHash(hash)
+        assertEquals(1, removedNames.size)
+        assertFalse(registry.hasHash(hash))
+    }
+
+    @Test
+    fun `NameRegistry snapshot and restore`() {
+        val registry = NameRegistry()
+
+        val hash1 = hashOf("content1")
+        val hash2 = hashOf("content2")
+        registry.register(null, "foo", hash1)
+        registry.register("mod", "bar", hash2)
+
+        // Create snapshot
+        val snapshot = registry.snapshot()
+
+        // Clear and verify empty
+        registry.clear()
+        assertTrue(registry.isEmpty())
+
+        // Restore from snapshot
+        registry.restore(snapshot)
+        assertEquals(hash1, registry.getHash(null, "foo"))
+        assertEquals(hash2, registry.getHash("mod", "bar"))
+    }
+
+    @Test
+    fun `NameRegistry merge combines registries`() {
+        val registry1 = NameRegistry()
+        val registry2 = NameRegistry()
+
+        val hash1 = hashOf("content1")
+        val hash2 = hashOf("content2")
+        val hash3 = hashOf("content3")
+
+        registry1.register(null, "foo", hash1)
+        registry1.register(null, "bar", hash2)
+
+        registry2.register(null, "bar", hash3)  // Conflict: different hash
+        registry2.register(null, "baz", hash3)
+
+        // Merge - registry2 wins on conflicts
+        registry1.merge(registry2)
+
+        assertEquals(hash1, registry1.getHash(null, "foo"))
+        assertEquals(hash3, registry1.getHash(null, "bar"))  // registry2 wins
+        assertEquals(hash3, registry1.getHash(null, "baz"))
+        assertEquals(3, registry1.size)
+    }
+
+    @Test
+    fun `NameRegistry QualifiedName formatting`() {
+        val local = NameRegistry.QualifiedName(null, "myFunc")
+        val qualified = NameRegistry.QualifiedName("std::list", "map")
+
+        assertEquals("myFunc", local.fullName)
+        assertEquals("std::list::map", qualified.fullName)
+        assertEquals("myFunc", local.toString())
+        assertEquals("std::list::map", qualified.toString())
     }
 }
