@@ -170,7 +170,7 @@ class HandlerNotFoundException(
     val effectName: String,
     val operationName: String? = null
 ) : MezzeException(buildMessage(effectName, operationName)) {
-    
+
     companion object {
         private fun buildMessage(effectName: String, operationName: String?): String {
             return if (operationName != null) {
@@ -180,6 +180,18 @@ class HandlerNotFoundException(
             }
         }
     }
-    
+
     override fun getUserMessage(): String = "Handler not found: $effectName${operationName?.let { ".$it" } ?: ""}"
+}
+
+/**
+ * Exception thrown when the crash function is called.
+ * This represents an unrecoverable error, similar to Rust's panic!.
+ * crash is a built-in function that doesn't require imports.
+ */
+class MezzeCrashException(
+    message: String
+) : MezzeException(message) {
+
+    override fun getUserMessage(): String = message ?: "Program crashed"
 }

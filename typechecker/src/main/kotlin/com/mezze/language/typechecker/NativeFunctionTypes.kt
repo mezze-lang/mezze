@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.TypeVar
 import com.mezze.language.typechecker.types.BasicTypes
 import com.mezze.language.typechecker.types.CharTypes
 import com.mezze.language.typechecker.types.collections.ArrayListTypes
@@ -100,9 +101,11 @@ object NativeFunctionTypes {
         // Codec types (JSON serialization/deserialization)
         JsonTypes.registerAll(context)
 
+        // crash is a built-in function, no import needed
+        // Terminates the program with an error message (like Rust's panic!)
         context["crash"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("msg" to MezzeType.StringType)),
-            MezzeType.VariantType(emptyMap())
+            MezzeType.VarType(TypeVar.fresh())  // Returns 'a (never returns, so can unify with any type)
         )
     }
 }

@@ -43,7 +43,6 @@ import com.mezze.language.interpreter.stdlib.concurrent.CancellationTokenImpleme
 import com.mezze.language.interpreter.stdlib.conversion.TruffleConversionImplementations
 import com.mezze.language.interpreter.stdlib.io.TruffleIOImplementations
 import com.mezze.language.interpreter.stdlib.system.TruffleSystemImplementations
-import com.mezze.language.interpreter.stdlib.logic.TruffleLogicImplementations
 import com.mezze.language.interpreter.stdlib.codec.JsonImplementations
 
 
@@ -117,9 +116,6 @@ object TruffleNativeImplementations {
         STMImplementations.registerAll(context)  // Software Transactional Memory
         CancellationTokenImplementations.registerAll(context)  // Cooperative cancellation
 
-        // Register logic implementations (boolean operations, comparisons)
-        TruffleLogicImplementations.registerAll(context)
-
         // Register codec implementations (JSON serialization/deserialization)
         JsonImplementations.registerAll(context)
 
@@ -128,14 +124,12 @@ object TruffleNativeImplementations {
         TruffleIOImplementations.registerAll(context)
         TruffleSystemImplementations.registerAll(context)
 
-        // Register minimal crash function for testing
-        context["__native_crash"] = NativeMezzeFunction("__native_crash") { args ->
-            val record = args.firstOrNull() as? MezzeRecord ?: throw NativeFunctionException("__native_crash", "expects MezzeRecord")
-            val msg = record.fields["msg"] as? MezzeString ?: throw NativeFunctionException("__native_crash", "expects 'msg' as String")
-            System.err.println("Program crashed: ${msg.value}")
-            System.exit(1)
-            // This line will never be reached, but needed for type checking
-            throw MezzeException("Program crashed: ${msg.value}")
+        // Register crash function - built-in, no import needed
+        // Terminates the program with an error message (like Rust's panic!)
+        context["crash"] = NativeMezzeFunction("crash") { args ->
+            val record = args.firstOrNull() as? MezzeRecord ?: throw NativeFunctionException("crash", "expects MezzeRecord")
+            val msg = record.fields["msg"] as? MezzeString ?: throw NativeFunctionException("crash", "expects 'msg' as String")
+            throw MezzeCrashException("crash: ${msg.value}")
         }
 
         // NOTE: All native function implementations have been migrated to specialized files:
@@ -145,8 +139,7 @@ object TruffleNativeImplementations {
         // - Phase 4: Math operations (MathCore, MathTrig, MathRandom)
         // - Phase 5: Type conversions and basic types (Conversion, Bool, Float, Frac, Nat)
         // - Phase 6: I/O and System operations (Filesystem, Time, Environment, System)
-        // - Phase 7: Logic operations (TruffleLogicImplementations)
-        // - Phase 8: Effect system (Continuation, Loom, Log)
+        // - Phase 7: Effect system (Continuation, Loom, Log)
         //
         // All operators (+, -, *, /, %, ==, !=, <, >, <=, >=) are handled by dedicated
         // Truffle nodes (AddNode, SubtractNode, etc.) in nodes/arithmetic/ArithmeticNode.kt

@@ -181,7 +181,7 @@ pub let batched: {f: {'a} -> 'b, list: ['a], batch_size: Int} -> ['b] <Async> =
 let head: {list: ['a]} -> 'a =
     {list} -> match list is
         | [x, ...rest] -> x
-        | [] -> panic {msg = "head of empty list"}
+        | [] -> crash {msg = "head of empty list"}
 
 let map: {f: {'a} -> 'b, list: ['a]} -> ['b] =
     {f, list} -> match list is
@@ -204,8 +204,6 @@ let flatten: {list: [['a]]} -> ['a] =
         | [] -> []
         | [xs, ...rest] -> xs ++ flatten {list = rest}
 
-let panic: {msg: String} -> 'a =
-    {msg} -> __native_panic {msg = msg}
 
 # =============================================================================
 # Examples
