@@ -443,7 +443,7 @@ object AtomImplementations {
 
             val validator = atom.validator.get()
             if (validator != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to validator)))
+                mezzeOptionSome(validator)
             } else {
                 MezzeVariant("None", MezzeUnit)
             }

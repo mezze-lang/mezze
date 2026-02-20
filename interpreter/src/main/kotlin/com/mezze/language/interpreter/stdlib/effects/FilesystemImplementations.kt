@@ -36,14 +36,14 @@ object FilesystemImplementations {
      * Helper: Create Ok variant - Ok { val = value }
      */
     private fun createOk(value: MezzeValue): MezzeVariant {
-        return MezzeVariant("Ok", MezzeRecord(mapOf("val" to value)))
+        return mezzeResultOk(value)
     }
 
     /**
      * Helper: Create Err variant - Err { error = errorVariant }
      */
     private fun createErr(errorVariant: MezzeVariant): MezzeVariant {
-        return MezzeVariant("Err", MezzeRecord(mapOf("error" to errorVariant)))
+        return mezzeResultErr(errorVariant)
     }
 
     /**

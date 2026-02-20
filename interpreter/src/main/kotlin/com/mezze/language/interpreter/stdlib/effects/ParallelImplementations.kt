@@ -222,12 +222,12 @@ object ParallelImplementations {
             }
 
             if (list.isEmpty()) {
-                return@NativeMezzeFunction MezzeVariant("None", MezzeRecord(emptyMap()))
+                return@NativeMezzeFunction mezzeOptionNone()
             }
 
             // For reduce, we do parallel reduction in stages
             val result = parallelReduceInternal(list, f)
-            MezzeVariant("Some", MezzeRecord(mapOf("val" to result)))
+            mezzeOptionSome(result)
         }
     }
 
@@ -389,7 +389,7 @@ object ParallelImplementations {
             }
 
             if (list.isEmpty()) {
-                return@NativeMezzeFunction MezzeVariant("None", MezzeRecord(emptyMap()))
+                return@NativeMezzeFunction mezzeOptionNone()
             }
 
             val env = TruffleContextHolder.getEnv()
@@ -426,9 +426,9 @@ object ParallelImplementations {
 
             val foundValue = result.get()
             if (foundValue != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to foundValue)))
+                mezzeOptionSome(foundValue)
             } else {
-                MezzeVariant("None", MezzeRecord(emptyMap()))
+                mezzeOptionNone()
             }
         }
     }
@@ -822,7 +822,7 @@ object ParallelImplementations {
             }
 
             if (list.isEmpty()) {
-                return@NativeMezzeFunction MezzeVariant("None", MezzeRecord(emptyMap()))
+                return@NativeMezzeFunction mezzeOptionNone()
             }
 
             val env = TruffleContextHolder.getEnv()
@@ -862,7 +862,7 @@ object ParallelImplementations {
                 acc = callBinaryFunction(f, acc, chunkResults[i])
             }
 
-            MezzeVariant("Some", MezzeRecord(mapOf("val" to acc)))
+            mezzeOptionSome(acc)
         }
     }
 
@@ -950,7 +950,7 @@ object ParallelImplementations {
             }
 
             if (list.isEmpty()) {
-                return@NativeMezzeFunction MezzeVariant("None", MezzeRecord(emptyMap()))
+                return@NativeMezzeFunction mezzeOptionNone()
             }
 
             val env = TruffleContextHolder.getEnv()
@@ -995,9 +995,9 @@ object ParallelImplementations {
 
             val foundValue = result.get()
             if (foundValue != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to foundValue)))
+                mezzeOptionSome(foundValue)
             } else {
-                MezzeVariant("None", MezzeRecord(emptyMap()))
+                mezzeOptionNone()
             }
         }
     }
@@ -1344,14 +1344,14 @@ object ParallelImplementations {
             }
 
             if (list.isEmpty()) {
-                return@NativeMezzeFunction MezzeVariant("None", MezzeRecord(emptyMap()))
+                return@NativeMezzeFunction mezzeOptionNone()
             }
 
             var acc = list.first()
             for (i in 1 until list.size) {
                 acc = callBinaryFunction(f, acc, list[i])
             }
-            MezzeVariant("Some", MezzeRecord(mapOf("val" to acc)))
+            mezzeOptionSome(acc)
         }
     }
 
@@ -1445,10 +1445,10 @@ object ParallelImplementations {
             for (element in list) {
                 val result = callFunctionWithArg(f, element)
                 if ((result as? MezzeBool)?.value == true) {
-                    return@NativeMezzeFunction MezzeVariant("Some", MezzeRecord(mapOf("val" to element)))
+                    return@NativeMezzeFunction mezzeOptionSome(element)
                 }
             }
-            MezzeVariant("None", MezzeRecord(emptyMap()))
+            mezzeOptionNone()
         }
     }
 

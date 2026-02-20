@@ -81,20 +81,8 @@ object BasicTypes {
             MezzeType.IntType
         )
 
-        context["__native_int_equals"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
-            MezzeType.BooleanType
-        )
-
-        context["__native_int_less_than"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
-            MezzeType.BooleanType
-        )
-
-        context["__native_int_greater_than"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
-            MezzeType.BooleanType
-        )
+        // Note: __native_int_equals, __native_int_less_than, __native_int_greater_than
+        // are handled by Truffle operator nodes, not native functions
 
         // Module-qualified arithmetic functions for int
         context["int::add"] = MezzeType.FunctionType(
@@ -142,66 +130,32 @@ object BasicTypes {
             MezzeType.FracType
         )
 
-        context["__native_int_pow"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "base" to MezzeType.IntType,
-                "exp" to MezzeType.IntType
-            )),
-            MezzeType.IntType
+        context["__native_int_to_float"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
+            MezzeType.FloatType
         )
 
-        context["__native_int_sign"] = MezzeType.FunctionType(
+        context["__native_int_abs"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
             MezzeType.IntType
         )
+
+        context["__native_int_min"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.IntType
+        )
+
+        context["__native_int_max"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.IntType, "r" to MezzeType.IntType)),
+            MezzeType.IntType
+        )
+
+        // Note: __native_int_pow and __native_int_sign are registered in MathCoreTypes.kt
     }
 
     private fun registerFloatTypes(context: MutableMap<String, MezzeType>) {
-        // Native float operations
-        context["__native_float_add"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_subtract"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_multiply"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_divide"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_pow"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("base" to MezzeType.FloatType, "exp" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_sqrt"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_floor"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_ceil"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_round"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
+        // Note: Float arithmetic (__native_float_add, etc.) is handled by Truffle operator nodes
+        // Note: Math functions (__native_float_pow, sqrt, floor, ceil, round) are in MathCoreTypes.kt
 
         context["__native_float_to_string"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
@@ -221,6 +175,21 @@ object BasicTypes {
         context["__native_float_from_string"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
             optionType(MezzeType.FloatType)
+        )
+
+        context["__native_float_abs"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
+
+        context["__native_float_min"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
+
+        context["__native_float_max"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
+            MezzeType.FloatType
         )
 
         // Module-qualified functions for float
@@ -279,78 +248,10 @@ object BasicTypes {
             MezzeType.FloatType
         )
 
-        context["__native_float_ln"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_log10"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_exp"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_is_nan"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
-        )
-
-        context["__native_float_is_infinite"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
-        )
-
-        context["__native_float_is_finite"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.BooleanType
-        )
-
-        context["__native_float_sign"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_sin"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_cos"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_tan"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_asin"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_acos"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_atan"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
-            MezzeType.FloatType
-        )
-
-        context["__native_float_atan2"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "y" to MezzeType.FloatType,
-                "x" to MezzeType.FloatType
-            )),
-            MezzeType.FloatType
-        )
+        // Note: Math functions (__native_float_ln, log10, exp, is_nan, is_infinite, is_finite, sign)
+        // are registered in MathCoreTypes.kt
+        // Note: Trig functions (__native_float_sin, cos, tan, asin, acos, atan, atan2)
+        // are registered in MathTrigTypes.kt
     }
 
     private fun registerNatTypes(context: MutableMap<String, MezzeType>) {
@@ -438,18 +339,43 @@ object BasicTypes {
             MezzeType.FracType
         )
 
-        context["__native_nat_pow"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "base" to MezzeType.NatType,
-                "exp" to MezzeType.NatType
-            )),
+        context["__native_nat_min"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
             MezzeType.NatType
         )
+
+        context["__native_nat_max"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.NatType
+        )
+
+        // Note: __native_nat_pow is registered in MathCoreTypes.kt
     }
 
     private fun registerBoolTypes(context: MutableMap<String, MezzeType>) {
-        context["__native_boolean_to_string"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("value" to MezzeType.BooleanType)),
+        // Native bool operations for stdlib bool module
+        context["__native_bool_and"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
+            MezzeType.BooleanType
+        )
+
+        context["__native_bool_or"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
+            MezzeType.BooleanType
+        )
+
+        context["__native_bool_not"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("b" to MezzeType.BooleanType)),
+            MezzeType.BooleanType
+        )
+
+        context["__native_bool_xor"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("l" to MezzeType.BooleanType, "r" to MezzeType.BooleanType)),
+            MezzeType.BooleanType
+        )
+
+        context["__native_bool_to_string"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("b" to MezzeType.BooleanType)),
             MezzeType.StringType
         )
 

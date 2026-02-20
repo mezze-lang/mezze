@@ -51,10 +51,10 @@ object TruffleConversionImplementations {
             try {
                 val intValue = s.value.toLong()
                 // Some { val = int_value }
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeInt(intValue))))
+                mezzeOptionSome(MezzeInt(intValue))
             } catch (e: NumberFormatException) {
                 // None
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -186,23 +186,16 @@ object TruffleConversionImplementations {
             try {
                 val floatValue = s.value.toDouble()
                 // Some { val = float_value }
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeFloat(floatValue))))
+                mezzeOptionSome(MezzeFloat(floatValue))
             } catch (e: NumberFormatException) {
                 // None
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
     }
 
     private fun registerNatConversions(context: MutableMap<String, MezzeValue>) {
-        // Nat subtraction that returns Int (can be negative)
-        context["__native_nat_subtract_to_int"] = NativeMezzeFunction("__native_nat_subtract_to_int") { args ->
-            val record = args[0] as MezzeRecord
-            val l = record.fields["l"] as? MezzeNat ?: throw NativeFunctionException("__native_nat_subtract_to_int", "expects 'l' as Nat")
-            val r = record.fields["r"] as? MezzeNat ?: throw NativeFunctionException("__native_nat_subtract_to_int", "expects 'r' as Nat")
-            // Convert to Int to allow negative results
-            MezzeInt(l.value.toLong() - r.value.toLong())
-        }
+        // Note: __native_nat_subtract_to_int is registered in NatImplementations.kt
 
         // Convert Int to Nat (return Option since negative ints can't be Nat)
         context["__native_nat_from_int"] = NativeMezzeFunction("__native_nat_from_int") { args ->
@@ -211,10 +204,10 @@ object TruffleConversionImplementations {
 
             if (x.value >= 0) {
                 // Some { val = nat_value }
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeNat(x.value))))
+                mezzeOptionSome(MezzeNat(x.value))
             } else {
                 // None
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -226,10 +219,10 @@ object TruffleConversionImplementations {
             if (x.value >= 0.0 && x.value.isFinite()) {
                 val natValue = x.value.toLong()
                 // Some { val = nat_value }
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeNat(natValue))))
+                mezzeOptionSome(MezzeNat(natValue))
             } else {
                 // None
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -241,14 +234,14 @@ object TruffleConversionImplementations {
             try {
                 val natValue = s.value.toLong()
                 if (natValue < 0) {
-                    MezzeVariant("None", null)
+                    mezzeOptionNone()
                 } else {
                     // Some { val = nat_value }
-                    MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeNat(natValue))))
+                    mezzeOptionSome(MezzeNat(natValue))
                 }
             } catch (e: NumberFormatException) {
                 // None
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
     }

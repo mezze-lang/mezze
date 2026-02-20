@@ -14,6 +14,7 @@ import com.mezze.language.interpreter.MezzeInt
 import com.mezze.language.interpreter.MezzeFloat
 import com.mezze.language.interpreter.MezzeString
 import com.mezze.language.interpreter.MezzeBool
+import com.mezze.language.interpreter.MezzeNat
 import com.mezze.language.interpreter.MezzeRecord
 
 /**
@@ -591,7 +592,7 @@ class ASTToTruffleConverter(
         }
         return when (expr) {
             is IntLiteral -> IntLiteralNode(expr.value)
-            is NatLiteral -> IntLiteralNode(expr.value)  // Nat values are represented as Int at runtime
+            is NatLiteral -> NatLiteralNode(expr.value)
             is FloatLiteral -> FloatLiteralNode(expr.value)
             is FractionLiteral -> FractionLiteralNode(expr.numerator, expr.denominator)
             is StringLiteral -> {
@@ -752,7 +753,7 @@ class ASTToTruffleConverter(
                 // Convert literal patterns to LiteralPatternNode with the appropriate MezzeValue
                 val value = when (val lit = pattern.value) {
                     is IntLiteralValue -> MezzeInt(lit.value)
-                    is NatLiteralValue -> MezzeInt(lit.value)  // Nat values are represented as Int at runtime
+                    is NatLiteralValue -> MezzeNat(lit.value)
                     is FloatLiteralValue -> MezzeFloat(lit.value)
                     is StringLiteralValue -> MezzeString(lit.value)
                     is BooleanLiteralValue -> MezzeBool(lit.value)

@@ -123,9 +123,9 @@ object TruffleSortedSetImplementations {
 
             val min = s.min()
             if (min != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to min)))
+                mezzeOptionSome(min)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -137,9 +137,9 @@ object TruffleSortedSetImplementations {
 
             val max = s.max()
             if (max != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to max)))
+                mezzeOptionSome(max)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 

@@ -22,9 +22,9 @@ object TruffleCharImplementations {
                 ?: throw NativeFunctionException("__native_char_from_int", "expects 'code' as Int")
 
             if (code in 0..0xFFFF) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeChar(code.toChar()))))
+                mezzeOptionSome(MezzeChar(code.toChar()))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -36,9 +36,9 @@ object TruffleCharImplementations {
                 ?: throw NativeFunctionException("__native_char_from_string", "expects 's' as String")
 
             if (s.isNotEmpty()) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeChar(s[0]))))
+                mezzeOptionSome(MezzeChar(s[0]))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -181,9 +181,9 @@ object TruffleCharImplementations {
 
             val digitValue = c.digitToIntOrNull(radix)
             if (digitValue != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeInt(digitValue.toLong()))))
+                mezzeOptionSome(MezzeInt(digitValue.toLong()))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
     }

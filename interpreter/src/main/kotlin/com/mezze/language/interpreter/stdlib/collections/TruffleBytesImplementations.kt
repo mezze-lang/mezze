@@ -47,9 +47,9 @@ object TruffleBytesImplementations {
                 ?: throw NativeFunctionException("__native_bytes_from_hex", "expects 's' as String")
             try {
                 val b = MezzeBytes.fromHex(s.value)
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to b)))
+                mezzeOptionSome(b)
             } catch (e: Exception) {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -60,9 +60,9 @@ object TruffleBytesImplementations {
                 ?: throw NativeFunctionException("__native_bytes_from_base64", "expects 's' as String")
             try {
                 val b = MezzeBytes.fromBase64(s.value)
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to b)))
+                mezzeOptionSome(b)
             } catch (e: Exception) {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -94,8 +94,8 @@ object TruffleBytesImplementations {
                 ?: throw NativeFunctionException("__native_bytes_get", "expects 'i' as Int")
 
             when (val byte = b.get(i)) {
-                null -> MezzeVariant("None", null)
-                else -> MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeInt(byte.toLong()))))
+                null -> mezzeOptionNone()
+                else -> mezzeOptionSome(MezzeInt(byte.toLong()))
             }
         }
 
@@ -179,9 +179,9 @@ object TruffleBytesImplementations {
 
             val idx = b.indexOf(pattern)
             if (idx >= 0) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeInt(idx.toLong()))))
+                mezzeOptionSome(MezzeInt(idx.toLong()))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -234,9 +234,9 @@ object TruffleBytesImplementations {
                 ?: throw NativeFunctionException("__native_bytes_to_string", "expects 'b' as Bytes")
             try {
                 val s = b.toStringValue()
-                MezzeVariant("Ok", MezzeRecord(mapOf("val" to MezzeString(s))))
+                mezzeResultOk(MezzeString(s))
             } catch (e: Exception) {
-                MezzeVariant("Err", MezzeRecord(mapOf("error" to MezzeString("Invalid UTF-8"))))
+                mezzeResultErr(MezzeString("Invalid UTF-8"))
             }
         }
 

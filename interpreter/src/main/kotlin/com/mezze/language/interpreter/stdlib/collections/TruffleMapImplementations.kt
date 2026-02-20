@@ -42,9 +42,9 @@ object TruffleMapImplementations {
 
             val value = m.get(k)
             if (value != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to value)))
+                mezzeOptionSome(value)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 

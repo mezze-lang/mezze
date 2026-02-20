@@ -184,9 +184,9 @@ object AgentImplementations {
 
             val error = agent.error.get()
             if (error != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeString(error.message ?: "Unknown error"))))
+                mezzeOptionSome(MezzeString(error.message ?: "Unknown error"))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
     }

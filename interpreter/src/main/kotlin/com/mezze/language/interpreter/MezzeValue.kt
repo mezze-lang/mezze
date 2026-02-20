@@ -1963,4 +1963,41 @@ data class MezzeThread(
     }
 }
 
+// =============================================================================
+// Helper functions for creating standard Option and Result variants
+// =============================================================================
+// Use these helpers instead of constructing MezzeVariant directly to ensure
+// consistent formatting: Some { val = x } and Ok { val = x }
+// =============================================================================
+
+/**
+ * Create a Some variant: Some { val = value }
+ */
+fun mezzeOptionSome(value: MezzeValue): MezzeVariant =
+    MezzeVariant("Some", MezzeRecord(mapOf("val" to value)))
+
+/**
+ * Create a None variant: None
+ */
+fun mezzeOptionNone(): MezzeVariant =
+    MezzeVariant("None", null)
+
+/**
+ * Create an Option from a nullable value
+ */
+fun mezzeOption(value: MezzeValue?): MezzeVariant =
+    if (value != null) mezzeOptionSome(value) else mezzeOptionNone()
+
+/**
+ * Create an Ok variant: Ok { val = value }
+ */
+fun mezzeResultOk(value: MezzeValue): MezzeVariant =
+    MezzeVariant("Ok", MezzeRecord(mapOf("val" to value)))
+
+/**
+ * Create an Err variant: Err { error = value }
+ */
+fun mezzeResultErr(error: MezzeValue): MezzeVariant =
+    MezzeVariant("Err", MezzeRecord(mapOf("error" to error)))
+
 

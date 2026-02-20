@@ -570,14 +570,14 @@ object ForkJoinParallelImplementations {
             }
 
             if (list.isEmpty()) {
-                return@NativeMezzeFunction MezzeVariant("None", MezzeRecord(emptyMap()))
+                return@NativeMezzeFunction mezzeOptionNone()
             }
 
             val pool = createForkJoinPool(parallelism)
             try {
                 val task = ReduceTask(list, f, 0, list.size, threshold)
                 val result = pool.invoke(task)
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to result)))
+                mezzeOptionSome(result)
             } finally {
                 pool.shutdown()
             }
@@ -695,7 +695,7 @@ object ForkJoinParallelImplementations {
             }
 
             if (list.isEmpty()) {
-                return@NativeMezzeFunction MezzeVariant("None", MezzeRecord(emptyMap()))
+                return@NativeMezzeFunction mezzeOptionNone()
             }
 
             val pool = createForkJoinPool(parallelism)
@@ -707,9 +707,9 @@ object ForkJoinParallelImplementations {
 
                 val foundValue = result.get()
                 if (foundValue != null) {
-                    MezzeVariant("Some", MezzeRecord(mapOf("val" to foundValue)))
+                    mezzeOptionSome(foundValue)
                 } else {
-                    MezzeVariant("None", MezzeRecord(emptyMap()))
+                    mezzeOptionNone()
                 }
             } finally {
                 pool.shutdown()

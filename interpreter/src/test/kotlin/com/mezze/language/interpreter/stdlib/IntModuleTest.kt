@@ -180,4 +180,122 @@ class IntModuleTest {
         val variables = parseTypeCheckAndRun(source)
         assertEquals(36L, (variables["result"] as MezzeInt).value)
     }
+
+    // === Additional tests for missing functions ===
+
+    @Test
+    fun `test int from_string - valid integer`() {
+        val source = """
+            use std::int
+            let result = match int::from_string { s = "42" } is
+                Some { val } -> val
+                None -> -999
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(42L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int from_string - negative integer`() {
+        val source = """
+            use std::int
+            let result = match int::from_string { s = "-123" } is
+                Some { val } -> val
+                None -> -999
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(-123L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int from_string - invalid string`() {
+        val source = """
+            use std::int
+            let result = match int::from_string { s = "not a number" } is
+                Some { val } -> val
+                None -> -999
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(-999L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int from_nat`() {
+        val source = """
+            use std::int
+            let result = int::from_nat { n = 42n }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(42L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int sign - positive`() {
+        val source = """
+            use std::int
+            let result = int::sign { n = 42 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(1L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int sign - negative`() {
+        val source = """
+            use std::int
+            let result = int::sign { n = -42 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(-1L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int sign - zero`() {
+        val source = """
+            use std::int
+            let result = int::sign { n = 0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int pow - basic`() {
+        val source = """
+            use std::int
+            let result = int::pow { base = 2, exp = 10 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(1024L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int pow - zero exponent`() {
+        val source = """
+            use std::int
+            let result = int::pow { base = 5, exp = 0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(1L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int pow - exponent of one`() {
+        val source = """
+            use std::int
+            let result = int::pow { base = 7, exp = 1 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(7L, (variables["result"] as MezzeInt).value)
+    }
 }

@@ -11,121 +11,6 @@ object IntImplementations {
      * Register all Int runtime implementations
      */
     fun registerAll(context: MutableMap<String, MezzeValue>) {
-        // Arithmetic operations
-        context["add_int"] = NativeMezzeFunction("add_int") { args ->
-            val record = args[0] as MezzeRecord
-            val l = record.fields["l"] as? MezzeInt ?: throw NativeFunctionException("add_int", "expects 'l' as Int")
-            val r = record.fields["r"] as? MezzeInt ?: throw NativeFunctionException("add_int", "expects 'r' as Int")
-            MezzeInt(l.value + r.value)
-        }
-
-        context["subtract_int"] = NativeMezzeFunction("subtract_int") { args ->
-            val record = args[0] as MezzeRecord
-            val l = record.fields["l"] as? MezzeInt ?: throw NativeFunctionException("subtract_int", "expects 'l' as Int")
-            val r = record.fields["r"] as? MezzeInt ?: throw NativeFunctionException("subtract_int", "expects 'r' as Int")
-            MezzeInt(l.value - r.value)
-        }
-
-        context["multiply_int"] = NativeMezzeFunction("multiply_int") { args ->
-            val record = args[0] as MezzeRecord
-            val left = record.fields["left"] as? MezzeInt ?: throw NativeFunctionException("multiply_int", "expects 'left' as Int")
-            val right = record.fields["right"] as? MezzeInt ?: throw NativeFunctionException("multiply_int", "expects 'right' as Int")
-            MezzeInt(left.value * right.value)
-        }
-
-        context["divide_int"] = NativeMezzeFunction("divide_int") { args ->
-            val record = args[0] as MezzeRecord
-            val left = record.fields["left"] as? MezzeInt ?: throw NativeFunctionException("divide_int", "expects 'left' as Int")
-            val right = record.fields["right"] as? MezzeInt ?: throw NativeFunctionException("divide_int", "expects 'right' as Int")
-            if (right.value == 0L) throw MezzeException("Division by zero")
-            MezzeInt(left.value / right.value)
-        }
-
-        context["modulo_int"] = NativeMezzeFunction("modulo_int") { args ->
-            val record = args[0] as MezzeRecord
-            val left = record.fields["left"] as? MezzeInt ?: throw NativeFunctionException("modulo_int", "expects 'left' as Int")
-            val right = record.fields["right"] as? MezzeInt ?: throw NativeFunctionException("modulo_int", "expects 'right' as Int")
-            if (right.value == 0L) throw MezzeException("Modulo by zero")
-            MezzeInt(left.value % right.value)
-        }
-
-        // Comparison operations
-        context["equal_int"] = NativeMezzeFunction("equal_int") { args ->
-            val record = args[0] as MezzeRecord
-            val left = record.fields["left"] as? MezzeInt ?: throw NativeFunctionException("equal_int", "expects 'left' as Int")
-            val right = record.fields["right"] as? MezzeInt ?: throw NativeFunctionException("equal_int", "expects 'right' as Int")
-            MezzeBool(left.value == right.value)
-        }
-
-        context["lessThan_int"] = NativeMezzeFunction("lessThan_int") { args ->
-            val record = args[0] as MezzeRecord
-            val left = record.fields["left"] as? MezzeInt ?: throw NativeFunctionException("lessThan_int", "expects 'left' as Int")
-            val right = record.fields["right"] as? MezzeInt ?: throw NativeFunctionException("lessThan_int", "expects 'right' as Int")
-            MezzeBool(left.value < right.value)
-        }
-
-        context["greaterThan_int"] = NativeMezzeFunction("greaterThan_int") { args ->
-            val record = args[0] as MezzeRecord
-            val left = record.fields["left"] as? MezzeInt ?: throw NativeFunctionException("greaterThan_int", "expects 'left' as Int")
-            val right = record.fields["right"] as? MezzeInt ?: throw NativeFunctionException("greaterThan_int", "expects 'right' as Int")
-            MezzeBool(left.value > right.value)
-        }
-
-        // Conversion operations
-        context["intToFloat"] = NativeMezzeFunction("intToFloat") { args ->
-            val record = args[0] as MezzeRecord
-            val value = record.fields["val"] as? MezzeInt ?: throw NativeFunctionException("intToFloat", "expects 'val' as Int")
-            MezzeFloat(value.value.toDouble())
-        }
-
-        context["intToFrac"] = NativeMezzeFunction("intToFrac") { args ->
-            val record = args[0] as MezzeRecord
-            val value = record.fields["val"] as? MezzeInt ?: throw NativeFunctionException("intToFrac", "expects 'val' as Int")
-            MezzeFrac(value.value, 1L)
-        }
-
-        context["intToNat"] = NativeMezzeFunction("intToNat") { args ->
-            val record = args[0] as MezzeRecord
-            val value = record.fields["val"] as? MezzeInt ?: throw NativeFunctionException("intToNat", "expects 'val' as Int")
-            if (value.value < 0) throw MezzeException("Cannot convert negative integer to Nat: ${value.value}")
-            MezzeNat(value.value)
-        }
-
-        // Hidden native operations
-        context["__native_int_equals"] = NativeMezzeFunction("__native_int_equals") { args ->
-            val record = args[0] as MezzeRecord
-            val l = record.fields["l"] as? MezzeInt ?: throw NativeFunctionException("__native_int_equals", "expects 'l' as Int")
-            val r = record.fields["r"] as? MezzeInt ?: throw NativeFunctionException("__native_int_equals", "expects 'r' as Int")
-            MezzeBool(l.value == r.value)
-        }
-
-        context["__native_int_less_than"] = NativeMezzeFunction("__native_int_less_than") { args ->
-            val record = args[0] as MezzeRecord
-            val l = record.fields["l"] as? MezzeInt ?: throw NativeFunctionException("__native_int_less_than", "expects 'l' as Int")
-            val r = record.fields["r"] as? MezzeInt ?: throw NativeFunctionException("__native_int_less_than", "expects 'r' as Int")
-            MezzeBool(l.value < r.value)
-        }
-
-        context["__native_int_greater_than"] = NativeMezzeFunction("__native_int_greater_than") { args ->
-            val record = args[0] as MezzeRecord
-            val l = record.fields["l"] as? MezzeInt ?: throw NativeFunctionException("__native_int_greater_than", "expects 'l' as Int")
-            val r = record.fields["r"] as? MezzeInt ?: throw NativeFunctionException("__native_int_greater_than", "expects 'r' as Int")
-            MezzeBool(l.value > r.value)
-        }
-
-        context["__native_int_compare"] = NativeMezzeFunction("__native_int_compare") { args ->
-            val record = args[0] as MezzeRecord
-            val l = record.fields["l"] as? MezzeInt ?: throw NativeFunctionException("__native_int_compare", "expects 'l' as Int")
-            val r = record.fields["r"] as? MezzeInt ?: throw NativeFunctionException("__native_int_compare", "expects 'r' as Int")
-            val result = when {
-                l.value < r.value -> "Less"
-                l.value > r.value -> "Greater"
-                else -> "Equal"
-            }
-            // TODO: Return proper variant instead of string
-            MezzeString(result)
-        }
-
         context["__native_int_to_string"] = NativeMezzeFunction("__native_int_to_string") { args ->
             val record = args[0] as MezzeRecord
             val n = record.fields["n"] as? MezzeInt ?: throw NativeFunctionException("__native_int_to_string", "expects 'n' as Int")
@@ -238,10 +123,10 @@ object IntImplementations {
             try {
                 val value = s.value.toLong()
                 // Return Some {val = value}
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeInt(value))))
+                mezzeOptionSome(MezzeInt(value))
             } catch (e: NumberFormatException) {
                 // Return None
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -249,6 +134,32 @@ object IntImplementations {
             val record = args[0] as MezzeRecord
             val n = record.fields["n"] as? MezzeNat ?: throw NativeFunctionException("__native_int_from_nat", "expects 'n' as Nat")
             MezzeInt(n.value)
+        }
+
+        context["__native_int_to_float"] = NativeMezzeFunction("__native_int_to_float") { args ->
+            val record = args[0] as MezzeRecord
+            val n = record.fields["n"] as? MezzeInt ?: throw NativeFunctionException("__native_int_to_float", "expects 'n' as Int")
+            MezzeFloat(n.value.toDouble())
+        }
+
+        context["__native_int_abs"] = NativeMezzeFunction("__native_int_abs") { args ->
+            val record = args[0] as MezzeRecord
+            val n = record.fields["n"] as? MezzeInt ?: throw NativeFunctionException("__native_int_abs", "expects 'n' as Int")
+            MezzeInt(kotlin.math.abs(n.value))
+        }
+
+        context["__native_int_min"] = NativeMezzeFunction("__native_int_min") { args ->
+            val record = args[0] as MezzeRecord
+            val l = record.fields["l"] as? MezzeInt ?: throw NativeFunctionException("__native_int_min", "expects 'l' as Int")
+            val r = record.fields["r"] as? MezzeInt ?: throw NativeFunctionException("__native_int_min", "expects 'r' as Int")
+            MezzeInt(kotlin.math.min(l.value, r.value))
+        }
+
+        context["__native_int_max"] = NativeMezzeFunction("__native_int_max") { args ->
+            val record = args[0] as MezzeRecord
+            val l = record.fields["l"] as? MezzeInt ?: throw NativeFunctionException("__native_int_max", "expects 'l' as Int")
+            val r = record.fields["r"] as? MezzeInt ?: throw NativeFunctionException("__native_int_max", "expects 'r' as Int")
+            MezzeInt(kotlin.math.max(l.value, r.value))
         }
     }
 }

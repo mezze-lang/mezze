@@ -505,7 +505,7 @@ object ContinuationImplementations {
                 }
                 else -> {
                     // Return None
-                    MezzeVariant("None", null)
+                    mezzeOptionNone()
                 }
             }
         }

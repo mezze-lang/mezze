@@ -161,9 +161,9 @@ object ChannelImplementations {
 
             val value = channel.queue.poll()
             if (value != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to value)))
+                mezzeOptionSome(value)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
     }
@@ -287,7 +287,7 @@ object ChannelImplementations {
                 // Check if all channels are closed and empty
                 val allClosedAndEmpty = channels.all { it.isClosed() && it.queue.isEmpty() }
                 if (allClosedAndEmpty) {
-                    return@NativeMezzeFunction MezzeVariant("None", null)
+                    return@NativeMezzeFunction mezzeOptionNone()
                 }
 
                 // Small sleep to avoid busy-waiting
@@ -295,7 +295,7 @@ object ChannelImplementations {
             }
 
             // Timeout expired
-            MezzeVariant("None", null)
+            mezzeOptionNone()
         }
     }
 
@@ -370,9 +370,9 @@ object ChannelImplementations {
 
             val value = channel.queue.poll()
             if (value != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to value)))
+                mezzeOptionSome(value)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -445,7 +445,7 @@ object ChannelImplementations {
             }
 
             // Return None (simulates timeout when nothing available)
-            MezzeVariant("None", null)
+            mezzeOptionNone()
         }
     }
 

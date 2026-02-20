@@ -30,13 +30,13 @@ pub let from_nat = { n: Nat } ->
 
 # Utility functions for integers
 pub let abs = { n: Int } ->
-    if n < 0 then NumSub.neg { n = n } else n
+    __native_int_abs { n = n }
 
 pub let max = { l: Int, r: Int } ->
-    if l > r then l else r
+    __native_int_max { l = l, r = r }
 
 pub let min = { l: Int, r: Int } ->
-    if l < r then l else r
+    __native_int_min { l = l, r = r }
 
 pub let sign = { n: Int } ->
     if n > 0 then 1

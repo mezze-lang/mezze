@@ -38,7 +38,7 @@ object EnvironmentImplementations {
             if (value != null) {
                 MezzeVariant("Some", MezzeRecord(mapOf("value" to MezzeString(value))))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -124,7 +124,7 @@ object EnvironmentImplementations {
                     return@NativeMezzeFunction MezzeVariant("Some", MezzeRecord(mapOf("value" to value)))
                 }
             }
-            MezzeVariant("None", null)
+            mezzeOptionNone()
         }
     }
 }

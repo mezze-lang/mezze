@@ -10,6 +10,7 @@ import com.mezze.language.interpreter.MezzeFloat
 import com.mezze.language.interpreter.MezzeString
 import com.mezze.language.interpreter.MezzeBool
 import com.mezze.language.interpreter.MezzeFrac
+import com.mezze.language.interpreter.MezzeNat
 import com.mezze.language.interpreter.MezzeNull
 
 /**
@@ -77,6 +78,19 @@ class BooleanLiteralNode(private val value: Boolean) : LiteralNode() {
     }
 
     override fun toString(): String = "BooleanLiteral($value)"
+}
+
+/**
+ * Natural number literal node
+ */
+@NodeInfo(shortName = "nat-literal")
+class NatLiteralNode(private val value: Long) : LiteralNode() {
+
+    override fun getValue(): MezzeValue {
+        return MezzeNat(value)
+    }
+
+    override fun toString(): String = "NatLiteral(${value}n)"
 }
 
 /**

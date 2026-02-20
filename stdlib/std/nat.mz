@@ -18,10 +18,10 @@ pub let from_string = { s: String } ->
 
 # Utility functions
 pub let min = { l: Nat, r: Nat } ->
-    if l < r then l else r
+    __native_nat_min { l = l, r = r }
 
 pub let max = { l: Nat, r: Nat } ->
-    if l > r then l else r
+    __native_nat_max { l = l, r = r }
 
 pub let is_zero = { n: Nat } ->
     n == 0n

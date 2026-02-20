@@ -18,4 +18,10 @@ pub let from_string = { s: String } ->
     __native_float_from_string { s = s }
 
 pub let abs = { n: Float } ->
-    if n < 0.0 then NumSub.neg { n = n } else n
+    __native_float_abs { n = n }
+
+pub let min = { l: Float, r: Float } ->
+    __native_float_min { l = l, r = r }
+
+pub let max = { l: Float, r: Float } ->
+    __native_float_max { l = l, r = r }

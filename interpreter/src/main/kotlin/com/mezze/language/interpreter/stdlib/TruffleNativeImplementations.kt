@@ -2,9 +2,9 @@ package com.mezze.language.interpreter.stdlib
 
 import com.mezze.language.interpreter.*
 import com.mezze.language.interpreter.stdlib.basic.IntImplementations
+import com.mezze.language.interpreter.stdlib.basic.BoolImplementations
 import com.mezze.language.interpreter.stdlib.basic.FloatImplementations
 import com.mezze.language.interpreter.stdlib.basic.NatImplementations
-import com.mezze.language.interpreter.stdlib.basic.BoolImplementations
 import com.mezze.language.interpreter.stdlib.basic.StringImplementations
 import com.mezze.language.interpreter.stdlib.basic.FracImplementations
 import com.mezze.language.interpreter.stdlib.math.MathCoreImplementations
@@ -69,9 +69,9 @@ object TruffleNativeImplementations {
     fun registerAll(context: MutableMap<String, MezzeValue>) {
         // Register basic type implementations (int, float, nat, bool, string, frac, char)
         IntImplementations.registerAll(context)
+        BoolImplementations.registerAll(context)
         FloatImplementations.registerAll(context)
         NatImplementations.registerAll(context)
-        BoolImplementations.registerAll(context)
         StringImplementations.registerAll(context)
         FracImplementations.registerAll(context)
         TruffleCharImplementations.registerAll(context)

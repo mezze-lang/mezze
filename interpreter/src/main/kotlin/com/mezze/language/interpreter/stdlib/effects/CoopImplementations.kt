@@ -165,7 +165,7 @@ object CoopImplementations {
 
             // In Coop, timeout always succeeds (single-threaded, no actual waiting)
             val result = executePromise(promise, "__native_coop_timeout")
-            MezzeVariant("Some", MezzeRecord(mapOf("val" to result)))
+            mezzeOptionSome(result)
         }
     }
 
@@ -503,7 +503,7 @@ object CoopImplementations {
             val results = promises.map { promise ->
                 try {
                     val value = executePromise(promise, "__native_coop_settle")
-                    MezzeVariant("Ok", MezzeRecord(mapOf("val" to value)))
+                    mezzeResultOk(value)
                 } catch (e: java.util.concurrent.CancellationException) {
                     MezzeVariant("Err", MezzeRecord(mapOf(
                         "error" to MezzeVariant("AsyncCancelled", MezzeRecord(emptyMap()))

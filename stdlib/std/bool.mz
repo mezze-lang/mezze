@@ -1,30 +1,33 @@
 # Bool utility functions
 # This module provides utility functions for working with bools
-# Note: The Bool type and basic operations are now built-in
+# Note: The Bool type and basic operations (&&, ||) are built-in via Truffle nodes
 # Built-in ability implementations (Eq, Inspect) are automatically available
 
 # Type conversions
 pub let to_string = { b: Bool } ->
-    if b then "true" else "false"
+    __native_bool_to_string { b = b }
 
 # Bool logic operations
 pub let and = { l: Bool, r: Bool } ->
-    if l then r else False
+    __native_bool_and { l = l, r = r }
 
 pub let or = { l: Bool, r: Bool } ->
-    if l then True else r
+    __native_bool_or { l = l, r = r }
 
 pub let not = { b: Bool } ->
-    if b then False else True
+    __native_bool_not { b = b }
 
 pub let xor = { l: Bool, r: Bool } ->
-    (l && not { b = r }) || (not { b = l } && r)
+    __native_bool_xor { l = l, r = r }
 
 pub let implies = { l: Bool, r: Bool } ->
-    not { b = l } || r
+    __native_bool_or { l = __native_bool_not { b = l }, r = r }
 
 pub let iff = { l: Bool, r: Bool } ->
-    (l && r) || (not { b = l } && not { b = r })
+    __native_bool_or {
+        l = __native_bool_and { l = l, r = r },
+        r = __native_bool_and { l = __native_bool_not { b = l }, r = __native_bool_not { b = r } }
+    }
 
 # Additional bool utilities
 # TODO: Array pattern matching [head, ...tail] not yet supported in parser
@@ -41,4 +44,4 @@ pub let iff = { l: Bool, r: Bool } ->
 #         [head, ...tail] -> if head then True else any { xs = tail }
 
 # pub let none = { xs: [Bool] } ->
-#     not { x = any { xs = xs } }
+#     not { b = any { xs = xs } }

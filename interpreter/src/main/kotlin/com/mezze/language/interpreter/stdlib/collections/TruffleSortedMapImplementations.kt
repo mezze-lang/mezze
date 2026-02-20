@@ -46,9 +46,9 @@ object TruffleSortedMapImplementations {
 
             val value = m.get(k)
             if (value != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to value)))
+                mezzeOptionSome(value)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -130,9 +130,9 @@ object TruffleSortedMapImplementations {
 
             val minKey = m.minKey()
             if (minKey != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to minKey)))
+                mezzeOptionSome(minKey)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -144,9 +144,9 @@ object TruffleSortedMapImplementations {
 
             val maxKey = m.maxKey()
             if (maxKey != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to maxKey)))
+                mezzeOptionSome(maxKey)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -158,9 +158,9 @@ object TruffleSortedMapImplementations {
 
             val minEntry = m.minEntry()
             if (minEntry != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeRecord(mapOf("key" to minEntry.first, "value" to minEntry.second)))))
+                mezzeOptionSome(MezzeRecord(mapOf("key" to minEntry.first, "value" to minEntry.second)))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -172,9 +172,9 @@ object TruffleSortedMapImplementations {
 
             val maxEntry = m.maxEntry()
             if (maxEntry != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeRecord(mapOf("key" to maxEntry.first, "value" to maxEntry.second)))))
+                mezzeOptionSome(MezzeRecord(mapOf("key" to maxEntry.first, "value" to maxEntry.second)))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 

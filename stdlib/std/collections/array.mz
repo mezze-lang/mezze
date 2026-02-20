@@ -70,10 +70,7 @@ pub let drop = {xs, n} ->
     slice { xs = xs, start = n, end = length { xs = xs } }
 
 pub let head = {xs} ->
-    if is_empty { xs = xs } then
-        None
-    else
-        Some { val = get { xs = xs, i = 0 } }
+    get { xs = xs, i = 0 }
 
 pub let tail = {xs} ->
     drop { xs = xs, n = 1 }

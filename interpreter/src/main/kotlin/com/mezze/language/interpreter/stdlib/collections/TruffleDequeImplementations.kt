@@ -106,7 +106,7 @@ object TruffleDequeImplementations {
                     "val" to MezzeRecord(mapOf("head" to head, "tail" to tail))
                 )))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -123,7 +123,7 @@ object TruffleDequeImplementations {
                     "val" to MezzeRecord(mapOf("init" to init, "last" to last))
                 )))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -139,9 +139,9 @@ object TruffleDequeImplementations {
 
             val front = d.peekFront()
             if (front != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to front)))
+                mezzeOptionSome(front)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -153,9 +153,9 @@ object TruffleDequeImplementations {
 
             val back = d.peekBack()
             if (back != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to back)))
+                mezzeOptionSome(back)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 

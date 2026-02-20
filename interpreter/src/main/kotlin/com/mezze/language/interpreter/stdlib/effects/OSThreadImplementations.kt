@@ -269,9 +269,9 @@ object OSThreadImplementations {
 
             try {
                 val result = promise.future.get(timeout, java.util.concurrent.TimeUnit.MILLISECONDS)
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to result)))
+                mezzeOptionSome(result)
             } catch (e: java.util.concurrent.TimeoutException) {
-                MezzeVariant("None", MezzeRecord(emptyMap()))
+                mezzeOptionNone()
             }
         }
     }
@@ -693,7 +693,7 @@ object OSThreadImplementations {
             val results = promises.map { promise ->
                 try {
                     val value = promise.future.get()
-                    MezzeVariant("Ok", MezzeRecord(mapOf("val" to value)))
+                    mezzeResultOk(value)
                 } catch (e: java.util.concurrent.CancellationException) {
                     MezzeVariant("Err", MezzeRecord(mapOf(
                         "error" to MezzeVariant("AsyncCancelled", MezzeRecord(emptyMap()))

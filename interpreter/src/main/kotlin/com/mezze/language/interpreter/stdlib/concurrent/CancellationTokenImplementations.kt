@@ -97,9 +97,9 @@ object CancellationTokenImplementations {
 
             val reason = token.token.getCancellationReason()
             if (reason != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeString(reason))))
+                mezzeOptionSome(MezzeString(reason))
             } else {
-                MezzeVariant("None", MezzeRecord(emptyMap()))
+                mezzeOptionNone()
             }
         }
     }

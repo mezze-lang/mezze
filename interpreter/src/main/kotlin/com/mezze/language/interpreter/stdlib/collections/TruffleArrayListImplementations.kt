@@ -45,9 +45,9 @@ object TruffleArrayListImplementations {
 
             // Return Option - Some if index is valid, None otherwise
             if (i < 0 || i >= xs.size()) {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             } else {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to xs.get(i))))
+                mezzeOptionSome(xs.get(i))
             }
         }
 
@@ -63,10 +63,10 @@ object TruffleArrayListImplementations {
 
             // Return Option - Some if index is valid, None otherwise
             if (i < 0 || i >= xs.size()) {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             } else {
                 // O(1) update via Vavr Vector - returns new array with structural sharing
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to xs.set(i, x))))
+                mezzeOptionSome(xs.set(i, x))
             }
         }
 
@@ -91,10 +91,10 @@ object TruffleArrayListImplementations {
 
             // Return Option - Some if index is valid, None otherwise
             if (i < 0 || i >= xs.size()) {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             } else {
                 // O(1) remove via Vavr Vector - returns new array with structural sharing
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to xs.removeAt(i))))
+                mezzeOptionSome(xs.removeAt(i))
             }
         }
 
@@ -282,9 +282,9 @@ object TruffleArrayListImplementations {
             }
 
             if (found != null) {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to found)))
+                mezzeOptionSome(found)
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 
@@ -307,9 +307,9 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_index_of", "expects 'x' field")
             val index = xs.indexOf(x)
             if (index >= 0) {
-                MezzeVariant("Some", MezzeInt(index.toLong()))
+                mezzeOptionSome(MezzeInt(index.toLong()))
             } else {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             }
         }
 

@@ -43,16 +43,16 @@ object JsonImplementations {
                 val jsonElement = Json.parseToJsonElement(jsonString.value)
                 val jsonValue = kotlinxToMezzeJson(jsonElement)
                 // Return Ok {val = jsonValue}
-                MezzeVariant("Ok", MezzeRecord(mapOf("val" to jsonValue)))
+                mezzeResultOk(jsonValue)
             } catch (e: Exception) {
                 // Return Err {error = {path = [], message = "...", expected = "JSON", found = None}}
                 val error = MezzeRecord(mapOf(
                     "path" to MezzeList.empty(),
                     "message" to MezzeString("JSON parse error: ${e.message}"),
                     "expected" to MezzeString("JSON"),
-                    "found" to MezzeVariant("None", null)
+                    "found" to mezzeOptionNone()
                 ))
-                MezzeVariant("Err", MezzeRecord(mapOf("error" to error)))
+                mezzeResultErr(error)
             }
         }
 
@@ -73,14 +73,14 @@ object JsonImplementations {
                     json.encodeToString(JsonElement.serializer(), jsonElement)
                 }
                 // Return Ok {val = jsonString}
-                MezzeVariant("Ok", MezzeRecord(mapOf("val" to MezzeString(jsonString))))
+                mezzeResultOk(MezzeString(jsonString))
             } catch (e: Exception) {
                 // Return Err {error = {path = [], message = "..."}}
                 val error = MezzeRecord(mapOf(
                     "path" to MezzeList.empty(),
                     "message" to MezzeString("JSON serialize error: ${e.message}")
                 ))
-                MezzeVariant("Err", MezzeRecord(mapOf("error" to error)))
+                mezzeResultErr(error)
             }
         }
 
@@ -97,13 +97,13 @@ object JsonImplementations {
                 val jsonString = json.encodeToString(JsonElement.serializer(), jsonElement)
                 val bytes = jsonString.toByteArray(Charsets.UTF_8)
                 // Return Ok {val = bytes}
-                MezzeVariant("Ok", MezzeRecord(mapOf("val" to MezzeBytes(bytes))))
+                mezzeResultOk(MezzeBytes(bytes))
             } catch (e: Exception) {
                 val error = MezzeRecord(mapOf(
                     "path" to MezzeList.empty(),
                     "message" to MezzeString("JSON to bytes error: ${e.message}")
                 ))
-                MezzeVariant("Err", MezzeRecord(mapOf("error" to error)))
+                mezzeResultErr(error)
             }
         }
 
@@ -119,15 +119,15 @@ object JsonImplementations {
                 val jsonString = String(bytes.bytes, Charsets.UTF_8)
                 val jsonElement = Json.parseToJsonElement(jsonString)
                 val jsonValue = kotlinxToMezzeJson(jsonElement)
-                MezzeVariant("Ok", MezzeRecord(mapOf("val" to jsonValue)))
+                mezzeResultOk(jsonValue)
             } catch (e: Exception) {
                 val error = MezzeRecord(mapOf(
                     "path" to MezzeList.empty(),
                     "message" to MezzeString("JSON from bytes error: ${e.message}"),
                     "expected" to MezzeString("JSON"),
-                    "found" to MezzeVariant("None", null)
+                    "found" to mezzeOptionNone()
                 ))
-                MezzeVariant("Err", MezzeRecord(mapOf("error" to error)))
+                mezzeResultErr(error)
             }
         }
 
@@ -357,9 +357,9 @@ object JsonImplementations {
             "path" to path,
             "message" to MezzeString(message),
             "expected" to MezzeString(expected),
-            "found" to MezzeVariant("None", null)
+            "found" to mezzeOptionNone()
         ))
-        return MezzeVariant("Err", MezzeRecord(mapOf("error" to error)))
+        return mezzeResultErr(error)
     }
 
     private fun streamDecodeInt(bytes: ByteArray, offset: Int, path: MezzeValue): MezzeValue {
@@ -675,7 +675,7 @@ object JsonImplementations {
         pos = skipWhitespace(bytes, pos)
 
         // Check for value field or end
-        var payload: MezzeValue = MezzeVariant("None", null)
+        var payload: MezzeValue = mezzeOptionNone()
 
         if (pos < bytes.size && bytes[pos].toInt().toChar() == ',') {
             pos++
@@ -699,7 +699,7 @@ object JsonImplementations {
                         val valueStart = pos
                         pos = skipJsonValue(bytes, pos)
                         val valueBytes = bytes.sliceArray(valueStart until pos)
-                        payload = MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeBytes(valueBytes))))
+                        payload = mezzeOptionSome(MezzeBytes(valueBytes))
                     }
                 }
             }
@@ -745,7 +745,7 @@ object JsonImplementations {
             val finalPos = if (pos < bytes.size) pos + 1 else pos
             return MezzeVariant("Ok", MezzeRecord(mapOf(
                 "val" to MezzeRecord(mapOf(
-                    "value" to MezzeVariant("None", null),
+                    "value" to mezzeOptionNone(),
                     "offset" to MezzeInt(finalPos.toLong())
                 ))
             )))
@@ -758,7 +758,7 @@ object JsonImplementations {
 
         return MezzeVariant("Ok", MezzeRecord(mapOf(
             "val" to MezzeRecord(mapOf(
-                "value" to MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeBytes(valueBytes)))),
+                "value" to mezzeOptionSome(MezzeBytes(valueBytes)),
                 "offset" to MezzeInt(pos.toLong())
             ))
         )))
@@ -789,7 +789,7 @@ object JsonImplementations {
             val finalPos = if (pos < bytes.size) pos + 1 else pos
             return MezzeVariant("Ok", MezzeRecord(mapOf(
                 "val" to MezzeRecord(mapOf(
-                    "entry" to MezzeVariant("None", null),
+                    "entry" to mezzeOptionNone(),
                     "offset" to MezzeInt(finalPos.toLong())
                 ))
             )))
@@ -826,7 +826,7 @@ object JsonImplementations {
 
         return MezzeVariant("Ok", MezzeRecord(mapOf(
             "val" to MezzeRecord(mapOf(
-                "entry" to MezzeVariant("Some", MezzeRecord(mapOf("val" to entry))),
+                "entry" to mezzeOptionSome(entry),
                 "offset" to MezzeInt(pos.toLong())
             ))
         )))
@@ -840,7 +840,7 @@ object JsonImplementations {
         if (remaining >= 4 && String(bytes, pos, 4, Charsets.UTF_8) == "null") {
             return MezzeVariant("Ok", MezzeRecord(mapOf(
                 "val" to MezzeRecord(mapOf(
-                    "value" to MezzeVariant("None", null),
+                    "value" to mezzeOptionNone(),
                     "offset" to MezzeInt((pos + 4).toLong())
                 ))
             )))
@@ -853,7 +853,7 @@ object JsonImplementations {
 
         return MezzeVariant("Ok", MezzeRecord(mapOf(
             "val" to MezzeRecord(mapOf(
-                "value" to MezzeVariant("Some", MezzeRecord(mapOf("val" to MezzeBytes(valueBytes)))),
+                "value" to mezzeOptionSome(MezzeBytes(valueBytes)),
                 "offset" to MezzeInt(pos.toLong())
             ))
         )))

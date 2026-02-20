@@ -72,9 +72,9 @@ object TruffleListImplementations {
 
             val head = xs.headOrNull()
             if (head == null) {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             } else {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to head)))
+                mezzeOptionSome(head)
             }
         }
 
@@ -86,9 +86,9 @@ object TruffleListImplementations {
 
             val tail = xs.tailOrNull()
             if (tail == null) {
-                MezzeVariant("None", null)
+                mezzeOptionNone()
             } else {
-                MezzeVariant("Some", MezzeRecord(mapOf("val" to tail)))
+                mezzeOptionSome(tail)
             }
         }
 
@@ -108,7 +108,7 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_uncons", "expects 'xs' as List")
 
             when (xs) {
-                is MezzeNil -> MezzeVariant("None", null)
+                is MezzeNil -> mezzeOptionNone()
                 is MezzeCons -> MezzeVariant("Some", MezzeRecord(mapOf(
                     "val" to MezzeRecord(mapOf(
                         "head" to xs.head,
@@ -156,12 +156,12 @@ object TruffleListImplementations {
             var current: MezzeList = xs
             while (current is MezzeCons) {
                 if (idx == 0) {
-                    return@NativeMezzeFunction MezzeVariant("Some", MezzeRecord(mapOf("val" to current.head)))
+                    return@NativeMezzeFunction mezzeOptionSome(current.head)
                 }
                 current = current.tail
                 idx--
             }
-            MezzeVariant("None", null)
+            mezzeOptionNone()
         }
 
         context["__native_list_take"] = NativeMezzeFunction("__native_list_take") { args ->
