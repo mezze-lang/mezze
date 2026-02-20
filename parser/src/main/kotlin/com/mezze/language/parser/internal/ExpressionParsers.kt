@@ -292,30 +292,43 @@ internal val MezzeParser.lambdaParameterEntry: Parser<Pair<String, TypeAnnotatio
         when (ident) {
             is ParseResult.Success -> {
                 val paramName = ident.value.text
-                val stream1 = ident.remaining
 
-                // Check if there's a colon (type annotation)
-                if (stream1.current()?.type == TokenType.COLON) {
-                    // Parse type annotation
-                    val colon = tok(TokenType.COLON)(stream1)
-                    when (colon) {
-                        is ParseResult.Success -> {
-                            val typeAnnotation = typeAnnotationParser(colon.remaining)
-                            when (typeAnnotation) {
-                                is ParseResult.Success -> {
-                                    ParseResult.Success(
-                                        Pair(paramName, typeAnnotation.value),
-                                        typeAnnotation.remaining
-                                    )
-                                }
-                                is ParseResult.Failure -> typeAnnotation
-                            }
-                        }
-                        is ParseResult.Failure -> colon
-                    }
+                // Disallow __native prefix - reserved for Mezze internals
+                if (paramName.startsWith("__native")) {
+                    // Use remaining position so this error "wins" over earlier failures,
+                    // but report the token's line/column for better error pointing
+                    ParseResult.Failure(
+                        "Names starting with '__native' are reserved for Mezze internals",
+                        ident.remaining.getSourcePosition(),
+                        ident.value.line,
+                        ident.value.column
+                    )
                 } else {
-                    // No type annotation - this is an untyped parameter
-                    ParseResult.Success(Pair(paramName, null), stream1)
+                    val stream1 = ident.remaining
+
+                    // Check if there's a colon (type annotation)
+                    if (stream1.current()?.type == TokenType.COLON) {
+                        // Parse type annotation
+                        val colon = tok(TokenType.COLON)(stream1)
+                        when (colon) {
+                            is ParseResult.Success -> {
+                                val typeAnnotation = typeAnnotationParser(colon.remaining)
+                                when (typeAnnotation) {
+                                    is ParseResult.Success -> {
+                                        ParseResult.Success(
+                                            Pair(paramName, typeAnnotation.value),
+                                            typeAnnotation.remaining
+                                        )
+                                    }
+                                    is ParseResult.Failure -> typeAnnotation
+                                }
+                            }
+                            is ParseResult.Failure -> colon
+                        }
+                    } else {
+                        // No type annotation - this is an untyped parameter
+                        ParseResult.Success(Pair(paramName, null), stream1)
+                    }
                 }
             }
             is ParseResult.Failure -> ident
@@ -355,12 +368,25 @@ internal val MezzeParser.typedLambdaParams: Parser<LambdaParameters>
     }
 
 internal val MezzeParser.untypedLambdaParams: Parser<LambdaParameters>
-    get() = { stream ->
+    get() = parser@{ stream ->
         // {x, y,} or {x, y, ...,} or {} - allows optional trailing comma
         val params = Parsers.sepEndBy(identifierParser, tok(TokenType.COMMA))(stream)
         when (params) {
             is ParseResult.Success -> {
-                val names = params.value.map { it.text }
+                val tokens = params.value
+
+                // Check for __native prefix in parameter names - reserved for Mezze internals
+                val invalidToken = tokens.find { it.text.startsWith("__native") }
+                if (invalidToken != null) {
+                    return@parser ParseResult.Failure(
+                        "Names starting with '__native' are reserved for Mezze internals",
+                        params.remaining.getSourcePosition(),
+                        invalidToken.line,
+                        invalidToken.column
+                    )
+                }
+
+                val names = tokens.map { it.text }
                 val stream1 = params.remaining
 
                 // Check for optional comma before ellipsis (same logic as recordPatternParser)

@@ -38,7 +38,22 @@ internal val MezzeParser.variablePatternForLet: Parser<Pattern>
     get() = { stream ->
         val ident = identifierParser(stream)
         when (ident) {
-            is ParseResult.Success -> ParseResult.Success(VariablePattern(ident.value.text), ident.remaining)
+            is ParseResult.Success -> {
+                val name = ident.value.text
+                // Disallow __native prefix - reserved for Mezze internals
+                if (name.startsWith("__native")) {
+                    // Use remaining position so this error "wins" over earlier failures,
+                    // but report the token's line/column for better error pointing
+                    ParseResult.Failure(
+                        "Names starting with '__native' are reserved for Mezze internals",
+                        ident.remaining.getSourcePosition(),
+                        ident.value.line,
+                        ident.value.column
+                    )
+                } else {
+                    ParseResult.Success(VariablePattern(name), ident.remaining)
+                }
+            }
             is ParseResult.Failure -> ident
         }
     }
@@ -180,13 +195,25 @@ internal val MezzeParser.patternParser: Parser<Pattern>
 // Standalone record pattern for matching on records directly (not wrapped in a constructor)
 // Example: { name, age } -> ...
 internal val MezzeParser.standaloneRecordPattern: Parser<Pattern>
-    get() = { stream ->
+    get() = parser@{ stream ->
         // Only parse if we see a LBRACE that's not preceded by an uppercase identifier
         // Since this is tried after wildcard and literal patterns, we can safely try parsing
         val lbrace = tok(TokenType.LBRACE)(stream)
         when (lbrace) {
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbrace.remaining)
+
+                // Check if first token after { is a __native identifier - report error early
+                val firstToken = stream1.current()
+                if (firstToken?.type == TokenType.IDENTIFIER && firstToken.text.startsWith("__native")) {
+                    return@parser ParseResult.Failure(
+                        "Names starting with '__native' are reserved for Mezze internals",
+                        stream1.getSourcePosition(),
+                        stream1.getSourceLine(),
+                        stream1.getSourceColumn()
+                    )
+                }
+
                 val entries = sepEndByWithNewlines(
                     recordPatternEntryParser,
                     tok(TokenType.COMMA)
@@ -325,7 +352,20 @@ internal val MezzeParser.variablePattern: Parser<Pattern>
                     } else ""
                     stream.failure("'${ident.value.text} {...}' is a constructor pattern, not a variable pattern.$suggestion")
                 } else {
-                    ParseResult.Success(VariablePattern(ident.value.text), ident.remaining)
+                    val name = ident.value.text
+                    // Disallow __native prefix - reserved for Mezze internals
+                    if (name.startsWith("__native")) {
+                        // Use remaining position so this error "wins" over earlier failures,
+                        // but report the token's line/column for better error pointing
+                        ParseResult.Failure(
+                            "Names starting with '__native' are reserved for Mezze internals",
+                            ident.remaining.getSourcePosition(),
+                            ident.value.line,
+                            ident.value.column
+                        )
+                    } else {
+                        ParseResult.Success(VariablePattern(name), ident.remaining)
+                    }
                 }
             }
             is ParseResult.Failure -> ident
@@ -367,15 +407,30 @@ internal val MezzeParser.constructorPattern: Parser<Pattern>
                             // Shorthand pattern: Some x (means Some {value = x})
                             val varPat = identifierParser(stream1)
                             when (varPat) {
-                                is ParseResult.Success -> ParseResult.Success(
-                                    ConstructorPattern(
-                                        ident.value.text,
-                                        RecordPattern(listOf(
-                                            RecordPatternEntry("value", VariablePattern(varPat.value.text))
-                                        ), false)  // Shorthand patterns are always closed
-                                    ),
-                                    varPat.remaining
-                                )
+                                is ParseResult.Success -> {
+                                    val name = varPat.value.text
+                                    // Disallow __native prefix - reserved for Mezze internals
+                                    if (name.startsWith("__native")) {
+                                        // Use remaining position so this error "wins" over earlier failures,
+                                        // but report the token's line/column for better error pointing
+                                        ParseResult.Failure(
+                                            "Names starting with '__native' are reserved for Mezze internals",
+                                            varPat.remaining.getSourcePosition(),
+                                            varPat.value.line,
+                                            varPat.value.column
+                                        )
+                                    } else {
+                                        ParseResult.Success(
+                                            ConstructorPattern(
+                                                ident.value.text,
+                                                RecordPattern(listOf(
+                                                    RecordPatternEntry("value", VariablePattern(name))
+                                                ), false)  // Shorthand patterns are always closed
+                                            ),
+                                            varPat.remaining
+                                        )
+                                    }
+                                }
                                 is ParseResult.Failure -> varPat
                             }
                         }
@@ -450,27 +505,40 @@ internal val MezzeParser.recordPatternEntryParser: Parser<RecordPatternEntry>
         val ident = identifierParser(stream)
         when (ident) {
             is ParseResult.Success -> {
-                val stream1 = ident.remaining
-                val assign = tok(TokenType.ASSIGN)(stream1)
+                val fieldName = ident.value.text
+                // Disallow __native prefix - reserved for Mezze internals
+                if (fieldName.startsWith("__native")) {
+                    // Use remaining position so this error "wins" over earlier failures,
+                    // but report the token's line/column for better error pointing
+                    ParseResult.Failure(
+                        "Names starting with '__native' are reserved for Mezze internals",
+                        ident.remaining.getSourcePosition(),
+                        ident.value.line,
+                        ident.value.column
+                    )
+                } else {
+                    val stream1 = ident.remaining
+                    val assign = tok(TokenType.ASSIGN)(stream1)
 
-                when (assign) {
-                    is ParseResult.Success -> {
-                        // field = pattern
-                        val pattern = patternParser(assign.remaining)
-                        when (pattern) {
-                            is ParseResult.Success -> ParseResult.Success(
-                                RecordPatternEntry(ident.value.text, pattern.value),
-                                pattern.remaining
-                            )
-                            is ParseResult.Failure -> pattern
+                    when (assign) {
+                        is ParseResult.Success -> {
+                            // field = pattern
+                            val pattern = patternParser(assign.remaining)
+                            when (pattern) {
+                                is ParseResult.Success -> ParseResult.Success(
+                                    RecordPatternEntry(fieldName, pattern.value),
+                                    pattern.remaining
+                                )
+                                is ParseResult.Failure -> pattern
+                            }
                         }
-                    }
-                    is ParseResult.Failure -> {
-                        // Punning: field
-                        ParseResult.Success(
-                            RecordPatternEntry(ident.value.text, null),
-                            stream1
-                        )
+                        is ParseResult.Failure -> {
+                            // Punning: field
+                            ParseResult.Success(
+                                RecordPatternEntry(fieldName, null),
+                                stream1
+                            )
+                        }
                     }
                 }
             }
