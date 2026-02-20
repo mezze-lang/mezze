@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.constraints
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.TypingContext
+import com.mezze.language.typechecker.dependencies.DefinitionRef
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.SpreadSyntaxError
 import com.mezze.language.typechecker.debug.DebugLogger
@@ -237,17 +238,21 @@ class ExpressionConstraintGenerator {
                         // CRITICAL: If the type is SuspendedType, extract its effects
                         // This allows perform expressions to know what effects need handling
                         val type = binding.type
+                        // Track reference for dependency graph (module-qualified if from another module)
+                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, expr.name)
                         when (type) {
                             is MezzeType.SuspendedType -> ConstraintResult(
                                 type = type,
                                 constraints = emptyList(),
                                 effects = type.effects.effects,  // Propagate effects from SuspendedType
-                                usedVariables = setOf(expr.name)  // Track variable usage
+                                usedVariables = setOf(expr.name),  // Track variable usage
+                                referencedBindings = setOf(referencedBinding)
                             )
                             else -> ConstraintResult(
                                 type = type,
                                 constraints = emptyList(),
-                                usedVariables = setOf(expr.name)  // Track variable usage
+                                usedVariables = setOf(expr.name),  // Track variable usage
+                                referencedBindings = setOf(referencedBinding)
                             )
                         }
                     }
@@ -274,12 +279,16 @@ class ExpressionConstraintGenerator {
                             else -> emptySet()
                         }
 
+                        // Track reference for dependency graph (module-qualified if from another module)
+                        val referencedBinding = DefinitionRef.ByName(binding.sourceModule, expr.name)
+
                         ConstraintResult(
                             type = type,
                             constraints = emptyList(),
                             effects = effects,
                             abilityConstraints = abilityConstraints,
-                            usedVariables = setOf(expr.name)  // Track variable usage
+                            usedVariables = setOf(expr.name),  // Track variable usage
+                            referencedBindings = setOf(referencedBinding)
                         )
                     }
                 }
@@ -407,7 +416,8 @@ class ExpressionConstraintGenerator {
         return ConstraintResult(
             type = elementType,
             constraints = constraints,
-            undefinedVariables = arrayResult.undefinedVariables + indexResult.undefinedVariables
+            undefinedVariables = arrayResult.undefinedVariables + indexResult.undefinedVariables,
+            referencedBindings = arrayResult.referencedBindings + indexResult.referencedBindings
         )
     }
 
@@ -1635,7 +1645,8 @@ class ExpressionConstraintGenerator {
             tailCalls = bodyResult.tailCalls,
             usedVariables = bodyResult.usedVariables,
             unusedVariables = bodyResult.unusedVariables,
-            patternWarnings = bodyResult.patternWarnings
+            patternWarnings = bodyResult.patternWarnings,
+            referencedBindings = bodyResult.referencedBindings
         )
     }
 
@@ -1792,7 +1803,8 @@ class ExpressionConstraintGenerator {
                         effects = functionResult.effects + argumentResult.effects,
                         performed = functionResult.performed || argumentResult.performed,
                         abilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints,
-                        undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables
+                        undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
+                        referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings
                     )
                 }
             }
@@ -1850,7 +1862,8 @@ class ExpressionConstraintGenerator {
                     effects = propagatedEffects,  // Propagate effects from function type
                     performed = propagatedPerformed,  // Propagate performed flag
                     undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
-                    tailCalls = tailCalls
+                    tailCalls = tailCalls,
+                    referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings
                 )
             }
         }
@@ -1896,7 +1909,8 @@ class ExpressionConstraintGenerator {
             performed = collectedPerformed,  // Propagate performed flag
             abilityConstraints = collectedAbilityConstraints,  // Propagate ability constraints
             undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
-            tailCalls = tailCalls
+            tailCalls = tailCalls,
+            referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings
         )
     }
 
@@ -1957,7 +1971,8 @@ class ExpressionConstraintGenerator {
             performed = performed,
             abilityConstraints = abilityConstraints,
             undefinedVariables = conditionResult.undefinedVariables + thenResult.undefinedVariables + elseResult.undefinedVariables,
-            tailCalls = tailCalls
+            tailCalls = tailCalls,
+            referencedBindings = conditionResult.referencedBindings + thenResult.referencedBindings + elseResult.referencedBindings
         )
     }
 
@@ -1986,6 +2001,9 @@ class ExpressionConstraintGenerator {
         val unusedVars = mutableListOf<ConstraintResult.UnusedVariable>()
         // Track pattern-related warnings (e.g., float literal patterns)
         val patternWarnings = mutableListOf<String>()
+        // Track referenced bindings for dependency graph
+        val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
+        referencedBindings.addAll(scrutineeResult.referencedBindings)
 
         // Step 2: Check for wildcards - if present, scrutinee must be open variant
         // IMPORTANT: Only check TOP-LEVEL patterns for wildcards/variables.
@@ -2047,6 +2065,7 @@ class ExpressionConstraintGenerator {
                 effects.addAll(guardResult.effects)
                 performed = performed || guardResult.performed  // Propagate performed
                 duplicateBindings.addAll(guardResult.duplicateBindings)
+                referencedBindings.addAll(guardResult.referencedBindings)
 
                 // Guard must be Bool (variant type | True, False |)
                 constraints.add(
@@ -2100,6 +2119,7 @@ class ExpressionConstraintGenerator {
             performed = performed || caseBodyResult.performed  // Propagate performed
             duplicateBindings.addAll(caseBodyResult.duplicateBindings)
             tailCalls.addAll(caseBodyResult.tailCalls)
+            referencedBindings.addAll(caseBodyResult.referencedBindings)
 
             // Check for unused pattern bindings
             // Variables starting with _ are intentionally unused (convention)
@@ -2145,7 +2165,8 @@ class ExpressionConstraintGenerator {
             duplicateBindings = duplicateBindings,
             tailCalls = tailCalls,
             unusedVariables = unusedVars,
-            patternWarnings = patternWarnings
+            patternWarnings = patternWarnings,
+            referencedBindings = referencedBindings
         )
     }
 
@@ -2169,6 +2190,8 @@ class ExpressionConstraintGenerator {
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         // TCO: Track tail calls from result expression (statements are not in tail position)
         val tailCalls = mutableSetOf<SourceLocation>()
+        // Track referenced bindings for dependency graph
+        val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
 
         // Create pattern generator for handling destructuring in let statements
         val patternGenerator = PatternConstraintGenerator()
@@ -2184,6 +2207,7 @@ class ExpressionConstraintGenerator {
                     effects.addAll(exprResult.effects)
                     performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
+                    referencedBindings.addAll(exprResult.referencedBindings)
 
                     // CRITICAL: Inside a do block, unwrap SuspendedType for let bindings.
                     // Data types (Result, Option, etc.) are orthogonal to effects.
@@ -2230,6 +2254,7 @@ class ExpressionConstraintGenerator {
                     effects.addAll(exprResult.effects)
                     performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
+                    referencedBindings.addAll(exprResult.referencedBindings)
                 }
             }
         }
@@ -2250,6 +2275,7 @@ class ExpressionConstraintGenerator {
         abilityConstraints.addAll(resultResult.abilityConstraints)
         // TCO: Only the result expression can have tail calls
         tailCalls.addAll(resultResult.tailCalls)
+        referencedBindings.addAll(resultResult.referencedBindings)
 
         // CRITICAL: If do block has effects or performed effects, wrap the result in SuspendedType
         // This allows perform expressions to properly detect and handle effects
@@ -2278,7 +2304,8 @@ class ExpressionConstraintGenerator {
             performed = performed,  // Include performed flag
             abilityConstraints = abilityConstraints,
             undefinedVariables = undefinedVars,
-            tailCalls = tailCalls
+            tailCalls = tailCalls,
+            referencedBindings = referencedBindings
         )
     }
 
@@ -2468,7 +2495,8 @@ class ExpressionConstraintGenerator {
             constraints = exprResult.constraints,
             effects = remainingEffects,  // Return remaining unhandled effects
             performed = true,  // Mark that effects were performed
-            undefinedVariables = exprResult.undefinedVariables
+            undefinedVariables = exprResult.undefinedVariables,
+            referencedBindings = exprResult.referencedBindings
         )
     }
 

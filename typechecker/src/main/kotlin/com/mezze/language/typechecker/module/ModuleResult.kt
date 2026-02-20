@@ -169,7 +169,9 @@ data class TypedModule(
     val exports: Map<String, ExportedItem>,           // Exports with complete types
     val context: TypingContext,                       // Module-specific typing context
     val substitution: Substitution,                   // Type substitution from inference
-    val monomorphicInstances: Map<String, LetBinding> // Specialized function instances
+    val monomorphicInstances: Map<String, LetBinding>, // Specialized function instances
+    val dependencyGraph: com.mezze.language.typechecker.dependencies.DependencyGraph =
+        com.mezze.language.typechecker.dependencies.DependencyGraph.EMPTY  // Dependencies between definitions
 )
 
 // ============================================================================
