@@ -1,5 +1,6 @@
 package com.mezze.language.interpreter.concurrency
 
+import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.interpreter.effects.EffectContext
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
@@ -139,11 +140,30 @@ class SmartEffectScheduler(
     }
     
     private fun generateCacheKey(block: EffectBlock): String {
-        // Create a signature based on operation types and dependencies
-        val signature = block.operations.joinToString("|") { op ->
-            "${op.effectType}:${op.readVariables.sorted()}:${op.writeVariables.sorted()}"
+        // Use SHA3-512 hash for collision-resistant cache keys
+        // This is much stronger than String.hashCode() (32-bit)
+        val builder = MezzeHashBuilder()
+        builder.appendInt(block.operations.size)
+
+        for (op in block.operations) {
+            builder.append(op.effectType)
+
+            // Append sorted read variables
+            val sortedReads = op.readVariables.sorted()
+            builder.appendInt(sortedReads.size)
+            for (v in sortedReads) {
+                builder.append(v)
+            }
+
+            // Append sorted write variables
+            val sortedWrites = op.writeVariables.sorted()
+            builder.appendInt(sortedWrites.size)
+            for (v in sortedWrites) {
+                builder.append(v)
+            }
         }
-        return signature.hashCode().toString()
+
+        return builder.build().toString()
     }
     
     private fun calculateCacheHitRate(): Double {

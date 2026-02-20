@@ -1179,11 +1179,11 @@ class SubstitutionApplier(
                     else -> MezzeType.TypeApplication(typeName, emptyList())
                 }
             }
-            val key = "${abilityName}<${implTypeArgs.joinToString(", ") { prettyPrintType(it) }}>"
             // Content hash is now computed early (Phase 0.5) so it's available here
             val contentHash = impl.contentHash
                 ?: throw IllegalStateException("Content hash not computed for impl: ${impl.abilityName} ${impl.targetTypes}")
-            resolvedAbilities[key] = ResolvedAbility(
+            // Use content hash as key for O(1) lookup and collision-free identity
+            resolvedAbilities[contentHash] = ResolvedAbility(
                 abilityName = abilityName,
                 typeArgs = implTypeArgs,
                 isBuiltin = false,
@@ -1192,8 +1192,9 @@ class SubstitutionApplier(
         } else if (BuiltinAbilities.isBuiltin(abilityName)) {
             // Check for built-in ability with automatic implementation
             if (BuiltinAbilities.typeHasAutomaticImplementation(primaryType, abilityName)) {
-                val key = "${abilityName}<${prettyPrintType(primaryType)}>"
-                resolvedAbilities[key] = ResolvedAbility(
+                // For builtins, use a deterministic synthetic key based on ability + type
+                val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(primaryType)}"
+                resolvedAbilities[builtinKey] = ResolvedAbility(
                     abilityName = abilityName,
                     typeArgs = listOf(primaryType),
                     isBuiltin = true
@@ -1291,14 +1292,15 @@ class SubstitutionApplier(
                 // The returned impl has its content hash computed
                 val implWithHash = registerGeneratedCodecImpl(generatedImpl)
 
-                // Create the resolved ability reference using content hash
-                val key = "${abilityName}<${formatTypeName}, ${prettyPrintType(primaryType)}>"
+                // Create the resolved ability reference using content hash as key
+                val implHash = implWithHash.contentHash
+                    ?: throw IllegalStateException("Content hash not computed for generated codec impl: $abilityName")
 
-                resolvedAbilities[key] = ResolvedAbility(
+                resolvedAbilities[implHash] = ResolvedAbility(
                     abilityName = abilityName,
                     typeArgs = listOf(formatType, resolvedPrimaryType),
                     isBuiltin = false,
-                    implementationHash = implWithHash.contentHash
+                    implementationHash = implHash
                 )
             }
         }
@@ -1328,12 +1330,10 @@ class SubstitutionApplier(
             val impl = findAbilityImplementation(abilityName, typeArgs)
 
             if (impl != null) {
-                // Found explicit implementation
-                val key = "${abilityName}<${typeArgs.joinToString(", ") { prettyPrintType(it) }}>"
-                // Content hash is now computed early (Phase 0.5) so it's available here
+                // Found explicit implementation - use content hash as key
                 val contentHash = impl.contentHash
                     ?: throw IllegalStateException("Content hash not computed for impl: ${impl.abilityName} ${impl.targetTypes}")
-                resolvedAbilities[key] = ResolvedAbility(
+                resolvedAbilities[contentHash] = ResolvedAbility(
                     abilityName = abilityName,
                     typeArgs = typeArgs,
                     isBuiltin = false,
@@ -1343,8 +1343,9 @@ class SubstitutionApplier(
                 // Check if it's a built-in ability with automatic implementation
                 val targetType = typeArgs[0]
                 if (BuiltinAbilities.typeHasAutomaticImplementation(targetType, abilityName)) {
-                    val key = "${abilityName}<${prettyPrintType(targetType)}>"
-                    resolvedAbilities[key] = ResolvedAbility(
+                    // For builtins, use a deterministic synthetic key
+                    val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(targetType)}"
+                    resolvedAbilities[builtinKey] = ResolvedAbility(
                         abilityName = abilityName,
                         typeArgs = typeArgs,
                         isBuiltin = true

@@ -433,8 +433,9 @@ data class FunctionCall(
     override val sourceLocation: SourceLocation? = null,
 
     // NEW: Resolved ability implementations for this call
-    // Maps ability constraint identifier to its resolved implementation
-    // Example: {"NumAdd<Int>" -> ResolvedAbility(...)}
+    // Maps content hash (or synthetic key for builtins) to its resolved implementation
+    // For user-defined: {"abc123..." -> ResolvedAbility(..., implementationHash="abc123...")}
+    // For builtins: {"builtin:NumAdd:Int" -> ResolvedAbility(..., isBuiltin=true)}
     val resolvedAbilities: Map<String, ResolvedAbility> = emptyMap(),
 
     // NEW: For monomorphic dispatch - direct reference to specialized function
