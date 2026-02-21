@@ -928,7 +928,12 @@ private fun formatType(type: MezzeType): String {
         is MezzeType.CharType -> "Char"
         is MezzeType.FunctionType -> "{...} -> ..."
         is MezzeType.RecordType -> "{${type.fields.entries.take(3).joinToString { "${it.key}: ${formatType(it.value)}" }}${if (type.fields.size > 3) ", ..." else ""}}"
-        is MezzeType.VariantType -> "[${type.constructors.keys.take(3).joinToString()}${if (type.constructors.size > 3) ", ..." else ""}]"
+        is MezzeType.VariantType -> {
+            val constructorStrs = type.constructors.entries.take(3).map { (name, payload) ->
+                if (payload != null) "$name ${formatType(payload)}" else name
+            }
+            "| ${constructorStrs.joinToString(", ")}${if (type.constructors.size > 3) ", ..." else ""} |"
+        }
         is MezzeType.TypeApplication -> "${type.constructor}${if (type.args.isNotEmpty()) " ${type.args.joinToString(" ") { formatType(it) }}" else ""}"
         is MezzeType.ArrayType -> "Array ${formatType(type.elementType)}"
         is MezzeType.ListType -> "List ${formatType(type.elementType)}"

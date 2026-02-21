@@ -1878,13 +1878,15 @@ class ExpressionConstraintGenerator {
         constraints.addAll(argumentResult.constraints)
 
         // function must be a function type: argumentType -> returnType
+        // Note: left = actual (what we got), right = expected (what we need)
+        // The function's actual type must match a function that takes our argument type
         constraints.add(
             Constraint.Equality(
-                left = functionResult.type,
-                right = MezzeType.FunctionType(
+                left = MezzeType.FunctionType(
                     paramType = argumentResult.type,
                     returnType = returnType
                 ),
+                right = functionResult.type,
                 context = "Function application",
                 sourceLocation = expr.sourceLocation
             )
