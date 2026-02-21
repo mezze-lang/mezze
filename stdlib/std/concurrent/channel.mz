@@ -53,11 +53,11 @@ effect Channel where {
 
 # Create an unbounded channel
 pub let chan: {} -> Chan 'a = {} ->
-    Chan (__native_channel_make {})
+    __native_channel_make {}
 
 # Create a bounded channel with specified capacity
 pub let chan_bounded: { cap: Int } -> Chan 'a = { cap } ->
-    Chan (__native_channel_make_buffered { capacity = cap })
+    __native_channel_make_buffered { capacity = cap }
 
 # =============================================================================
 # BlockingChannel Implementation - Default using LinkedBlockingQueue

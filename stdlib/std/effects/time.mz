@@ -71,6 +71,94 @@ pub let current_date: {} -> { year: Int, month: Int, day: Int } <Time> = {} -> d
     let day = Time.current_day {}
     { year = year, month = month, day = day }
 
+pub let current_time: {} -> { hour: Int, minute: Int, second: Int } <Time> = {} -> do
+    let hour = Time.current_hour {}
+    let minute = Time.current_minute {}
+    let second = Time.current_second {}
+    { hour = hour, minute = minute, second = second }
+
+pub let current_datetime: {} -> { year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int } <Time> = {} -> do
+    let year = Time.current_year {}
+    let month = Time.current_month {}
+    let day = Time.current_day {}
+    let hour = Time.current_hour {}
+    let minute = Time.current_minute {}
+    let second = Time.current_second {}
+    { year = year, month = month, day = day, hour = hour, minute = minute, second = second }
+
+# Time arithmetic (pure functions - no effect needed)
+pub let add_millis: { timestamp: Int, millis: Int } -> Int = { timestamp, millis } ->
+    timestamp + millis
+
+pub let add_seconds: { timestamp: Int, seconds: Int } -> Int = { timestamp, seconds } ->
+    timestamp + (seconds * 1000)
+
+pub let add_minutes: { timestamp: Int, minutes: Int } -> Int = { timestamp, minutes } ->
+    timestamp + (minutes * 60 * 1000)
+
+pub let add_hours: { timestamp: Int, hours: Int } -> Int = { timestamp, hours } ->
+    timestamp + (hours * 60 * 60 * 1000)
+
+pub let add_days: { timestamp: Int, days: Int } -> Int = { timestamp, days } ->
+    timestamp + (days * 24 * 60 * 60 * 1000)
+
+# Time difference utilities (pure functions)
+pub let diff_millis: { start: Int, end: Int } -> Int = { start, end } ->
+    end - start
+
+pub let diff_seconds: { start: Int, end: Int } -> Int = { start, end } ->
+    (end - start) / 1000
+
+pub let diff_minutes: { start: Int, end: Int } -> Int = { start, end } ->
+    (end - start) / (60 * 1000)
+
+pub let diff_hours: { start: Int, end: Int } -> Int = { start, end } ->
+    (end - start) / (60 * 60 * 1000)
+
+pub let diff_days: { start: Int, end: Int } -> Int = { start, end } ->
+    (end - start) / (24 * 60 * 60 * 1000)
+
+# Check if year is leap year (pure function)
+pub let is_leap_year: { year: Int } -> Bool = { year } ->
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+
+# Get days in month (pure function, requires year for February)
+pub let days_in_month: { year: Int, month: Int } -> Int = { year, month } ->
+    match month is
+        1 -> 31
+        2 -> match is_leap_year { year = year } is
+            True -> 29
+            False -> 28
+        3 -> 31
+        4 -> 30
+        5 -> 31
+        6 -> 30
+        7 -> 31
+        8 -> 31
+        9 -> 30
+        10 -> 31
+        11 -> 30
+        12 -> 31
+        _ -> 0
+
+# Format timestamp with common formats
+pub let format_iso8601: { timestamp: Int } -> String <Time> = { timestamp } ->
+    Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd'T'HH:mm:ss'Z'" }
+
+pub let format_date: { timestamp: Int } -> String <Time> = { timestamp } ->
+    Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd" }
+
+pub let format_time_only: { timestamp: Int } -> String <Time> = { timestamp } ->
+    Time.format_timestamp { timestamp = timestamp, format = "HH:mm:ss" }
+
+pub let format_datetime: { timestamp: Int } -> String <Time> = { timestamp } ->
+    Time.format_timestamp { timestamp = timestamp, format = "yyyy-MM-dd HH:mm:ss" }
+
+# Get elapsed time since timestamp
+pub let elapsed_since: { timestamp: Int } -> Int <Time> = { timestamp } -> do
+    let current = Time.now {}
+    current - timestamp
+
 # Usage examples:
 # 
 # Using system time:

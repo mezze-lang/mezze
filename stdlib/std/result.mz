@@ -80,3 +80,33 @@ pub let fold: { result: (Result 'a 'e), on_err: {error: 'e} -> 'b, on_ok: {val: 
     match result is
         Ok { val } -> on_ok { val }
         Err { error } -> on_err { error }
+
+# =============================================================================
+# Additional Utilities
+# =============================================================================
+
+# Flatten nested Result: Result (Result a e) e -> Result a e
+# Example: flatten {result = Ok {val = Ok {val = 42}}} -> Ok {val = 42}
+# Example: flatten {result = Ok {val = Err {error = "inner"}}} -> Err {error = "inner"}
+pub let flatten: { result: (Result (Result 'a 'e) 'e) } -> (Result 'a 'e) = { result } ->
+    match result is
+        Ok { val } -> val
+        Err { error } -> Err { error = error }
+
+# Convert Result to a list (empty list for Err, singleton for Ok)
+# Example: to_list {result = Ok {val = 42}} -> [42]
+# Example: to_list {result = Err {error = "oops"}} -> []
+pub let to_list: { result: (Result 'a 'e) } -> ['a] = { result } ->
+    match result is
+        Ok { val } -> [val]
+        Err { error } -> []
+
+# Combine two Results into a Result of a record
+# Returns the first Err encountered
+# Example: zip {a = Ok {val = 1}, b = Ok {val = "x"}} -> Ok {val = {fst = 1, snd = "x"}}
+pub let zip: { a: (Result 'a 'e), b: (Result 'b 'e) } -> (Result {fst: 'a, snd: 'b} 'e) = { a, b } ->
+    match a is
+        Ok { val = av } -> match b is
+            Ok { val = bv } -> Ok { val = { fst = av, snd = bv } }
+            Err { error } -> Err { error = error }
+        Err { error } -> Err { error = error }

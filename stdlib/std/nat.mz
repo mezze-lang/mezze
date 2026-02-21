@@ -31,3 +31,18 @@ pub let is_even = { n: Nat } ->
 
 pub let is_odd = { n: Nat } ->
     if is_even { n = n } then False else True
+
+# Convert Nat to Int (always succeeds since all naturals are valid integers)
+# Example: to_int {n = 5n} -> 5
+pub let to_int = { n: Nat } ->
+    __native_nat_to_int { n = n }
+
+# Convert Nat to String
+# Example: to_string {n = 42n} -> "42"
+pub let to_string = { n: Nat } ->
+    __native_nat_to_string { n = n }
+
+# Clamp value to range [min, max]
+# Example: clamp {n = 15n, min = 0n, max = 10n} -> 10n
+pub let clamp = { n: Nat, min: Nat, max: Nat } ->
+    __native_nat_clamp { n = n, min = min, max = max }

@@ -1,6 +1,6 @@
 # std/effects/concurrency.mezze - Virtual thread concurrency using Promises
 
-use std::effects::async::{Promise, AsyncRunner}
+use std::async::{Promise}
 
 # Concurrency effect - spawn computations on virtual threads
 effect Concurrency where {
@@ -16,11 +16,11 @@ effect Concurrency where {
 pub impl Concurrency for Loom where {
   # spawn - creates new virtual thread, returns Promise
   spawn = {computation} ->
-    __native_loom_spawn {computation = computation}
+    __native_loom_spawn_cfg {f = computation, max_concurrent = 0},
 
   # await - blocks current thread until Promise resolves
   await = {promise} ->
-    __native_loom_await {promise = promise}
+    __native_loom_await {p = promise}
 }
 
 # Helper: spawn and immediately await (blocks until done)
@@ -31,12 +31,13 @@ pub let run: {computation: {} -> 'a} -> 'a <Concurrency> = {computation} -> do
 # Helper: spawn multiple, await all
 pub let all: {computations: [{} -> 'a]} -> ['a] <Concurrency> = {computations} -> do
   # Spawn all computations
-  let promises = computations |> map {comp} ->
-    Concurrency.spawn {computation = comp}
-
+  let promises = computations |> __native_arraylist_map {xs = @, f = {x} ->
+    Concurrency.spawn {computation = x}
+  }
   # Wait for all to complete
-  promises |> map {p} ->
-    Concurrency.await {promise = p}
+  promises |> __native_arraylist_map {xs = @, f = {x} ->
+    Concurrency.await {promise = x}
+  }
 
 # Usage examples:
 #

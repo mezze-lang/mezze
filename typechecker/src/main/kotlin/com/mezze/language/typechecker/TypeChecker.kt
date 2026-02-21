@@ -390,7 +390,7 @@ class TypeChecker(
                 val generatedCodecImpls = solver.getGeneratedCodecImpls().mapValues { (_, impl) ->
                     if (impl.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(impl)
-                        impl.copy(contentHash = hash.toString())
+                        impl.copy(contentHash = hash.toFullHexString())
                     } else {
                         impl
                     }
@@ -769,7 +769,7 @@ class TypeChecker(
                 is ImplAbilityDeclaration -> {
                     if (item.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(item)
-                        item.copy(contentHash = hash.toString())
+                        item.copy(contentHash = hash.toFullHexString())
                     } else {
                         item  // Already has hash (e.g., from import)
                     }
@@ -777,7 +777,7 @@ class TypeChecker(
                 is ImplDeclaration -> {
                     if (item.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplDeclaration(item)
-                        item.copy(contentHash = hash.toString())
+                        item.copy(contentHash = hash.toFullHexString())
                     } else {
                         item
                     }
@@ -785,7 +785,7 @@ class TypeChecker(
                 is LetBinding -> {
                     if (item.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashLetBinding(item)
-                        item.copy(contentHash = hash.toString())
+                        item.copy(contentHash = hash.toFullHexString())
                     } else {
                         item
                     }
@@ -793,7 +793,7 @@ class TypeChecker(
                 is TypeDeclaration -> {
                     if (item.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashTypeDeclaration(item)
-                        item.copy(contentHash = hash.toString())
+                        item.copy(contentHash = hash.toFullHexString())
                     } else {
                         item
                     }
@@ -801,7 +801,7 @@ class TypeChecker(
                 is EffectDeclaration -> {
                     if (item.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashEffectDeclaration(item)
-                        item.copy(contentHash = hash.toString())
+                        item.copy(contentHash = hash.toFullHexString())
                     } else {
                         item
                     }
@@ -809,7 +809,7 @@ class TypeChecker(
                 is AbilityDeclaration -> {
                     if (item.contentHash == null) {
                         val hash = com.mezze.language.ast.hashing.ASTHasher.hashAbilityDeclaration(item)
-                        item.copy(contentHash = hash.toString())
+                        item.copy(contentHash = hash.toFullHexString())
                     } else {
                         item
                     }

@@ -97,11 +97,21 @@ object SetTypes {
             setType
         )
 
+        context["__native_set_to_list"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to setType)),
+            MezzeType.ListType(MezzeType.VarType(setElemTypeVar))
+        )
+
+        context["__native_set_from_list"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("xs" to MezzeType.ListType(MezzeType.VarType(setElemTypeVar)))),
+            setType
+        )
+
         context["__native_set_filter"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "s" to setType,
                 "p" to MezzeType.FunctionType(
-                    MezzeType.VarType(setElemTypeVar),
+                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
                     MezzeType.BooleanType
                 )
             )),
@@ -112,7 +122,7 @@ object SetTypes {
             MezzeType.RecordType(mapOf(
                 "s" to setType,
                 "f" to MezzeType.FunctionType(
-                    MezzeType.VarType(setElemTypeVar),
+                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(setElemTypeVar))),
                     MezzeType.VarType(setElemTypeVarB)
                 )
             )),

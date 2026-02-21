@@ -161,5 +161,25 @@ object IntImplementations {
             val r = record.fields["r"] as? MezzeInt ?: throw NativeFunctionException("__native_int_max", "expects 'r' as Int")
             MezzeInt(kotlin.math.max(l.value, r.value))
         }
+
+        // Clamp value to range [min, max]
+        context["__native_int_clamp"] = NativeMezzeFunction("__native_int_clamp") { args ->
+            val record = args[0] as MezzeRecord
+            val n = record.fields["n"] as? MezzeInt ?: throw NativeFunctionException("__native_int_clamp", "expects 'n' as Int")
+            val min = record.fields["min"] as? MezzeInt ?: throw NativeFunctionException("__native_int_clamp", "expects 'min' as Int")
+            val max = record.fields["max"] as? MezzeInt ?: throw NativeFunctionException("__native_int_clamp", "expects 'max' as Int")
+            MezzeInt(n.value.coerceIn(min.value, max.value))
+        }
+
+        // Convert Int to Nat, returns None if negative
+        context["__native_int_to_nat"] = NativeMezzeFunction("__native_int_to_nat") { args ->
+            val record = args[0] as MezzeRecord
+            val n = record.fields["n"] as? MezzeInt ?: throw NativeFunctionException("__native_int_to_nat", "expects 'n' as Int")
+            if (n.value >= 0) {
+                mezzeOptionSome(MezzeNat(n.value))
+            } else {
+                mezzeOptionNone()
+            }
+        }
     }
 }

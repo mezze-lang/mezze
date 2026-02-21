@@ -22,7 +22,8 @@ effect Scope where {
     fork: { task: {} -> 'a } -> {} <Scope, Concurrency>,
 
     # Fork and get a handle to await explicitly
-    fork_with_handle: { task: {} -> 'a } -> { await: {} -> 'a } <Scope, Concurrency>
+    # Note: The await function in the returned record requires Concurrency effect
+    fork_with_handle: { task: {} -> 'a } -> { await: {} -> 'a <Concurrency> } <Scope, Concurrency>
 }
 
 # AutoScope impl - automatically awaits all forked tasks on scope exit

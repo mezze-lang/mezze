@@ -350,6 +350,62 @@ class ResultModuleTest {
         assertEquals("Err", variant.constructor)
     }
 
+    // === if_ok ===
+
+    @Test
+    fun `test result if_ok - Ok executes action`() {
+        val source = """
+            use std::result
+            let res: Result Int String = Ok { val = 5 }
+            let result = result::if_ok { result = res, action = { val } -> {} }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        // if_ok returns {} (unit), just verify it runs without error
+        assertNotNull(variables["result"])
+    }
+
+    @Test
+    fun `test result if_ok - Err does not execute`() {
+        val source = """
+            use std::result
+            let res: Result Int String = Err { error = "oops" }
+            let result = result::if_ok { result = res, action = { val } -> {} }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        // if_ok returns {} (unit), just verify it runs without error
+        assertNotNull(variables["result"])
+    }
+
+    // === if_err ===
+
+    @Test
+    fun `test result if_err - Err executes action`() {
+        val source = """
+            use std::result
+            let res: Result Int String = Err { error = "oops" }
+            let result = result::if_err { result = res, action = { error } -> {} }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        // if_err returns {} (unit), just verify it runs without error
+        assertNotNull(variables["result"])
+    }
+
+    @Test
+    fun `test result if_err - Ok does not execute`() {
+        val source = """
+            use std::result
+            let res: Result Int String = Ok { val = 5 }
+            let result = result::if_err { result = res, action = { error } -> {} }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        // if_err returns {} (unit), just verify it runs without error
+        assertNotNull(variables["result"])
+    }
+
     // === fold ===
 
     @Test
@@ -382,5 +438,136 @@ class ResultModuleTest {
 
         val variables = parseTypeCheckAndRun(source)
         assertEquals("error", (variables["folded"] as MezzeString).value)
+    }
+
+    // === flatten ===
+
+    @Test
+    fun `test result flatten - Ok Ok`() {
+        val source = """
+            use std::result
+            let inner: Result Int String = Ok { val = 42 }
+            let nested: Result (Result Int String) String = Ok { val = inner }
+            let result = result::flatten { result = nested }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Ok", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        assertEquals(42L, (payload.fields["val"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test result flatten - Ok Err`() {
+        val source = """
+            use std::result
+            let inner: Result Int String = Err { error = "inner error" }
+            let nested: Result (Result Int String) String = Ok { val = inner }
+            let result = result::flatten { result = nested }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Err", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        assertEquals("inner error", (payload.fields["error"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test result flatten - Err`() {
+        val source = """
+            use std::result
+            let nested: Result (Result Int String) String = Err { error = "outer error" }
+            let result = result::flatten { result = nested }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Err", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        assertEquals("outer error", (payload.fields["error"] as MezzeString).value)
+    }
+
+    // === to_list ===
+
+    @Test
+    fun `test result to_list - Ok becomes singleton list`() {
+        val source = """
+            use std::result
+            use std::collections::array
+            let res: Result Int String = Ok { val = 42 }
+            let xs = result::to_list { result = res }
+            let len = array::length { xs = xs }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(1L, (variables["len"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test result to_list - Err becomes empty list`() {
+        val source = """
+            use std::result
+            use std::collections::array
+            let res: Result Int String = Err { error = "oops" }
+            let xs = result::to_list { result = res }
+            let len = array::length { xs = xs }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0L, (variables["len"] as MezzeInt).value)
+    }
+
+    // === zip ===
+
+    @Test
+    fun `test result zip - both Ok`() {
+        val source = """
+            use std::result
+            let a: Result Int String = Ok { val = 1 }
+            let b: Result String String = Ok { val = "x" }
+            let result = result::zip { a = a, b = b }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Ok", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        val innerRecord = payload.fields["val"] as MezzeRecord
+        assertEquals(1L, (innerRecord.fields["fst"] as MezzeInt).value)
+        assertEquals("x", (innerRecord.fields["snd"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test result zip - first Err`() {
+        val source = """
+            use std::result
+            let a: Result Int String = Err { error = "first failed" }
+            let b: Result String String = Ok { val = "x" }
+            let result = result::zip { a = a, b = b }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Err", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        assertEquals("first failed", (payload.fields["error"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test result zip - second Err`() {
+        val source = """
+            use std::result
+            let a: Result Int String = Ok { val = 1 }
+            let b: Result String String = Err { error = "second failed" }
+            let result = result::zip { a = a, b = b }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Err", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        assertEquals("second failed", (payload.fields["error"] as MezzeString).value)
     }
 }

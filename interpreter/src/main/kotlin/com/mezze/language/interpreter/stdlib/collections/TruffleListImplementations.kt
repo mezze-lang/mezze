@@ -624,12 +624,134 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_sort_by", "expects 'cmp' function")
 
             val sorted = xs.toKotlinList().sortedWith { a, b ->
-                val callArg = MezzeRecord(mapOf("l" to a, "r" to b))
+                val callArg = MezzeRecord(mapOf("a" to a, "b" to b))
                 val result = callFunction(cmp, callArg, "__native_list_sort_by")
                 (result as? MezzeInt)?.value?.toInt()
                     ?: throw NativeFunctionException("__native_list_sort_by", "comparator must return Int")
             }
             MezzeList.fromKotlinList(sorted)
+        }
+
+        // Find first element matching predicate
+        context["__native_list_find"] = NativeMezzeFunction("__native_list_find") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_list_find", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeList
+                ?: throw NativeFunctionException("__native_list_find", "expects 'xs' as List")
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_list_find", "expects 'p' predicate")
+
+            var current: MezzeList = xs
+            while (current is MezzeCons) {
+                val callArg = MezzeRecord(mapOf("x" to current.head))
+                val result = callFunction(p, callArg, "__native_list_find")
+                val matches = (result as? MezzeBool)?.value
+                    ?: throw NativeFunctionException("__native_list_find", "predicate must return Boolean")
+                if (matches) return@NativeMezzeFunction mezzeOptionSome(current.head)
+                current = current.tail
+            }
+            mezzeOptionNone()
+        }
+
+        // Find index of first element matching predicate
+        context["__native_list_find_index"] = NativeMezzeFunction("__native_list_find_index") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_list_find_index", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeList
+                ?: throw NativeFunctionException("__native_list_find_index", "expects 'xs' as List")
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_list_find_index", "expects 'p' predicate")
+
+            var current: MezzeList = xs
+            var index = 0L
+            while (current is MezzeCons) {
+                val callArg = MezzeRecord(mapOf("x" to current.head))
+                val result = callFunction(p, callArg, "__native_list_find_index")
+                val matches = (result as? MezzeBool)?.value
+                    ?: throw NativeFunctionException("__native_list_find_index", "predicate must return Boolean")
+                if (matches) return@NativeMezzeFunction mezzeOptionSome(MezzeInt(index))
+                current = current.tail
+                index++
+            }
+            mezzeOptionNone()
+        }
+
+        // Partition list into matching and non-matching elements
+        context["__native_list_partition"] = NativeMezzeFunction("__native_list_partition") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_list_partition", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeList
+                ?: throw NativeFunctionException("__native_list_partition", "expects 'xs' as List")
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_list_partition", "expects 'p' predicate")
+
+            val matching = mutableListOf<MezzeValue>()
+            val notMatching = mutableListOf<MezzeValue>()
+
+            var current: MezzeList = xs
+            while (current is MezzeCons) {
+                val callArg = MezzeRecord(mapOf("x" to current.head))
+                val result = callFunction(p, callArg, "__native_list_partition")
+                val matches = (result as? MezzeBool)?.value
+                    ?: throw NativeFunctionException("__native_list_partition", "predicate must return Boolean")
+                if (matches) {
+                    matching.add(current.head)
+                } else {
+                    notMatching.add(current.head)
+                }
+                current = current.tail
+            }
+
+            MezzeRecord(mapOf(
+                "matching" to MezzeList.fromKotlinList(matching),
+                "not_matching" to MezzeList.fromKotlinList(notMatching)
+            ))
+        }
+
+        // Get last element of list
+        context["__native_list_last"] = NativeMezzeFunction("__native_list_last") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_list_last", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeList
+                ?: throw NativeFunctionException("__native_list_last", "expects 'xs' as List")
+
+            var last: MezzeValue? = null
+            var current: MezzeList = xs
+            while (current is MezzeCons) {
+                last = current.head
+                current = current.tail
+            }
+            if (last != null) {
+                mezzeOptionSome(last)
+            } else {
+                mezzeOptionNone()
+            }
+        }
+
+        // Get all elements except the last
+        context["__native_list_init"] = NativeMezzeFunction("__native_list_init") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_list_init", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeList
+                ?: throw NativeFunctionException("__native_list_init", "expects 'xs' as List")
+
+            val elements = mutableListOf<MezzeValue>()
+            var current: MezzeList = xs
+            while (current is MezzeCons) {
+                elements.add(current.head)
+                current = current.tail
+            }
+
+            if (elements.isEmpty()) {
+                MezzeNil
+            } else {
+                // Build list of all elements except last
+                var result: MezzeList = MezzeNil
+                for (i in (elements.size - 2) downTo 0) {
+                    result = MezzeCons(elements[i], result)
+                }
+                result
+            }
         }
 
         // List equality

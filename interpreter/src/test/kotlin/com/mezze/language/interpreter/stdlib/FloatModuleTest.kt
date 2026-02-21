@@ -207,4 +207,214 @@ class FloatModuleTest {
         val variables = parseTypeCheckAndRun(source)
         assertEquals(-999.0, (variables["result"] as MezzeFloat).value, 0.0001)
     }
+
+    // === Float Classification Tests ===
+
+    @Test
+    fun `test float is_nan - with NaN`() {
+        val source = """
+            use std::float
+            let result = float::is_nan { n = 0.0 / 0.0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(true, (variables["result"] as com.mezze.language.interpreter.MezzeBool).value)
+    }
+
+    @Test
+    fun `test float is_nan - with normal value`() {
+        val source = """
+            use std::float
+            let result = float::is_nan { n = 3.14 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(false, (variables["result"] as com.mezze.language.interpreter.MezzeBool).value)
+    }
+
+    @Test
+    fun `test float is_infinite - with positive infinity`() {
+        val source = """
+            use std::float
+            let result = float::is_infinite { n = 1.0 / 0.0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(true, (variables["result"] as com.mezze.language.interpreter.MezzeBool).value)
+    }
+
+    @Test
+    fun `test float is_infinite - with negative infinity`() {
+        val source = """
+            use std::float
+            let result = float::is_infinite { n = -1.0 / 0.0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(true, (variables["result"] as com.mezze.language.interpreter.MezzeBool).value)
+    }
+
+    @Test
+    fun `test float is_infinite - with normal value`() {
+        val source = """
+            use std::float
+            let result = float::is_infinite { n = 3.14 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(false, (variables["result"] as com.mezze.language.interpreter.MezzeBool).value)
+    }
+
+    @Test
+    fun `test float is_finite - with normal value`() {
+        val source = """
+            use std::float
+            let result = float::is_finite { n = 3.14 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(true, (variables["result"] as com.mezze.language.interpreter.MezzeBool).value)
+    }
+
+    @Test
+    fun `test float is_finite - with infinity`() {
+        val source = """
+            use std::float
+            let result = float::is_finite { n = 1.0 / 0.0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(false, (variables["result"] as com.mezze.language.interpreter.MezzeBool).value)
+    }
+
+    @Test
+    fun `test float is_finite - with NaN`() {
+        val source = """
+            use std::float
+            let result = float::is_finite { n = 0.0 / 0.0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(false, (variables["result"] as com.mezze.language.interpreter.MezzeBool).value)
+    }
+
+    // === Float Utilities Tests ===
+
+    @Test
+    fun `test float sign - positive`() {
+        val source = """
+            use std::float
+            let result = float::sign { n = 5.5 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(1.0, (variables["result"] as MezzeFloat).value, 0.0001)
+    }
+
+    @Test
+    fun `test float sign - negative`() {
+        val source = """
+            use std::float
+            let result = float::sign { n = -5.5 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(-1.0, (variables["result"] as MezzeFloat).value, 0.0001)
+    }
+
+    @Test
+    fun `test float sign - zero`() {
+        val source = """
+            use std::float
+            let result = float::sign { n = 0.0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0.0, (variables["result"] as MezzeFloat).value, 0.0001)
+    }
+
+    @Test
+    fun `test float clamp - within range`() {
+        val source = """
+            use std::float
+            let result = float::clamp { n = 5.0, min = 0.0, max = 10.0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(5.0, (variables["result"] as MezzeFloat).value, 0.0001)
+    }
+
+    @Test
+    fun `test float clamp - below min`() {
+        val source = """
+            use std::float
+            let result = float::clamp { n = -5.0, min = 0.0, max = 10.0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0.0, (variables["result"] as MezzeFloat).value, 0.0001)
+    }
+
+    @Test
+    fun `test float clamp - above max`() {
+        val source = """
+            use std::float
+            let result = float::clamp { n = 15.5, min = 0.0, max = 10.0 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(10.0, (variables["result"] as MezzeFloat).value, 0.0001)
+    }
+
+    @Test
+    fun `test float to_int - positive truncate`() {
+        val source = """
+            use std::float
+            let result = match float::to_int { n = 3.7 } is
+                Some { val } -> val
+                None -> -999
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(3L, (variables["result"] as com.mezze.language.interpreter.MezzeInt).value)
+    }
+
+    @Test
+    fun `test float to_int - negative truncate`() {
+        val source = """
+            use std::float
+            let result = match float::to_int { n = -3.7 } is
+                Some { val } -> val
+                None -> -999
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(-3L, (variables["result"] as com.mezze.language.interpreter.MezzeInt).value)
+    }
+
+    @Test
+    fun `test float to_int - with infinity returns None`() {
+        val source = """
+            use std::float
+            let result = match float::to_int { n = 1.0 / 0.0 } is
+                Some { val } -> 1
+                None -> 0
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0L, (variables["result"] as com.mezze.language.interpreter.MezzeInt).value)
+    }
+
+    @Test
+    fun `test float to_int - with NaN returns None`() {
+        val source = """
+            use std::float
+            let result = match float::to_int { n = 0.0 / 0.0 } is
+                Some { val } -> 1
+                None -> 0
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0L, (variables["result"] as com.mezze.language.interpreter.MezzeInt).value)
+    }
 }

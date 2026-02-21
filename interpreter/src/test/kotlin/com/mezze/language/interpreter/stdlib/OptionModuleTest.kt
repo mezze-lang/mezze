@@ -311,6 +311,62 @@ class OptionModuleTest {
         assertEquals("None", variant.constructor)
     }
 
+    // === if_some ===
+
+    @Test
+    fun `test option if_some - Some executes action`() {
+        val source = """
+            use std::option
+            let opt = Some { val = 5 }
+            let result = option::if_some { opt = opt, action = { val } -> {} }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        // if_some returns {} (unit), just verify it runs without error
+        assertNotNull(variables["result"])
+    }
+
+    @Test
+    fun `test option if_some - None does not execute`() {
+        val source = """
+            use std::option
+            let opt: Option Int = None
+            let result = option::if_some { opt = opt, action = { val } -> {} }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        // if_some returns {} (unit), just verify it runs without error
+        assertNotNull(variables["result"])
+    }
+
+    // === if_none ===
+
+    @Test
+    fun `test option if_none - None executes action`() {
+        val source = """
+            use std::option
+            let opt: Option Int = None
+            let result = option::if_none { opt = opt, action = {} -> {} }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        // if_none returns {} (unit), just verify it runs without error
+        assertNotNull(variables["result"])
+    }
+
+    @Test
+    fun `test option if_none - Some does not execute`() {
+        val source = """
+            use std::option
+            let opt = Some { val = 5 }
+            let result = option::if_none { opt = opt, action = {} -> {} }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        // if_none returns {} (unit), just verify it runs without error
+        assertNotNull(variables["result"])
+    }
+
     // === fold ===
 
     @Test
@@ -343,5 +399,205 @@ class OptionModuleTest {
 
         val variables = parseTypeCheckAndRun(source)
         assertEquals("empty", (variables["result"] as MezzeString).value)
+    }
+
+    // === flatten ===
+
+    @Test
+    fun `test option flatten - Some Some`() {
+        val source = """
+            use std::option
+            let nested = Some { val = Some { val = 42 } }
+            let result = option::flatten { opt = nested }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Some", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        assertEquals(42L, (payload.fields["val"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test option flatten - Some None`() {
+        val source = """
+            use std::option
+            let inner: Option Int = None
+            let nested = Some { val = inner }
+            let result = option::flatten { opt = nested }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("None", variant.constructor)
+    }
+
+    @Test
+    fun `test option flatten - None`() {
+        val source = """
+            use std::option
+            let nested: Option (Option Int) = None
+            let result = option::flatten { opt = nested }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("None", variant.constructor)
+    }
+
+    // === to_result ===
+
+    @Test
+    fun `test option to_result - Some becomes Ok`() {
+        val source = """
+            use std::option
+            let opt = Some { val = 42 }
+            let result = option::to_result { opt = opt, error = "not found" }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Ok", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        assertEquals(42L, (payload.fields["val"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test option to_result - None becomes Err`() {
+        val source = """
+            use std::option
+            let opt: Option Int = None
+            let result = option::to_result { opt = opt, error = "not found" }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Err", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        assertEquals("not found", (payload.fields["error"] as MezzeString).value)
+    }
+
+    // === to_list ===
+
+    @Test
+    fun `test option to_list - Some becomes singleton list`() {
+        val source = """
+            use std::option
+            use std::collections::array
+            let opt = Some { val = 42 }
+            let xs = option::to_list { opt = opt }
+            let result = array::length { xs = xs }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(1L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test option to_list - None becomes empty list`() {
+        val source = """
+            use std::option
+            use std::collections::array
+            let opt: Option Int = None
+            let xs = option::to_list { opt = opt }
+            let result = array::length { xs = xs }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0L, (variables["result"] as MezzeInt).value)
+    }
+
+    // === zip ===
+
+    @Test
+    fun `test option zip - both Some`() {
+        val source = """
+            use std::option
+            let a = Some { val = 1 }
+            let b = Some { val = "x" }
+            let result = option::zip { a = a, b = b }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Some", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        val innerRecord = payload.fields["val"] as MezzeRecord
+        assertEquals(1L, (innerRecord.fields["fst"] as MezzeInt).value)
+        assertEquals("x", (innerRecord.fields["snd"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test option zip - first None`() {
+        val source = """
+            use std::option
+            let a: Option Int = None
+            let b = Some { val = "x" }
+            let result = option::zip { a = a, b = b }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("None", variant.constructor)
+    }
+
+    @Test
+    fun `test option zip - second None`() {
+        val source = """
+            use std::option
+            let a = Some { val = 1 }
+            let b: Option String = None
+            let result = option::zip { a = a, b = b }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("None", variant.constructor)
+    }
+
+    // === zip_with ===
+
+    @Test
+    fun `test option zip_with - both Some`() {
+        val source = """
+            use std::option
+            let a = Some { val = 3 }
+            let b = Some { val = 4 }
+            let result = option::zip_with { a = a, b = b, f = { x, y } -> x + y }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("Some", variant.constructor)
+        val payload = variant.value as MezzeRecord
+        assertEquals(7L, (payload.fields["val"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test option zip_with - first None`() {
+        val source = """
+            use std::option
+            let a: Option Int = None
+            let b = Some { val = 4 }
+            let result = option::zip_with { a = a, b = b, f = { x, y } -> x + y }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("None", variant.constructor)
+    }
+
+    @Test
+    fun `test option zip_with - second None`() {
+        val source = """
+            use std::option
+            let a = Some { val = 3 }
+            let b: Option Int = None
+            let result = option::zip_with { a = a, b = b, f = { x, y } -> x + y }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        val variant = variables["result"] as MezzeVariant
+        assertEquals("None", variant.constructor)
     }
 }

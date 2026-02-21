@@ -826,6 +826,7 @@ class ConstraintGenerator(
                     "Ordering" -> MezzeType.OrderingType
                     "Bytes" -> MezzeType.BytesType
                     "ByteBuffer" -> MezzeType.ByteBufferType
+                    "Char" -> MezzeType.CharType
                     "Unit" -> MezzeType.RecordType(emptyMap())  // Unit is an empty record type
                     else -> {
                         // Type variable or type constructor

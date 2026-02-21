@@ -74,12 +74,12 @@ object MapTypes {
 
         context["__native_map_keys"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.ArrayType(MezzeType.VarType(mapKeyTypeVar))
+            MezzeType.ListType(MezzeType.VarType(mapKeyTypeVar))
         )
 
         context["__native_map_values"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("m" to mapType)),
-            MezzeType.ArrayType(MezzeType.VarType(mapValTypeVar))
+            MezzeType.ListType(MezzeType.VarType(mapValTypeVar))
         )
 
         context["__native_map_entries"] = MezzeType.FunctionType(
@@ -94,7 +94,7 @@ object MapTypes {
             MezzeType.RecordType(mapOf(
                 "m" to mapType,
                 "f" to MezzeType.FunctionType(
-                    MezzeType.VarType(mapValTypeVar),
+                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(mapValTypeVar))),
                     MezzeType.VarType(mapValTypeVarW)
                 )
             )),
@@ -133,9 +133,9 @@ object MapTypes {
 
         context["__native_map_from_keys"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "ks" to MezzeType.ArrayType(MezzeType.VarType(mapKeyTypeVar)),
+                "ks" to MezzeType.ListType(MezzeType.VarType(mapKeyTypeVar)),
                 "f" to MezzeType.FunctionType(
-                    MezzeType.VarType(mapKeyTypeVar),
+                    MezzeType.RecordType(mapOf("val" to MezzeType.VarType(mapKeyTypeVar))),
                     MezzeType.VarType(mapValTypeVar)
                 )
             )),
@@ -168,7 +168,7 @@ object MapTypes {
         context["__native_map_remove_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "m" to mapType,
-                "ks" to MezzeType.ArrayType(MezzeType.VarType(mapKeyTypeVar))
+                "ks" to MezzeType.ListType(MezzeType.VarType(mapKeyTypeVar))
             )),
             mapType
         )

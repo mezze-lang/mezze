@@ -357,8 +357,8 @@ object TruffleArrayListImplementations {
             val cmp = record.fields["cmp"]
                 ?: throw NativeFunctionException("__native_arraylist_sort_by", "expects 'cmp' as Function")
 
-            val sorted = xs.toList().sortedWith { a, b ->
-                val argRecord = MezzeRecord(mapOf("l" to a, "r" to b))
+            val sorted = xs.toList().sortedWith { elemA, elemB ->
+                val argRecord = MezzeRecord(mapOf("a" to elemA, "b" to elemB))
                 val result = when (cmp) {
                     is MezzeTruffleFunction -> {
                         // CRITICAL: MezzeFunctionRootNode expects 4 arguments
@@ -400,6 +400,236 @@ object TruffleArrayListImplementations {
             } else {
                 xs.slice(safeStart, safeEnd)
             }
+        }
+
+        // === New utility functions ===
+
+        // Zip two arrays together into array of records {fst, snd}
+        context["__native_arraylist_zip"] = NativeMezzeFunction("__native_arraylist_zip") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_zip", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_zip", "expects 'xs' as ArrayList")
+            val ys = record.fields["ys"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_zip", "expects 'ys' as ArrayList")
+
+            val xsList = xs.toList()
+            val ysList = ys.toList()
+            val minLen = minOf(xsList.size, ysList.size)
+
+            MezzeArrayList((0 until minLen).map { i ->
+                MezzeRecord(mapOf("fst" to xsList[i], "snd" to ysList[i]))
+            })
+        }
+
+        // Unzip array of records into two arrays
+        context["__native_arraylist_unzip"] = NativeMezzeFunction("__native_arraylist_unzip") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_unzip", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_unzip", "expects 'xs' as ArrayList")
+
+            val fsts = mutableListOf<MezzeValue>()
+            val snds = mutableListOf<MezzeValue>()
+
+            for (elem in xs.toList()) {
+                val pair = elem as? MezzeRecord
+                    ?: throw NativeFunctionException("__native_arraylist_unzip", "elements must be records with fst/snd")
+                fsts.add(pair.fields["fst"] ?: throw NativeFunctionException("__native_arraylist_unzip", "missing 'fst' field"))
+                snds.add(pair.fields["snd"] ?: throw NativeFunctionException("__native_arraylist_unzip", "missing 'snd' field"))
+            }
+
+            MezzeRecord(mapOf(
+                "fsts" to MezzeArrayList(fsts),
+                "snds" to MezzeArrayList(snds)
+            ))
+        }
+
+        // Flatten nested arrays
+        context["__native_arraylist_flatten"] = NativeMezzeFunction("__native_arraylist_flatten") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_flatten", "expects MezzeRecord")
+            val xss = record.fields["xss"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_flatten", "expects 'xss' as ArrayList")
+
+            val result = mutableListOf<MezzeValue>()
+            for (xs in xss.toList()) {
+                val inner = xs as? MezzeArrayList
+                    ?: throw NativeFunctionException("__native_arraylist_flatten", "elements must be ArrayLists")
+                result.addAll(inner.toList())
+            }
+            MezzeArrayList(result)
+        }
+
+        // Check if any element matches predicate
+        context["__native_arraylist_any"] = NativeMezzeFunction("__native_arraylist_any") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_any", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_any", "expects 'xs' as ArrayList")
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_arraylist_any", "expects 'p' as Function")
+
+            val result = xs.toList().any { element ->
+                val argRecord = MezzeRecord(mapOf("x" to element))
+                val res = callFunction(p, argRecord, "__native_arraylist_any")
+                (res as? MezzeBool)?.value ?: false
+            }
+            MezzeBool(result)
+        }
+
+        // Check if all elements match predicate
+        context["__native_arraylist_all"] = NativeMezzeFunction("__native_arraylist_all") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_all", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_all", "expects 'xs' as ArrayList")
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_arraylist_all", "expects 'p' as Function")
+
+            val result = xs.toList().all { element ->
+                val argRecord = MezzeRecord(mapOf("x" to element))
+                val res = callFunction(p, argRecord, "__native_arraylist_all")
+                (res as? MezzeBool)?.value ?: false
+            }
+            MezzeBool(result)
+        }
+
+        // Partition array into matching and non-matching
+        context["__native_arraylist_partition"] = NativeMezzeFunction("__native_arraylist_partition") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_partition", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_partition", "expects 'xs' as ArrayList")
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_arraylist_partition", "expects 'p' as Function")
+
+            val matching = mutableListOf<MezzeValue>()
+            val notMatching = mutableListOf<MezzeValue>()
+
+            for (element in xs.toList()) {
+                val argRecord = MezzeRecord(mapOf("x" to element))
+                val res = callFunction(p, argRecord, "__native_arraylist_partition")
+                if ((res as? MezzeBool)?.value == true) {
+                    matching.add(element)
+                } else {
+                    notMatching.add(element)
+                }
+            }
+
+            MezzeRecord(mapOf(
+                "matching" to MezzeArrayList(matching),
+                "not_matching" to MezzeArrayList(notMatching)
+            ))
+        }
+
+        // Find index of first element matching predicate
+        context["__native_arraylist_find_index"] = NativeMezzeFunction("__native_arraylist_find_index") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_find_index", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_find_index", "expects 'xs' as ArrayList")
+            val p = record.fields["p"]
+                ?: throw NativeFunctionException("__native_arraylist_find_index", "expects 'p' as Function")
+
+            val list = xs.toList()
+            for ((index, element) in list.withIndex()) {
+                val argRecord = MezzeRecord(mapOf("x" to element))
+                val res = callFunction(p, argRecord, "__native_arraylist_find_index")
+                if ((res as? MezzeBool)?.value == true) {
+                    return@NativeMezzeFunction mezzeOptionSome(MezzeInt(index.toLong()))
+                }
+            }
+            mezzeOptionNone()
+        }
+
+        // Get last element
+        context["__native_arraylist_last"] = NativeMezzeFunction("__native_arraylist_last") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_last", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_last", "expects 'xs' as ArrayList")
+
+            if (xs.isEmpty()) {
+                mezzeOptionNone()
+            } else {
+                mezzeOptionSome(xs.get(xs.size() - 1))
+            }
+        }
+
+        // Get all elements except last
+        context["__native_arraylist_init"] = NativeMezzeFunction("__native_arraylist_init") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_init", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_init", "expects 'xs' as ArrayList")
+
+            if (xs.isEmpty()) {
+                MezzeArrayList.empty()
+            } else {
+                xs.slice(0, xs.size() - 1)
+            }
+        }
+
+        // Remove duplicates (keeps first occurrence)
+        context["__native_arraylist_unique"] = NativeMezzeFunction("__native_arraylist_unique") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_arraylist_unique", "expects MezzeRecord")
+            val xs = record.fields["xs"] as? MezzeArrayList
+                ?: throw NativeFunctionException("__native_arraylist_unique", "expects 'xs' as ArrayList")
+
+            val seen = mutableSetOf<String>()
+            val result = mutableListOf<MezzeValue>()
+
+            for (elem in xs.toList()) {
+                val key = valueToKey(elem)
+                if (key !in seen) {
+                    seen.add(key)
+                    result.add(elem)
+                }
+            }
+            MezzeArrayList(result)
+        }
+    }
+
+    /**
+     * Helper function to call a Mezze function
+     */
+    private fun callFunction(f: MezzeValue, argRecord: MezzeRecord, funcName: String): MezzeValue {
+        return when (f) {
+            is MezzeTruffleFunction -> {
+                f.callTarget.call(
+                    argRecord,
+                    f.closureVariables,
+                    f.lexicalScope,
+                    f.lexicalScopeSlotMap
+                ) as MezzeValue
+            }
+            is NativeMezzeFunction -> {
+                f.call(listOf(argRecord))
+            }
+            else -> throw NativeFunctionException(
+                funcName,
+                "expected a function, got: ${f::class.simpleName}"
+            )
+        }
+    }
+
+    /**
+     * Convert a MezzeValue to a string key for deduplication
+     */
+    private fun valueToKey(v: MezzeValue): String {
+        return when (v) {
+            is MezzeInt -> "int:${v.value}"
+            is MezzeFloat -> "float:${v.value}"
+            is MezzeString -> "str:${v.value}"
+            is MezzeBool -> "bool:${v.value}"
+            is MezzeChar -> "char:${v.value}"
+            is MezzeNat -> "nat:${v.value}"
+            is MezzeVariant -> "variant:${v.constructor}:${v.value?.let { valueToKey(it) } ?: "null"}"
+            is MezzeRecord -> "record:{${v.fields.entries.sortedBy { it.key }.joinToString(",") { "${it.key}:${valueToKey(it.value)}" }}}"
+            is MezzeArrayList -> "array:[${v.toList().joinToString(",") { valueToKey(it) }}]"
+            else -> v.toString()
         }
     }
 

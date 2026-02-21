@@ -26,7 +26,7 @@ newtype Thread = Thread __NativeThread
 # Single async effect - can be implemented in multiple ways
 # Note: Return type will be the unwrapped promise value
 effect Async where {
-    await: {promise: Promise} -> 'a <Async>
+    await: {p: Promise} -> 'a <Async>
 }
 
 # =============================================================================
@@ -44,7 +44,7 @@ effect Async where {
 #       let response = Async.await {promise = http_request {}}
 #       response
 pub impl Async for FastAsync where {
-    await = {promise} -> __native_loom_await {promise = promise}
+    await = {p} -> __native_loom_await {p = p}
 }
 
 # =============================================================================
@@ -63,9 +63,9 @@ pub impl Async for FastAsync where {
 #       # Can serialize and resume even after crash!
 #       payment
 pub impl Async for DurableAsync {cont: continuation::Continuation} where {
-    await = {promise} -> do
+    await = {p} -> do
         # Suspend the continuation with the promise
-        cont.suspend_with {value = promise}
+        cont.suspend_with {value = p}
 }
 
 # =============================================================================
@@ -102,10 +102,10 @@ pub impl Async for AdaptiveAsync {
     interval: Option Int,
     count: Option Int
 } where {
-    await = {promise} -> do
+    await = {p} -> do
         # Strategy decision is made by native implementation
         __native_adaptive_async_await {
-            promise = promise,
+            p = p,
             cont = cont,
             strategy = strategy,
             interval = interval,
@@ -118,12 +118,12 @@ pub impl Async for AdaptiveAsync {
 # =============================================================================
 
 # Spawn a computation on a virtual thread (returns immediately)
-pub let spawn: {computation: {} -> 'a} -> Promise =
-    {computation} -> __native_loom_spawn {computation = computation}
+pub let spawn: {f: {} -> 'a} -> Promise =
+    {f} -> __native_loom_spawn {f = f}
 
 # Check if a promise is complete
-pub let is_complete: {promise: Promise} -> Bool =
-    {promise} -> __native_promise_is_complete {promise = promise}
+pub let is_complete: {p: Promise} -> Bool =
+    {p} -> __native_promise_is_complete {p = p}
 
 # =============================================================================
 # Convenience Functions for Common Patterns
@@ -148,36 +148,30 @@ pub let run_adaptive: {f: {} -> 'a <Async>, interval_ms: Int} -> 'a =
         } in f {}
 
 # =============================================================================
-# Examples
+# Examples (in comments - these use hypothetical functions)
 # =============================================================================
-
+#
 # Example 1: High-performance web server
-let web_server_example: {} -> {} =
-    {} -> run_fast {f = {} -> do
-        let request = Async.await {promise = http_accept {}}
-        let response = process_request {request = request}
-        http_send {response = response}
-    }
-
+#   run_fast {f = {} -> do
+#       let request = Async.await {p = http_accept {}}
+#       let response = process_request {request = request}
+#       http_send {response = response}
+#   }
+#
 # Example 2: Durable workflow
-let workflow_example: {} -> {} =
-    {} -> run_durable {f = {} -> do
-        let payment = Async.await {promise = charge_card {}}
-        let shipment = Async.await {promise = ship_order {}}
-        {payment = payment, shipment = shipment}
-    }
-
+#   run_durable {f = {} -> do
+#       let payment = Async.await {p = charge_card {}}
+#       let shipment = Async.await {p = ship_order {}}
+#       {payment = payment, shipment = shipment}
+#   }
+#
 # Example 3: Hybrid execution
-let hybrid_example: {} -> {} =
-    {} -> run_adaptive {
-        f = {} -> do
-            # Fast in-memory operations
-            let data = Async.await {promise = read_cache {}}
-            let processed = transform {data = data}
-
-            # Checkpoint before expensive operation
-            let saved = Async.await {promise = write_db {processed = processed}}
-            saved
-        ,
-        interval_ms = 5000
-    }
+#   run_adaptive {
+#       f = {} -> do
+#           let data = Async.await {p = read_cache {}}
+#           let processed = transform {data = data}
+#           let saved = Async.await {p = write_db {processed = processed}}
+#           saved
+#       ,
+#       interval_ms = 5000
+#   }

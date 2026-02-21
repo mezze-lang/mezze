@@ -1069,8 +1069,8 @@ class ConstraintSolver(
 
         // Compute content hash and use it as the key
         val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(generatedImpl)
-        val implWithHash = generatedImpl.copy(contentHash = hash.toString())
-        val implKey = hash.toString()
+        val implWithHash = generatedImpl.copy(contentHash = hash.toFullHexString())
+        val implKey = hash.toFullHexString()
 
         // Check if we've already generated this impl (same content = same hash)
         if (generatedCodecImpls.containsKey(implKey)) {
@@ -2814,6 +2814,9 @@ class ConstraintSolver(
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType
                     "Ordering" -> MezzeType.OrderingType
+                    "Char" -> MezzeType.CharType
+                    "Bytes" -> MezzeType.BytesType
+                    "ByteBuffer" -> MezzeType.ByteBufferType
                     else -> {
                         // Type variable or type constructor
                         if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {

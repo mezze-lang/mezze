@@ -51,32 +51,32 @@ object ContentHashComputer {
                     val hash = ASTHasher.hashLetBinding(item)
                     val name = if (item.isSimpleBinding) item.variableName else "pattern_binding"
                     hashMap[name] = hash
-                    item.copy(contentHash = hash.toString())
+                    item.copy(contentHash = hash.toFullHexString())
                 }
 
                 is TypeDeclaration -> {
                     val hash = ASTHasher.hashTypeDeclaration(item)
                     hashMap[item.name] = hash
-                    item.copy(contentHash = hash.toString())
+                    item.copy(contentHash = hash.toFullHexString())
                 }
 
                 is EffectDeclaration -> {
                     val hash = ASTHasher.hashEffectDeclaration(item)
                     hashMap[item.name] = hash
-                    item.copy(contentHash = hash.toString())
+                    item.copy(contentHash = hash.toFullHexString())
                 }
 
                 is ImplDeclaration -> {
                     val hash = ASTHasher.hashImplDeclaration(item)
                     // Use performer name as key
                     hashMap[item.performerName] = hash
-                    item.copy(contentHash = hash.toString())
+                    item.copy(contentHash = hash.toFullHexString())
                 }
 
                 is AbilityDeclaration -> {
                     val hash = ASTHasher.hashAbilityDeclaration(item)
                     hashMap[item.name] = hash
-                    item.copy(contentHash = hash.toString())
+                    item.copy(contentHash = hash.toFullHexString())
                 }
 
                 is ImplAbilityDeclaration -> {
@@ -84,7 +84,7 @@ object ContentHashComputer {
                     // Create a key that identifies the impl
                     val key = createAbilityImplKey(item)
                     hashMap[key] = hash
-                    item.copy(contentHash = hash.toString())
+                    item.copy(contentHash = hash.toFullHexString())
                 }
 
                 is TopLevelExpression -> item  // No hash for top-level expressions

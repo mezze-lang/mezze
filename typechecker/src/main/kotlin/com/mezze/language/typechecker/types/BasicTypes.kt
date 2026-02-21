@@ -150,6 +150,18 @@ object BasicTypes {
             MezzeType.IntType
         )
 
+        // Clamp
+        context["__native_int_clamp"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.IntType, "min" to MezzeType.IntType, "max" to MezzeType.IntType)),
+            MezzeType.IntType
+        )
+
+        // To Nat
+        context["__native_int_to_nat"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.IntType)),
+            optionType(MezzeType.NatType)
+        )
+
         // Note: __native_int_pow and __native_int_sign are registered in MathCoreTypes.kt
     }
 
@@ -190,6 +202,40 @@ object BasicTypes {
         context["__native_float_max"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("l" to MezzeType.FloatType, "r" to MezzeType.FloatType)),
             MezzeType.FloatType
+        )
+
+        // Float classification
+        context["__native_float_is_nan"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
+            MezzeType.BooleanType
+        )
+
+        context["__native_float_is_infinite"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
+            MezzeType.BooleanType
+        )
+
+        context["__native_float_is_finite"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
+            MezzeType.BooleanType
+        )
+
+        // Float sign
+        context["__native_float_sign"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
+
+        // Float clamp
+        context["__native_float_clamp"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType, "min" to MezzeType.FloatType, "max" to MezzeType.FloatType)),
+            MezzeType.FloatType
+        )
+
+        // Float to Int
+        context["__native_float_to_int"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.FloatType)),
+            optionType(MezzeType.IntType)
         )
 
         // Module-qualified functions for float
@@ -346,6 +392,24 @@ object BasicTypes {
 
         context["__native_nat_max"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("l" to MezzeType.NatType, "r" to MezzeType.NatType)),
+            MezzeType.NatType
+        )
+
+        // To Int
+        context["__native_nat_to_int"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.NatType)),
+            MezzeType.IntType
+        )
+
+        // To String
+        context["__native_nat_to_string"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.NatType)),
+            MezzeType.StringType
+        )
+
+        // Clamp
+        context["__native_nat_clamp"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("n" to MezzeType.NatType, "min" to MezzeType.NatType, "max" to MezzeType.NatType)),
             MezzeType.NatType
         )
 
@@ -562,6 +626,80 @@ object BasicTypes {
 
         context["string::join"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf("strings" to MezzeType.ArrayType(MezzeType.StringType), "separator" to MezzeType.StringType)),
+            MezzeType.StringType
+        )
+
+        // === New String Utility Functions ===
+
+        // Substring
+        context["__native_string_substring"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "start" to MezzeType.IntType, "end" to MezzeType.IntType)),
+            MezzeType.StringType
+        )
+
+        // Replace
+        context["__native_string_replace"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "old" to MezzeType.StringType, "new" to MezzeType.StringType)),
+            MezzeType.StringType
+        )
+
+        context["__native_string_replace_all"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "old" to MezzeType.StringType, "new" to MezzeType.StringType)),
+            MezzeType.StringType
+        )
+
+        // Character access
+        context["__native_string_char_at"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "i" to MezzeType.IntType)),
+            optionType(MezzeType.CharType)
+        )
+
+        // Index search
+        context["__native_string_index_of"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "sub" to MezzeType.StringType)),
+            optionType(MezzeType.IntType)
+        )
+
+        context["__native_string_last_index_of"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "sub" to MezzeType.StringType)),
+            optionType(MezzeType.IntType)
+        )
+
+        // Trimming
+        context["__native_string_trim_start"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
+            MezzeType.StringType
+        )
+
+        context["__native_string_trim_end"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
+            MezzeType.StringType
+        )
+
+        // Splitting utilities
+        context["__native_string_lines"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
+            MezzeType.ArrayType(MezzeType.StringType)
+        )
+
+        context["__native_string_words"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
+            MezzeType.ArrayType(MezzeType.StringType)
+        )
+
+        context["__native_string_chars"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType)),
+            MezzeType.ArrayType(MezzeType.CharType)
+        )
+
+        // Padding
+        context["__native_string_pad_left"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "len" to MezzeType.IntType, "c" to MezzeType.CharType)),
+            MezzeType.StringType
+        )
+
+        context["__native_string_pad_right"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "len" to MezzeType.IntType, "c" to MezzeType.CharType)),
             MezzeType.StringType
         )
     }

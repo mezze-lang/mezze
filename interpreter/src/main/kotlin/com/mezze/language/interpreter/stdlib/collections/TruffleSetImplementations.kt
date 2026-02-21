@@ -111,6 +111,22 @@ object TruffleSetImplementations {
             MezzeSet(xs.toKotlinList())
         }
 
+        // Convert to array
+        context["__native_set_to_array"] = NativeMezzeFunction("__native_set_to_array") { args ->
+            val record = args[0] as MezzeRecord
+            val s = record.fields["s"] as? MezzeSet ?: throw NativeFunctionException("__native_set_to_array", "expects 's' as Set")
+
+            MezzeArrayList(s.toList())
+        }
+
+        // Convert from array
+        context["__native_set_from_array"] = NativeMezzeFunction("__native_set_from_array") { args ->
+            val record = args[0] as MezzeRecord
+            val xs = record.fields["xs"] as? MezzeArrayList ?: throw NativeFunctionException("__native_set_from_array", "expects 'xs' as Array")
+
+            MezzeSet(xs.elements.toJavaList())
+        }
+
         // Filter
         context["__native_set_filter"] = NativeMezzeFunction("__native_set_filter") { args ->
             val record = args[0] as MezzeRecord
@@ -121,7 +137,7 @@ object TruffleSetImplementations {
             val filtered = s.elements.filter { element ->
                 val arg = if (element is MezzeRecord) element else MezzeRecord(mapOf("val" to element))
                 val result = when (p) {
-                    is NativeMezzeFunction -> p.call(listOf(element))
+                    is NativeMezzeFunction -> p.call(listOf(arg))
                     is MezzeTruffleFunction -> p.callTarget.call(arg, p.closureVariables, p.lexicalScope, p.lexicalScopeSlotMap) as MezzeValue
                     else -> throw NativeFunctionException("__native_set_filter", "unsupported function type: ${p::class.simpleName}")
                 }
@@ -141,7 +157,7 @@ object TruffleSetImplementations {
             val mapped = s.elements.map { element ->
                 val arg = if (element is MezzeRecord) element else MezzeRecord(mapOf("val" to element))
                 when (f) {
-                    is NativeMezzeFunction -> f.call(listOf(element))
+                    is NativeMezzeFunction -> f.call(listOf(arg))
                     is MezzeTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as MezzeValue
                     else -> throw NativeFunctionException("__native_set_map", "unsupported function type: ${f::class.simpleName}")
                 }
@@ -172,18 +188,18 @@ object TruffleSetImplementations {
         context["__native_set_insert_all"] = NativeMezzeFunction("__native_set_insert_all") { args ->
             val record = args[0] as MezzeRecord
             val s = record.fields["s"] as? MezzeSet ?: throw NativeFunctionException("__native_set_insert_all", "expects 's' as Set")
-            val xs = record.fields["xs"] as? MezzeList ?: throw NativeFunctionException("__native_set_insert_all", "expects 'xs' as List")
+            val xs = record.fields["xs"] as? MezzeArrayList ?: throw NativeFunctionException("__native_set_insert_all", "expects 'xs' as Array")
 
-            MezzeSet(s.elements.addAll(xs.toKotlinList()))
+            MezzeSet(s.elements.addAll(xs.elements.toJavaList()))
         }
 
         // Remove all
         context["__native_set_remove_all"] = NativeMezzeFunction("__native_set_remove_all") { args ->
             val record = args[0] as MezzeRecord
             val s = record.fields["s"] as? MezzeSet ?: throw NativeFunctionException("__native_set_remove_all", "expects 's' as Set")
-            val xs = record.fields["xs"] as? MezzeList ?: throw NativeFunctionException("__native_set_remove_all", "expects 'xs' as List")
+            val xs = record.fields["xs"] as? MezzeArrayList ?: throw NativeFunctionException("__native_set_remove_all", "expects 'xs' as Array")
 
-            MezzeSet(s.elements.removeAll(xs.toKotlinList()))
+            MezzeSet(s.elements.removeAll(xs.elements.toJavaList()))
         }
 
         // Equality check

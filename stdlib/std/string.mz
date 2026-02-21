@@ -51,3 +51,97 @@ pub let split = { s: String, delimiter: String } ->
 # Join array of strings with separator
 pub let join = { strings: [String], separator: String } ->
     __native_string_join { strings = strings, separator = separator }
+
+# =============================================================================
+# Substring and Slicing
+# =============================================================================
+
+# Extract substring from start (inclusive) to end (exclusive)
+# Returns empty string if indices are out of bounds
+# Example: substring {s = "hello", start = 1, end = 4} -> "ell"
+pub let substring = { s: String, start: Int, end: Int } ->
+    __native_string_substring { s = s, start = start, end = end }
+
+# =============================================================================
+# Replace Operations
+# =============================================================================
+
+# Replace first occurrence of old with new
+# Example: replace {s = "hello world", old = "o", new = "0"} -> "hell0 world"
+pub let replace = { s: String, old: String, new: String } ->
+    __native_string_replace { s = s, old = old, new = new }
+
+# Replace all occurrences of old with new
+# Example: replace_all {s = "hello world", old = "o", new = "0"} -> "hell0 w0rld"
+pub let replace_all = { s: String, old: String, new: String } ->
+    __native_string_replace_all { s = s, old = old, new = new }
+
+# =============================================================================
+# Character Access
+# =============================================================================
+
+# Get character at index, returns None if out of bounds
+# Example: char_at {s = "hello", i = 1} -> Some {val = 'e'}
+pub let char_at = { s: String, i: Int } ->
+    __native_string_char_at { s = s, i = i }
+
+# =============================================================================
+# Index Search
+# =============================================================================
+
+# Find first index of substring, returns None if not found
+# Example: index_of {s = "hello", sub = "ll"} -> Some {val = 2}
+pub let index_of = { s: String, sub: String } ->
+    __native_string_index_of { s = s, sub = sub }
+
+# Find last index of substring, returns None if not found
+# Example: last_index_of {s = "hello hello", sub = "ll"} -> Some {val = 8}
+pub let last_index_of = { s: String, sub: String } ->
+    __native_string_last_index_of { s = s, sub = sub }
+
+# =============================================================================
+# Additional Trimming
+# =============================================================================
+
+# Trim leading whitespace only
+# Example: trim_start {s = "  hello  "} -> "hello  "
+pub let trim_start = { s: String } ->
+    __native_string_trim_start { s = s }
+
+# Trim trailing whitespace only
+# Example: trim_end {s = "  hello  "} -> "  hello"
+pub let trim_end = { s: String } ->
+    __native_string_trim_end { s = s }
+
+# =============================================================================
+# Splitting Utilities
+# =============================================================================
+
+# Split string by newlines
+# Example: lines {s = "a\nb\nc"} -> ["a", "b", "c"]
+pub let lines = { s: String } ->
+    __native_string_lines { s = s }
+
+# Split string by whitespace (removes empty strings)
+# Example: words {s = "hello  world"} -> ["hello", "world"]
+pub let words = { s: String } ->
+    __native_string_words { s = s }
+
+# Convert string to array of characters
+# Example: chars {s = "abc"} -> ['a', 'b', 'c']
+pub let chars = { s: String } ->
+    __native_string_chars { s = s }
+
+# =============================================================================
+# Padding
+# =============================================================================
+
+# Pad string on the left to reach target length
+# Example: pad_left {s = "42", len = 5, c = '0'} -> "00042"
+pub let pad_left = { s: String, len: Int, c: Char } ->
+    __native_string_pad_left { s = s, len = len, c = c }
+
+# Pad string on the right to reach target length
+# Example: pad_right {s = "hi", len = 5, c = '.'} -> "hi..."
+pub let pad_right = { s: String, len: Int, c: Char } ->
+    __native_string_pad_right { s = s, len = len, c = c }

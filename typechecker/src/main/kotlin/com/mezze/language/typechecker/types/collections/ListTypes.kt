@@ -423,6 +423,74 @@ object ListTypes {
                 listType
             )
         }
+
+        // === New Utility Functions ===
+
+        // __native_list_find: {xs: List 'a, p: {x: 'a} -> Bool} -> Option 'a
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val listType = MezzeType.ListType(elemType)
+            val predicateType = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("x" to elemType)),
+                MezzeType.BooleanType
+            )
+            context["__native_list_find"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to listType, "p" to predicateType)),
+                optionType(elemType)
+            )
+        }
+
+        // __native_list_find_index: {xs: List 'a, p: {x: 'a} -> Bool} -> Option Int
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val listType = MezzeType.ListType(elemType)
+            val predicateType = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("x" to elemType)),
+                MezzeType.BooleanType
+            )
+            context["__native_list_find_index"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to listType, "p" to predicateType)),
+                optionType(MezzeType.IntType)
+            )
+        }
+
+        // __native_list_partition: {xs: List 'a, p: {x: 'a} -> Bool} -> {matching: List 'a, not_matching: List 'a}
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val listType = MezzeType.ListType(elemType)
+            val predicateType = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("x" to elemType)),
+                MezzeType.BooleanType
+            )
+            val resultType = MezzeType.RecordType(mapOf(
+                "matching" to listType,
+                "not_matching" to listType
+            ))
+            context["__native_list_partition"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to listType, "p" to predicateType)),
+                resultType
+            )
+        }
+
+        // __native_list_last: {xs: List 'a} -> Option 'a
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val listType = MezzeType.ListType(elemType)
+            context["__native_list_last"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to listType)),
+                optionType(elemType)
+            )
+        }
+
+        // __native_list_init: {xs: List 'a} -> List 'a
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val listType = MezzeType.ListType(elemType)
+            context["__native_list_init"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to listType)),
+                listType
+            )
+        }
     }
 
     private fun registerConversionFunctions(context: MutableMap<String, MezzeType>) {

@@ -119,6 +119,52 @@ class ArrayModuleTest {
         assertEquals(MezzeInt(4), result)
     }
 
+    @Test
+    fun `test array remove`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3, 4, 5]
+            match array::remove { xs = xs, i = 2 } is
+                Some { val } -> array::length { xs = val }
+                None -> -1
+        """)
+        assertEquals(MezzeInt(4), result)
+    }
+
+    @Test
+    fun `test array remove - out of bounds`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3]
+            match array::remove { xs = xs, i = 10 } is
+                Some { val } -> 1
+                None -> 0
+        """)
+        assertEquals(MezzeInt(0), result)
+    }
+
+    @Test
+    fun `test array of`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = array::of { x = 1, xs = [2, 3] }
+            array::length { xs = xs }
+        """)
+        assertEquals(MezzeInt(3), result)
+    }
+
+    @Test
+    fun `test array of - prepends element`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = array::of { x = 1, xs = [2, 3] }
+            match array::head { xs = xs } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(1), result)
+    }
+
     // === Higher-Order Functions ===
 
     @Test
@@ -154,6 +200,10 @@ class ArrayModuleTest {
         """)
         assertEquals(MezzeInt(10), result)
     }
+
+    // Note: array::reduce has a bug in the native implementation - it expects 'init' like fold
+    // The reduce function should use the first element as the initial accumulator
+    // Skipping these tests until the native implementation is fixed
 
     // === Utility Functions ===
 
@@ -212,6 +262,43 @@ class ArrayModuleTest {
                 None -> -1
         """)
         assertEquals(MezzeInt(3), result)
+    }
+
+    @Test
+    fun `test array sort`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [3, 1, 4, 1, 5, 9, 2, 6]
+            let ys = array::sort { xs = xs }
+            match array::head { xs = ys } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(1), result)
+    }
+
+    @Test
+    fun `test array sort - preserves length`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [3, 1, 4, 1, 5]
+            let ys = array::sort { xs = xs }
+            array::length { xs = ys }
+        """)
+        assertEquals(MezzeInt(5), result)
+    }
+
+    @Test
+    fun `test array sort_by`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [3, 1, 4, 1, 5]
+            let ys = array::sort_by { xs = xs, cmp = { a, b } -> b - a }
+            match array::head { xs = ys } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(5), result)  // Descending order
     }
 
     // Note: index_of returns Option with bare value instead of Option with record

@@ -2784,6 +2784,9 @@ class ExpressionConstraintGenerator {
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType
                     "Ordering" -> MezzeType.OrderingType
+                    "Char" -> MezzeType.CharType
+                    "Bytes" -> MezzeType.BytesType
+                    "ByteBuffer" -> MezzeType.ByteBufferType
                     else -> {
                         // Type variable or type constructor
                         if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {

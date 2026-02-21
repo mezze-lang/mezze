@@ -532,6 +532,7 @@ class ContextBuilder {
                     "Ordering" -> MezzeType.OrderingType
                     "Bytes" -> MezzeType.BytesType
                     "ByteBuffer" -> MezzeType.ByteBufferType
+                    "Char" -> MezzeType.CharType
                     else -> {
                         // Type variable or type constructor
                         if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {

@@ -122,3 +122,40 @@ pub let sort = { xs } ->
 
 pub let sort_by = { xs, cmp } ->
     __native_list_sort_by { xs = xs, cmp = cmp }
+
+# =============================================================================
+# Search and Find
+# =============================================================================
+
+# Find first element matching predicate
+# Example: find {xs = [1, 2, 3], p = {x} -> x > 1} -> Some {val = 2}
+pub let find = { xs, p } ->
+    __native_list_find { xs = xs, p = p }
+
+# Find index of first element matching predicate
+# Example: find_index {xs = [1, 2, 3], p = {x} -> x > 1} -> Some {val = 1}
+pub let find_index = { xs, p } ->
+    __native_list_find_index { xs = xs, p = p }
+
+# =============================================================================
+# Partition
+# =============================================================================
+
+# Partition list into matching and non-matching elements
+# Example: partition {xs = [1, 2, 3, 4], p = {x} -> x > 2} -> {matching = [3, 4], not_matching = [1, 2]}
+pub let partition = { xs, p } ->
+    __native_list_partition { xs = xs, p = p }
+
+# =============================================================================
+# Additional Accessors
+# =============================================================================
+
+# Get last element of list
+# Example: last {xs = [1, 2, 3]} -> Some {val = 3}
+pub let last = { xs } ->
+    __native_list_last { xs = xs }
+
+# Get all elements except the last
+# Example: init {xs = [1, 2, 3]} -> [1, 2]
+pub let init = { xs } ->
+    __native_list_init { xs = xs }

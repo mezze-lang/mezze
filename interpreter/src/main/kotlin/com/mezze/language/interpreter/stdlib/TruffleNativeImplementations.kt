@@ -72,6 +72,7 @@ object TruffleNativeImplementations {
         FloatImplementations.registerAll(context)
         NatImplementations.registerAll(context)
         StringImplementations.registerAll(context)
+        StringImplementations.registerUtilities(context)
         FracImplementations.registerAll(context)
         TruffleCharImplementations.registerAll(context)
 

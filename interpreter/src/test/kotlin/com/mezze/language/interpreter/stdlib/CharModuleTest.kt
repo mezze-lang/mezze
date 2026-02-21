@@ -25,6 +25,13 @@ class CharModuleTest {
         return MezzeTestHelper.getLastExecutionContext()
     }
 
+    private fun eval(source: String): MezzeValue {
+        val program = parser.parse(source)
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val (result, _) = MezzeTestHelper.executeWithContext(typeCheckResult.program, typeCheckResult.monomorphicInstances)
+        return result
+    }
+
     // === Construction ===
 
     @Test
@@ -313,9 +320,64 @@ class CharModuleTest {
         assertEquals(false, (variables["result"] as MezzeBool).value)
     }
 
-    // Note: char::compare tests are in CharInterpreterTest.kt
-    // The compare function returns Ordering type which requires special handling
-    // when matching - see "compare returns correct ordering" test there
+    // === Compare ===
+
+    @Test
+    fun `test char compare - less than`() {
+        val result = eval("""
+            use std::char
+            let c1 = char::from_int { code = 65 }
+            let c2 = char::from_int { code = 66 }
+            match c1 is
+                Some { val = a } -> match c2 is
+                    Some { val = b } ->
+                        match char::compare { a = a, b = b } is
+                            LT -> 1
+                            EQ -> 0
+                            GT -> -1
+                    None -> -2
+                None -> -2
+        """)
+        assertEquals(MezzeInt(1), result) // LT
+    }
+
+    @Test
+    fun `test char compare - equal`() {
+        val result = eval("""
+            use std::char
+            let c1 = char::from_int { code = 65 }
+            let c2 = char::from_int { code = 65 }
+            match c1 is
+                Some { val = a } -> match c2 is
+                    Some { val = b } ->
+                        match char::compare { a = a, b = b } is
+                            LT -> 1
+                            EQ -> 0
+                            GT -> -1
+                    None -> -2
+                None -> -2
+        """)
+        assertEquals(MezzeInt(0), result) // EQ
+    }
+
+    @Test
+    fun `test char compare - greater than`() {
+        val result = eval("""
+            use std::char
+            let c1 = char::from_int { code = 66 }
+            let c2 = char::from_int { code = 65 }
+            match c1 is
+                Some { val = a } -> match c2 is
+                    Some { val = b } ->
+                        match char::compare { a = a, b = b } is
+                            LT -> 1
+                            EQ -> 0
+                            GT -> -1
+                    None -> -2
+                None -> -2
+        """)
+        assertEquals(MezzeInt(-1), result) // GT
+    }
 
     // === Digit Operations ===
 

@@ -62,3 +62,14 @@ pub let gcd = { l: Int, r: Int } ->
 
 pub let lcm = { l: Int, r: Int } ->
     abs { n = (l * r) / gcd { l = l, r = r } }
+
+# Clamp value to range [min, max]
+# Example: clamp {n = 15, min = 0, max = 10} -> 10
+pub let clamp = { n: Int, min: Int, max: Int } ->
+    __native_int_clamp { n = n, min = min, max = max }
+
+# Convert Int to Nat, returns None if negative
+# Example: to_nat {n = 5} -> Some {val = 5n}
+# Example: to_nat {n = -1} -> None
+pub let to_nat = { n: Int } ->
+    __native_int_to_nat { n = n }

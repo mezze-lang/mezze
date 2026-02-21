@@ -298,4 +298,89 @@ class IntModuleTest {
         val variables = parseTypeCheckAndRun(source)
         assertEquals(7L, (variables["result"] as MezzeInt).value)
     }
+
+    // === Tests for clamp and to_nat ===
+
+    @Test
+    fun `test int clamp - within range`() {
+        val source = """
+            use std::int
+            let result = int::clamp { n = 5, min = 0, max = 10 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(5L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int clamp - below min`() {
+        val source = """
+            use std::int
+            let result = int::clamp { n = -5, min = 0, max = 10 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int clamp - above max`() {
+        val source = """
+            use std::int
+            let result = int::clamp { n = 15, min = 0, max = 10 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(10L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int clamp - negative range`() {
+        val source = """
+            use std::int
+            let result = int::clamp { n = 0, min = -10, max = -5 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(-5L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int to_nat - positive`() {
+        val source = """
+            use std::int
+            let result = match int::to_nat { n = 42 } is
+                Some { val } -> 1
+                None -> 0
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(1L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int to_nat - negative returns None`() {
+        val source = """
+            use std::int
+            let result = match int::to_nat { n = -5 } is
+                Some { val } -> 1
+                None -> 0
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0L, (variables["result"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test int to_nat - zero`() {
+        val source = """
+            use std::int
+            let result = match int::to_nat { n = 0 } is
+                Some { val } -> 1
+                None -> 0
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(1L, (variables["result"] as MezzeInt).value)
+    }
 }

@@ -1,33 +1,131 @@
 # std/effects/filesystem.mezze - File system effects (async by default)
 
+use std::string::{split, join}
+
+# FileSystem error types (exported for pattern matching)
+pub type FileSystemError = | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, IOError { path: String, message: String }, DiskFull { path: String, bytes_needed: Int }, AlreadyExists { path: String }, DirectoryNotEmpty { path: String }, NotADirectory { path: String }, InvalidPath { path: String } |
+
 effect FileSystem where {
-    read_file: { path: String } -> Result String | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, IOError { path: String, message: String } | <FileSystem>,
-    write_file: { path: String, content: String } -> Result {} | PermissionDenied { path: String, operation: String }, IOError { path: String, message: String }, DiskFull { path: String, bytes_needed: Int } | <FileSystem>,
-    exists: { path: String } -> Result Bool | PermissionDenied { path: String, operation: String }, IOError { path: String, message: String } | <FileSystem>,
-    delete: { path: String } -> Result {} | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, DirectoryNotEmpty { path: String }, IOError { path: String, message: String } | <FileSystem>,
-    list_directory: { path: String } -> Result [String] | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, NotADirectory { path: String }, IOError { path: String, message: String } | <FileSystem>,
-    create_directory: { path: String } -> Result {} | AlreadyExists { path: String }, PermissionDenied { path: String, operation: String }, InvalidPath { path: String }, IOError { path: String, message: String } | <FileSystem>,
-    file_size: { path: String } -> Result Int | FileNotFound { path: String }, PermissionDenied { path: String, operation: String }, IOError { path: String, message: String } | <FileSystem>
+    read_file: { path: String } -> Result String FileSystemError <FileSystem>,
+    write_file: { path: String, content: String } -> Result {} FileSystemError <FileSystem>,
+    append_file: { path: String, content: String } -> Result {} FileSystemError <FileSystem>,
+    exists: { path: String } -> Result Bool FileSystemError <FileSystem>,
+    delete: { path: String } -> Result {} FileSystemError <FileSystem>,
+    delete_recursive: { path: String } -> Result {} FileSystemError <FileSystem>,
+    list_directory: { path: String } -> Result [String] FileSystemError <FileSystem>,
+    create_directory: { path: String } -> Result {} FileSystemError <FileSystem>,
+    create_directories: { path: String } -> Result {} FileSystemError <FileSystem>,
+    file_size: { path: String } -> Result Int FileSystemError <FileSystem>,
+    is_directory: { path: String } -> Result Bool FileSystemError <FileSystem>,
+    is_file: { path: String } -> Result Bool FileSystemError <FileSystem>,
+    copy_file: { src: String, dest: String } -> Result {} FileSystemError <FileSystem>,
+    move_file: { src: String, dest: String } -> Result {} FileSystemError <FileSystem>
 }
 
 # Local disk implementation (runs in virtual threads transparently)
 pub impl FileSystem for LocalDisk where {
     read_file = { path } -> __native_fs_read_file { path = path },
     write_file = { path, content } -> __native_fs_write_file { path = path, content = content },
+    append_file = { path, content } -> __native_fs_append_file { path = path, content = content },
     exists = { path } -> __native_fs_exists { path = path },
     delete = { path } -> __native_fs_delete { path = path },
+    delete_recursive = { path } -> __native_fs_delete_recursive { path = path },
     list_directory = { path } -> __native_fs_list_directory { path = path },
     create_directory = { path } -> __native_fs_create_directory { path = path },
-    file_size = { path } -> __native_fs_file_size { path = path }
+    create_directories = { path } -> __native_fs_create_directories { path = path },
+    file_size = { path } -> __native_fs_file_size { path = path },
+    is_directory = { path } -> __native_fs_is_directory { path = path },
+    is_file = { path } -> __native_fs_is_file { path = path },
+    copy_file = { src, dest } -> __native_fs_copy_file { src = src, dest = dest },
+    move_file = { src, dest } -> __native_fs_move_file { src = src, dest = dest }
 }
 
 # Memory-based file system (for testing)
 pub impl FileSystem for MemoryFS where {
     read_file = { path } -> __native_memfs_read_file { path = path },
     write_file = { path, content } -> __native_memfs_write_file { path = path, content = content },
+    append_file = { path, content } -> __native_memfs_append_file { path = path, content = content },
     exists = { path } -> __native_memfs_exists { path = path },
     delete = { path } -> __native_memfs_delete { path = path },
+    delete_recursive = { path } -> __native_memfs_delete_recursive { path = path },
     list_directory = { path } -> __native_memfs_list_directory { path = path },
     create_directory = { path } -> __native_memfs_create_directory { path = path },
-    file_size = { path } -> __native_memfs_file_size { path = path }
+    create_directories = { path } -> __native_memfs_create_directories { path = path },
+    file_size = { path } -> __native_memfs_file_size { path = path },
+    is_directory = { path } -> __native_memfs_is_directory { path = path },
+    is_file = { path } -> __native_memfs_is_file { path = path },
+    copy_file = { src, dest } -> __native_memfs_copy_file { src = src, dest = dest },
+    move_file = { src, dest } -> __native_memfs_move_file { src = src, dest = dest }
 }
+
+# =========================================================================
+# Path Helper Functions (pure, no effects needed)
+# =========================================================================
+
+# Join path components with separator
+pub let path_join: { parts: [String] } -> String = { parts } ->
+    join { strings = parts, separator = "/" }
+
+# Get the file name from a path (last component)
+pub let file_name: { path: String } -> String = { path } -> do
+    let parts = split { s = path, delimiter = "/" }
+    let len = __native_arraylist_length { xs = parts }
+    match len > 0 is
+        True -> match __native_arraylist_get { xs = parts, i = len - 1 } is
+            Some { val } -> val
+            None -> ""
+        False -> ""
+
+# Get the parent directory of a path
+pub let parent: { path: String } -> String = { path } -> do
+    let parts = split { s = path, delimiter = "/" }
+    let len = __native_arraylist_length { xs = parts }
+    match len > 1 is
+        True -> do
+            let init_parts = __native_arraylist_slice { xs = parts, start = 0, end = len - 1 }
+            join { strings = init_parts, separator = "/" }
+        False -> "/"
+
+# Get file extension (without the dot) - returns Option since file may have no extension
+pub let extension: { path: String } -> Option String = { path } -> do
+    let name = file_name { path = path }
+    let parts = split { s = name, delimiter = "." }
+    let len = __native_arraylist_length { xs = parts }
+    match len > 1 is
+        True -> __native_arraylist_get { xs = parts, i = len - 1 }
+        False -> None
+
+# Check if path has given extension
+pub let has_extension: { path: String, ext: String } -> Bool = { path, ext } ->
+    match extension { path = path } is
+        Some { val } -> val == ext
+        None -> False
+
+# =========================================================================
+# Convenience Functions (effectful helpers)
+# =========================================================================
+
+# Read file with default value if not found
+pub let read_file_or: { path: String, default: String } -> String <FileSystem> = { path, default } ->
+    match FileSystem.read_file { path = path } is
+        Ok { val } -> val
+        Err { error } -> default
+
+# Write file, creating parent directories if needed
+pub let write_file_mkdirs: { path: String, content: String } -> Result {} FileSystemError <FileSystem> = { path, content } -> do
+    let parent_path = parent { path = path }
+    let _ = FileSystem.create_directories { path = parent_path }
+    FileSystem.write_file { path = path, content = content }
+
+# Check if a path exists and is a directory, create if not
+pub let ensure_directory: { path: String } -> Result {} FileSystemError <FileSystem> = { path } ->
+    match FileSystem.exists { path = path } is
+        Ok { val = exists } ->
+            match exists is
+                True -> match FileSystem.is_directory { path = path } is
+                    Ok { val = is_dir } -> match is_dir is
+                        True -> Ok { val = {} }
+                        False -> Err { error = NotADirectory { path = path } }
+                    Err { error } -> Err { error = error }
+                False -> FileSystem.create_directories { path = path }
+        Err { error } -> Err { error = error }

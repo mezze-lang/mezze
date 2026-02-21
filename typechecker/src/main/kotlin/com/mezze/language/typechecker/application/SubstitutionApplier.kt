@@ -110,7 +110,7 @@ class SubstitutionApplier(
     private fun registerGeneratedCodecImpl(impl: ImplAbilityDeclaration): ImplAbilityDeclaration {
         // Compute content hash immediately
         val hash = ASTHasher.hashImplAbilityDeclaration(impl)
-        val implWithHash = impl.copy(contentHash = hash.toString())
+        val implWithHash = impl.copy(contentHash = hash.toFullHexString())
 
         generatedCodecImpls.add(implWithHash)
 
@@ -118,7 +118,7 @@ class SubstitutionApplier(
         // Use content hash as the key (same key format as TypingContext)
         val abilityName = impl.abilityName
         val targetTypes = impl.targetTypes.map { com.mezze.language.typechecker.hashing.ContentHashComputer.typeAnnotationToString(it) }
-        val contentHashKey = hash.toString()
+        val contentHashKey = hash.toFullHexString()
 
         mutableAbilityImpls[contentHashKey] = com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo(
             abilityName = abilityName,
@@ -1176,6 +1176,10 @@ class SubstitutionApplier(
                     "Bool" -> MezzeType.BooleanType
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType
+                    "Char" -> MezzeType.CharType
+                    "Bytes" -> MezzeType.BytesType
+                    "ByteBuffer" -> MezzeType.ByteBufferType
+                    "Ordering" -> MezzeType.OrderingType
                     else -> MezzeType.TypeApplication(typeName, emptyList())
                 }
             }
@@ -1814,6 +1818,9 @@ class SubstitutionApplier(
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType
                     "Ordering" -> MezzeType.OrderingType
+                    "Char" -> MezzeType.CharType
+                    "Bytes" -> MezzeType.BytesType
+                    "ByteBuffer" -> MezzeType.ByteBufferType
                     else -> {
                         if (annotation.name.first().isLowerCase() || annotation.name.startsWith("'")) {
                             MezzeType.VarType(TypeVar(annotation.name.removePrefix("'")))

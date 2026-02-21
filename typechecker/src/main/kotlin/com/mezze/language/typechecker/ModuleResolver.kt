@@ -816,6 +816,10 @@ class ModuleResolver(
                     )
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType
+                    "Char" -> MezzeType.CharType
+                    "Bytes" -> MezzeType.BytesType
+                    "ByteBuffer" -> MezzeType.ByteBufferType
+                    "Ordering" -> MezzeType.OrderingType
                     else -> MezzeType.VarType(TypeVar.fresh())
                 }
             }

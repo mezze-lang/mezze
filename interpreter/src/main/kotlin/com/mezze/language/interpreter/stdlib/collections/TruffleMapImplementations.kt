@@ -112,7 +112,7 @@ object TruffleMapImplementations {
             val newMap = m.entries.mapValues { v ->
                 val arg = if (v is MezzeRecord) v else MezzeRecord(mapOf("val" to v))
                 when (f) {
-                    is NativeMezzeFunction -> f.call(listOf(v))
+                    is NativeMezzeFunction -> f.call(listOf(arg))
                     is MezzeTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as MezzeValue
                     else -> throw NativeFunctionException("__native_map_map_values", "unsupported function type: ${f::class.simpleName}")
                 }
@@ -168,7 +168,7 @@ object TruffleMapImplementations {
             val entries = ks.toKotlinList().associateWith { k ->
                 val arg = if (k is MezzeRecord) k else MezzeRecord(mapOf("val" to k))
                 when (f) {
-                    is NativeMezzeFunction -> f.call(listOf(k))
+                    is NativeMezzeFunction -> f.call(listOf(arg))
                     is MezzeTruffleFunction -> f.callTarget.call(arg, f.closureVariables, f.lexicalScope, f.lexicalScopeSlotMap) as MezzeValue
                     else -> throw NativeFunctionException("__native_map_from_keys", "unsupported function type: ${f::class.simpleName}")
                 }

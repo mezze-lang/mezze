@@ -78,3 +78,82 @@ pub let tail = {xs} ->
 # Equality
 pub let equals = {l, r} ->
     __native_arraylist_equals { l = l, r = r }
+
+# =============================================================================
+# Zip Operations
+# =============================================================================
+
+# Zip two arrays together into array of records {fst, snd}
+# Truncates to the shorter array length
+# Example: zip {xs = [1, 2], ys = ["a", "b"]} -> [{fst = 1, snd = "a"}, {fst = 2, snd = "b"}]
+pub let zip = {xs, ys} ->
+    __native_arraylist_zip { xs = xs, ys = ys }
+
+# Unzip array of records into two arrays
+# Example: unzip {xs = [{fst = 1, snd = "a"}]} -> {fsts = [1], snds = ["a"]}
+pub let unzip = {xs} ->
+    __native_arraylist_unzip { xs = xs }
+
+# =============================================================================
+# Flatten
+# =============================================================================
+
+# Flatten nested arrays into a single array
+# Example: flatten {xss = [[1, 2], [3, 4]]} -> [1, 2, 3, 4]
+pub let flatten = {xss} ->
+    __native_arraylist_flatten { xss = xss }
+
+# =============================================================================
+# Predicate Functions
+# =============================================================================
+
+# Check if any element matches the predicate
+# Example: any {xs = [1, 2, 3], p = {x} -> x > 2} -> True
+pub let any = {xs, p} ->
+    __native_arraylist_any { xs = xs, p = p }
+
+# Check if all elements match the predicate
+# Example: all {xs = [2, 4, 6], p = {x} -> x % 2 == 0} -> True
+pub let all = {xs, p} ->
+    __native_arraylist_all { xs = xs, p = p }
+
+# =============================================================================
+# Partition
+# =============================================================================
+
+# Partition array into matching and non-matching elements
+# Example: partition {xs = [1, 2, 3, 4], p = {x} -> x > 2} -> {matching = [3, 4], not_matching = [1, 2]}
+pub let partition = {xs, p} ->
+    __native_arraylist_partition { xs = xs, p = p }
+
+# =============================================================================
+# Index Operations
+# =============================================================================
+
+# Find index of first element matching predicate
+# Example: find_index {xs = [1, 2, 3], p = {x} -> x > 1} -> Some {val = 1}
+pub let find_index = {xs, p} ->
+    __native_arraylist_find_index { xs = xs, p = p }
+
+# =============================================================================
+# Additional Accessors
+# =============================================================================
+
+# Get last element of array
+# Example: last {xs = [1, 2, 3]} -> Some {val = 3}
+pub let last = {xs} ->
+    __native_arraylist_last { xs = xs }
+
+# Get all elements except the last
+# Example: init {xs = [1, 2, 3]} -> [1, 2]
+pub let init = {xs} ->
+    __native_arraylist_init { xs = xs }
+
+# =============================================================================
+# Deduplication
+# =============================================================================
+
+# Remove duplicate elements (keeps first occurrence)
+# Example: unique {xs = [1, 2, 1, 3, 2]} -> [1, 2, 3]
+pub let unique = {xs} ->
+    __native_arraylist_unique { xs = xs }

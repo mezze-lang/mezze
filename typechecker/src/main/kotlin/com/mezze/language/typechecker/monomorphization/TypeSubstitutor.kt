@@ -357,6 +357,9 @@ class TypeSubstitutor(
                 "Nat" -> MezzeType.NatType
                 "Frac" -> MezzeType.FracType
                 "Ordering" -> MezzeType.OrderingType
+                "Char" -> MezzeType.CharType
+                "Bytes" -> MezzeType.BytesType
+                "ByteBuffer" -> MezzeType.ByteBufferType
                 else -> MezzeType.VarType(TypeVar(annotation.name))
             }
             is RecordTypeAnnotation -> MezzeType.RecordType(

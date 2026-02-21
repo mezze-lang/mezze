@@ -302,5 +302,138 @@ object ArrayListTypes {
                 MezzeType.BooleanType
             )
         }
+
+        // === New Utility Functions ===
+
+        // __native_arraylist_zip: {xs: ['a], ys: ['b]} -> [{fst: 'a, snd: 'b}]
+        run {
+            val elemTypeA = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val elemTypeB = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
+            val arrayTypeA = MezzeType.ArrayType(elemTypeA)
+            val arrayTypeB = MezzeType.ArrayType(elemTypeB)
+            val pairType = MezzeType.RecordType(mapOf("fst" to elemTypeA, "snd" to elemTypeB))
+            val resultType = MezzeType.ArrayType(pairType)
+            context["__native_arraylist_zip"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to arrayTypeA, "ys" to arrayTypeB)),
+                resultType
+            )
+        }
+
+        // __native_arraylist_unzip: {xs: [{fst: 'a, snd: 'b}]} -> {fsts: ['a], snds: ['b]}
+        run {
+            val elemTypeA = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val elemTypeB = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
+            val pairType = MezzeType.RecordType(mapOf("fst" to elemTypeA, "snd" to elemTypeB))
+            val inputType = MezzeType.ArrayType(pairType)
+            val resultType = MezzeType.RecordType(mapOf(
+                "fsts" to MezzeType.ArrayType(elemTypeA),
+                "snds" to MezzeType.ArrayType(elemTypeB)
+            ))
+            context["__native_arraylist_unzip"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to inputType)),
+                resultType
+            )
+        }
+
+        // __native_arraylist_flatten: {xss: [['a]]} -> ['a]
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val innerArrayType = MezzeType.ArrayType(elemType)
+            val outerArrayType = MezzeType.ArrayType(innerArrayType)
+            context["__native_arraylist_flatten"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xss" to outerArrayType)),
+                innerArrayType
+            )
+        }
+
+        // __native_arraylist_any: {xs: ['a], p: {x: 'a} -> Bool} -> Bool
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val arrayType = MezzeType.ArrayType(elemType)
+            val predicateType = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("x" to elemType)),
+                MezzeType.BooleanType
+            )
+            context["__native_arraylist_any"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to arrayType, "p" to predicateType)),
+                MezzeType.BooleanType
+            )
+        }
+
+        // __native_arraylist_all: {xs: ['a], p: {x: 'a} -> Bool} -> Bool
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val arrayType = MezzeType.ArrayType(elemType)
+            val predicateType = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("x" to elemType)),
+                MezzeType.BooleanType
+            )
+            context["__native_arraylist_all"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to arrayType, "p" to predicateType)),
+                MezzeType.BooleanType
+            )
+        }
+
+        // __native_arraylist_partition: {xs: ['a], p: {x: 'a} -> Bool} -> {matching: ['a], not_matching: ['a]}
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val arrayType = MezzeType.ArrayType(elemType)
+            val predicateType = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("x" to elemType)),
+                MezzeType.BooleanType
+            )
+            val resultType = MezzeType.RecordType(mapOf(
+                "matching" to arrayType,
+                "not_matching" to arrayType
+            ))
+            context["__native_arraylist_partition"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to arrayType, "p" to predicateType)),
+                resultType
+            )
+        }
+
+        // __native_arraylist_find_index: {xs: ['a], p: {x: 'a} -> Bool} -> Option Int
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val arrayType = MezzeType.ArrayType(elemType)
+            val predicateType = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("x" to elemType)),
+                MezzeType.BooleanType
+            )
+            context["__native_arraylist_find_index"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to arrayType, "p" to predicateType)),
+                optionType(MezzeType.IntType)
+            )
+        }
+
+        // __native_arraylist_last: {xs: ['a]} -> Option 'a
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val arrayType = MezzeType.ArrayType(elemType)
+            context["__native_arraylist_last"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to arrayType)),
+                optionType(elemType)
+            )
+        }
+
+        // __native_arraylist_init: {xs: ['a]} -> ['a]
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val arrayType = MezzeType.ArrayType(elemType)
+            context["__native_arraylist_init"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to arrayType)),
+                arrayType
+            )
+        }
+
+        // __native_arraylist_unique: {xs: ['a]} -> ['a]
+        run {
+            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val arrayType = MezzeType.ArrayType(elemType)
+            context["__native_arraylist_unique"] = MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("xs" to arrayType)),
+                arrayType
+            )
+        }
     }
 }

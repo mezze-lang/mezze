@@ -50,17 +50,17 @@ pub let from_array: { xs: ['a] } -> Set 'a = { xs } ->
     __native_set_from_array { xs = xs }
 
 # Conversion functions - List
-pub let to_list: { s: Set 'a } -> List 'a = {s} ->
-    __native_list_from_array { xs = __native_set_to_array { s = s } }
+pub let to_list: { s: Set 'a } -> (List 'a) = {s} ->
+    __native_set_to_list { s = s }
 
-pub let from_list: { xs: List 'a } -> Set 'a = { xs } ->
-    __native_set_from_array { xs = __native_list_to_array { xs = xs } }
+pub let from_list: { xs: (List 'a) } -> Set 'a = { xs } ->
+    __native_set_from_list { xs = xs }
 
 # Higher-order functions
-pub let filter: { s: Set 'a, p: 'a -> Bool } -> Set 'a= {s, p} ->
+pub let filter: { s: Set 'a, p: { val: 'a } -> Bool } -> Set 'a = {s, p} ->
     __native_set_filter { s = s, p = p }
 
-pub let map: { s: Set 'a, f: 'a -> 'b } -> Set 'b= {s,f} ->
+pub let map: { s: Set 'a, f: { val: 'a } -> 'b } -> Set 'b = {s, f} ->
     __native_set_map { s = s, f = f }
 
 pub let fold: { s: Set 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc } -> 'acc = {s, init, f} ->

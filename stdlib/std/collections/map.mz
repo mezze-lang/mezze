@@ -26,10 +26,10 @@ pub let is_empty: { m: (Map 'k 'v) } -> Bool = {m} ->
     size { m = m } == 0
 
 # Map queries and utilities
-pub let keys: { m: (Map 'k 'v) } -> ['k] = {m} ->
+pub let keys: { m: (Map 'k 'v) } -> (List 'k) = {m} ->
     __native_map_keys { m = m }
 
-pub let values: { m: (Map 'k 'v) } -> ['v] = {m} ->
+pub let values: { m: (Map 'k 'v) } -> (List 'v) = {m} ->
     __native_map_values { m = m }
 
 # TODO: Tuple syntax not yet supported in type annotations
@@ -37,7 +37,7 @@ pub let values: { m: (Map 'k 'v) } -> ['v] = {m} ->
 #     __native_map_entries { m = m }
 
 # Higher-order functions
-pub let map_values: { m: (Map 'k 'v), f: 'v -> 'w } -> (Map 'k 'w)= {m, f} ->
+pub let map_values: { m: (Map 'k 'v), f: { val: 'v } -> 'w } -> (Map 'k 'w) = {m, f} ->
     __native_map_map_values { m = m, f = f }
 
 pub let filter: { m: (Map 'k 'v), p: { k: 'k, v: 'v } -> Bool } -> (Map 'k 'v)= {m, p} ->
@@ -46,7 +46,7 @@ pub let filter: { m: (Map 'k 'v), p: { k: 'k, v: 'v } -> Bool } -> (Map 'k 'v)= 
 pub let fold: { m: (Map 'k 'v), init: 'acc, f: { acc: 'acc, k: 'k, v: 'v } -> 'acc } -> 'acc = {m, init, f} ->
     __native_map_fold { m = m, init = init, f = f }
 
-pub let from_keys: { ks: ['k], f: 'k -> 'v } -> (Map 'k 'v)= {ks, f} ->
+pub let from_keys: { ks: (List 'k), f: { val: 'k } -> 'v } -> (Map 'k 'v) = {ks, f} ->
     __native_map_from_keys { ks = ks, f = f }
 
 # Map operations
@@ -70,7 +70,7 @@ pub let update: { m: (Map 'k 'v), k: 'k, f: { x: (Option 'v) } -> (Option 'v) } 
         Some { val } -> insert { m = m, k = k, v = val }
         None -> remove { m = m, k = k }
 
-pub let remove_all: { m: (Map 'k 'v), ks: ['k] } -> (Map 'k 'v)= {m, ks} ->
+pub let remove_all: { m: (Map 'k 'v), ks: (List 'k) } -> (Map 'k 'v) = {m, ks} ->
     __native_map_remove_all { m = m, ks = ks }
 
 # Equality
