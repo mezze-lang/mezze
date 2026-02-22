@@ -557,6 +557,20 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         val ast = parser.parse(source, file = file.name)
         val parseTime = (System.nanoTime() - startTime) / 1_000_000.0
 
+        // Check for bare top-level expressions (not allowed in CLI mode)
+        val bareExpressions = ast.items.filterIsInstance<TopLevelExpression>()
+        if (bareExpressions.isNotEmpty()) {
+            val first = bareExpressions.first()
+            val loc = first.expression.sourceLocation
+            val locStr = loc?.let { "${file.name}:${it.line}:${it.column}" } ?: file.name
+            println("❌ Error at $locStr")
+            println("━".repeat(50))
+            println("Top-level expression is not allowed. Did you mean to assign it with 'let'?")
+            println()
+            println("Example: let result = <expression>")
+            kotlin.system.exitProcess(1)
+        }
+
         // Use the source file's directory for module resolution
         // This allows the ModuleResolver to find Mezze.toml in parent directories
         // Note: mezze.project.root is for stdlib location, NOT for user module resolution
