@@ -59,7 +59,7 @@ object ErrorPrettyPrinter {
                 sb.appendLine("━".repeat(50))
                 sb.appendLine("Export '${error.exportName}' not found in module '${error.modulePath}'")
                 sb.appendLine()
-                
+
                 // Check if they're trying to import a built-in type or ability
                 if (BuiltinTypes.isBuiltinTypeName(error.exportName)) {
                     sb.appendLine("💡 Built-in Type Detected:")
@@ -76,7 +76,17 @@ object ErrorPrettyPrinter {
                     sb.appendLine("   - For built-in features, no import is needed")
                 }
             }
-            
+
+            is ModuleError.PrivateExport -> {
+                sb.appendLine("❌ Private Item")
+                sb.appendLine("━".repeat(50))
+                sb.appendLine("'${error.exportName}' exists in '${error.modulePath}' but is not public")
+                sb.appendLine()
+                sb.appendLine("💡 To fix this, add 'pub' to the definition:")
+                sb.appendLine()
+                sb.appendLine("   pub let ${error.exportName} = ...")
+            }
+
             is ModuleError.DeprecatedCoreModule -> {
                 sb.appendLine("⚠️  Deprecated Core Module")
                 sb.appendLine("━".repeat(50))

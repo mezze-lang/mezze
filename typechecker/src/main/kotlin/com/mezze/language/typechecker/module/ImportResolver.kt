@@ -277,24 +277,34 @@ class ImportResolver(
                 )
 
                 // Check if all requested items were found
-                val missingItems = path.items.mapNotNull { item ->
-                    if (!module.exports.containsKey(item.name)) {
-                        item.name
-                    } else null
-                }
+                // Also check if items exist but are private (not exported)
+                val errors = mutableListOf<ModuleError>()
 
-                if (missingItems.isNotEmpty()) {
-                    val availableExports = module.exports.keys.toList().sorted()
-                    return ProcessResult.Failure(
-                        missingItems.map { itemName ->
-                            ModuleError.ExportNotFound(
+                for (item in path.items) {
+                    if (!module.exports.containsKey(item.name)) {
+                        // Check if the item exists in the module but isn't public
+                        val existsButPrivate = checkIfItemExistsButPrivate(module, item.name)
+
+                        if (existsButPrivate) {
+                            errors.add(ModuleError.PrivateExport(
                                 modulePath = modulePath,
-                                exportName = itemName,
+                                exportName = item.name,
+                                sourceLocation = sourceLocation
+                            ))
+                        } else {
+                            val availableExports = module.exports.keys.toList().sorted()
+                            errors.add(ModuleError.ExportNotFound(
+                                modulePath = modulePath,
+                                exportName = item.name,
                                 sourceLocation = sourceLocation,
                                 availableExports = availableExports
-                            )
+                            ))
                         }
-                    )
+                    }
+                }
+
+                if (errors.isNotEmpty()) {
+                    return ProcessResult.Failure(errors)
                 }
 
                 ProcessResult.Success(
@@ -567,6 +577,44 @@ class ImportResolver(
             importedImpls = impls,
             importedAbilityImpls = abilityImpls
         )
+    }
+
+    // ========================================================================
+    // HELPER FUNCTIONS
+    // ========================================================================
+
+    /**
+     * Check if an item exists in the module but is not public (not exported).
+     *
+     * This helps provide better error messages when a user tries to import
+     * something that exists but hasn't been marked with `pub`.
+     */
+    private fun checkIfItemExistsButPrivate(module: LoadedModule, itemName: String): Boolean {
+        val index = module.index
+
+        // Check let bindings (functions/values)
+        index.letBindings[itemName]?.let { binding ->
+            // Found it - it exists but wasn't exported (otherwise it would be in exports)
+            return binding.visibility != Visibility.PUBLIC
+        }
+
+        // Check type declarations
+        index.typeDeclarations[itemName]?.let { typeDecl ->
+            return typeDecl.visibility != Visibility.PUBLIC
+        }
+
+        // Check ability declarations (abilities are always public, so if it's here but not exported, something is wrong)
+        if (index.abilityDeclarations.containsKey(itemName)) {
+            return false  // Abilities are always public
+        }
+
+        // Check effect declarations (effects are always public)
+        if (index.effectDeclarations.containsKey(itemName)) {
+            return false  // Effects are always public
+        }
+
+        // Item not found at all
+        return false
     }
 
     // ========================================================================

@@ -97,34 +97,67 @@ class ModuleSystemTest {
     }
     
     @Test
-    fun testExportNotFound() {
+    fun testPrivateExport() {
         // Create a module with limited exports
         val mathModule = """
             pub let add = { x, y } -> x + y
             let subtract = { x, y } -> x - y  # private
         """.trimIndent()
-        
+
         val srcDir = tempDir.resolve("src")
         Files.createDirectories(srcDir)
         Files.writeString(srcDir.resolve("math.mz"), mathModule)
-        
-        // Try to import non-exported function
+
+        // Try to import non-exported function (exists but not public)
         val mainModule = """
             use math::{add, subtract}  # subtract is not exported
-            
+
             let result = add { x = 5, y = 3 }
         """.trimIndent()
-        
+
         Files.writeString(srcDir.resolve("main.mz"), mainModule)
-        
+
         val program = parser.parse(mainModule)
-        
+
+        val exception = assertThrows(ModuleError.PrivateExport::class.java) {
+            typeChecker.typeCheck(program, srcDir).program
+        }
+
+        // Verify the error contains useful info
+        assertEquals("subtract", exception.exportName)
+        assertEquals("math", exception.modulePath)
+        assertTrue(exception.message!!.contains("not public"))
+    }
+
+    @Test
+    fun testExportNotFound() {
+        // Create a module with limited exports
+        val mathModule = """
+            pub let add = { x, y } -> x + y
+        """.trimIndent()
+
+        val srcDir = tempDir.resolve("src")
+        Files.createDirectories(srcDir)
+        Files.writeString(srcDir.resolve("math.mz"), mathModule)
+
+        // Try to import function that doesn't exist at all
+        val mainModule = """
+            use math::{add, multiply}  # multiply doesn't exist
+
+            let result = add { x = 5, y = 3 }
+        """.trimIndent()
+
+        Files.writeString(srcDir.resolve("main.mz"), mainModule)
+
+        val program = parser.parse(mainModule)
+
         val exception = assertThrows(ModuleError.ExportNotFound::class.java) {
             typeChecker.typeCheck(program, srcDir).program
         }
-        
-        // Just verify we got the right exception type - the message format can vary
-        assertNotNull(exception.message)
+
+        // Verify the error contains useful info
+        assertEquals("multiply", exception.exportName)
+        assertEquals("math", exception.modulePath)
     }
     
     @Test

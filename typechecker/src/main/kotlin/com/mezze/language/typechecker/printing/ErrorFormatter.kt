@@ -149,6 +149,7 @@ object ErrorFormatter {
             is ModuleError.ParseError -> formatModuleParseError(error)
             is ModuleError.ImportError -> formatModuleImportError(error)
             is ModuleError.ExportNotFound -> formatModuleExportNotFoundError(error)
+            is ModuleError.PrivateExport -> formatModulePrivateExportError(error)
             is ModuleError.InternalModuleAccess -> formatModuleInternalModuleAccessError(error)
         }
     }
@@ -760,6 +761,45 @@ object ErrorFormatter {
             appendLine("   - Check the export name spelling")
             appendLine("   - Verify the module exports this item with 'pub'")
             appendLine("   - Use 'use ${error.modulePath}' to see available exports")
+        }.trim()
+    }
+
+    private fun formatModulePrivateExportError(error: ModuleError.PrivateExport): String {
+        return buildString {
+            appendLine("❌ Module Error [Private Item]")
+            appendLine("━".repeat(50))
+
+            // Show source location if available
+            error.sourceLocation?.let { loc ->
+                val fileInfo = loc.file ?: "<input>"
+                appendLine("   --> $fileInfo:${loc.line}:${loc.column}")
+
+                // Try to show source code snippet if we can
+                loc.file?.let { filePath ->
+                    try {
+                        val file = java.io.File(filePath)
+                        if (file.exists()) {
+                            val lines = file.readLines()
+                            if (loc.line > 0 && loc.line <= lines.size) {
+                                val line = lines[loc.line - 1]
+                                appendLine("    |")
+                                appendLine("${loc.line.toString().padStart(3)} | $line")
+                                val underlineLen = loc.length ?: 1
+                                appendLine("    | ${" ".repeat(loc.column - 1)}${"^".repeat(maxOf(1, underlineLen))}")
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // Ignore file read errors
+                    }
+                }
+                appendLine()
+            }
+
+            appendLine("Error: '${error.exportName}' exists in '${error.modulePath}' but is not public")
+            appendLine()
+            appendLine("💡 To fix this, add 'pub' to the definition in ${error.modulePath}:")
+            appendLine()
+            appendLine("   pub let ${error.exportName} = ...")
         }.trim()
     }
 

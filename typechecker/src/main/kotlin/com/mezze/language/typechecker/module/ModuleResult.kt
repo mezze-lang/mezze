@@ -115,6 +115,15 @@ sealed class ModuleError(override val message: String) : Exception(message) {
         val availableExports: List<String> = emptyList()
     ) : ModuleError("Export '$exportName' not found in module '$modulePath'")
 
+    /**
+     * Thrown when trying to import an item that exists but is not public.
+     */
+    data class PrivateExport(
+        val modulePath: String,
+        val exportName: String,
+        val sourceLocation: com.mezze.language.ast.SourceLocation? = null
+    ) : ModuleError("'$exportName' exists in module '$modulePath' but is not public. Add 'pub' to export it.")
+
     data class InternalModuleAccess(
         val fromModule: String,
         val toModule: String,

@@ -661,6 +661,30 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         println("   - Move the module out of the '$internalFolder' folder to make it public")
         println("   - Create a public API that wraps the internal functionality")
         kotlin.system.exitProcess(1)
+    } catch (e: com.mezze.language.typechecker.module.ModuleError.PrivateExport) {
+        // Pretty-print private export error with source context
+        println("❌ Module Error [Private Item]")
+        println("━".repeat(50))
+        e.sourceLocation?.let { loc ->
+            println("   --> ${loc.file ?: file.name}:${loc.line}:${loc.column}")
+            val lines = source.lines()
+            if (loc.line > 0 && loc.line <= lines.size) {
+                val lineNum = loc.line
+                val lineContent = lines[lineNum - 1]
+                println("    |")
+                println("${lineNum.toString().padStart(3)} | $lineContent")
+                val underlineLen = loc.length ?: 1
+                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}${"^".repeat(maxOf(1, underlineLen))}")
+            }
+            println()
+        }
+        println("Error: '${e.exportName}' exists in '${e.modulePath}' but is not public")
+        println()
+        println("💡 To fix this, add 'pub' to the definition in ${e.modulePath}:")
+        println()
+        println("   pub let ${e.exportName} = ...")
+        println()
+        kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.typechecker.module.ModuleError.ExportNotFound) {
         // Pretty-print export not found error with source context
         println("❌ Module Error [Export Not Found]")
@@ -944,6 +968,30 @@ private fun handleExecCommand(args: List<String>) {
             sourceCode = source
         )
         println(formattedError)
+        kotlin.system.exitProcess(1)
+    } catch (e: com.mezze.language.typechecker.module.ModuleError.PrivateExport) {
+        // Pretty-print private export error with source context
+        println("❌ Module Error [Private Item]")
+        println("━".repeat(50))
+        e.sourceLocation?.let { loc ->
+            println("   --> ${loc.file ?: fileName}:${loc.line}:${loc.column}")
+            val lines = source.lines()
+            if (loc.line > 0 && loc.line <= lines.size) {
+                val lineNum = loc.line
+                val lineContent = lines[lineNum - 1]
+                println("    |")
+                println("${lineNum.toString().padStart(3)} | $lineContent")
+                val underlineLen = loc.length ?: 1
+                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}${"^".repeat(maxOf(1, underlineLen))}")
+            }
+            println()
+        }
+        println("Error: '${e.exportName}' exists in '${e.modulePath}' but is not public")
+        println()
+        println("💡 To fix this, add 'pub' to the definition in ${e.modulePath}:")
+        println()
+        println("   pub let ${e.exportName} = ...")
+        println()
         kotlin.system.exitProcess(1)
     } catch (e: com.mezze.language.typechecker.module.ModuleError.ExportNotFound) {
         // Pretty-print export not found error with source context
