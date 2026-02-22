@@ -562,12 +562,28 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         if (bareExpressions.isNotEmpty()) {
             val first = bareExpressions.first()
             val loc = first.expression.sourceLocation
-            val locStr = loc?.let { "${file.name}:${it.line}:${it.column}" } ?: file.name
-            println("❌ Error at $locStr")
+            println("❌ Error: Top-level expression not allowed")
             println("━".repeat(50))
-            println("Top-level expression is not allowed. Did you mean to assign it with 'let'?")
+            if (loc != null) {
+                val lines = source.lines()
+                val lineNum = loc.line
+                val col = loc.column
+                println("   --> ${file.name}:$lineNum:$col")
+                println("    |")
+                if (lineNum >= 1 && lineNum <= lines.size) {
+                    val sourceLine = lines[lineNum - 1]
+                    println("  ${lineNum.toString().padStart(2)} | $sourceLine")
+                    val underlineLength = loc.length ?: minOf(10, sourceLine.length - col + 1)
+                    println("    | ${" ".repeat(col - 1)}${"^".repeat(maxOf(1, underlineLength))} expression result is discarded")
+                }
+                println("    |")
+            }
             println()
-            println("Example: let result = <expression>")
+            println("Bare expressions at module level have no effect.")
+            println("Did you mean to assign it?")
+            println()
+            println("  let result = <expression>")
+            println()
             kotlin.system.exitProcess(1)
         }
 
