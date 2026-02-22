@@ -7,6 +7,8 @@ import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.typechecker.*
 import com.mezze.language.interpreter.MezzeException
 import com.mezze.language.interpreter.MezzeLanguage
+import com.mezze.language.codebase.CodebasePopulator
+import com.mezze.language.codebase.SQLiteCodebase
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -16,6 +18,7 @@ import org.graalvm.polyglot.Source
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Base64
 
 /**
  * Detect the project root by finding the directory containing the stdlib folder.
@@ -134,6 +137,8 @@ fun main(args: Array<String>) {
             "add" -> handleAddCommand(remainingArgs)
             "remove" -> handleRemoveCommand(remainingArgs)
             "sync" -> handleSyncCommand(remainingArgs)
+            // Developer tools
+            "lsp" -> handleLspCommand(remainingArgs)
             else -> {
                 println("❌ Unknown command: $command")
                 println()
@@ -175,6 +180,9 @@ private fun showHelp() {
     println("  remove    Remove a dependency from Mezze.toml")
     println("  sync      Download and install all dependencies")
     println()
+    println("DEVELOPER TOOLS:")
+    println("  lsp       Start Language Server Protocol server")
+    println()
     println("GLOBAL OPTIONS:")
     println("  -h, --help     Show this help message")
     println("  -v, --version  Show version information")
@@ -215,6 +223,7 @@ private fun showUsage() {
     println("  File-based:    parse, check, exec, compile")
     println("  Package-based: dev, build")
     println("  Packages:      init, add, remove, sync")
+    println("  Tools:         lsp")
     println()
     println("For command-specific help: mezze <command> --help")
 }
@@ -418,6 +427,33 @@ private fun showCommandHelp(command: String) {
             println()
         }
 
+        "lsp" -> {
+            println("USAGE: mezze lsp [options]")
+            println()
+            println("Start the Mezze Language Server Protocol server")
+            println()
+            println("The server communicates via stdin/stdout using the Language Server Protocol.")
+            println("This is primarily used by editor extensions (VS Code, Neovim, etc.).")
+            println()
+            println("OPTIONS:")
+            println("  --stdio            Use stdio for communication (default)")
+            println("  -v, --version      Print version and exit")
+            println("  -h, --help         Show this help message")
+            println()
+            println("FEATURES:")
+            println("  - Diagnostics (parse errors, type errors)")
+            println("  - Hover (show types on hover)")
+            println("  - Go to definition")
+            println("  - Find references")
+            println("  - Code completion")
+            println("  - Document symbols (outline)")
+            println()
+            println("EDITOR INTEGRATION:")
+            println("  VS Code:  Install the Mezze extension")
+            println("  Neovim:   Configure LSP client to run 'mezze lsp'")
+            println()
+        }
+
         else -> {
             println("❌ Unknown command: $command")
             println()
@@ -563,7 +599,8 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
                 val lineContent = lines[lineNum - 1]
                 println("    |")
                 println("${lineNum.toString().padStart(3)} | $lineContent")
-                println("    | ${" ".repeat(loc.column - 1)}^ here")
+                val underlineLen = loc.length ?: 1
+                println("    | ${" ".repeat(loc.column - 1)}${"^".repeat(maxOf(1, underlineLen))} here")
                 println("    |")
             }
         }
@@ -597,7 +634,8 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
                 val lineContent = lines[lineNum - 1]
                 println("    |")
                 println("${lineNum.toString().padStart(3)} | $lineContent")
-                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}^")
+                val underlineLen = loc.length ?: 1
+                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}${"^".repeat(maxOf(1, underlineLen))}")
             }
             println()
         }
@@ -870,7 +908,8 @@ private fun handleExecCommand(args: List<String>) {
                 val lineContent = lines[lineNum - 1]
                 println("    |")
                 println("${lineNum.toString().padStart(3)} | $lineContent")
-                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}^")
+                val underlineLen = loc.length ?: 1
+                println("    | ${" ".repeat(maxOf(0, loc.column - 1))}${"^".repeat(maxOf(1, underlineLen))}")
             }
             println()
         }
@@ -1141,28 +1180,30 @@ private fun createJavaMainClass(tempDir: File, inputFile: File, source: String) 
     val projectRoot = inputFile.toPath().parent ?: inputFile.toPath()
     val typeCheckResult = typeChecker.typeCheck(program, projectRoot)
 
-    // Serialize the enhanced AST to JSON (clean user AST only, no compiler artifacts)
-    val json = kotlinx.serialization.json.Json {
-        prettyPrint = false
-        ignoreUnknownKeys = true
-    }
-    val serializedAST = json.encodeToString(Program.serializer(), typeCheckResult.program)
-
     // Get all modules that were type-checked (stdlib + imports + packages)
-    // These will be bundled into the JAR to avoid parsing at runtime
     val loadedModules = ModuleResolver.getAllModules()
-    val serializedModules = json.encodeToString(
-        MapSerializer(String.serializer(), Program.serializer()),
-        loadedModules
-    )
 
     println("📦 Bundling ${loadedModules.size} pre-parsed modules (stdlib, imports, packages)")
 
-    // Save serialized data as resource files
+    // Create in-memory SQLite codebase and populate it
+    val codebase = SQLiteCodebase.inMemory()
+    CodebasePopulator.populate(
+        codebase = codebase,
+        mainProgram = typeCheckResult.program,
+        modules = loadedModules,
+        mainModulePath = null  // Script mode has no module path
+    )
+
+    // Export codebase to bytes
+    val codebaseBytes = SQLiteCodebase.toBytes(codebase)
+    codebase.close()
+
+    println("📦 Codebase size: ${codebaseBytes.size / 1024} KB")
+
+    // Save codebase as resource file
     val resourcesDir = File(tempDir, "src/main/resources/com/mezze/standalone")
     resourcesDir.mkdirs()
-    File(resourcesDir, "ast.json").writeText(serializedAST)
-    File(resourcesDir, "modules.json").writeText(serializedModules)
+    File(resourcesDir, "codebase.db").writeBytes(codebaseBytes)
 
     val mainClassDir = File(tempDir, "src/main/java/com/mezze/standalone")
     mainClassDir.mkdirs()
@@ -1172,15 +1213,13 @@ package com.mezze.standalone;
 
 import com.mezze.language.cli.standalone.StandaloneHelper;
 import java.io.InputStream;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.util.stream.Collectors;
+import java.io.ByteArrayOutputStream;
 
 /**
  * Standalone executable for ${inputFile.name}
  * Generated by Mezze compiler with pre-processed enhanced AST
  *
- * This JAR contains the pre-parsed and type-checked AST, so no parser is needed at runtime.
+ * This JAR contains a SQLite codebase with all definitions and types.
  * Uses full Truffle execution with JIT compilation for maximum performance.
  */
 public class Main {
@@ -1188,12 +1227,11 @@ public class Main {
 
     public static void main(String[] args) {
         try {
-            // Load serialized AST and modules from resources
-            String astJson = loadResource("/com/mezze/standalone/ast.json");
-            String modulesJson = loadResource("/com/mezze/standalone/modules.json");
+            // Load codebase from embedded resource
+            byte[] codebaseBytes = loadResourceBytes("/com/mezze/standalone/codebase.db");
 
-            // Delegate to pre-compiled Kotlin helper (already in CLI JAR)
-            StandaloneHelper.executeFromJson(astJson, modulesJson);
+            // Execute using the codebase
+            StandaloneHelper.executeFromCodebase(codebaseBytes);
 
         } catch (Exception e) {
             System.err.println("Error executing " + PROGRAM_NAME + ": " + e.getMessage());
@@ -1204,20 +1242,25 @@ public class Main {
         }
     }
 
-    private static String loadResource(String path) throws Exception {
+    private static byte[] loadResourceBytes(String path) throws Exception {
         InputStream is = Main.class.getResourceAsStream(path);
         if (is == null) {
             throw new IllegalStateException("Cannot find resource: " + path);
         }
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
-            return reader.lines().collect(Collectors.joining("\n"));
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] data = new byte[16384];
+        int bytesRead;
+        while ((bytesRead = is.read(data, 0, data.length)) != -1) {
+            buffer.write(data, 0, bytesRead);
         }
+        is.close();
+        return buffer.toByteArray();
     }
 }
     """.trimIndent()
 
     File(mainClassDir, "Main.java").writeText(mainClassContent)
-    println("✅ Created Java wrapper (using pre-compiled helper)")
+    println("✅ Created Java wrapper (using SQLite codebase)")
 }
 
 private fun copyMezzeLanguageJars(tempDir: File) {
@@ -1536,6 +1579,20 @@ private fun handleSyncCommand(args: List<String>) {
 }
 
 /**
+ * Start the Language Server Protocol server
+ */
+private fun handleLspCommand(args: List<String>) {
+    // Handle version flag
+    if (args.contains("--version") || args.contains("-v")) {
+        println("Mezze Language Server v1.0.0")
+        return
+    }
+
+    // Start the LSP server (communicates via stdin/stdout)
+    com.mezze.language.lsp.startServer(System.`in`, System.out)
+}
+
+/**
  * Enhanced error reporting functions
  */
 private fun printTypeError(error: TypeCheckError) {
@@ -1727,6 +1784,15 @@ private fun printTypeCheckSuccess(result: TypeCheckResult, typeAliases: Map<Stri
 }
 
 private fun printFileCheckSuccess(result: TypeCheckResult, typeAliases: Map<String, TypeAliasInfo>) {
+    // Print warnings first (before success message)
+    if (result.warnings.isNotEmpty()) {
+        for (warning in result.warnings) {
+            val locationStr = warning.sourceLocation?.let { ":${it.line}:${it.column}" } ?: ""
+            println("⚠️  Warning$locationStr: ${warning.message}")
+        }
+        println()
+    }
+
     println("Type check passed")
     println("━".repeat(50))
 

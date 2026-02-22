@@ -2136,10 +2136,13 @@ class ExpressionConstraintGenerator {
                 (guard?.let { generate(it, caseContext).usedVariables } ?: emptySet())
             for ((varName, _) in patternResult.bindings) {
                 if (!varName.startsWith("_") && varName !in usedVarsInBody) {
+                    // Use case body source location as approximation (closer to pattern than match expression)
+                    // Ideally we'd have source location on each pattern binding
+                    val patternLocation = matchCase.expression.sourceLocation ?: expr.sourceLocation
                     unusedVars.add(
                         ConstraintResult.UnusedVariable(
                             name = varName,
-                            sourceLocation = expr.sourceLocation
+                            sourceLocation = patternLocation
                         )
                     )
                 }

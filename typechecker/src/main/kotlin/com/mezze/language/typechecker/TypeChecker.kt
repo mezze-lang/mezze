@@ -119,6 +119,7 @@ class TypeChecker(
             val program: Program,                              // Program with inferred types and resolved call sites
             val substitution: Substitution,                    // Final type substitution
             val monomorphicInstances: Map<String, LetBinding>, // Specialized function instances
+            val importContext: ModuleImportContext? = null,    // Resolved imports for IDE support
             val warnings: List<String> = emptyList()
         ) : TypeCheckResult()
 
@@ -140,6 +141,21 @@ class TypeChecker(
         val message: String,
         val sourceLocation: SourceLocation? = null
     )
+
+    /**
+     * Result of type checking with error recovery.
+     * Contains partial type information even when there are errors.
+     */
+    data class TypeCheckResultWithRecovery(
+        val program: Program?,                              // Program with partial type info (null if parsing failed)
+        val errors: List<TypeCheckError>,                   // All errors collected
+        val partialSubstitution: Substitution?,             // Partial substitution if solving partially succeeded
+        val importContext: ModuleImportContext? = null,     // Resolved imports for IDE support
+        val warnings: List<String> = emptyList()
+    ) {
+        val hasErrors: Boolean get() = errors.isNotEmpty()
+        val isSuccess: Boolean get() = errors.isEmpty()
+    }
 
     /**
      * Check a program through all 7 phases.
@@ -542,6 +558,7 @@ class TypeChecker(
                                     program = monomorphizationResult.program,
                                     substitution = substitution,
                                     monomorphicInstances = monomorphizationResult.monomorphicInstances,
+                                    importContext = importContext,
                                     warnings = warnings
                                 )
                             }
@@ -550,6 +567,355 @@ class TypeChecker(
                 }
             }
         }
+    }
+
+    /**
+     * Check a program with error recovery.
+     *
+     * Unlike checkProgram() which returns on the first error, this method
+     * continues checking and collects ALL errors. It also returns partial
+     * type information for items that were successfully type-checked.
+     *
+     * This is useful for IDE support where you want to show all errors at once
+     * and still provide type information for hover/completion even when there
+     * are errors in other parts of the file.
+     *
+     * @param program The program to type-check
+     * @param currentPath Optional path for module resolution (defaults to current directory)
+     */
+    fun checkProgramWithRecovery(program: Program, currentPath: Path = Paths.get(".")): TypeCheckResultWithRecovery {
+        // Clear caches for fresh type checking
+        com.mezze.language.typechecker.solving.clearUnificationCache()
+
+        val allErrors = mutableListOf<TypeCheckError>()
+        val allWarnings = mutableListOf<String>()
+
+        // PHASE 0: Module Resolution (if imports are present)
+        var importContext: ModuleImportContext? = null
+        val enhancedContext = if (hasImports(program)) {
+            val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
+            val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
+                parentContext,
+                moduleLoader.getResolver()
+            )
+            val importResolver = ImportResolver(moduleLoader, moduleTypeChecker)
+
+            val importResult = importResolver.resolveImports(program)
+
+            when (importResult) {
+                is ImportResolutionResult.Success -> {
+                    importContext = importResult.importContext
+                    mergeImportContext(parentContext, importResult.importContext)
+                }
+                is ImportResolutionResult.Failure -> {
+                    // Collect import errors but continue with parent context
+                    importResult.errors.forEach { moduleError ->
+                        // Convert ModuleError to TypeCheckError
+                        // Extract source location if available
+                        val sourceLocation = (moduleError as? ModuleError.ExportNotFound)?.sourceLocation
+                            ?: (moduleError as? ModuleError.InternalModuleAccess)?.sourceLocation
+                        allErrors.add(TypeCheckError(
+                            phase = "Import",
+                            message = moduleError.message,
+                            sourceLocation = sourceLocation
+                        ))
+                    }
+                    parentContext
+                }
+            }
+        } else {
+            parentContext
+        }
+
+        // PHASE 0.5: Compute Content Hashes for Declarations
+        val hashedProgram = computeDeclarationHashes(program)
+
+        // PHASE 1: Build Context
+        val contextBuilder = ContextBuilder()
+        val buildResult = try {
+            contextBuilder.build(
+                program = hashedProgram,
+                parentContext = enhancedContext,
+                importedImpls = importContext?.importedImpls ?: emptyMap(),
+                importedAbilities = importContext?.importedAbilities ?: emptyMap(),
+                importedTypes = importContext?.importedTypes ?: emptyMap()
+            )
+        } catch (e: Exception) {
+            // Context building failed - return with error
+            allErrors.add(TypeCheckError(
+                phase = "Context Building",
+                message = e.message ?: "Unknown error building context",
+                sourceLocation = null
+            ))
+            return TypeCheckResultWithRecovery(
+                program = hashedProgram,
+                errors = allErrors,
+                partialSubstitution = null,
+                importContext = importContext,
+                warnings = allWarnings
+            )
+        }
+        val context = buildResult.context
+
+        // Build type aliases for pretty printing
+        cachedTypeAliases = buildTypeAliases(hashedProgram, contextBuilder, importContext)
+
+        // PHASE 2: Generate Constraints
+        val abilityNames = buildResult.abilityDeclarations.keys +
+            (importContext?.importedAbilities?.keys ?: emptySet())
+        val effectNames = buildResult.effectDeclarations.keys +
+            (importContext?.importedEffects?.keys ?: emptySet())
+
+        val allEffectDeclarations = buildResult.effectDeclarations +
+            (importContext?.importedEffects ?: emptyMap())
+        val allTypeDeclarations = buildResult.typeDeclarations +
+            (importContext?.importedTypes ?: emptyMap())
+        val importedAbilities = importContext?.importedAbilities ?: emptyMap()
+        val allAbilityDeclarations = buildResult.abilityDeclarations + importedAbilities
+
+        val constraintGenerator = ConstraintGenerator.create(
+            typeDeclarations = allTypeDeclarations,
+            performerToEffect = buildResult.performerToEffect,
+            performerAddedEffects = buildResult.performerAddedEffects,
+            abilityNames = abilityNames,
+            effectNames = effectNames,
+            abilityDeclarations = allAbilityDeclarations,
+            effectDeclarations = allEffectDeclarations
+        )
+        val programConstraintResult = constraintGenerator.generateProgram(hashedProgram, context)
+        val constraintResults = programConstraintResult.constraintResults
+        val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
+        val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
+
+        // Collect per-binding solve errors (don't return early)
+        perBindingSolveErrors.forEach { error ->
+            allErrors.add(TypeCheckError(
+                phase = "Constraint Solving",
+                message = error.message,
+                sourceLocation = error.constraint.sourceLocation
+            ))
+        }
+
+        // Collect undefined variable errors (don't return early)
+        val undefinedVars = constraintResults.values.flatMap { it.undefinedVariables }
+        undefinedVars.forEach { undefinedVar ->
+            val isBuiltInAbility = com.mezze.language.typechecker.abilities.BuiltInAbilities.isBuiltInAbility(undefinedVar.name)
+            val isUserDefinedAbility = allAbilityDeclarations.containsKey(undefinedVar.name)
+            val isEffect = allEffectDeclarations.containsKey(undefinedVar.name)
+
+            val matchingAbilityOp = allAbilityDeclarations.entries.firstOrNull { (_, ability) ->
+                ability.operations.any { it.name == undefinedVar.name }
+            }
+            val matchingEffectOp = allEffectDeclarations.entries.firstOrNull { (_, effect) ->
+                effect.operations.any { it.name == undefinedVar.name }
+            }
+
+            val message = if (isBuiltInAbility || isUserDefinedAbility) {
+                "Ability '${undefinedVar.name}' cannot be used as a value. " +
+                "Did you mean to access a method like ${undefinedVar.name}.method_name?"
+            } else if (isEffect) {
+                "Effect '${undefinedVar.name}' cannot be used as a value. " +
+                "Did you mean to access an operation like ${undefinedVar.name}.operation_name?"
+            } else if (matchingAbilityOp != null) {
+                val abilityName = matchingAbilityOp.key
+                "Undefined variable: ${undefinedVar.name}. " +
+                "Did you mean to call an ability method? Use: $abilityName.${undefinedVar.name}"
+            } else if (matchingEffectOp != null) {
+                val effectName = matchingEffectOp.key
+                "Undefined variable: ${undefinedVar.name}. " +
+                "Did you mean to call an effect operation? Use: $effectName.${undefinedVar.name}"
+            } else {
+                val validator = TypeValidator(context, allTypeDeclarations, allEffectDeclarations, buildResult.implDeclarations)
+                val allVariables = context.getAllBindings()
+                val similarNames = validator.findSimilarNames(undefinedVar.name, allVariables.keys.toList())
+                buildString {
+                    append("Undefined variable or function: ${undefinedVar.name}")
+                    if (similarNames.isNotEmpty()) {
+                        append(". Did you mean: ${similarNames.joinToString()}")
+                    }
+                }
+            }
+            allErrors.add(TypeCheckError(
+                phase = "Validation",
+                message = message,
+                sourceLocation = undefinedVar.sourceLocation
+            ))
+        }
+
+        // Collect duplicate binding errors (don't return early)
+        val duplicateBindings = constraintResults.values.flatMap { it.duplicateBindings }
+        duplicateBindings.forEach { duplicate ->
+            allErrors.add(TypeCheckError(
+                phase = "Validation",
+                message = "Duplicate binding: '${duplicate.name}' is already defined in this scope",
+                sourceLocation = duplicate.sourceLocation
+            ))
+        }
+
+        // Collect warnings
+        val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
+            val locationInfo = unused.sourceLocation?.let { " at line ${it.line}" } ?: ""
+            "Unused variable '${unused.name}'$locationInfo. Prefix with '_' to suppress this warning."
+        }
+        allWarnings.addAll(unusedVarWarnings)
+        allWarnings.addAll(constraintResults.values.flatMap { it.patternWarnings })
+
+        // Collect all constraints (filter structural constraints)
+        val allConstraints = constraintResults.values.flatMap { it.constraints }
+            .filter { constraint ->
+                constraint !is Constraint.HasConstructor && constraint !is Constraint.HasField
+            } + constraintResults.values.flatMap { it.abilityConstraints }
+
+        // PHASE 3: Solve Constraints
+        val solver = ConstraintSolver(context, allTypeDeclarations, buildResult.abilityDeclarations)
+        val solveResult = solver.solve(allConstraints)
+
+        // Process solve result
+        val (substitution, solveWarnings) = when (solveResult) {
+            is ConstraintSolver.SolveResult.Failure -> {
+                // Collect solve errors but try to continue with partial information
+                solveResult.errors.forEach { error ->
+                    allErrors.add(TypeCheckError(
+                        phase = "Constraint Solving",
+                        message = error.message,
+                        sourceLocation = error.constraint.sourceLocation
+                    ))
+                }
+                // Use empty substitution for partial results
+                Pair(Substitution.empty, emptyList<String>())
+            }
+            is ConstraintSolver.SolveResult.Success -> {
+                Pair(solveResult.substitution, solveResult.warnings)
+            }
+        }
+
+        allWarnings.addAll(solveWarnings)
+
+        // Get generated codec implementations
+        val generatedCodecImpls = solver.getGeneratedCodecImpls().mapValues { (_, impl) ->
+            if (impl.contentHash == null) {
+                val hash = com.mezze.language.ast.hashing.ASTHasher.hashImplAbilityDeclaration(impl)
+                impl.copy(contentHash = hash.toFullHexString())
+            } else {
+                impl
+            }
+        }
+
+        val mustBeOpenRowVars = when (solveResult) {
+            is ConstraintSolver.SolveResult.Success -> solveResult.mustBeOpenRowVars + perBindingMustBeOpenRowVars
+            else -> perBindingMustBeOpenRowVars
+        }
+        val mustBeOpenBindings: Set<String> = when (solveResult) {
+            is ConstraintSolver.SolveResult.Success -> solveResult.mustBeOpenBindings
+            else -> emptySet()
+        }
+        val mustBeOpenTypes: Set<TypeVar> = when (solveResult) {
+            is ConstraintSolver.SolveResult.Success -> solveResult.mustBeOpenTypes
+            else -> emptySet()
+        }
+
+        // Apply global substitution to constraint results
+        val tempGenerator = ConstraintGenerator.create(buildResult.typeDeclarations)
+        val globallyResolvedConstraintResults = constraintResults.mapValues { (_, result) ->
+            val resolvedType = substitution.apply(result.type)
+            val typeWithAbilities = tempGenerator.addAbilityConstraintsToFunctionType(resolvedType, result.abilityConstraints, substitution)
+            result.copy(type = typeWithAbilities)
+        }
+
+        // TCO: Collect tail call locations
+        val tailCallLocations = constraintResults.values
+            .flatMap { it.tailCalls }
+            .filterNotNull()
+            .toSet()
+
+        // PHASE 4: Apply Substitution
+        val applier = SubstitutionApplier(
+            substitution,
+            globallyResolvedConstraintResults,
+            buildResult.performerToEffect,
+            mustBeOpenRowVars,
+            mustBeOpenBindings,
+            mustBeOpenTypes,
+            context.getAllAbilityImpls(),
+            allAbilityDeclarations,
+            allEffectDeclarations,
+            allTypeDeclarations,
+            tailCallLocations,
+            buildResult.implDeclarations
+        )
+        val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
+            Program(items = generatedCodecImpls.values.toList() + hashedProgram.items)
+        } else {
+            hashedProgram
+        }
+        val typedProgram = try {
+            applier.applyToProgram(programWithCodecImpls)
+        } catch (e: Exception) {
+            // If substitution application fails, return partial program
+            allErrors.add(TypeCheckError(
+                phase = "Substitution",
+                message = e.message ?: "Failed to apply substitution",
+                sourceLocation = null
+            ))
+            return TypeCheckResultWithRecovery(
+                program = programWithCodecImpls,
+                errors = allErrors,
+                partialSubstitution = substitution,
+                importContext = importContext,
+                warnings = allWarnings
+            )
+        }
+
+        // PHASE 5: Validation (only if no errors so far to avoid cascading errors)
+        if (allErrors.isEmpty()) {
+            val validator = TypeValidator(
+                context,
+                allTypeDeclarations,
+                allEffectDeclarations,
+                buildResult.implDeclarations
+            )
+
+            val constraintValidation = validator.validateConstraints(allConstraints, substitution)
+            when (constraintValidation) {
+                is ValidationResult.Failure -> {
+                    constraintValidation.errors.forEach { error ->
+                        allErrors.add(TypeCheckError(
+                            phase = "Validation",
+                            message = error.message(),
+                            sourceLocation = error.location()
+                        ))
+                    }
+                }
+                is ValidationResult.Success -> {
+                    allWarnings.addAll(constraintValidation.warnings)
+                }
+            }
+
+            val validationResult = validator.validate(typedProgram, globallyResolvedConstraintResults, substitution)
+            when (validationResult) {
+                is ValidationResult.Failure -> {
+                    validationResult.errors.forEach { error ->
+                        allErrors.add(TypeCheckError(
+                            phase = "Validation",
+                            message = error.message(),
+                            sourceLocation = error.location()
+                        ))
+                    }
+                }
+                is ValidationResult.Success -> {
+                    allWarnings.addAll(validationResult.warnings)
+                }
+            }
+        }
+
+        // Return result with all collected errors and partial type information
+        return TypeCheckResultWithRecovery(
+            program = typedProgram,
+            errors = allErrors,
+            partialSubstitution = substitution,
+            importContext = importContext,
+            warnings = allWarnings
+        )
     }
 
     /**
@@ -975,9 +1341,26 @@ class TypeChecker(
 
         return when (result) {
             is TypeCheckResult.Success -> {
+                // Convert import context to resolved imports for IDE support
+                val resolvedImports = buildResolvedImports(result.importContext)
+
+                // Convert string warnings to structured TypeCheckWarning format
+                // Parse location info from strings like "Unused variable 'n' at line 11..."
+                val structuredWarnings = result.warnings.map { warningStr ->
+                    // Try to extract source location from warning message
+                    val lineMatch = Regex(" at line (\\d+)").find(warningStr)
+                    val sourceLocation = lineMatch?.let { match ->
+                        val line = match.groupValues[1].toIntOrNull() ?: 1
+                        SourceLocation(line, 1)
+                    }
+                    com.mezze.language.ast.TypeCheckWarning(warningStr, sourceLocation)
+                }
+
                 com.mezze.language.ast.TypeCheckResult(
                     program = result.program,
-                    monomorphicInstances = result.monomorphicInstances
+                    monomorphicInstances = result.monomorphicInstances,
+                    resolvedImports = resolvedImports,
+                    warnings = structuredWarnings
                 )
             }
             is TypeCheckResult.Failure -> {
@@ -987,6 +1370,62 @@ class TypeChecker(
                 throw TypeCheckError(error.message, error.sourceLocation)
             }
         }
+    }
+
+    /**
+     * Build resolved imports from import context for IDE support.
+     */
+    private fun buildResolvedImports(importContext: ModuleImportContext?): List<com.mezze.language.ast.ResolvedImport> {
+        if (importContext == null) return emptyList()
+
+        val imports = mutableListOf<com.mezze.language.ast.ResolvedImport>()
+
+        // Add imported bindings (functions/values)
+        for ((name, binding) in importContext.importedBindings) {
+            imports.add(com.mezze.language.ast.ResolvedImport(
+                localName = name,
+                originalName = binding.originalName,
+                modulePath = binding.modulePath,
+                type = binding.type,
+                kind = com.mezze.language.ast.ImportKind.FUNCTION
+            ))
+        }
+
+        // Add imported types - use TypeApplication for type representation
+        for ((name, typeDecl) in importContext.importedTypes) {
+            val typeParams = typeDecl.typeParams.map { MezzeType.VarType(TypeVar(it)) }
+            imports.add(com.mezze.language.ast.ResolvedImport(
+                localName = name,
+                originalName = name,
+                modulePath = "",  // TypeDeclaration doesn't track module path
+                type = MezzeType.TypeApplication(name, typeParams),
+                kind = com.mezze.language.ast.ImportKind.TYPE
+            ))
+        }
+
+        // Add imported abilities - use simple type application for representation
+        for ((name, _) in importContext.importedAbilities) {
+            imports.add(com.mezze.language.ast.ResolvedImport(
+                localName = name,
+                originalName = name,
+                modulePath = "",
+                type = MezzeType.TypeApplication(name, emptyList()),
+                kind = com.mezze.language.ast.ImportKind.ABILITY
+            ))
+        }
+
+        // Add imported effects - use simple type application for representation
+        for ((name, _) in importContext.importedEffects) {
+            imports.add(com.mezze.language.ast.ResolvedImport(
+                localName = name,
+                originalName = name,
+                modulePath = "",
+                type = MezzeType.TypeApplication(name, emptyList()),
+                kind = com.mezze.language.ast.ImportKind.EFFECT
+            ))
+        }
+
+        return imports
     }
 
     companion object {

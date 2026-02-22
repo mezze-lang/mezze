@@ -41,10 +41,42 @@ data class Program(
  * - Monomorphic instances are compiler-internal, not part of the AST
  * - Users never see or write mangled names like "add$Int"
  */
+/**
+ * A resolved import with type information, for IDE support.
+ */
+@Serializable
+data class ResolvedImport(
+    val localName: String,           // Name as used in the importing file
+    val originalName: String,        // Name in the source module
+    val modulePath: String,          // Source module path (e.g., "std::effects::log")
+    val type: MezzeType,             // Resolved type of the import
+    val kind: ImportKind             // What kind of thing was imported
+)
+
+@Serializable
+enum class ImportKind {
+    FUNCTION,   // A let binding / function
+    TYPE,       // A type declaration
+    EFFECT,     // An effect declaration
+    ABILITY,    // An ability declaration
+    PERFORMER   // An effect performer (impl)
+}
+
 @Serializable
 data class TypeCheckResult(
     val program: Program,  // User's original AST with type information
-    val monomorphicInstances: Map<String, LetBinding> = emptyMap()  // Compiler-generated specialized functions (e.g., "add$Int" -> specialized binding)
+    val monomorphicInstances: Map<String, LetBinding> = emptyMap(),  // Compiler-generated specialized functions (e.g., "add$Int" -> specialized binding)
+    val resolvedImports: List<ResolvedImport> = emptyList(),  // Resolved imports for IDE support (hover, go-to-definition)
+    val warnings: List<TypeCheckWarning> = emptyList()  // Warnings (not errors) like unused variables
+)
+
+/**
+ * A warning from type checking (not a fatal error).
+ */
+@Serializable
+data class TypeCheckWarning(
+    val message: String,
+    val sourceLocation: SourceLocation? = null
 )
 
 @Serializable
