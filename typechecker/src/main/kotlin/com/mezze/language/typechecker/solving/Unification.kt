@@ -1084,10 +1084,17 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
         is VariantDefinition -> def
         is NewtypeDefinition -> {
             // Convert newtype to a variant with a single constructor
-            // newtype UserId = UserId Int  =>  type UserId = | UserId { value: Int } |
-            val payloadType = RecordTypeAnnotation(
-                entries = listOf(RecordTypeEntry("value", def.wrappedType))
-            )
+            // If wrappedType is already a record, use it directly:
+            //   newtype Point = Point { x: Int, y: Int }  =>  type Point = | Point { x: Int, y: Int } |
+            // Otherwise, wrap in a record with 'val' field:
+            //   newtype UserId = UserId Int  =>  type UserId = | UserId { val: Int } |
+            val payloadType = if (def.wrappedType is RecordTypeAnnotation) {
+                def.wrappedType
+            } else {
+                RecordTypeAnnotation(
+                    entries = listOf(RecordTypeEntry("val", def.wrappedType))
+                )
+            }
             VariantDefinition(listOf(VariantConstructorDef(def.constructor, payloadType)))
         }
         else -> return null
@@ -1101,19 +1108,13 @@ internal fun expandTypeApplicationToVariant(typeApp: MezzeType.TypeApplication, 
     }
 
     // Build substitution map for type parameters
-    // CRITICAL: When args contain TypeVars, we create a substitution that maps
-    // parameter names to FRESH TypeVars, not the original ones from args.
-    // This prevents occurs check failures where the same TypeVar instance appears
-    // in both the TypeApplication args and the expanded payload types.
+    // Use the actual type arguments from the TypeApplication - this preserves
+    // the connection between type parameters and their usage sites.
+    // For example, Color 'a should expand to a variant where 'a is preserved,
+    // so that pattern bindings like `Blue { n }` get `n: 'a` which can then
+    // unify with other uses of 'a in the match body.
     val typeParamSubst = typeDecl.typeParams.zip(typeApp.args).associate { (paramName, argType) ->
-        // If argType is a TypeVar, create a FRESH TypeVar for substitution
-        // This ensures each expansion gets unique TypeVars
-        val substType = if (argType is MezzeType.VarType) {
-            MezzeType.VarType(TypeVar.fresh())
-        } else {
-            argType
-        }
-        paramName to substType
+        paramName to argType
     }
 
     // Helper to substitute type parameters in a MezzeType

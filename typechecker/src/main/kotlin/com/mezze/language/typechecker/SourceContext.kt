@@ -106,7 +106,8 @@ object SourceContext {
                 // Show error pointer - calculate visual column accounting for tabs
                 val pointerPadding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
                 val visualColumn = calculateVisualColumn(lineContent, errorColumn)
-                val pointer = " ".repeat(maxOf(0, visualColumn - 1)) + "^"
+                val underlineLength = location.length ?: 1
+                val pointer = " ".repeat(maxOf(0, visualColumn - 1)) + "^".repeat(maxOf(1, underlineLength))
                 sb.appendLine("$pointerPadding$pointer")
             } else {
                 // Context line

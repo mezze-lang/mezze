@@ -632,8 +632,9 @@ class ParseException(
     val sourceCode: String? = null,
     val file: String? = null,
     val errorType: ParseErrorType = ParseErrorType.GenericError(errorMessage),
-    val hints: List<ParseHint> = emptyList()
-) : Exception(formatParseError(errorMessage, position, line, column, sourceCode, file, hints)) {
+    val hints: List<ParseHint> = emptyList(),
+    val length: Int = 1
+) : Exception(formatParseError(errorMessage, position, line, column, sourceCode, file, hints, length)) {
 
     /**
      * Check if this error is of a specific type.
@@ -653,7 +654,8 @@ class ParseException(
             column: Int,
             sourceCode: String?,
             file: String?,
-            hints: List<ParseHint> = emptyList()
+            hints: List<ParseHint> = emptyList(),
+            length: Int = 1
         ): String {
             val sb = StringBuilder()
 
@@ -677,7 +679,7 @@ class ParseException(
                     sb.appendLine("$lineNumStr | $errorLineContent")
 
                     // Show error pointer
-                    val pointer = " ".repeat(maxOf(0, column - 1)) + "^"
+                    val pointer = " ".repeat(maxOf(0, column - 1)) + "^".repeat(maxOf(1, length))
                     sb.appendLine("$padding | $pointer")
                     sb.appendLine("$padding |")
                 }

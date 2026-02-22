@@ -132,12 +132,14 @@ data class RowVar(val name: String) {
  * Source location for error reporting.
  *
  * Tracks the location of AST nodes in the original source code for precise error messages.
+ * The length field indicates the span of the token/construct for underlining in error messages.
  */
 @Serializable
 data class SourceLocation(
     val line: Int,
     val column: Int,
-    val file: String? = null
+    val file: String? = null,
+    val length: Int? = null
 ) {
     override fun toString(): String = if (file != null) "$file:$line:$column" else "$line:$column"
 }

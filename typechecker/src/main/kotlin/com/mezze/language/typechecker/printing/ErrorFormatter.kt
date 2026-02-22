@@ -743,7 +743,8 @@ object ErrorFormatter {
                                 val line = lines[loc.line - 1]
                                 appendLine("    |")
                                 appendLine("${loc.line.toString().padStart(3)} | $line")
-                                appendLine("    | ${" ".repeat(loc.column - 1)}^")
+                                val underlineLen = loc.length ?: 1
+                                appendLine("    | ${" ".repeat(loc.column - 1)}${"^".repeat(maxOf(1, underlineLen))}")
                             }
                         }
                     } catch (_: Exception) {

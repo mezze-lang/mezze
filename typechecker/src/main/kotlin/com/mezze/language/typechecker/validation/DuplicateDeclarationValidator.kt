@@ -32,6 +32,7 @@ object DuplicateDeclarationValidator {
         validateDuplicateTypes(program)
         validateDuplicateConstructors(program)
         validateNewtypeConstructors(program)
+        validateFreeTypeVariables(program)
         validateDuplicateEffects(program)
         validateDuplicatePerformers(program)
         validateDuplicateAbilities(program)
@@ -201,6 +202,169 @@ object DuplicateDeclarationValidator {
                         typeDecl.sourceLocation
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Validate that type declarations don't have free (undeclared) type variables.
+     *
+     * For example:
+     * - `type Color 'a = | Red, Blue { n: 'a } |` is VALID ('a is declared)
+     * - `type Color = | Red, Blue { n: 'a } |` is INVALID ('a is free/undeclared)
+     *
+     * Free type variables in type definitions are confusing because:
+     * 1. The type appears monomorphic but has polymorphic fields
+     * 2. Different usages can unify the free variable to different types
+     * 3. It's unclear what type the field should have
+     */
+    private fun validateFreeTypeVariables(program: Program) {
+        for (typeDecl in program.items.filterIsInstance<TypeDeclaration>()) {
+            // typeParams are stored WITH the apostrophe prefix (e.g., "'a")
+            val declaredParams = typeDecl.typeParams.map { it.removePrefix("'") }.toSet()
+            val usedTypeVarsWithLocation = collectTypeVariablesWithLocation(typeDecl.definition)
+
+            val freeTypeVars = usedTypeVarsWithLocation.filter { it.first !in declaredParams }
+            if (freeTypeVars.isNotEmpty()) {
+                val freeVarList = freeTypeVars.map { it.first }.distinct().sorted().joinToString(", ") { "'$it" }
+                val suggestion = if (freeTypeVars.map { it.first }.distinct().size == 1) {
+                    "Add it as a type parameter: type ${typeDecl.name} '${freeTypeVars.first().first} = ..."
+                } else {
+                    val params = freeTypeVars.map { it.first }.distinct().sorted().joinToString(" ") { "'$it" }
+                    "Add them as type parameters: type ${typeDecl.name} $params = ..."
+                }
+                // Use the source location of the first free type variable if available
+                val errorLocation = freeTypeVars.firstNotNullOfOrNull { it.second } ?: typeDecl.sourceLocation
+                throw TypeCheckError(
+                    "Type '${typeDecl.name}' has undeclared type variable(s): $freeVarList. $suggestion",
+                    errorLocation
+                )
+            }
+        }
+    }
+
+    /**
+     * Collect all type variable names used in a type definition, with their source locations.
+     *
+     * All type variables must be declared as type parameters - no implicit
+     * rank-2 polymorphism. This follows OCaml and Roc's approach.
+     */
+    private fun collectTypeVariablesWithLocation(definition: TypeDefinition): List<Pair<String, SourceLocation?>> {
+        return when (definition) {
+            is VariantDefinition -> {
+                definition.constructors.flatMap { ctor ->
+                    ctor.dataType?.let { collectTypeVariablesWithLocationFromAnnotation(it) } ?: emptyList()
+                }
+            }
+            is RecordDefinition -> {
+                definition.fields.flatMap { field ->
+                    collectTypeVariablesWithLocationFromAnnotation(field.type)
+                }
+            }
+            is NewtypeDefinition -> {
+                collectTypeVariablesWithLocationFromAnnotation(definition.wrappedType)
+            }
+        }
+    }
+
+    /**
+     * Collect all type variable names used in a type definition (without location).
+     * Kept for backward compatibility.
+     */
+    private fun collectTypeVariablesInDefinition(definition: TypeDefinition): Set<String> {
+        return collectTypeVariablesWithLocation(definition).map { it.first }.toSet()
+    }
+
+    /**
+     * Collect all type variable names with their source locations from a type annotation.
+     * Note: Most type annotations don't have source locations, so we return null for those.
+     */
+    private fun collectTypeVariablesWithLocationFromAnnotation(annotation: TypeAnnotation): List<Pair<String, SourceLocation?>> {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                // Type variables start with apostrophe or lowercase
+                if (annotation.name.startsWith("'")) {
+                    listOf(annotation.name.removePrefix("'") to annotation.sourceLocation)
+                } else if (annotation.name.first().isLowerCase()) {
+                    listOf(annotation.name to annotation.sourceLocation)
+                } else {
+                    emptyList()
+                }
+            }
+            is TypeApplicationAnnotation -> {
+                annotation.args.flatMap { collectTypeVariablesWithLocationFromAnnotation(it) }
+            }
+            is FunctionTypeAnnotation -> {
+                collectTypeVariablesWithLocationFromAnnotation(annotation.paramType) +
+                    collectTypeVariablesWithLocationFromAnnotation(annotation.returnType) +
+                    (annotation.effects?.let { collectTypeVariablesWithLocationFromAnnotation(it) } ?: emptyList())
+            }
+            is RecordTypeAnnotation -> {
+                annotation.entries.flatMap { entry ->
+                    collectTypeVariablesWithLocationFromAnnotation(entry.type)
+                }
+            }
+            is VariantTypeAnnotation -> {
+                annotation.constructors.flatMap { ctor ->
+                    ctor.dataType?.let { collectTypeVariablesWithLocationFromAnnotation(it) } ?: emptyList()
+                }
+            }
+            is ArrayTypeAnnotation -> {
+                collectTypeVariablesWithLocationFromAnnotation(annotation.elementType)
+            }
+            is EffectRowAnnotation -> {
+                // Effect row annotations might contain type variables in their effect parameters
+                emptyList()
+            }
+            is QualifiedTypeAnnotation -> {
+                annotation.args.flatMap { collectTypeVariablesWithLocationFromAnnotation(it) }
+            }
+        }
+    }
+
+    /**
+     * Collect all type variable names used in a type annotation.
+     * All type variables found must be declared as type parameters.
+     */
+    private fun collectTypeVariablesInAnnotation(annotation: TypeAnnotation): Set<String> {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                // Type variables start with apostrophe or lowercase
+                if (annotation.name.startsWith("'")) {
+                    setOf(annotation.name.removePrefix("'"))
+                } else if (annotation.name.first().isLowerCase()) {
+                    setOf(annotation.name)
+                } else {
+                    emptySet()
+                }
+            }
+            is TypeApplicationAnnotation -> {
+                annotation.args.flatMap { collectTypeVariablesInAnnotation(it) }.toSet()
+            }
+            is FunctionTypeAnnotation -> {
+                collectTypeVariablesInAnnotation(annotation.paramType) +
+                    collectTypeVariablesInAnnotation(annotation.returnType) +
+                    (annotation.effects?.let { collectTypeVariablesInAnnotation(it) } ?: emptySet())
+            }
+            is RecordTypeAnnotation -> {
+                annotation.entries.flatMap { entry ->
+                    collectTypeVariablesInAnnotation(entry.type)
+                }.toSet()
+            }
+            is VariantTypeAnnotation -> {
+                annotation.constructors.flatMap { ctor ->
+                    ctor.dataType?.let { collectTypeVariablesInAnnotation(it) } ?: emptySet()
+                }.toSet()
+            }
+            is ArrayTypeAnnotation -> {
+                collectTypeVariablesInAnnotation(annotation.elementType)
+            }
+            is EffectRowAnnotation -> {
+                // Effect row annotations might contain type variables in their effect parameters
+                emptySet()
+            }
+            is QualifiedTypeAnnotation -> {
+                annotation.args.flatMap { collectTypeVariablesInAnnotation(it) }.toSet()
             }
         }
     }

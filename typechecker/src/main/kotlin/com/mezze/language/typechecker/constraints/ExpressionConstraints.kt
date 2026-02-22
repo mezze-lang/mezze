@@ -433,6 +433,7 @@ class ExpressionConstraintGenerator {
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+        val usedVars = mutableSetOf<String>()
 
         // Pre-pass: collect ALL explicit field names upfront
         // This is needed because spread validation needs to know all field names,
@@ -461,6 +462,7 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(fieldResult.constraints)
                     undefinedVars.addAll(fieldResult.undefinedVariables)
                     abilityConstraints.addAll(fieldResult.abilityConstraints)
+                    usedVars.addAll(fieldResult.usedVariables)
                 }
                 is RecordSpreadEntry -> {
                     // Spread: {...baseRecord}
@@ -469,6 +471,7 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(spreadResult.constraints)
                     undefinedVars.addAll(spreadResult.undefinedVariables)
                     abilityConstraints.addAll(spreadResult.abilityConstraints)
+                    usedVars.addAll(spreadResult.usedVariables)
 
                     // Extract fields from the spread type and merge into our record
                     // The spread expression must be a record type (or unify with one via constraints)
@@ -584,7 +587,8 @@ class ExpressionConstraintGenerator {
             type = recordType,
             constraints = constraints,
             undefinedVariables = undefinedVars,
-            abilityConstraints = abilityConstraints
+            abilityConstraints = abilityConstraints,
+            usedVariables = usedVars
         )
     }
 
@@ -1804,6 +1808,7 @@ class ExpressionConstraintGenerator {
                         performed = functionResult.performed || argumentResult.performed,
                         abilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints,
                         undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
+                        usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
                         referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings
                     )
                 }
@@ -1862,6 +1867,7 @@ class ExpressionConstraintGenerator {
                     effects = propagatedEffects,  // Propagate effects from function type
                     performed = propagatedPerformed,  // Propagate performed flag
                     undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
+                    usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
                     tailCalls = tailCalls,
                     referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings
                 )
@@ -1911,6 +1917,7 @@ class ExpressionConstraintGenerator {
             performed = collectedPerformed,  // Propagate performed flag
             abilityConstraints = collectedAbilityConstraints,  // Propagate ability constraints
             undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
+            usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
             tailCalls = tailCalls,
             referencedBindings = functionResult.referencedBindings + argumentResult.referencedBindings
         )

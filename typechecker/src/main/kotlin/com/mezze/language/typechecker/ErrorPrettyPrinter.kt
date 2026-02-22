@@ -114,7 +114,7 @@ object ErrorPrettyPrinter {
 
         // Add code snippet if source is available
         if (sourceCode != null && location != null) {
-            sb.append(formatCodeSnippet(sourceCode, location.line, location.column))
+            sb.append(formatCodeSnippet(sourceCode, location.line, location.column, location.length ?: 1))
         }
 
         // Add error message
@@ -232,7 +232,7 @@ object ErrorPrettyPrinter {
     /**
      * Format a code snippet with line numbers and error pointer
      */
-    private fun formatCodeSnippet(sourceCode: String, errorLine: Int, errorColumn: Int, contextLines: Int = 2): String {
+    private fun formatCodeSnippet(sourceCode: String, errorLine: Int, errorColumn: Int, errorLength: Int = 1, contextLines: Int = 2): String {
         val lines = sourceCode.lines()
 
         // Validate line number
@@ -267,7 +267,7 @@ object ErrorPrettyPrinter {
 
                 // Show error pointer
                 val padding = " ".repeat(lineNumberWidth + 3) // account for " " + lineNum + " | "
-                val pointer = " ".repeat(maxOf(0, errorColumn - 1)) + "^"
+                val pointer = " ".repeat(maxOf(0, errorColumn - 1)) + "^".repeat(maxOf(1, errorLength))
                 sb.appendLine("$padding$pointer")
             } else {
                 // Context line

@@ -391,31 +391,30 @@ private fun inferTypeArgsFromStructure(
     variantDef: VariantDefinition,
     typeParams: List<String>
 ): List<MezzeType>? {
-    // Find a constructor that exists in both the inferred type and the declaration
-    val commonConstructor = variantType.constructors.keys.firstOrNull { constructorName ->
-        variantDef.constructors.any { it.name == constructorName }
-    } ?: return null
+    // Find a constructor that exists in both the inferred type and the declaration AND has a payload
+    // Skip constructors without payloads (like Leaf, None, etc.) since we need a payload to infer type args
+    for (constructorName in variantType.constructors.keys) {
+        val declConstructor = variantDef.constructors.find { it.name == constructorName } ?: continue
+        val inferredPayload = variantType.constructors[constructorName]
 
-    val inferredPayload = variantType.constructors[commonConstructor]
-    val declConstructor = variantDef.constructors.find { it.name == commonConstructor } ?: return null
+        // Skip constructors without payloads - we need a payload to infer type arguments
+        if (inferredPayload == null || declConstructor.dataType == null) {
+            continue
+        }
 
-    // If there's no payload, we can't infer type arguments
-    if (inferredPayload == null || declConstructor.dataType == null) {
-        return null
-    }
+        // Match the payloads and extract type arguments
+        // For single-parameter types, look for a simple field that contains the type param
+        if (typeParams.size == 1 && inferredPayload is MezzeType.RecordType && declConstructor.dataType is RecordTypeAnnotation) {
+            val typeParam = typeParams[0]
 
-    // Match the payloads and extract type arguments
-    // For single-parameter types, look for a simple field that contains the type param
-    if (typeParams.size == 1 && inferredPayload is MezzeType.RecordType && declConstructor.dataType is RecordTypeAnnotation) {
-        val typeParam = typeParams[0]
-
-        // Find a field in the declaration that has type 'a (the type parameter)
-        for (declField in declConstructor.dataType.entries) {
-            if (declField.type is IdentifierTypeAnnotation && declField.type.name == typeParam) {
-                // Found a field with type parameter - get the concrete type from the inferred payload
-                val concreteType = inferredPayload.fields[declField.name]
-                if (concreteType != null) {
-                    return listOf(concreteType)
+            // Find a field in the declaration that has type 'a (the type parameter)
+            for (declField in declConstructor.dataType.entries) {
+                if (declField.type is IdentifierTypeAnnotation && declField.type.name == typeParam) {
+                    // Found a field with type parameter - get the concrete type from the inferred payload
+                    val concreteType = inferredPayload.fields[declField.name]
+                    if (concreteType != null) {
+                        return listOf(concreteType)
+                    }
                 }
             }
         }

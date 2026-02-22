@@ -30,7 +30,8 @@ sealed interface TypeAnnotation
 
 @Serializable
 data class IdentifierTypeAnnotation(
-    val name: String
+    val name: String,
+    val sourceLocation: SourceLocation? = null
 ) : TypeAnnotation
 
 @Serializable

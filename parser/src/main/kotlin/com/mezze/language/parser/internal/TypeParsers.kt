@@ -616,14 +616,14 @@ internal val MezzeParser.typeApplicationAnnotation: Parser<TypeAnnotation>
                     } else {
                         // No args, just an identifier type
                         ParseResult.Success(
-                            IdentifierTypeAnnotation(typeName),
+                            IdentifierTypeAnnotation(typeName, SourceLocation(ident.value.line, ident.value.column, length = typeName.length)),
                             currentStream
                         )
                     }
                 } else {
                     // Lowercase identifier, just a type variable or simple type
                     ParseResult.Success(
-                        IdentifierTypeAnnotation(typeName),
+                        IdentifierTypeAnnotation(typeName, SourceLocation(ident.value.line, ident.value.column, length = typeName.length)),
                         currentStream
                     )
                 }
@@ -638,7 +638,7 @@ internal val MezzeParser.identifierTypeAnnotation: Parser<TypeAnnotation>
         val ident = identifierParser(stream)
         when (ident) {
             is ParseResult.Success -> ParseResult.Success(
-                IdentifierTypeAnnotation(ident.value.text),
+                IdentifierTypeAnnotation(ident.value.text, SourceLocation(ident.value.line, ident.value.column, length = ident.value.text.length)),
                 ident.remaining
             )
             is ParseResult.Failure -> ident

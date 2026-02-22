@@ -947,10 +947,8 @@ class ConstraintSolver(
             //
             // Bidirectional inference is only done in validateAbilityConstraints()
             // AFTER all equality constraints are solved.
-            return ConstraintResult.Success(
-                Substitution.empty,
-                warnings = listOf("Ability constraint $abilityName deferred (has type variables)")
-            )
+            // Ability constraint deferred - will be validated later after all equality constraints are solved
+            return ConstraintResult.Success(Substitution.empty)
         }
     }
 
@@ -1638,10 +1636,7 @@ class ConstraintSolver(
     private fun solveEffectUsed(constraint: Constraint.EffectUsed): ConstraintResult {
         // Effect handling is validated later
         // Here we just note that an effect is used
-        return ConstraintResult.Success(
-            Substitution.empty,
-            warnings = listOf("Effect ${constraint.effect} used (deferred to validation)")
-        )
+        return ConstraintResult.Success(Substitution.empty)
     }
 
     /**
@@ -1967,27 +1962,42 @@ class ConstraintSolver(
                         rowVar = if (variantDef.isOpen) RowVar.fresh() else null  // Use declared openness
                     )
 
-                    // CRITICAL: Unify the expected payload type with the declared constructor's payload type
-                    // This ensures that pattern bindings like `Some { val }` get the correct type for `val`
+                    // CRITICAL: Validate payload presence/absence and unify types
+                    // This ensures that:
+                    // 1. Pattern bindings like `Some { val }` get the correct type for `val`
+                    // 2. Patterns without destructuring (like `Blue`) fail if constructor has payload
+                    // 3. Patterns with destructuring fail if constructor has no payload
                     var resultSubst = Substitution.single(variantType.variable, declaredVariant)
 
-                    if (expectedPayloadType != null) {
-                        val declaredPayload = constructors[constructorName]
-                        if (declaredPayload != null) {
-                            val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
-                            when (unifyResult) {
-                                is UnificationResult.Success -> {
-                                    resultSubst = resultSubst.compose(unifyResult.substitution)
-                                }
-                                is UnificationResult.Failure -> {
-                                    // This shouldn't happen for well-formed patterns
-                                    return ConstraintResult.Failure(
-                                        "Pattern payload type mismatch for constructor '$constructorName': ${unifyResult.message}"
-                                    )
-                                }
+                    val declaredPayload = constructors[constructorName]
+
+                    if (expectedPayloadType != null && declaredPayload != null) {
+                        // Both pattern and constructor have payload - unify them
+                        val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
+                        when (unifyResult) {
+                            is UnificationResult.Success -> {
+                                resultSubst = resultSubst.compose(unifyResult.substitution)
+                            }
+                            is UnificationResult.Failure -> {
+                                return ConstraintResult.Failure(
+                                    "Pattern payload type mismatch for constructor '$constructorName': ${unifyResult.message}"
+                                )
                             }
                         }
+                    } else if (expectedPayloadType == null && declaredPayload != null) {
+                        // Pattern has no destructuring but constructor has payload - ERROR!
+                        return ConstraintResult.Failure(
+                            "Constructor '$constructorName' has a payload that must be destructured. " +
+                            "Use '$constructorName { ... }' to match the payload."
+                        )
+                    } else if (expectedPayloadType != null && declaredPayload == null) {
+                        // Pattern tries to destructure but constructor has no payload - ERROR!
+                        return ConstraintResult.Failure(
+                            "Constructor '$constructorName' has no payload, but pattern tries to destructure it. " +
+                            "Use '$constructorName' without '{ ... }'."
+                        )
                     }
+                    // else: both null - no payload on either side, which is fine
 
                     return ConstraintResult.Success(resultSubst)
                 }
@@ -2064,21 +2074,33 @@ class ConstraintSolver(
 
                     var resultSubst = Substitution.single(variantType.variable, declaredVariant)
 
-                    if (expectedPayloadType != null) {
-                        val declaredPayload = constructors[constructorName]
-                        if (declaredPayload != null) {
-                            val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
-                            when (unifyResult) {
-                                is UnificationResult.Success -> {
-                                    resultSubst = resultSubst.compose(unifyResult.substitution)
-                                }
-                                is UnificationResult.Failure -> {
-                                    return ConstraintResult.Failure(
-                                        "Constructor payload type mismatch for '$constructorName': ${unifyResult.message}"
-                                    )
-                                }
+                    val declaredPayload = constructors[constructorName]
+
+                    if (expectedPayloadType != null && declaredPayload != null) {
+                        // Both pattern and constructor have payload - unify them
+                        val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
+                        when (unifyResult) {
+                            is UnificationResult.Success -> {
+                                resultSubst = resultSubst.compose(unifyResult.substitution)
+                            }
+                            is UnificationResult.Failure -> {
+                                return ConstraintResult.Failure(
+                                    "Constructor payload type mismatch for '$constructorName': ${unifyResult.message}"
+                                )
                             }
                         }
+                    } else if (expectedPayloadType == null && declaredPayload != null) {
+                        // Pattern has no destructuring but constructor has payload - ERROR!
+                        return ConstraintResult.Failure(
+                            "Constructor '$constructorName' has a payload that must be destructured. " +
+                            "Use '$constructorName { ... }' to match the payload."
+                        )
+                    } else if (expectedPayloadType != null && declaredPayload == null) {
+                        // Pattern tries to destructure but constructor has no payload - ERROR!
+                        return ConstraintResult.Failure(
+                            "Constructor '$constructorName' has no payload, but pattern tries to destructure it. " +
+                            "Use '$constructorName' without '{ ... }'."
+                        )
                     }
 
                     return ConstraintResult.Success(resultSubst)
@@ -2186,22 +2208,34 @@ class ConstraintSolver(
                             if (resultVariant != null && resultVariant is MezzeType.VariantType) {
                                 var resultSubst = Substitution.single(variantType.variable, resultVariant)
 
-                                // Unify the expected payload type with the declared constructor's payload type
-                                if (expectedPayloadType != null) {
-                                    val declaredPayload = resultVariant.constructors[constructorName]
-                                    if (declaredPayload != null) {
-                                        val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
-                                        when (unifyResult) {
-                                            is UnificationResult.Success -> {
-                                                resultSubst = resultSubst.compose(unifyResult.substitution)
-                                            }
-                                            is UnificationResult.Failure -> {
-                                                return ConstraintResult.Failure(
-                                                    "Constructor payload type mismatch for '$constructorName': ${unifyResult.message}"
-                                                )
-                                            }
+                                // Validate payload presence/absence and unify types
+                                val declaredPayload = resultVariant.constructors[constructorName]
+
+                                if (expectedPayloadType != null && declaredPayload != null) {
+                                    // Both pattern and constructor have payload - unify them
+                                    val unifyResult = unify(expectedPayloadType, declaredPayload, typeDeclarations)
+                                    when (unifyResult) {
+                                        is UnificationResult.Success -> {
+                                            resultSubst = resultSubst.compose(unifyResult.substitution)
+                                        }
+                                        is UnificationResult.Failure -> {
+                                            return ConstraintResult.Failure(
+                                                "Constructor payload type mismatch for '$constructorName': ${unifyResult.message}"
+                                            )
                                         }
                                     }
+                                } else if (expectedPayloadType == null && declaredPayload != null) {
+                                    // Pattern has no destructuring but constructor has payload - ERROR!
+                                    return ConstraintResult.Failure(
+                                        "Constructor '$constructorName' has a payload that must be destructured. " +
+                                        "Use '$constructorName { ... }' to match the payload."
+                                    )
+                                } else if (expectedPayloadType != null && declaredPayload == null) {
+                                    // Pattern tries to destructure but constructor has no payload - ERROR!
+                                    return ConstraintResult.Failure(
+                                        "Constructor '$constructorName' has no payload, but pattern tries to destructure it. " +
+                                        "Use '$constructorName' without '{ ... }'."
+                                    )
                                 }
 
                                 return ConstraintResult.Success(resultSubst)
@@ -2317,15 +2351,9 @@ class ConstraintSolver(
                 }
             }
 
-            // Constructor exists - check payload type
-            if (expectedPayloadType != null) {
-                if (actualPayloadType == null) {
-                    return ConstraintResult.Failure(
-                        "Constructor '$constructorName' does not have a payload. " +
-                        "Remove the pattern '{ ... }' after '$constructorName' since it's a unit variant."
-                    )
-                }
-
+            // Constructor exists - validate payload presence/absence and unify types
+            if (expectedPayloadType != null && actualPayloadType != null) {
+                // Both pattern and constructor have payload - unify them
                 // CRITICAL FIX: Instantiate the actual payload type with fresh type variables
                 // This prevents occurs check failures where the same TypeVar instance from the variant
                 // definition is shared across multiple uses of the constructor (in patterns and expressions).
@@ -2339,10 +2367,20 @@ class ConstraintSolver(
                         "Constructor '$constructorName' payload type mismatch: ${result.message}"
                     )
                 }
+            } else if (expectedPayloadType == null && actualPayloadType != null) {
+                // Pattern has no destructuring but constructor has payload - ERROR!
+                return ConstraintResult.Failure(
+                    "Constructor '$constructorName' has a payload that must be destructured. " +
+                    "Use '$constructorName { ... }' to match the payload."
+                )
+            } else if (expectedPayloadType != null && actualPayloadType == null) {
+                // Pattern tries to destructure but constructor has no payload - ERROR!
+                return ConstraintResult.Failure(
+                    "Constructor '$constructorName' does not have a payload. " +
+                    "Remove the pattern '{ ... }' after '$constructorName' since it's a unit variant."
+                )
             } else {
-                // expectedPayloadType == null means "wildcard - accept any payload or no payload"
-                // This allows matching constructors without destructuring their payloads
-                // Example: "Some -> ..." (ignoring the payload) or "None -> ..." (no payload)
+                // Both null - no payload on either side, which is fine
                 return ConstraintResult.Success(Substitution.empty)
             }
         }
@@ -2366,8 +2404,13 @@ class ConstraintSolver(
                             "Constructor 'Cons' payload type mismatch: ${result.message}"
                         )
                     }
+                } else {
+                    // Cons always has payload - must be destructured
+                    return ConstraintResult.Failure(
+                        "Constructor 'Cons' has a payload that must be destructured. " +
+                        "Use 'Cons { head, tail }' to match the payload."
+                    )
                 }
-                return ConstraintResult.Success(Substitution.empty)
             } else if (constructorName == "Nil") {
                 // Nil has no payload
                 if (expectedPayloadType != null) {
