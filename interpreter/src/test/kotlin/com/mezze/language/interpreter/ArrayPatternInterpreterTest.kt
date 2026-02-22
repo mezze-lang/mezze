@@ -18,17 +18,22 @@ import org.junit.jupiter.api.Assertions.*
 class ArrayPatternInterpreterTest {
 
     private val parser = MezzeParser()
-    private val typeChecker = TypeChecker()
 
     private fun eval(source: String): MezzeValue {
+        // Clear module cache to ensure clean state between tests
+        com.mezze.language.typechecker.ModuleResolver.clearCache()
         val program = parser.parse(source)
+        val typeChecker = TypeChecker()
         val typeCheckResult = typeChecker.typeCheck(program)
         val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances, java.nio.file.Paths.get(System.getProperty("mezze.project.root", TestUtils.findProjectRoot().toString())))
         return result
     }
 
     private fun parseTypeCheckAndRun(source: String): Map<String, MezzeValue> {
+        // Clear module cache to ensure clean state between tests
+        com.mezze.language.typechecker.ModuleResolver.clearCache()
         val program = parser.parse(source)
+        val typeChecker = TypeChecker()
         val typeCheckResult = typeChecker.typeCheck(program)
         val (_, context) = MezzeTestHelper.executeWithContext(typeCheckResult.program, typeCheckResult.monomorphicInstances)
         return context

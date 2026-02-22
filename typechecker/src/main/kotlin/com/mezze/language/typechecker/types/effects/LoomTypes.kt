@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker.types.effects
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.RowVar
 
 /**
  * Type definitions for Loom virtual thread concurrency primitives.
@@ -35,13 +36,21 @@ object LoomTypes {
             promiseType
         )
 
-        // __native_loom_spawn_cfg: {f: {} -> 'a, max_concurrent: Int} -> Promise 'a
+        // Helper: Create an effect-polymorphic function type {} -> 'a <...>
+        // The RowVar makes it accept any effects
+        fun effectPolymorphicThunk(returnType: MezzeType): MezzeType.FunctionType {
+            return MezzeType.FunctionType(
+                MezzeType.RecordType(emptyMap()),
+                returnType,
+                effects = MezzeType.EffectRow(emptySet<String>(), RowVar.fresh(), performed = false)
+            )
+        }
+
+        // __native_loom_spawn_cfg: {f: {} -> 'a <...>, max_concurrent: Int} -> Promise 'a
+        // The f parameter accepts any effects (<...>)
         context["__native_loom_spawn_cfg"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-                ),
+                "f" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
                 "max_concurrent" to MezzeType.IntType
             )),
             promiseType
@@ -51,6 +60,26 @@ object LoomTypes {
         context["__native_loom_await"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "p" to promiseType
+            )),
+            MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+        )
+
+        // __native_loom_spawn_all: {fs: [{} -> 'a <...>]} -> ['a]
+        // Spawns all computations on virtual threads and waits for all to complete
+        // The fs parameter accepts functions with any effects
+        context["__native_loom_spawn_all"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "fs" to MezzeType.ArrayType(effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
+            )),
+            MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
+        )
+
+        // __native_loom_spawn_race: {fs: [{} -> 'a <...>]} -> 'a
+        // Spawns all computations on virtual threads and returns first result
+        // The fs parameter accepts functions with any effects
+        context["__native_loom_spawn_race"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf(
+                "fs" to MezzeType.ArrayType(effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
             )),
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
@@ -149,17 +178,12 @@ object LoomTypes {
 
         // === Structured Concurrency ===
 
-        // __native_loom_join: {left: {} -> 'a, right: {} -> 'b} -> {left: 'a, right: 'b}
+        // __native_loom_join: {left: {} -> 'a <...>, right: {} -> 'b <...>} -> {left: 'a, right: 'b}
+        // Callback parameters accept any effects (<...>)
         context["__native_loom_join"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "left" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-                ),
-                "right" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-                )
+                "left" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
+                "right" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
             )),
             MezzeType.RecordType(mapOf(
                 "left" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
@@ -167,21 +191,13 @@ object LoomTypes {
             ))
         )
 
-        // __native_loom_join3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c} -> {a: 'a, b: 'b, c: 'c}
+        // __native_loom_join3: {a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...>} -> {a: 'a, b: 'b, c: 'c}
+        // Callback parameters accept any effects (<...>)
         context["__native_loom_join3"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "a" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-                ),
-                "b" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-                ),
-                "c" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("c"))
-                )
+                "a" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
+                "b" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))),
+                "c" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("c")))
             )),
             MezzeType.RecordType(mapOf(
                 "a" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
@@ -192,36 +208,48 @@ object LoomTypes {
 
         // === Collection Operations ===
 
-        // __native_loom_map: {xs: ['a], f: {x: 'a} -> 'b} -> ['b]
+        // Helper: Create an effect-polymorphic function type {x: 'a} -> 'b <...>
+        fun effectPolymorphicMapper(inputType: MezzeType, outputType: MezzeType): MezzeType.FunctionType {
+            return MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("x" to inputType)),
+                outputType,
+                effects = MezzeType.EffectRow(emptySet<String>(), RowVar.fresh(), performed = false)
+            )
+        }
+
+        // __native_loom_map: {xs: ['a], f: {x: 'a} -> 'b <...>} -> ['b]
+        // The f parameter accepts any effects (<...>)
         context["__native_loom_map"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))),
+                "f" to effectPolymorphicMapper(
+                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
                     MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
                 )
             )),
             MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
         )
 
-        // __native_loom_for_each: {xs: ['a], f: {x: 'a} -> {}} -> {}
+        // __native_loom_for_each: {xs: ['a], f: {x: 'a} -> {} <...>} -> {}
+        // The f parameter accepts any effects (<...>)
         context["__native_loom_for_each"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))),
+                "f" to effectPolymorphicMapper(
+                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
                     MezzeType.RecordType(emptyMap())
                 )
             )),
             MezzeType.RecordType(emptyMap())
         )
 
-        // __native_loom_filter: {xs: ['a], f: {x: 'a} -> Bool} -> ['a]
+        // __native_loom_filter: {xs: ['a], f: {x: 'a} -> Bool <...>} -> ['a]
+        // The f parameter accepts any effects (<...>)
         context["__native_loom_filter"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "xs" to MezzeType.ArrayType(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))),
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("x" to MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))),
+                "f" to effectPolymorphicMapper(
+                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a")),
                     MezzeType.BooleanType
                 )
             )),
@@ -257,26 +285,31 @@ object LoomTypes {
         // Scope type - opaque wrapper for structured concurrency scopes
         val scopeType = MezzeType.TypeApplication("Scope", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
 
-        // __native_loom_scoped: {f: {scope: Scope 'a} -> 'a} -> 'a
+        // Helper: Create an effect-polymorphic function type {scope: Scope 'a} -> 'a <...>
+        fun effectPolymorphicScopedCallback(scopeType: MezzeType, returnType: MezzeType): MezzeType.FunctionType {
+            return MezzeType.FunctionType(
+                MezzeType.RecordType(mapOf("scope" to scopeType)),
+                returnType,
+                effects = MezzeType.EffectRow(emptySet<String>(), RowVar.fresh(), performed = false)
+            )
+        }
+
+        // __native_loom_scoped: {f: {scope: Scope 'a} -> 'a <...>} -> 'a
+        // The callback f can have any effects (<...>)
         context["__native_loom_scoped"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("scope" to scopeType)),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-                )
+                "f" to effectPolymorphicScopedCallback(scopeType, MezzeType.VarType(com.mezze.language.ast.TypeVar("a")))
             )),
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
 
-        // __native_loom_scope_spawn: {scope: Scope 'a, f: {} -> 'b} -> Promise 'b
+        // __native_loom_scope_spawn: {scope: Scope 'a, f: {} -> 'b <...>} -> Promise 'b
+        // The f parameter can have any effects (<...>)
         val scopeSpawnPromiseType = MezzeType.TypeApplication("Promise", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))))
         context["__native_loom_scope_spawn"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "scope" to scopeType,
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
-                )
+                "f" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
             )),
             scopeSpawnPromiseType
         )

@@ -36,9 +36,11 @@ pub newtype Scope 'a = Scope __NativeScope
 pub type AsyncError = | AsyncFailed { msg: String }, AsyncCancelled, AsyncTimedOut { ms: Int } |
 
 # Async effect - unified async operations
+# Note: Callback parameters use <...> for effect polymorphism - they accept any effects
 effect Async where {
     # Spawn a computation, returns immediately with Promise
-    spawn: {f: {} -> 'a} -> Promise 'a <Async>,
+    # The computation can have any effects (<...>)
+    spawn: {f: {} -> 'a <...>} -> Promise 'a <Async>,
 
     # Await Promise to complete, returns result
     await: {p: Promise 'a} -> 'a <Async>,
@@ -71,21 +73,21 @@ effect Async where {
 
     # Run two computations concurrently, return both results
     # If either fails, the other is cancelled
-    join: {left: {} -> 'a, right: {} -> 'b} -> {left: 'a, right: 'b} <Async>,
+    join: {left: {} -> 'a <...>, right: {} -> 'b <...>} -> {left: 'a, right: 'b} <Async>,
 
     # Run three computations concurrently
-    join3: {a: {} -> 'a, b: {} -> 'b, c: {} -> 'c} -> {a: 'a, b: 'b, c: 'c} <Async>,
+    join3: {a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...>} -> {a: 'a, b: 'b, c: 'c} <Async>,
 
     # === Collection Operations ===
 
     # Apply function to each element concurrently, results in input order
-    map: {xs: ['a], f: {x: 'a} -> 'b} -> ['b] <Async>,
+    map: {xs: ['a], f: {x: 'a} -> 'b <...>} -> ['b] <Async>,
 
     # Run function on each element concurrently for side effects
-    for_each: {xs: ['a], f: {x: 'a} -> {}} -> {} <Async>,
+    for_each: {xs: ['a], f: {x: 'a} -> {} <...>} -> {} <Async>,
 
     # Filter elements with predicate evaluated concurrently
-    filter: {xs: ['a], f: {x: 'a} -> Bool} -> ['a] <Async>,
+    filter: {xs: ['a], f: {x: 'a} -> Bool <...>} -> ['a] <Async>,
 
     # === Error Handling ===
 
@@ -102,6 +104,7 @@ effect Async where {
     # All tasks spawned via Scope.spawn must complete before scoped returns.
     # If the function fails, all children are cancelled.
     # If any child fails, siblings are cancelled (fail-fast behavior).
+    # The callback can have any effects (<...>)
     #
     # Example:
     #   Async.scoped {f = {scope} -> do
@@ -110,7 +113,7 @@ effect Async where {
     #       # Both p1 and p2 are awaited automatically before scoped returns
     #       process {p1 = p1, p2 = p2}
     #   }
-    scoped: {f: {scope: Scope 'a} -> 'a} -> 'a <Async>
+    scoped: {f: {scope: Scope 'a} -> 'a <...>} -> 'a <Async>
 }
 
 # =============================================================================
@@ -262,7 +265,7 @@ pub impl Async for OSThreadAsyncWith { pool_size: Int } where {
 #       let p = Async.spawn {f = {} -> 42}
 #       Async.await {p = p}
 
-pub impl Async for CoopAsync { cont: Continuation } where {
+pub impl Async for CoopAsync { cont: Continuation 'a 'b 'c } where {
     spawn = {f} -> __native_coop_spawn { f = f, cont = cont },
     await = {p} -> __native_coop_await { p = p, cont = cont },
     race = {ps} -> __native_coop_race { ps = ps, cont = cont },
@@ -327,10 +330,11 @@ pub let run_coop: {computation: {} -> 'a <Async>} -> 'a = {computation} ->
 
 # Spawn a task within a scope
 # The scope will wait for this task to complete before exiting
+# Note: f accepts any effects (<...>) for effect polymorphism
 #
 # Example:
 #   scope_spawn {scope = scope, f = {} -> expensive_computation {}}
-pub let scope_spawn: {scope: Scope 'a, f: {} -> 'b} -> Promise 'b =
+pub let scope_spawn: {scope: Scope 'a, f: {} -> 'b <...>} -> Promise 'b =
     {scope, f} -> __native_loom_scope_spawn {scope = scope, f = f}
 
 # Cancel all tasks in the scope

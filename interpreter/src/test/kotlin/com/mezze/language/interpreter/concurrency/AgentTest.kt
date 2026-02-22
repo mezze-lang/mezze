@@ -16,10 +16,13 @@ import org.junit.jupiter.api.Assertions.*
 class AgentTest {
 
     private val parser = MezzeParser()
-    private val typeChecker = TypeChecker()
 
     private fun eval(source: String): Any? {
+        // Clear module cache to ensure clean state between tests
+        com.mezze.language.typechecker.ModuleResolver.clearCache()
         val program = parser.parse(source)
+        // Create fresh TypeChecker for each test to avoid type variable pollution between tests
+        val typeChecker = TypeChecker()
         val typeCheckResult = typeChecker.typeCheck(program)
         return MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
     }
