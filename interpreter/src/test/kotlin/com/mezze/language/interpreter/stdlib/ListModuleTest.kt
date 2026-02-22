@@ -668,4 +668,42 @@ class ListModuleTest {
         """)
         assertEquals(MezzeBool(true), result)
     }
+
+    // === reduce ===
+
+    @Test
+    fun `test list reduce - sum`() {
+        val result = eval("""
+            use std::collections::list
+            let xs = list::range { start = 1, end = 6 }
+            match list::reduce { xs = xs, f = { acc, x } -> acc + x } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(15), result)  // 1 + 2 + 3 + 4 + 5 = 15
+    }
+
+    @Test
+    fun `test list reduce - single element`() {
+        val result = eval("""
+            use std::collections::list
+            let xs = list::singleton { x = 42 }
+            match list::reduce { xs = xs, f = { acc, x } -> acc + x } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(42), result)
+    }
+
+    @Test
+    fun `test list reduce - empty list`() {
+        val result = eval("""
+            use std::collections::list
+            let xs: List Int = list::empty {}
+            match list::reduce { xs = xs, f = { acc, x } -> acc + x } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(-1), result)  // None for empty list
+    }
 }

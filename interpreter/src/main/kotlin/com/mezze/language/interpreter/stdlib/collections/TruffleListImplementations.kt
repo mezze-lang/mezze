@@ -312,19 +312,22 @@ object TruffleListImplementations {
                 ?: throw NativeFunctionException("__native_list_reduce", "expects MezzeRecord")
             val xs = record.fields["xs"] as? MezzeList
                 ?: throw NativeFunctionException("__native_list_reduce", "expects 'xs' as List")
-            val init = record.fields["init"]
-                ?: throw NativeFunctionException("__native_list_reduce", "expects 'init' value")
             val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_list_reduce", "expects 'f' function")
 
-            var acc = init
-            var current: MezzeList = xs
-            while (current is MezzeCons) {
-                val callArg = MezzeRecord(mapOf("a" to acc, "b" to current.head))
-                acc = callFunction(f, callArg, "__native_list_reduce")
-                current = current.tail
+            // reduce uses the first element as initial accumulator, returns Option
+            if (xs is MezzeCons) {
+                var acc = xs.head
+                var current: MezzeList = xs.tail
+                while (current is MezzeCons) {
+                    val callArg = MezzeRecord(mapOf("acc" to acc, "x" to current.head))
+                    acc = callFunction(f, callArg, "__native_list_reduce")
+                    current = current.tail
+                }
+                MezzeVariant("Some", MezzeRecord(mapOf("val" to acc)))
+            } else {
+                MezzeVariant("None", null)
             }
-            acc
         }
 
         // List predicates

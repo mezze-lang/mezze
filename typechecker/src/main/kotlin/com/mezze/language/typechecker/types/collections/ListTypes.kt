@@ -236,7 +236,8 @@ object ListTypes {
             )
         }
 
-        // __native_list_reduce: {xs: List 'a, init: 'a, f: {acc: 'a, x: 'a} -> 'a} -> 'a
+        // __native_list_reduce: {xs: List 'a, f: {acc: 'a, x: 'a} -> 'a} -> Option 'a
+        // Returns None for empty list, Some for non-empty (uses first element as initial acc)
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val listType = MezzeType.ListType(elemType)
@@ -247,13 +248,19 @@ object ListTypes {
                 )),
                 elemType
             )
+            val optionType = MezzeType.VariantType(
+                constructors = mapOf(
+                    "Some" to MezzeType.RecordType(mapOf("val" to elemType)),
+                    "None" to null
+                ),
+                rowVar = null
+            )
             context["__native_list_reduce"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "xs" to listType,
-                    "init" to elemType,
                     "f" to funcType
                 )),
-                elemType
+                optionType
             )
         }
 

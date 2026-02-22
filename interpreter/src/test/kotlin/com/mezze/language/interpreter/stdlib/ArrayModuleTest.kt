@@ -423,4 +423,239 @@ class ArrayModuleTest {
         """)
         assertEquals(MezzeBool(false), result)
     }
+
+    // === reduce ===
+
+    @Test
+    fun `test array reduce - sum`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3, 4, 5]
+            match array::reduce { xs = xs, f = { acc, x } -> acc + x } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(15), result)
+    }
+
+    @Test
+    fun `test array reduce - empty`() {
+        val result = eval("""
+            use std::collections::array
+            let xs: [Int] = []
+            match array::reduce { xs = xs, f = { acc, x } -> acc + x } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(-1), result)
+    }
+
+    // === zip ===
+
+    @Test
+    fun `test array zip`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3]
+            let ys = ["a", "b", "c"]
+            let zipped = array::zip { xs = xs, ys = ys }
+            array::length { xs = zipped }
+        """)
+        assertEquals(MezzeInt(3), result)
+    }
+
+    @Test
+    fun `test array zip - unequal lengths`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3, 4]
+            let ys = ["a", "b"]
+            let zipped = array::zip { xs = xs, ys = ys }
+            array::length { xs = zipped }
+        """)
+        assertEquals(MezzeInt(2), result)
+    }
+
+    // === unzip ===
+
+    @Test
+    fun `test array unzip`() {
+        val result = eval("""
+            use std::collections::array
+            let pairs = [{ fst = 1, snd = "a" }, { fst = 2, snd = "b" }]
+            let result = array::unzip { xs = pairs }
+            array::length { xs = result.fsts }
+        """)
+        assertEquals(MezzeInt(2), result)
+    }
+
+    // === flatten ===
+
+    @Test
+    fun `test array flatten`() {
+        val result = eval("""
+            use std::collections::array
+            let nested = [[1, 2], [3, 4], [5]]
+            let flat = array::flatten { xss = nested }
+            array::length { xs = flat }
+        """)
+        assertEquals(MezzeInt(5), result)
+    }
+
+    // === any ===
+
+    @Test
+    fun `test array any - true`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3, 4, 5]
+            array::any { xs = xs, p = { x } -> x > 3 }
+        """)
+        assertEquals(MezzeBool(true), result)
+    }
+
+    @Test
+    fun `test array any - false`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3]
+            array::any { xs = xs, p = { x } -> x > 10 }
+        """)
+        assertEquals(MezzeBool(false), result)
+    }
+
+    // === all ===
+
+    @Test
+    fun `test array all - true`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [2, 4, 6, 8]
+            array::all { xs = xs, p = { x } -> x % 2 == 0 }
+        """)
+        assertEquals(MezzeBool(true), result)
+    }
+
+    @Test
+    fun `test array all - false`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [2, 4, 5, 8]
+            array::all { xs = xs, p = { x } -> x % 2 == 0 }
+        """)
+        assertEquals(MezzeBool(false), result)
+    }
+
+    // === partition ===
+
+    @Test
+    fun `test array partition`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3, 4, 5, 6]
+            let result = array::partition { xs = xs, p = { x } -> x % 2 == 0 }
+            array::length { xs = result.matching }
+        """)
+        assertEquals(MezzeInt(3), result)  // evens: 2, 4, 6
+    }
+
+    // === find_index ===
+
+    @Test
+    fun `test array find_index - found`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3, 4, 5]
+            match array::find_index { xs = xs, p = { x } -> x > 3 } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(3), result)  // index of 4
+    }
+
+    @Test
+    fun `test array find_index - not found`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3]
+            match array::find_index { xs = xs, p = { x } -> x > 10 } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(-1), result)
+    }
+
+    // === last ===
+
+    @Test
+    fun `test array last - non-empty`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3, 4, 5]
+            match array::last { xs = xs } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(5), result)
+    }
+
+    @Test
+    fun `test array last - empty`() {
+        val result = eval("""
+            use std::collections::array
+            let xs: [Int] = []
+            match array::last { xs = xs } is
+                Some { val } -> val
+                None -> -1
+        """)
+        assertEquals(MezzeInt(-1), result)
+    }
+
+    // === init ===
+
+    @Test
+    fun `test array init - non-empty`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3, 4, 5]
+            let result = array::init { xs = xs }
+            array::length { xs = result }
+        """)
+        assertEquals(MezzeInt(4), result)
+    }
+
+    @Test
+    fun `test array init - single element`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [42]
+            let result = array::init { xs = xs }
+            array::length { xs = result }
+        """)
+        assertEquals(MezzeInt(0), result)
+    }
+
+    // === unique ===
+
+    @Test
+    fun `test array unique`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 2, 3, 3, 3, 4]
+            let result = array::unique { xs = xs }
+            array::length { xs = result }
+        """)
+        assertEquals(MezzeInt(4), result)
+    }
+
+    @Test
+    fun `test array unique - already unique`() {
+        val result = eval("""
+            use std::collections::array
+            let xs = [1, 2, 3, 4]
+            let result = array::unique { xs = xs }
+            array::length { xs = result }
+        """)
+        assertEquals(MezzeInt(4), result)
+    }
 }

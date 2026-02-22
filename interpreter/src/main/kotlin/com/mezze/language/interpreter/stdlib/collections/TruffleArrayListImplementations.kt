@@ -221,31 +221,37 @@ object TruffleArrayListImplementations {
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects MezzeRecord")
             val xs = record.fields["xs"] as? MezzeArrayList
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'xs' as ArrayList")
-            val init = record.fields["init"]
-                ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'init' field")
             val f = record.fields["f"]
                 ?: throw NativeFunctionException("__native_arraylist_reduce", "expects 'f' as Function")
 
-            xs.fold(init) { acc, element ->
-                val argRecord = MezzeRecord(mapOf("a" to acc, "b" to element))
-                when (f) {
-                    is MezzeTruffleFunction -> {
-                        // CRITICAL: MezzeFunctionRootNode expects 4 arguments
-                        f.callTarget.call(
-                            argRecord,
-                            f.closureVariables,
-                            f.lexicalScope,
-                            f.lexicalScopeSlotMap
-                        ) as MezzeValue
+            // reduce uses first element as initial accumulator, returns Option
+            val xsList = xs.toList()
+            if (xsList.isEmpty()) {
+                MezzeVariant("None", null)
+            } else {
+                var acc: MezzeValue = xsList.first()
+                for (i in 1 until xsList.size) {
+                    val element = xsList[i]
+                    val argRecord = MezzeRecord(mapOf("acc" to acc, "x" to element))
+                    acc = when (f) {
+                        is MezzeTruffleFunction -> {
+                            f.callTarget.call(
+                                argRecord,
+                                f.closureVariables,
+                                f.lexicalScope,
+                                f.lexicalScopeSlotMap
+                            ) as MezzeValue
+                        }
+                        is NativeMezzeFunction -> {
+                            f.call(listOf(argRecord))
+                        }
+                        else -> throw NativeFunctionException(
+                            "__native_arraylist_reduce",
+                            "f must be a function, got: ${f::class.simpleName}"
+                        )
                     }
-                    is NativeMezzeFunction -> {
-                        f.call(listOf(argRecord))
-                    }
-                    else -> throw NativeFunctionException(
-                        "__native_arraylist_reduce",
-                        "f must be a function, got: ${f::class.simpleName}"
-                    )
                 }
+                MezzeVariant("Some", MezzeRecord(mapOf("val" to acc)))
             }
         }
 

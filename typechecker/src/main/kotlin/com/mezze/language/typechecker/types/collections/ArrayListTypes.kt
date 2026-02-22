@@ -172,8 +172,8 @@ object ArrayListTypes {
             )
         }
 
-        // __native_arraylist_reduce: {xs: ['a], f: {acc: 'a, x: 'a} -> 'a} -> 'a
-        // Note: Reduce uses same type for accumulator and elements
+        // __native_arraylist_reduce: {xs: ['a], f: {acc: 'a, x: 'a} -> 'a} -> Option 'a
+        // Returns None for empty array, Some for non-empty (uses first element as initial acc)
         run {
             val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
             val arrayType = MezzeType.ArrayType(elemType)
@@ -184,12 +184,19 @@ object ArrayListTypes {
                 )),
                 elemType
             )
+            val optionType = MezzeType.VariantType(
+                constructors = mapOf(
+                    "Some" to MezzeType.RecordType(mapOf("val" to elemType)),
+                    "None" to null
+                ),
+                rowVar = null
+            )
             context["__native_arraylist_reduce"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf(
                     "xs" to arrayType,
                     "f" to funcType
                 )),
-                elemType
+                optionType
             )
         }
 
