@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib
 
 import com.mezze.language.interpreter.MezzeBool
+import com.mezze.language.interpreter.MezzeChar
 import com.mezze.language.interpreter.MezzeInt
 import com.mezze.language.interpreter.MezzeString
 import com.mezze.language.interpreter.MezzeTestHelper
@@ -319,5 +320,285 @@ class StringModuleTest {
 
         val variables = parseTypeCheckAndRun(source)
         assertEquals("one,two,three", (variables["rejoined"] as MezzeString).value)
+    }
+
+    // === substring ===
+
+    @Test
+    fun `test string substring`() {
+        val source = """
+            use std::string
+            let s = "hello world"
+            let result = string::substring { s = s, start = 0, end = 5 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("hello", (variables["result"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test string substring - middle`() {
+        val source = """
+            use std::string
+            let s = "hello world"
+            let result = string::substring { s = s, start = 6, end = 11 }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("world", (variables["result"] as MezzeString).value)
+    }
+
+    // === replace ===
+
+    @Test
+    fun `test string replace`() {
+        val source = """
+            use std::string
+            let s = "hello world world"
+            let result = string::replace { s = s, old = "world", new = "there" }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("hello there world", (variables["result"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test string replace_all`() {
+        val source = """
+            use std::string
+            let s = "hello world world"
+            let result = string::replace_all { s = s, old = "world", new = "there" }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("hello there there", (variables["result"] as MezzeString).value)
+    }
+
+    // === char_at ===
+
+    @Test
+    fun `test string char_at - found`() {
+        val source = """
+            use std::string
+            use std::char
+            let s = "hello"
+            let result = match string::char_at { s = s, i = 1 } is
+                Some { val } -> char::to_int { c = val }
+                None -> -1
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(MezzeInt('e'.code.toLong()), variables["result"])
+    }
+
+    @Test
+    fun `test string char_at - out of bounds`() {
+        val source = """
+            use std::string
+            let s = "hello"
+            let is_none = match string::char_at { s = s, i = 10 } is
+                Some { val } -> False
+                None -> True
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(MezzeBool(true), variables["is_none"])
+    }
+
+    // === index_of ===
+
+    @Test
+    fun `test string index_of - found`() {
+        val source = """
+            use std::string
+            let s = "hello world"
+            let result = match string::index_of { s = s, sub = "world" } is
+                Some { val } -> val
+                None -> -1
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(MezzeInt(6), variables["result"])
+    }
+
+    @Test
+    fun `test string index_of - not found`() {
+        val source = """
+            use std::string
+            let s = "hello world"
+            let result = match string::index_of { s = s, sub = "xyz" } is
+                Some { val } -> val
+                None -> -1
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(MezzeInt(-1), variables["result"])
+    }
+
+    // === last_index_of ===
+
+    @Test
+    fun `test string last_index_of - found`() {
+        val source = """
+            use std::string
+            let s = "hello world world"
+            let result = match string::last_index_of { s = s, sub = "world" } is
+                Some { val } -> val
+                None -> -1
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(MezzeInt(12), variables["result"])
+    }
+
+    @Test
+    fun `test string last_index_of - not found`() {
+        val source = """
+            use std::string
+            let s = "hello world"
+            let result = match string::last_index_of { s = s, sub = "xyz" } is
+                Some { val } -> val
+                None -> -1
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(MezzeInt(-1), variables["result"])
+    }
+
+    // === trim_start / trim_end ===
+
+    @Test
+    fun `test string trim_start`() {
+        val source = """
+            use std::string
+            let s = "   hello   "
+            let result = string::trim_start { s = s }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("hello   ", (variables["result"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test string trim_end`() {
+        val source = """
+            use std::string
+            let s = "   hello   "
+            let result = string::trim_end { s = s }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("   hello", (variables["result"] as MezzeString).value)
+    }
+
+    // === lines ===
+
+    @Test
+    fun `test string lines`() {
+        val source = """
+            use std::string
+            let s = "line1\nline2\nline3"
+            let lines = string::lines { s = s }
+            let result = __native_arraylist_length { xs = lines }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(MezzeInt(3), variables["result"])
+    }
+
+    // === words ===
+
+    @Test
+    fun `test string words`() {
+        val source = """
+            use std::string
+            let s = "hello world foo"
+            let words = string::words { s = s }
+            let result = __native_arraylist_length { xs = words }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(MezzeInt(3), variables["result"])
+    }
+
+    // === chars ===
+
+    @Test
+    fun `test string chars`() {
+        val source = """
+            use std::string
+            let s = "hello"
+            let chars = string::chars { s = s }
+            let result = __native_arraylist_length { xs = chars }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(MezzeInt(5), variables["result"])
+    }
+
+    // === pad_left / pad_right ===
+
+    @Test
+    fun `test string pad_left`() {
+        val source = """
+            use std::string
+            use std::char
+            let s = "hi"
+            let opt = char::from_int { code = 48 }
+            let result = match opt is
+                Some { val } -> string::pad_left { s = s, len = 5, c = val }
+                None -> ""
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("000hi", (variables["result"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test string pad_left - already long enough`() {
+        val source = """
+            use std::string
+            use std::char
+            let s = "hello"
+            let opt = char::from_int { code = 48 }
+            let result = match opt is
+                Some { val } -> string::pad_left { s = s, len = 3, c = val }
+                None -> ""
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("hello", (variables["result"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test string pad_right`() {
+        val source = """
+            use std::string
+            use std::char
+            let s = "hi"
+            let opt = char::from_int { code = 46 }
+            let result = match opt is
+                Some { val } -> string::pad_right { s = s, len = 5, c = val }
+                None -> ""
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("hi...", (variables["result"] as MezzeString).value)
+    }
+
+    @Test
+    fun `test string pad_right - already long enough`() {
+        val source = """
+            use std::string
+            use std::char
+            let s = "hello"
+            let opt = char::from_int { code = 46 }
+            let result = match opt is
+                Some { val } -> string::pad_right { s = s, len = 3, c = val }
+                None -> ""
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("hello", (variables["result"] as MezzeString).value)
     }
 }
