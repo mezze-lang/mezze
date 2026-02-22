@@ -878,7 +878,7 @@ class MezzeTextDocumentService(
     /**
      * Get variant constructor completions for a specific field in a function call.
      * E.g., for `my_func { status = | }`, if status is type `| Active, Inactive |`,
-     * suggest `status = Active` and `status = Inactive`.
+     * suggest just the constructor name (not `status = Constructor` since user already typed `status = `).
      */
     private fun getVariantCompletionsForFieldType(
         fieldType: MezzeType,
@@ -895,10 +895,13 @@ class MezzeTextDocumentService(
         val typeDeclarations = (state.typeCheckResult?.program ?: state.ast)?.items
             ?.filterIsInstance<TypeDeclaration>() ?: emptyList()
 
+        // Just suggest the constructor names - when user types "field = " and triggers completion,
+        // they want the value, not "field = value" again
         return variantType.constructors.entries.mapIndexed { constructorIndex, (constructorName, payload) ->
-            CompletionItem("$fieldName = $constructorName").apply {
+            CompletionItem(constructorName).apply {
                 kind = CompletionItemKind.EnumMember
                 sortText = "2_${fieldIndex.toString().padStart(3, '0')}_${constructorIndex.toString().padStart(3, '0')}"
+                detail = "$fieldName: ${prettyPrintTypeWithAliases(fieldType, state.typeAliases, false, typeDeclarations)}"
 
                 if (payload != null) {
                     // Constructor has payload
@@ -911,12 +914,10 @@ class MezzeTextDocumentService(
                         }
                         else -> " { \${1:value} }"
                     }
-                    detail = prettyPrintTypeWithAliases(fieldType, state.typeAliases, false, typeDeclarations)
-                    insertText = "$fieldName = $constructorName$payloadStr"
+                    insertText = "$constructorName$payloadStr"
                     insertTextFormat = InsertTextFormat.Snippet
                 } else {
-                    detail = prettyPrintTypeWithAliases(fieldType, state.typeAliases, false, typeDeclarations)
-                    insertText = "$fieldName = $constructorName"
+                    insertText = constructorName
                 }
             }
         }
@@ -1338,12 +1339,13 @@ class MezzeTextDocumentService(
 
     /**
      * Find the type of an expression by name (variable lookup).
+     * Searches top-level bindings, imports, and function parameters.
      */
     private fun findExpressionType(exprName: String, result: TypeCheckResult, state: DocumentState): MezzeType? {
         // Clean up the expression name (might have braces or other syntax)
         val cleanName = exprName.trim().split(Regex("""\s*\{""")).firstOrNull()?.trim() ?: exprName
 
-        // Check local bindings
+        // Check top-level bindings
         val binding = result.program.items
             .filterIsInstance<LetBinding>()
             .filter { it.isSimpleBinding }
@@ -1359,8 +1361,37 @@ class MezzeTextDocumentService(
             return unwrapType(import.type)
         }
 
-        // Check function parameters - need to find the enclosing function
-        // This is a simplified check; for full accuracy would need AST traversal
+        // Search for the variable in function parameters
+        // This handles cases like: let f = {x: MyType} -> match x is ...
+        for (item in result.program.items) {
+            if (item is LetBinding) {
+                val paramType = findParameterTypeInBinding(cleanName, item)
+                if (paramType != null) {
+                    return unwrapType(paramType)
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Find a parameter type in a let binding's lambda expression.
+     */
+    private fun findParameterTypeInBinding(paramName: String, binding: LetBinding): MezzeType? {
+        // Get the binding's expression - if it's a lambda, check its parameters
+        val expr = binding.expression
+        if (expr is LambdaExpression) {
+            // Lambda has inferredType which is the full function type
+            val funcType = expr.inferredType
+            if (funcType is MezzeType.FunctionType) {
+                val paramType = funcType.paramType
+                if (paramType is MezzeType.RecordType) {
+                    // Record parameter: {x: Int, y: String} -> ...
+                    return paramType.fields[paramName]
+                }
+            }
+        }
         return null
     }
 
