@@ -2,6 +2,7 @@ package com.mezze.language.cli.commands
 
 import com.akuleshov7.ktoml.Toml
 import com.mezze.language.cli.`package`.MezzeToml
+import com.mezze.language.cli.CodebaseHelper
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
@@ -121,6 +122,15 @@ class BuildCommand {
             val typeCheckResult = typeChecker.typeCheck(ast, currentDir.toPath())
 
             println("✅ Type checking successful")
+
+            // Populate codebase in project mode
+            if (CodebaseHelper.populateIfInProject(
+                projectRoot = currentDir,
+                typeCheckResult = typeCheckResult,
+                modulePath = manifest.`package`.name
+            )) {
+                println("📦 Updated .mez/codebase.db")
+            }
 
             // Validate that program has a 'main' function with type {} -> {}
             val mainBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()

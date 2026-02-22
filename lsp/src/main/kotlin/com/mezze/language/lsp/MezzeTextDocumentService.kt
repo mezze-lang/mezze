@@ -3,6 +3,7 @@ package com.mezze.language.lsp
 import com.mezze.language.ast.*
 import com.mezze.language.ast.prettyPrintTypeWithAliases
 import com.mezze.language.codebase.CodebaseManager
+import com.mezze.language.codebase.CodebasePopulator
 import com.mezze.language.codebase.Codebase
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.parser.ParseException
@@ -219,6 +220,23 @@ class MezzeTextDocumentService(
                     monomorphicInstances = emptyMap(),  // Not available in recovery mode
                     resolvedImports = buildResolvedImports(recoveryResult.importContext)
                 )
+
+                // Populate codebase if in project mode and no errors
+                if (recoveryResult.errors.isEmpty()) {
+                    projectCodebase?.let { codebase ->
+                        try {
+                            CodebasePopulator.populate(
+                                codebase = codebase,
+                                mainProgram = program,
+                                modules = emptyMap(),  // Modules stored separately when type-checked
+                                mainModulePath = null  // Per-file analysis, no module path
+                            )
+                            server.logInfo("Populated codebase with ${program.items.size} items")
+                        } catch (e: Exception) {
+                            server.logError("Failed to populate codebase: ${e.message}")
+                        }
+                    }
+                }
             }
 
         } catch (e: TypeCheckError) {

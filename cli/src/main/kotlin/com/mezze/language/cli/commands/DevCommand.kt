@@ -2,6 +2,7 @@ package com.mezze.language.cli.commands
 
 import com.akuleshov7.ktoml.Toml
 import com.mezze.language.cli.`package`.MezzeToml
+import com.mezze.language.cli.CodebaseHelper
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.TypeCheckError
@@ -117,6 +118,13 @@ class DevCommand {
             println(ErrorPrettyPrinter.prettyPrint(e, source, fileName))
             kotlin.system.exitProcess(1)
         }
+
+        // Populate codebase in project mode
+        CodebaseHelper.populateIfInProject(
+            projectRoot = currentDir,
+            typeCheckResult = typeCheckResult,
+            modulePath = manifest.`package`.name
+        )
 
         // Check if program has a 'main' function and auto-call it
         val mainBinding = typeCheckResult.program.items.filterIsInstance<LetBinding>()

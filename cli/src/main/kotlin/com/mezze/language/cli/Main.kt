@@ -598,12 +598,22 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         val typeCheckTime = (System.nanoTime() - typeCheckStart) / 1_000_000.0
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
+        // Populate codebase in project mode
+        val codebaseUpdated = CodebaseHelper.populateIfInProject(
+            projectRoot = typeCheckProjectRoot,
+            typeCheckResult = result,
+            modulePath = null
+        )
+
         if (quietMode) {
             println("OK (${String.format("%.2f", totalTime)}ms)")
         } else {
             val typeAliases = typeChecker.getTypeAliases()
 
             printFileCheckSuccess(result, typeAliases)
+            if (codebaseUpdated) {
+                println("📦 Updated .mez/codebase.db")
+            }
             println()
             println("Parse: ${String.format("%.2f", parseTime)}ms  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
         }
@@ -772,10 +782,20 @@ private fun handlePackageCheck(quietMode: Boolean, appName: String? = null) {
 
         val totalTime = (System.nanoTime() - startTime) / 1_000_000.0
 
+        // Populate codebase in project mode
+        val codebaseUpdated = CodebaseHelper.populateIfInProject(
+            projectRoot = currentDir.toPath(),
+            typeCheckResult = result,
+            modulePath = manifest.`package`.name
+        )
+
         if (quietMode) {
             println("OK (${String.format("%.2f", totalTime)}ms)")
         } else {
             println("Type check passed: ${appConfig.name}")
+            if (codebaseUpdated) {
+                println("📦 Updated .mez/codebase.db")
+            }
             println("Time: ${String.format("%.2f", totalTime)}ms")
         }
     } catch (e: TypeCheckError) {
