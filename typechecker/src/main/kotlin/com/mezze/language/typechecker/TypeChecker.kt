@@ -120,7 +120,7 @@ class TypeChecker(
             val substitution: Substitution,                    // Final type substitution
             val monomorphicInstances: Map<String, LetBinding>, // Specialized function instances
             val importContext: ModuleImportContext? = null,    // Resolved imports for IDE support
-            val warnings: List<String> = emptyList()
+            val warnings: List<TypeCheckWarning> = emptyList() // Structured warnings with source locations
         ) : TypeCheckResult()
 
         /**
@@ -143,6 +143,16 @@ class TypeChecker(
     )
 
     /**
+     * Type checking warning.
+     *
+     * Warnings are non-fatal issues detected during type checking.
+     */
+    data class TypeCheckWarning(
+        val message: String,
+        val sourceLocation: SourceLocation? = null
+    )
+
+    /**
      * Result of type checking with error recovery.
      * Contains partial type information even when there are errors.
      */
@@ -151,7 +161,7 @@ class TypeChecker(
         val errors: List<TypeCheckError>,                   // All errors collected
         val partialSubstitution: Substitution?,             // Partial substitution if solving partially succeeded
         val importContext: ModuleImportContext? = null,     // Resolved imports for IDE support
-        val warnings: List<String> = emptyList()
+        val warnings: List<TypeCheckWarning> = emptyList()
     ) {
         val hasErrors: Boolean get() = errors.isNotEmpty()
         val isSuccess: Boolean get() = errors.isEmpty()
@@ -352,12 +362,17 @@ class TypeChecker(
 
         // Collect unused variable warnings (these are warnings, not errors)
         val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
-            val locationInfo = unused.sourceLocation?.let { " at line ${it.line}" } ?: ""
-            "Unused variable '${unused.name}'$locationInfo. Prefix with '_' to suppress this warning."
+            TypeCheckWarning(
+                message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
+                sourceLocation = unused.sourceLocation
+            )
         }
 
         // Collect pattern-related warnings (e.g., float literal patterns)
-        val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }
+        // Convert string warnings to structured warnings (these don't have locations yet)
+        val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }.map { warningMsg ->
+            TypeCheckWarning(message = warningMsg, sourceLocation = null)
+        }
 
         // Collect all constraints from all bindings (including ability constraints)
         // IMPORTANT: Filter out HasConstructor and HasField constraints!
@@ -393,9 +408,12 @@ class TypeChecker(
             is ConstraintSolver.SolveResult.Success -> {
                 // Continue to validation
                 val substitution = solveResult.substitution
-                val warnings = solveResult.warnings.toMutableList()
+                // Convert solver string warnings to structured warnings
+                val warnings = solveResult.warnings.map { msg ->
+                    TypeCheckWarning(message = msg, sourceLocation = null)
+                }.toMutableList()
 
-                // Add unused variable warnings
+                // Add unused variable warnings (already structured with source locations)
                 warnings.addAll(unusedVarWarnings)
 
                 // Add pattern-related warnings
@@ -508,7 +526,9 @@ class TypeChecker(
                         return TypeCheckResult.Failure(errors)
                     }
                     is ValidationResult.Success -> {
-                        warnings.addAll(constraintValidation.warnings)
+                        constraintValidation.warnings.forEach { msg ->
+                            warnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+                        }
                     }
                 }
 
@@ -528,7 +548,9 @@ class TypeChecker(
                         return TypeCheckResult.Failure(errors)
                     }
                     is ValidationResult.Success -> {
-                        warnings.addAll(validationResult.warnings)
+                        validationResult.warnings.forEach { msg ->
+                            warnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+                        }
 
                         // PHASE 5.5: Transform continuations
                         // Convert perform block bodies from DoExpression to StateMachineExpression
@@ -552,7 +574,9 @@ class TypeChecker(
                                 return TypeCheckResult.Failure(errors)
                             }
                             is MonomorphizationResult.Success -> {
-                                warnings.addAll(monomorphizationResult.warnings)
+                                monomorphizationResult.warnings.forEach { msg ->
+                                    warnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+                                }
 
                                 return TypeCheckResult.Success(
                                     program = monomorphizationResult.program,
@@ -588,7 +612,7 @@ class TypeChecker(
         com.mezze.language.typechecker.solving.clearUnificationCache()
 
         val allErrors = mutableListOf<TypeCheckError>()
-        val allWarnings = mutableListOf<String>()
+        val allWarnings = mutableListOf<TypeCheckWarning>()
 
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
@@ -752,13 +776,18 @@ class TypeChecker(
             ))
         }
 
-        // Collect warnings
+        // Collect warnings with proper source locations
         val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
-            val locationInfo = unused.sourceLocation?.let { " at line ${it.line}" } ?: ""
-            "Unused variable '${unused.name}'$locationInfo. Prefix with '_' to suppress this warning."
+            TypeCheckWarning(
+                message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
+                sourceLocation = unused.sourceLocation
+            )
         }
         allWarnings.addAll(unusedVarWarnings)
-        allWarnings.addAll(constraintResults.values.flatMap { it.patternWarnings })
+        // Convert pattern warnings (strings) to structured warnings
+        constraintResults.values.flatMap { it.patternWarnings }.forEach { msg ->
+            allWarnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+        }
 
         // Collect all constraints (filter structural constraints)
         val allConstraints = constraintResults.values.flatMap { it.constraints }
@@ -771,7 +800,7 @@ class TypeChecker(
         val solveResult = solver.solve(allConstraints)
 
         // Process solve result
-        val (substitution, solveWarnings) = when (solveResult) {
+        val substitution = when (solveResult) {
             is ConstraintSolver.SolveResult.Failure -> {
                 // Collect solve errors but try to continue with partial information
                 solveResult.errors.forEach { error ->
@@ -782,14 +811,16 @@ class TypeChecker(
                     ))
                 }
                 // Use empty substitution for partial results
-                Pair(Substitution.empty, emptyList<String>())
+                Substitution.empty
             }
             is ConstraintSolver.SolveResult.Success -> {
-                Pair(solveResult.substitution, solveResult.warnings)
+                // Convert solver string warnings to structured warnings
+                solveResult.warnings.forEach { msg ->
+                    allWarnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+                }
+                solveResult.substitution
             }
         }
-
-        allWarnings.addAll(solveWarnings)
 
         // Get generated codec implementations
         val generatedCodecImpls = solver.getGeneratedCodecImpls().mapValues { (_, impl) ->
@@ -887,7 +918,9 @@ class TypeChecker(
                     }
                 }
                 is ValidationResult.Success -> {
-                    allWarnings.addAll(constraintValidation.warnings)
+                    constraintValidation.warnings.forEach { msg ->
+                        allWarnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+                    }
                 }
             }
 
@@ -903,7 +936,9 @@ class TypeChecker(
                     }
                 }
                 is ValidationResult.Success -> {
-                    allWarnings.addAll(validationResult.warnings)
+                    validationResult.warnings.forEach { msg ->
+                        allWarnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
+                    }
                 }
             }
         }
@@ -1344,16 +1379,10 @@ class TypeChecker(
                 // Convert import context to resolved imports for IDE support
                 val resolvedImports = buildResolvedImports(result.importContext)
 
-                // Convert string warnings to structured TypeCheckWarning format
-                // Parse location info from strings like "Unused variable 'n' at line 11..."
-                val structuredWarnings = result.warnings.map { warningStr ->
-                    // Try to extract source location from warning message
-                    val lineMatch = Regex(" at line (\\d+)").find(warningStr)
-                    val sourceLocation = lineMatch?.let { match ->
-                        val line = match.groupValues[1].toIntOrNull() ?: 1
-                        SourceLocation(line, 1)
-                    }
-                    com.mezze.language.ast.TypeCheckWarning(warningStr, sourceLocation)
+                // Convert internal TypeCheckWarning to AST TypeCheckWarning
+                // Source locations are already properly set for each warning
+                val structuredWarnings = result.warnings.map { warning ->
+                    com.mezze.language.ast.TypeCheckWarning(warning.message, warning.sourceLocation)
                 }
 
                 com.mezze.language.ast.TypeCheckResult(

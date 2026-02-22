@@ -156,6 +156,9 @@ class MezzeTextDocumentService(
 
     /**
      * Analyze a document and return its state with diagnostics.
+     *
+     * Uses multi-error recovery to collect ALL errors and provide
+     * partial type information even when there are errors.
      */
     private fun analyzeDocument(uri: String, content: String, version: Int): DocumentState {
         val diagnostics = mutableListOf<Diagnostic>()
@@ -180,13 +183,46 @@ class MezzeTextDocumentService(
             return DocumentState(uri, content, version, null, null, emptyMap(), diagnostics)
         }
 
-        // Step 2: Type check
+        // Step 2: Type check with multi-error recovery
         try {
             val projectRoot = filePath?.parent ?: Paths.get(".")
-            typeCheckResult = typeChecker.typeCheck(ast, projectRoot)
-            // Get type aliases for pretty printing
+
+            // Use checkProgramWithRecovery to get ALL errors and partial type info
+            val recoveryResult = typeChecker.checkProgramWithRecovery(ast, projectRoot)
+
+            // Get type aliases for pretty printing (available even with errors)
             typeAliases = typeChecker.getTypeAliases()
+
+            // Collect all errors as diagnostics
+            recoveryResult.errors.forEach { error ->
+                diagnostics.add(createDiagnosticFromRecoveryError(error))
+            }
+
+            // Collect warnings with proper source locations
+            recoveryResult.warnings.forEach { warning ->
+                val line = warning.sourceLocation?.line?.minus(1) ?: 0  // LSP uses 0-based lines
+                val column = warning.sourceLocation?.column?.minus(1) ?: 0  // LSP uses 0-based columns
+                diagnostics.add(createDiagnostic(
+                    message = warning.message,
+                    severity = DiagnosticSeverity.Warning,
+                    line = line,
+                    column = column
+                ))
+            }
+
+            // Create TypeCheckResult from partial results (even if there are errors)
+            // This allows hover/completion to work on successfully checked items
+            val program = recoveryResult.program
+            if (program != null) {
+                typeCheckResult = TypeCheckResult(
+                    program = program,
+                    monomorphicInstances = emptyMap(),  // Not available in recovery mode
+                    resolvedImports = buildResolvedImports(recoveryResult.importContext)
+                )
+            }
+
         } catch (e: TypeCheckError) {
+            // Fallback for unexpected exceptions
             diagnostics.add(createDiagnosticFromTypeError(e))
         } catch (e: Exception) {
             diagnostics.add(createDiagnostic(
@@ -198,6 +234,76 @@ class MezzeTextDocumentService(
         }
 
         return DocumentState(uri, content, version, ast, typeCheckResult, typeAliases, diagnostics)
+    }
+
+    /**
+     * Build resolved imports list from import context.
+     */
+    private fun buildResolvedImports(importContext: com.mezze.language.typechecker.module.ModuleImportContext?): List<ResolvedImport> {
+        if (importContext == null) return emptyList()
+
+        val imports = mutableListOf<ResolvedImport>()
+
+        // Add imported bindings (functions/values)
+        for ((name, binding) in importContext.importedBindings) {
+            imports.add(ResolvedImport(
+                localName = name,
+                originalName = binding.originalName,
+                modulePath = binding.modulePath,
+                type = binding.type,
+                kind = ImportKind.FUNCTION
+            ))
+        }
+
+        // Add imported types
+        for ((name, typeDecl) in importContext.importedTypes) {
+            val typeParams = typeDecl.typeParams.map { MezzeType.VarType(TypeVar(it)) }
+            imports.add(ResolvedImport(
+                localName = name,
+                originalName = name,
+                modulePath = "",
+                type = MezzeType.TypeApplication(name, typeParams),
+                kind = ImportKind.TYPE
+            ))
+        }
+
+        // Add imported abilities
+        for ((name, _) in importContext.importedAbilities) {
+            imports.add(ResolvedImport(
+                localName = name,
+                originalName = name,
+                modulePath = "",
+                type = MezzeType.TypeApplication(name, emptyList()),
+                kind = ImportKind.ABILITY
+            ))
+        }
+
+        // Add imported effects
+        for ((name, _) in importContext.importedEffects) {
+            imports.add(ResolvedImport(
+                localName = name,
+                originalName = name,
+                modulePath = "",
+                type = MezzeType.TypeApplication(name, emptyList()),
+                kind = ImportKind.EFFECT
+            ))
+        }
+
+        return imports
+    }
+
+    /**
+     * Create a diagnostic from a recovery error.
+     */
+    private fun createDiagnosticFromRecoveryError(error: TypeChecker.TypeCheckError): Diagnostic {
+        val loc = error.sourceLocation
+        return createDiagnostic(
+            message = error.message,
+            severity = DiagnosticSeverity.Error,
+            line = (loc?.line ?: 1) - 1,
+            column = (loc?.column ?: 1) - 1,
+            code = error.phase
+        )
     }
 
     /**

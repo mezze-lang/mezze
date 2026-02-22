@@ -1867,11 +1867,13 @@ class ConstraintGenerator(
  * Result of pattern constraint generation.
  *
  * Contains:
- * - Bindings introduced by the pattern
+ * - Bindings introduced by the pattern (name -> type)
+ * - bindingLocations: source locations for each binding (for unused variable warnings)
  * - Constraints on the scrutinee type
  */
 data class PatternConstraintResult(
     val bindings: Map<String, MezzeType>,
     val constraints: List<Constraint>,
-    val warnings: List<String> = emptyList()
+    val warnings: List<String> = emptyList(),
+    val bindingLocations: Map<String, SourceLocation> = emptyMap()
 )

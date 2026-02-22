@@ -30,7 +30,7 @@ class PatternValidationTest {
         // Use checkProgram which returns the internal TypeCheckResult with warnings
         val result = typeChecker.checkProgram(parser.parse(code))
         return when (result) {
-            is TypeChecker.TypeCheckResult.Success -> Pair(result.program, result.warnings)
+            is TypeChecker.TypeCheckResult.Success -> Pair(result.program, result.warnings.map { it.message })
             is TypeChecker.TypeCheckResult.Failure -> throw result.errors.first().let {
                 TypeCheckError(it.message, it.sourceLocation)
             }
@@ -142,6 +142,116 @@ class PatternValidationTest {
         """.trimIndent()
 
         // Should pass - Some has payload and pattern destructures it
+        val program = parseAndTypeCheck(code)
+        assertNotNull(program)
+    }
+
+    // ========== PAYLOAD VARIANT WITHOUT DESTRUCTURING (BUG FIX) ==========
+
+    @Test
+    fun `payload variant without destructuring pattern should fail`() {
+        // This was a BUG: typing `Blue` instead of `Blue { n }` when Blue has payload
+        val code = """
+            type Color = | Red, Blue { n: Int }, Green |
+
+            let my_func = {x, y, c} -> match c is
+                Red -> x + y
+                Blue -> x - y
+                Green -> x
+        """.trimIndent()
+
+        // Should throw - Blue has payload but pattern doesn't destructure
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Blue") == true,
+            "Message should contain 'Blue'. Actual: ${exception.message}")
+        assertTrue(exception.message?.contains("payload") == true &&
+                   exception.message?.contains("must be destructured") == true,
+            "Message should say payload must be destructured. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `payload variant with proper destructuring should pass`() {
+        val code = """
+            type Color = | Red, Blue { n: Int }, Green |
+
+            let my_func = {x, y, c} -> match c is
+                Red -> x + y
+                Blue { n } -> x - y * n
+                Green -> x
+        """.trimIndent()
+
+        // Should pass - Blue has payload and pattern destructures it
+        val program = parseAndTypeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `multiple payload variants without destructuring should fail`() {
+        val code = """
+            type Result = | Ok { val: Int }, Err { msg: String } |
+
+            let check = {result} ->
+                match result is
+                    Ok -> 1
+                    Err -> 0
+        """.trimIndent()
+
+        // Should throw - both Ok and Err have payloads
+        assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+    }
+
+    @Test
+    fun `polymorphic payload variant without destructuring should fail`() {
+        // Test with type parameter 'a
+        val code = """
+            type Option 'a = | Some { val: 'a }, None |
+
+            let is_some = {opt} ->
+                match opt is
+                    Some -> True
+                    None -> False
+        """.trimIndent()
+
+        // Should throw - Some has payload
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Some") == true,
+            "Message should contain 'Some'. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `List Cons without destructuring should fail`() {
+        // Built-in List type - Cons always has payload
+        val code = """
+            let head_or_zero = {lst: List Int} ->
+                match lst is
+                    Cons -> 1
+                    Nil -> 0
+        """.trimIndent()
+
+        // Should throw - Cons has payload { head, tail }
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("Cons") == true,
+            "Message should contain 'Cons'. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `List Cons with proper destructuring should pass`() {
+        val code = """
+            let head_or_zero = {lst: List Int} ->
+                match lst is
+                    Cons { head, tail } -> head
+                    Nil -> 0
+        """.trimIndent()
+
+        // Should pass
         val program = parseAndTypeCheck(code)
         assertNotNull(program)
     }
@@ -317,6 +427,134 @@ class PatternValidationTest {
         assertNotNull(program)
         assertTrue(warnings.any { it.contains("Float literal pattern") || it.contains("floating-point") },
             "Should warn about float literal pattern. Warnings: $warnings")
+    }
+
+    // ========== FREE TYPE VARIABLE VALIDATION ==========
+
+    @Test
+    fun `free type variable in type definition should fail`() {
+        val code = """
+            type Color = | Red, Blue { n: 'a }, Green |
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("undeclared type variable") == true,
+            "Error should mention undeclared type variable. Actual: ${exception.message}")
+        assertTrue(exception.message?.contains("'a") == true,
+            "Error should mention 'a. Actual: ${exception.message}")
+        assertTrue(exception.message?.contains("type Color 'a =") == true,
+            "Error should suggest adding type parameter. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `declared type variable in type definition should pass`() {
+        val code = """
+            type Color 'a = | Red, Blue { n: 'a }, Green |
+        """.trimIndent()
+
+        // Should pass - 'a is declared as a type parameter
+        val program = parseAndTypeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `multiple free type variables should fail with all listed`() {
+        val code = """
+            type Pair = { first: 'a, second: 'b }
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("'a") == true,
+            "Error should mention 'a. Actual: ${exception.message}")
+        assertTrue(exception.message?.contains("'b") == true,
+            "Error should mention 'b. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `partially declared type variables should fail`() {
+        // 'a is declared but 'b is not
+        val code = """
+            type Container 'a = { value: 'a, metadata: 'b }
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("'b") == true,
+            "Error should mention undeclared 'b. Actual: ${exception.message}")
+        // Should NOT mention 'a since it's declared
+        assertTrue(exception.message?.contains("'a") != true ||
+                   exception.message?.contains("type Container 'a") == true,
+            "Error should not say 'a is undeclared. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `newtype with free type variable should fail`() {
+        val code = """
+            newtype Wrapper = Wrap 'a
+        """.trimIndent()
+
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("undeclared type variable") == true,
+            "Error should mention undeclared type variable. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `newtype with declared type variable should pass`() {
+        val code = """
+            newtype Wrapper 'a = Wrap 'a
+        """.trimIndent()
+
+        // Should pass - 'a is declared
+        val program = parseAndTypeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `record with function field containing free type variable should fail`() {
+        // No implicit rank-2 polymorphism - all type vars must be declared
+        val code = """
+            type Continuation = { capture: {} -> 'a }
+        """.trimIndent()
+
+        // Should fail - 'a must be declared as type parameter
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("undeclared type variable") == true,
+            "Error should mention undeclared type variable. Actual: ${exception.message}")
+    }
+
+    @Test
+    fun `record with declared type parameter in function field should pass`() {
+        // Type parameter is declared, so this is valid
+        val code = """
+            type Continuation 'a = { capture: {} -> 'a }
+        """.trimIndent()
+
+        // Should pass - 'a is declared
+        val program = parseAndTypeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `record with non-function polymorphic field should fail`() {
+        val code = """
+            type Container = { value: 'a }
+        """.trimIndent()
+
+        // Should fail - 'a must be declared as type parameter
+        val exception = assertThrows<TypeCheckError> {
+            parseAndTypeCheck(code)
+        }
+        assertTrue(exception.message?.contains("undeclared type variable") == true,
+            "Error should mention undeclared type variable. Actual: ${exception.message}")
     }
 
     // ========== LIST VS ARRAY PATTERN ERROR ==========

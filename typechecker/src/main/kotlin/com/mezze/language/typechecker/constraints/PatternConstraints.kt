@@ -75,7 +75,8 @@ class PatternConstraintGenerator {
         // Example: let x = expr  (x gets type of expr)
         return PatternConstraintResult(
             bindings = mapOf(pattern.name to scrutineeType),
-            constraints = emptyList()
+            constraints = emptyList(),
+            bindingLocations = pattern.sourceLocation?.let { mapOf(pattern.name to it) } ?: emptyMap()
         )
     }
 
@@ -299,7 +300,8 @@ class PatternConstraintGenerator {
 
             return PatternConstraintResult(
                 bindings = payloadResult.bindings,
-                constraints = constraints
+                constraints = constraints,
+                bindingLocations = payloadResult.bindingLocations
             )
         }
     }
@@ -318,6 +320,7 @@ class PatternConstraintGenerator {
         // Scrutinee must be record type with these fields
 
         val bindings = mutableMapOf<String, MezzeType>()
+        val bindingLocations = mutableMapOf<String, SourceLocation>()
         val constraints = mutableListOf<Constraint>()
 
         // STRICT RECORD DESTRUCTURING: If pattern is not open (no ...), all fields must be covered
@@ -368,16 +371,24 @@ class PatternConstraintGenerator {
             )
 
             // Generate constraints for the field pattern
-            val fieldPattern = entry.pattern ?: VariablePattern(entry.name)
+            // For punning {n}, entry.pattern is null - use entry's source location
+            val fieldPattern = entry.pattern ?: VariablePattern(entry.name, entry.sourceLocation)
             val fieldResult = generate(fieldPattern, fieldType, context, sourceLocation)
 
             bindings.putAll(fieldResult.bindings)
+            fieldResult.bindingLocations.forEach { (name, loc) -> bindingLocations[name] = loc }
+            // For punning patterns, use the entry's source location
+            val entryLoc = entry.sourceLocation
+            if (entry.pattern == null && entryLoc != null) {
+                bindingLocations[entry.name] = entryLoc
+            }
             constraints.addAll(fieldResult.constraints)
         }
 
         return PatternConstraintResult(
             bindings = bindings,
-            constraints = constraints
+            constraints = constraints,
+            bindingLocations = bindingLocations
         )
     }
 
