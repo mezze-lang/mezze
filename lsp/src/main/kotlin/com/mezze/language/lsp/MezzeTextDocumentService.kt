@@ -764,34 +764,50 @@ class MezzeTextDocumentService(
 
             val items = mutableListOf<CompletionItem>()
 
-            // Check if we're inside a function call (after '{')
-            val argCompletions = if (state != null) {
-                getFunctionArgumentCompletions(state, position)
+            // Check if we're inside a match expression (after 'match X is')
+            val matchCompletions = if (state != null) {
+                getMatchPatternCompletions(state, position)
             } else {
                 emptyList()
             }
 
-            if (argCompletions.isNotEmpty()) {
-                // If we're completing function arguments, prioritize those
-                items.addAll(argCompletions)
+            if (matchCompletions.isNotEmpty()) {
+                // If we're completing match patterns, prioritize those
+                items.addAll(matchCompletions)
+                Either.forLeft<List<CompletionItem>, CompletionList>(items)
             } else {
-                // Standard completions
-                // Add keywords
-                items.addAll(getKeywordCompletions())
-
-                // Add bindings from current document (top-level + imports)
-                if (state != null) {
-                    items.addAll(getBindingCompletions(state))
-
-                    // Add local variables in scope at this position
-                    items.addAll(getLocalVariableCompletions(state, position))
+                // Check if we're inside a function call (after '{')
+                val argCompletions = if (state != null) {
+                    getFunctionArgumentCompletions(state, position)
+                } else {
+                    emptyList()
                 }
 
-                // Add stdlib suggestions
-                items.addAll(getStdlibCompletions())
-            }
+                if (argCompletions.isNotEmpty()) {
+                    // If we're completing function arguments, prioritize those
+                    items.addAll(argCompletions)
+                } else {
+                    // Standard completions
+                    // Add keywords
+                    items.addAll(getKeywordCompletions())
 
-            Either.forLeft(items)
+                    // Add bindings from current document (top-level + imports)
+                    if (state != null) {
+                        items.addAll(getBindingCompletions(state))
+
+                        // Add local variables in scope at this position
+                        items.addAll(getLocalVariableCompletions(state, position))
+
+                        // Add variant constructors from visible types
+                        items.addAll(getVariantConstructorCompletions(state))
+                    }
+
+                    // Add stdlib suggestions
+                    items.addAll(getStdlibCompletions())
+                }
+
+                Either.forLeft(items)
+            }
         }
     }
 
@@ -850,9 +866,60 @@ class MezzeTextDocumentService(
                 insertText = "$fieldName = "
                 sortText = "1_${index.toString().padStart(3, '0')}"
             })
+
+            // If the field type is a variant, also suggest "fieldName = Constructor" shortcuts
+            val variantCompletions = getVariantCompletionsForFieldType(fieldType, fieldName, state, index)
+            items.addAll(variantCompletions)
         }
 
         return items
+    }
+
+    /**
+     * Get variant constructor completions for a specific field in a function call.
+     * E.g., for `my_func { status = | }`, if status is type `| Active, Inactive |`,
+     * suggest `status = Active` and `status = Inactive`.
+     */
+    private fun getVariantCompletionsForFieldType(
+        fieldType: MezzeType,
+        fieldName: String,
+        state: DocumentState,
+        fieldIndex: Int
+    ): List<CompletionItem> {
+        val variantType = when (fieldType) {
+            is MezzeType.VariantType -> fieldType
+            is MezzeType.TypeApplication -> findVariantTypeFromApplication(fieldType, state)
+            else -> null
+        } ?: return emptyList()
+
+        val typeDeclarations = (state.typeCheckResult?.program ?: state.ast)?.items
+            ?.filterIsInstance<TypeDeclaration>() ?: emptyList()
+
+        return variantType.constructors.entries.mapIndexed { constructorIndex, (constructorName, payload) ->
+            CompletionItem("$fieldName = $constructorName").apply {
+                kind = CompletionItemKind.EnumMember
+                sortText = "2_${fieldIndex.toString().padStart(3, '0')}_${constructorIndex.toString().padStart(3, '0')}"
+
+                if (payload != null) {
+                    // Constructor has payload
+                    val payloadStr = when (payload) {
+                        is MezzeType.RecordType -> {
+                            val fields = payload.fields.keys.mapIndexed { i, field ->
+                                "$field = \${${i + 1}:}"
+                            }.joinToString(", ")
+                            " { $fields }"
+                        }
+                        else -> " { \${1:value} }"
+                    }
+                    detail = prettyPrintTypeWithAliases(fieldType, state.typeAliases, false, typeDeclarations)
+                    insertText = "$fieldName = $constructorName$payloadStr"
+                    insertTextFormat = InsertTextFormat.Snippet
+                } else {
+                    detail = prettyPrintTypeWithAliases(fieldType, state.typeAliases, false, typeDeclarations)
+                    insertText = "$fieldName = $constructorName"
+                }
+            }
+        }
     }
 
     /**
@@ -1205,6 +1272,265 @@ class MezzeTextDocumentService(
             }
             else -> {}
         }
+    }
+
+    /**
+     * Get variant constructor completions for match patterns.
+     * Detects when cursor is after 'match X is' and suggests constructors based on X's type.
+     */
+    private fun getMatchPatternCompletions(state: DocumentState, position: Position): List<CompletionItem> {
+        val lines = state.content.lines()
+        if (position.line >= lines.size) return emptyList()
+
+        // Look backwards to find 'match X is' pattern
+        val matchContext = findMatchContext(lines, position) ?: return emptyList()
+
+        // Find the type of the scrutinee
+        val result = state.typeCheckResult ?: return emptyList()
+        val scrutineeType = findExpressionType(matchContext.scrutinee, result, state)
+            ?: return emptyList()
+
+        // If it's a variant type, suggest constructors
+        return getVariantConstructorCompletionsForType(scrutineeType, state)
+    }
+
+    /**
+     * Context information for a match expression being edited.
+     */
+    private data class MatchContext(
+        val scrutinee: String,  // The expression being matched (e.g., "tree", "option")
+        val existingPatterns: Set<String>  // Patterns already used in this match
+    )
+
+    /**
+     * Find the match expression context at the current position.
+     * Returns the scrutinee expression and any already-matched patterns.
+     */
+    private fun findMatchContext(lines: List<String>, position: Position): MatchContext? {
+        // Build the text from current line back to find 'match ... is'
+        val currentLineText = lines[position.line].substring(0, minOf(position.character, lines[position.line].length))
+
+        // Search backwards for 'match X is' pattern
+        var searchText = ""
+        for (i in position.line downTo maxOf(0, position.line - 20)) {
+            val line = if (i == position.line) currentLineText else lines[i]
+            searchText = line + "\n" + searchText
+        }
+
+        // Look for 'match <expr> is' pattern
+        // The pattern might be: match expr is, match (expr) is, match func { ... } is, etc.
+        val matchRegex = Regex("""match\s+(\S+(?:\s*\{[^}]*\})?)\s+is""", RegexOption.DOT_MATCHES_ALL)
+        val matchResult = matchRegex.findAll(searchText).lastOrNull() ?: return null
+
+        val scrutinee = matchResult.groupValues[1].trim()
+
+        // Find existing patterns in this match (to avoid suggesting them again)
+        // Look for patterns like: Constructor ->, Constructor { ... } ->
+        val existingPatterns = mutableSetOf<String>()
+        val afterMatch = searchText.substringAfter("is", "")
+        val patternRegex = Regex("""^\s*([A-Z][a-zA-Z0-9_]*)(?:\s*\{[^}]*\})?\s*->""", RegexOption.MULTILINE)
+        patternRegex.findAll(afterMatch).forEach { result ->
+            existingPatterns.add(result.groupValues[1])
+        }
+
+        return MatchContext(scrutinee, existingPatterns)
+    }
+
+    /**
+     * Find the type of an expression by name (variable lookup).
+     */
+    private fun findExpressionType(exprName: String, result: TypeCheckResult, state: DocumentState): MezzeType? {
+        // Clean up the expression name (might have braces or other syntax)
+        val cleanName = exprName.trim().split(Regex("""\s*\{""")).firstOrNull()?.trim() ?: exprName
+
+        // Check local bindings
+        val binding = result.program.items
+            .filterIsInstance<LetBinding>()
+            .filter { it.isSimpleBinding }
+            .find { it.variableName == cleanName }
+
+        if (binding?.inferredType != null) {
+            return unwrapType(binding.inferredType!!)
+        }
+
+        // Check imports
+        val import = result.resolvedImports.find { it.localName == cleanName }
+        if (import != null) {
+            return unwrapType(import.type)
+        }
+
+        // Check function parameters - need to find the enclosing function
+        // This is a simplified check; for full accuracy would need AST traversal
+        return null
+    }
+
+    /**
+     * Unwrap wrapper types (like SuspendedType) to get the underlying type.
+     */
+    private fun unwrapType(type: MezzeType): MezzeType {
+        return when (type) {
+            is MezzeType.SuspendedType -> unwrapType(type.valueType)
+            else -> type
+        }
+    }
+
+    /**
+     * Get variant constructor completions for a specific variant type.
+     */
+    private fun getVariantConstructorCompletionsForType(type: MezzeType, state: DocumentState): List<CompletionItem> {
+        val variantType = when (type) {
+            is MezzeType.VariantType -> type
+            is MezzeType.TypeApplication -> {
+                // Type application like Option<Int> - need to find the underlying variant
+                findVariantTypeFromApplication(type, state)
+            }
+            else -> null
+        } ?: return emptyList()
+
+        val items = mutableListOf<CompletionItem>()
+        val typeDeclarations = (state.typeCheckResult?.program ?: state.ast)?.items
+            ?.filterIsInstance<TypeDeclaration>() ?: emptyList()
+
+        variantType.constructors.entries.forEachIndexed { index, (name, payload) ->
+            val item = CompletionItem(name).apply {
+                kind = CompletionItemKind.EnumMember
+                sortText = index.toString().padStart(3, '0')
+
+                if (payload != null) {
+                    // Constructor has payload - suggest with destructuring
+                    val payloadStr = when (payload) {
+                        is MezzeType.RecordType -> {
+                            val fields = payload.fields.keys.mapIndexed { i, field ->
+                                "$field = \${${i + 1}:}"
+                            }.joinToString(", ")
+                            " { $fields }"
+                        }
+                        else -> {
+                            val typeStr = prettyPrintTypeWithAliases(payload, state.typeAliases, false, typeDeclarations)
+                            " { \${1:value}: $typeStr }"
+                        }
+                    }
+                    detail = "with payload"
+                    insertText = name + payloadStr
+                    insertTextFormat = InsertTextFormat.Snippet
+                } else {
+                    // No payload
+                    detail = "unit constructor"
+                    insertText = name
+                }
+            }
+            items.add(item)
+        }
+
+        // Add wildcard pattern at the end
+        items.add(CompletionItem("_").apply {
+            kind = CompletionItemKind.Keyword
+            detail = "wildcard (matches anything)"
+            insertText = "_ -> \${1:}"
+            insertTextFormat = InsertTextFormat.Snippet
+            sortText = "zzz"  // Show last
+        })
+
+        return items
+    }
+
+    /**
+     * Find the variant type from a type application (e.g., Option<Int> -> | Some, None |)
+     */
+    private fun findVariantTypeFromApplication(typeApp: MezzeType.TypeApplication, state: DocumentState): MezzeType.VariantType? {
+        val typeName = typeApp.constructor
+        val program = state.typeCheckResult?.program ?: state.ast ?: return null
+
+        // Find the type declaration
+        val typeDecl = program.items
+            .filterIsInstance<TypeDeclaration>()
+            .find { it.name == typeName }
+
+        // Check the type definition
+        return when (val def = typeDecl?.definition) {
+            is VariantDefinition -> {
+                // Build variant type from declaration
+                // Note: VariantConstructorDef has dataType (TypeAnnotation), not a MezzeType
+                // For now, we just track the constructor names - payload handling would need type resolution
+                val constructors = def.constructors.associate { constructor ->
+                    constructor.name to null  // Simplified - we don't resolve TypeAnnotation to MezzeType here
+                }
+                MezzeType.VariantType(constructors, null)
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Get all visible variant constructors as completions.
+     * Useful for general code completion where a variant value is expected.
+     */
+    private fun getVariantConstructorCompletions(state: DocumentState): List<CompletionItem> {
+        val program = state.typeCheckResult?.program ?: state.ast ?: return emptyList()
+        val typeDeclarations = program.items.filterIsInstance<TypeDeclaration>()
+
+        val items = mutableListOf<CompletionItem>()
+
+        // Add constructors from local type declarations
+        for (typeDecl in typeDeclarations) {
+            when (val def = typeDecl.definition) {
+                is VariantDefinition -> {
+                    for (constructor in def.constructors) {
+                        items.add(CompletionItem(constructor.name).apply {
+                            kind = CompletionItemKind.EnumMember
+                            detail = typeDecl.name
+
+                            if (constructor.dataType != null) {
+                                // Has payload - suggest with braces
+                                insertText = "${constructor.name} { \${1:} }"
+                                insertTextFormat = InsertTextFormat.Snippet
+                            } else {
+                                insertText = constructor.name
+                            }
+                        })
+                    }
+                }
+                else -> {}
+            }
+        }
+
+        // Add Bool constructors (built-in)
+        items.add(CompletionItem("True").apply {
+            kind = CompletionItemKind.EnumMember
+            detail = "Bool"
+        })
+        items.add(CompletionItem("False").apply {
+            kind = CompletionItemKind.EnumMember
+            detail = "Bool"
+        })
+
+        // Add Option constructors (commonly used)
+        items.add(CompletionItem("Some").apply {
+            kind = CompletionItemKind.EnumMember
+            detail = "Option"
+            insertText = "Some { value = \${1:} }"
+            insertTextFormat = InsertTextFormat.Snippet
+        })
+        items.add(CompletionItem("None").apply {
+            kind = CompletionItemKind.EnumMember
+            detail = "Option"
+        })
+
+        // Add Result constructors (commonly used)
+        items.add(CompletionItem("Ok").apply {
+            kind = CompletionItemKind.EnumMember
+            detail = "Result"
+            insertText = "Ok { value = \${1:} }"
+            insertTextFormat = InsertTextFormat.Snippet
+        })
+        items.add(CompletionItem("Err").apply {
+            kind = CompletionItemKind.EnumMember
+            detail = "Result"
+            insertText = "Err { error = \${1:} }"
+            insertTextFormat = InsertTextFormat.Snippet
+        })
+
+        return items
     }
 
     private fun getStdlibCompletions(): List<CompletionItem> {
