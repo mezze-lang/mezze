@@ -429,7 +429,6 @@ class AbilityOrphanRulesTest {
     }
 
     @Test
-    @Disabled("Cross-module ability impl visibility requires more complex module loading setup")
     fun `ability impl is visible when type is imported`() {
         // Impl should be auto-visible when you import the type
 
@@ -458,6 +457,7 @@ class AbilityOrphanRulesTest {
             use person::{Person}
 
             # Should be able to use impl Show Person - it comes with Person
+            # No type annotation needed - Person is in scope, impl should be found
             let p = { name = "Alice" }
             let result = Show.show { val = p }
         """.trimIndent())

@@ -985,17 +985,29 @@ class ConstraintSolver(
         // Context is now keyed by content hash, so we search by ability name and match types
         val typeNames = typeArgs.map { getTypeName(it) }
 
-        // Build alternative type names for variant types that might match by constructor name
+        // Build alternative type names for types that might match by alias
         val alternativeTypeNames = typeArgs.mapIndexed { index, type ->
-            if (type is MezzeType.VariantType && type.typeName == null) {
-                // Include all constructor names as alternatives
-                type.constructors.keys.toList()
-            } else {
-                listOf(typeNames[index])
+            when {
+                // For variant types without a typeName, try constructor names
+                type is MezzeType.VariantType && type.typeName == null -> {
+                    type.constructors.keys.toList()
+                }
+                // For record types without a typeName, check if any type alias matches
+                type is MezzeType.RecordType && type.typeName == null -> {
+                    val matchingAliases = findMatchingRecordTypeAliases(type)
+                    if (matchingAliases.isNotEmpty()) {
+                        listOf(typeNames[index]) + matchingAliases
+                    } else {
+                        listOf(typeNames[index])
+                    }
+                }
+                else -> listOf(typeNames[index])
             }
         }
 
-        val hasImpl = context.getAbilityImpls(abilityName).any { implInfo ->
+        val impls = context.getAbilityImpls(abilityName)
+
+        val hasImpl = impls.any { implInfo ->
             // Check exact match first
             if (implInfo.targetTypes == typeNames) return@any true
 
@@ -1025,6 +1037,37 @@ class ConstraintSolver(
         return implTargetTypes.zip(alternativeTypeNames).all { (implType, alternatives) ->
             alternatives.contains(implType)
         }
+    }
+
+    /**
+     * Find type aliases that match the given record type structure.
+     *
+     * When a record literal `{ name = "Alice" }` is created without a type annotation,
+     * it has no typeName. But if there's a type alias `Person = { name: String }` in scope,
+     * we should be able to find impls for `Person`.
+     */
+    private fun findMatchingRecordTypeAliases(recordType: MezzeType.RecordType): List<String> {
+        val matchingAliases = mutableListOf<String>()
+
+        for ((aliasName, typeDecl) in typeDeclarations) {
+            val definition = typeDecl.definition
+            if (definition is RecordDefinition) {
+                // Check if fields match
+                val aliasFields = definition.fields.associate { it.name to it.type }
+
+                // Same number of fields?
+                if (aliasFields.size != recordType.fields.size) continue
+
+                // Same field names?
+                if (aliasFields.keys != recordType.fields.keys) continue
+
+                // For now, just check field names match (not full type compatibility)
+                // Full type checking would require recursive unification
+                matchingAliases.add(aliasName)
+            }
+        }
+
+        return matchingAliases
     }
 
     /**

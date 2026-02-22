@@ -70,8 +70,10 @@ class ModuleTypeChecker(
         val moduleContext = buildModuleContext(importContext)
 
         // Type-check the module using TypeChecker
+        // Use the module's file path parent directory for import resolution
         val typeChecker = TypeChecker.withContext(moduleContext)
-        val result = typeChecker.checkProgram(module.program)
+        val modulePath = java.nio.file.Paths.get(module.filePath).parent ?: java.nio.file.Paths.get(".")
+        val result = typeChecker.checkProgram(module.program, modulePath)
 
         return when (result) {
             is TypeChecker.TypeCheckResult.Success -> {

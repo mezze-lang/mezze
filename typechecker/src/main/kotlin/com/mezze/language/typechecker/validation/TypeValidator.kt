@@ -39,7 +39,7 @@ class TypeValidator(
     private val effectDeclarations: Map<String, EffectDeclaration> = emptyMap(),
     private val implDeclarations: Map<String, ImplDeclaration> = emptyMap()
 ) {
-    private val abilityResolver = AbilityResolver(context)
+    private val abilityResolver = AbilityResolver(context, typeDeclarations)
     private val effectValidator = EffectValidator(context)
     private val codecGenerator = CodecGenerator()
 
@@ -410,6 +410,20 @@ class TypeValidator(
                 continue
             }
 
+            // Check for match via type alias - if the type is a record without typeName,
+            // check if any type alias in scope matches its structure
+            val hasAliasMatch = if (implTypeParts.size == 1 && concreteType is MezzeType.RecordType && concreteType.typeName == null) {
+                val matchingAliases = findMatchingRecordTypeAliases(concreteType)
+                context.getAbilityImpls(abilityName).any { implInfo ->
+                    implInfo.targetTypes.size == 1 && matchingAliases.contains(implInfo.targetTypes[0])
+                }
+            } else {
+                false
+            }
+            if (hasAliasMatch) {
+                continue
+            }
+
             // For multi-parameter abilities, try to find a partial match
             // For example, if we're looking for Convert_Int and there's Convert_Int_String, that's a match
             val hasPartialMatch = if (implTypeParts.size == 1 && constraint.typeArgs.isNotEmpty()) {
@@ -473,6 +487,37 @@ class TypeValidator(
             implInfo.targetTypes.size >= knownTypeParts.size &&
             implInfo.targetTypes.take(knownTypeParts.size) == knownTypeParts
         }
+    }
+
+    /**
+     * Find type aliases that match the given record type structure.
+     *
+     * When a record literal `{ name = "Alice" }` is created without a type annotation,
+     * it has no typeName. But if there's a type alias `Person = { name: String }` in scope,
+     * we should be able to find impls for `Person`.
+     */
+    private fun findMatchingRecordTypeAliases(recordType: MezzeType.RecordType): List<String> {
+        val matchingAliases = mutableListOf<String>()
+
+        for ((aliasName, typeDecl) in typeDeclarations) {
+            val definition = typeDecl.definition
+            if (definition is RecordDefinition) {
+                // Check if fields match
+                val aliasFields = definition.fields.associate { it.name to it.type }
+
+                // Same number of fields?
+                if (aliasFields.size != recordType.fields.size) continue
+
+                // Same field names?
+                if (aliasFields.keys != recordType.fields.keys) continue
+
+                // For now, just check field names match (not full type compatibility)
+                // Full type checking would require recursive unification
+                matchingAliases.add(aliasName)
+            }
+        }
+
+        return matchingAliases
     }
 
     /**

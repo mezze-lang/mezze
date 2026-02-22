@@ -24,7 +24,8 @@ import com.mezze.language.typechecker.context.TypingContext
  * 3. Are ability constraints from functions satisfied?
  */
 class AbilityResolver(
-    private val context: TypingContext
+    private val context: TypingContext,
+    private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap()
 ) {
     private val codecGenerator = CodecGenerator()
     /**
@@ -543,8 +544,13 @@ class AbilityResolver(
             possibleTypeNames.addAll(type.constructors.keys)
         }
 
-        // For record types without a typeName set, there's no good fallback
-        // The user must define the impl with the structural type or use a type alias
+        // For record types without a typeName set, check if any type alias in scope
+        // matches the record's structure. This allows `{ name = "Alice" }` to match
+        // `impl Show Person` when `type Person = { name: String }` is in scope.
+        if (type is MezzeType.RecordType && type.typeName == null) {
+            val matchingAliases = findMatchingRecordTypeAliases(type)
+            possibleTypeNames.addAll(matchingAliases)
+        }
 
         // Search for implementation by ability name and matching types
         // (ability impls are now keyed by content hash, so we search by ability name)
@@ -577,5 +583,36 @@ class AbilityResolver(
                 "Add an implementation: impl $abilityName $typeName { ... }"
             )
         )
+    }
+
+    /**
+     * Find type aliases that match the given record type structure.
+     *
+     * When a record literal `{ name = "Alice" }` is created without a type annotation,
+     * it has no typeName. But if there's a type alias `Person = { name: String }` in scope,
+     * we should be able to find impls for `Person`.
+     */
+    private fun findMatchingRecordTypeAliases(recordType: MezzeType.RecordType): List<String> {
+        val matchingAliases = mutableListOf<String>()
+
+        for ((aliasName, typeDecl) in typeDeclarations) {
+            val definition = typeDecl.definition
+            if (definition is RecordDefinition) {
+                // Check if fields match
+                val aliasFields = definition.fields.associate { it.name to it.type }
+
+                // Same number of fields?
+                if (aliasFields.size != recordType.fields.size) continue
+
+                // Same field names?
+                if (aliasFields.keys != recordType.fields.keys) continue
+
+                // For now, just check field names match (not full type compatibility)
+                // Full type checking would require recursive unification
+                matchingAliases.add(aliasName)
+            }
+        }
+
+        return matchingAliases
     }
 }
