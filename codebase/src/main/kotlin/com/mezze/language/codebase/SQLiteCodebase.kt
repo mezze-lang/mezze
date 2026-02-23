@@ -183,8 +183,9 @@ class SQLiteCodebase private constructor(
             stmt.executeUpdate("PRAGMA temp_store=MEMORY")
             // Increase cache size (negative = KB)
             stmt.executeUpdate("PRAGMA cache_size=-64000")  // 64MB
-            // Enable foreign keys
-            stmt.executeUpdate("PRAGMA foreign_keys=ON")
+            // Disable foreign keys - this is a cache, not a source of truth
+            // FK constraints cause issues when updating definitions (hash changes)
+            stmt.executeUpdate("PRAGMA foreign_keys=OFF")
             // Memory-mapped I/O
             stmt.executeUpdate("PRAGMA mmap_size=268435456")  // 256MB
         }
