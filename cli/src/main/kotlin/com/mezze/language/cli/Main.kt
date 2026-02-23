@@ -611,9 +611,6 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
             val typeAliases = typeChecker.getTypeAliases()
 
             printFileCheckSuccess(result, typeAliases)
-            if (codebaseUpdated) {
-                println("📦 Updated .mez/codebase.db")
-            }
             println()
             println("Parse: ${String.format("%.2f", parseTime)}ms  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
         }
@@ -817,9 +814,6 @@ private fun handlePackageCheck(quietMode: Boolean, appName: String? = null) {
             println("OK (${String.format("%.2f", totalTime)}ms)")
         } else {
             println("Type check passed: ${appConfig.name}")
-            if (codebaseUpdated) {
-                println("📦 Updated .mez/codebase.db")
-            }
             println("Time: ${String.format("%.2f", totalTime)}ms")
         }
     } catch (e: TypeCheckError) {
@@ -1096,8 +1090,7 @@ private fun handleExecCommand(args: List<String>) {
     )
 
     try {
-        // Suppress Truffle warnings for native binary (interpreter-only mode is expected)
-        System.setProperty("polyglot.engine.WarnInterpreterOnly", "false")
+        // Suppress verbose Truffle logging (JIT compilation is enabled via truffle-runtime)
         System.setProperty("polyglot.log.level", "OFF")
 
         // Execute using the interpreter directly with the already type-checked AST

@@ -1516,7 +1516,10 @@ class ExpressionConstraintGenerator {
             return ConstraintResult(
                 type = resultType,
                 constraints = constraints,
-                undefinedVariables = payloadResult.undefinedVariables
+                undefinedVariables = payloadResult.undefinedVariables,
+                usedVariables = payloadResult.usedVariables,
+                abilityConstraints = payloadResult.abilityConstraints,
+                referencedBindings = payloadResult.referencedBindings
             )
         }
     }
