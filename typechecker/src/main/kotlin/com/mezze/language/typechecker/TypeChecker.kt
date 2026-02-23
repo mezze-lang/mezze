@@ -181,6 +181,7 @@ class TypeChecker(
 
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
+        var loadedModules: Map<String, TypedModule> = emptyMap()
         val enhancedContext = if (hasImports(program)) {
             val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
             // CRITICAL FIX: Pass the ModuleResolver to ModuleTypeChecker so it can update
@@ -196,6 +197,7 @@ class TypeChecker(
             when (importResult) {
                 is ImportResolutionResult.Success -> {
                     importContext = importResult.importContext
+                    loadedModules = importResult.loadedModules
                     // Merge import context with parent context
                     mergeImportContext(parentContext, importResult.importContext)
                 }
@@ -330,11 +332,18 @@ class TypeChecker(
                     "Undefined variable: ${undefinedVar.name}. " +
                     "Did you mean to call an effect operation? Use: $effectName.${undefinedVar.name}"
                 } else {
-                    val similarNames = validator.findSimilarNames(undefinedVar.name, allVariables.keys.toList())
-                    buildString {
-                        append("Undefined variable or function: ${undefinedVar.name}")
-                        if (similarNames.isNotEmpty()) {
-                            append(". Did you mean: ${similarNames.joinToString()}")
+                    // Check if this is a qualified name (module::function) referring to a private item
+                    val privateItemMessage = checkIfPrivateQualifiedItem(undefinedVar.name, loadedModules, importContext)
+
+                    if (privateItemMessage != null) {
+                        privateItemMessage
+                    } else {
+                        val similarNames = validator.findSimilarNames(undefinedVar.name, allVariables.keys.toList())
+                        buildString {
+                            append("Undefined variable or function: ${undefinedVar.name}")
+                            if (similarNames.isNotEmpty()) {
+                                append(". Did you mean: ${similarNames.joinToString()}")
+                            }
                         }
                     }
                 }
@@ -616,6 +625,7 @@ class TypeChecker(
 
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
+        var loadedModules: Map<String, TypedModule> = emptyMap()
         val enhancedContext = if (hasImports(program)) {
             val moduleLoader = ModuleLoader.fromPath(currentPath.toString())
             val moduleTypeChecker = ModuleTypeChecker.withContextAndResolver(
@@ -629,6 +639,7 @@ class TypeChecker(
             when (importResult) {
                 is ImportResolutionResult.Success -> {
                     importContext = importResult.importContext
+                    loadedModules = importResult.loadedModules
                     mergeImportContext(parentContext, importResult.importContext)
                 }
                 is ImportResolutionResult.Failure -> {
@@ -636,8 +647,12 @@ class TypeChecker(
                     importResult.errors.forEach { moduleError ->
                         // Convert ModuleError to TypeCheckError
                         // Extract source location if available
-                        val sourceLocation = (moduleError as? ModuleError.ExportNotFound)?.sourceLocation
-                            ?: (moduleError as? ModuleError.InternalModuleAccess)?.sourceLocation
+                        val sourceLocation = when (moduleError) {
+                            is ModuleError.ExportNotFound -> moduleError.sourceLocation
+                            is ModuleError.InternalModuleAccess -> moduleError.sourceLocation
+                            is ModuleError.PrivateExport -> moduleError.sourceLocation
+                            else -> null
+                        }
                         allErrors.add(TypeCheckError(
                             phase = "Import",
                             message = moduleError.message,
@@ -749,13 +764,20 @@ class TypeChecker(
                 "Undefined variable: ${undefinedVar.name}. " +
                 "Did you mean to call an effect operation? Use: $effectName.${undefinedVar.name}"
             } else {
-                val validator = TypeValidator(context, allTypeDeclarations, allEffectDeclarations, buildResult.implDeclarations)
-                val allVariables = context.getAllBindings()
-                val similarNames = validator.findSimilarNames(undefinedVar.name, allVariables.keys.toList())
-                buildString {
-                    append("Undefined variable or function: ${undefinedVar.name}")
-                    if (similarNames.isNotEmpty()) {
-                        append(". Did you mean: ${similarNames.joinToString()}")
+                // Check if this is a qualified name (module::function) referring to a private item
+                val privateItemMessage = checkIfPrivateQualifiedItem(undefinedVar.name, loadedModules, importContext)
+
+                if (privateItemMessage != null) {
+                    privateItemMessage
+                } else {
+                    val validator = TypeValidator(context, allTypeDeclarations, allEffectDeclarations, buildResult.implDeclarations)
+                    val allVariables = context.getAllBindings()
+                    val similarNames = validator.findSimilarNames(undefinedVar.name, allVariables.keys.toList())
+                    buildString {
+                        append("Undefined variable or function: ${undefinedVar.name}")
+                        if (similarNames.isNotEmpty()) {
+                            append(". Did you mean: ${similarNames.joinToString()}")
+                        }
                     }
                 }
             }
@@ -1080,6 +1102,95 @@ class TypeChecker(
         return program.items.any { item ->
             item is UseDeclaration || item is PubUseDeclaration
         }
+    }
+
+    /**
+     * Check if a qualified name (like "module::function") refers to an item
+     * that exists in the module but isn't public.
+     *
+     * @return An error message if the item exists but isn't public, null otherwise.
+     */
+    private fun checkIfPrivateQualifiedItem(
+        name: String,
+        loadedModules: Map<String, TypedModule>,
+        importContext: ModuleImportContext?
+    ): String? {
+        // Only check qualified names (containing ::)
+        if (!name.contains("::")) return null
+
+        // Parse the qualified name into module qualifier and item name
+        // Examples: "int::to_string" -> qualifier="int", itemName="to_string"
+        //           "std::int::to_string" -> qualifier="std::int", itemName="to_string"
+        val lastDoubleColon = name.lastIndexOf("::")
+        if (lastDoubleColon == -1) return null
+
+        val qualifier = name.substring(0, lastDoubleColon)
+        val itemName = name.substring(lastDoubleColon + 2)
+
+        // Find which module this qualifier refers to
+        // The qualifier could be:
+        // 1. A direct module path (e.g., "std::int")
+        // 2. A last-segment alias (e.g., "int" when imported via "use std::int")
+
+        // First, check loaded modules by path
+        val moduleByPath = loadedModules.values.find { module ->
+            module.modulePath == qualifier || module.modulePath.endsWith("::$qualifier")
+        }
+
+        if (moduleByPath != null) {
+            // Check if the item exists in the module's program but isn't exported
+            val existsButNotExported = checkIfItemExistsInModule(moduleByPath, itemName)
+            if (existsButNotExported) {
+                return "'$itemName' exists in module '$qualifier' but is not public. Add 'pub' to export it."
+            }
+        }
+
+        // Also check by matching against imported bindings to find the source module
+        val matchingBinding = importContext?.importedBindings?.entries?.find { (bindingName, _) ->
+            bindingName.startsWith("$qualifier::")
+        }
+
+        if (matchingBinding != null) {
+            val modulePath = matchingBinding.value.modulePath
+            val module = loadedModules[modulePath]
+            if (module != null) {
+                val existsButNotExported = checkIfItemExistsInModule(module, itemName)
+                if (existsButNotExported) {
+                    return "'$itemName' exists in module '$qualifier' but is not public. Add 'pub' to export it."
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Check if an item exists in a module's program but isn't exported.
+     */
+    private fun checkIfItemExistsInModule(module: TypedModule, itemName: String): Boolean {
+        // Check if it's exported - if so, it's not private
+        if (module.exports.containsKey(itemName)) {
+            return false
+        }
+
+        // Check if it exists in the module's program
+        val program = module.program
+        for (item in program.items) {
+            when (item) {
+                is LetBinding -> {
+                    // Only check simple bindings (not destructuring patterns)
+                    if (item.isSimpleBinding && item.variableName == itemName) return true
+                }
+                is TypeDeclaration -> if (item.name == itemName) return true
+                is AbilityDeclaration -> if (item.name == itemName) return true
+                is EffectDeclaration -> if (item.name == itemName) return true
+                is ImplDeclaration -> if (item.performerName == itemName) return true
+                is ImplAbilityDeclaration -> {} // These don't have simple names
+                is UseDeclaration, is PubUseDeclaration, is TopLevelExpression -> {}
+            }
+        }
+
+        return false
     }
 
     /**
