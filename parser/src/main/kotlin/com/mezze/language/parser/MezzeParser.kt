@@ -82,6 +82,18 @@ class MezzeParser(
         ))
     }
 
+    /**
+     * Result of parsing with error recovery.
+     */
+    data class ParseResultWithRecovery(
+        val program: Program,
+        val errors: List<ParseException>,
+        val warnings: List<ParseWarning>
+    ) {
+        val hasErrors: Boolean get() = errors.isNotEmpty()
+        val isSuccess: Boolean get() = errors.isEmpty()
+    }
+
     fun parse(source: String, desugar: Boolean = true, file: String? = null): Program {
         // Store for error reporting in nested parser methods
         currentSource = source
@@ -113,6 +125,112 @@ class MezzeParser(
             currentSource = null
             currentFile = null
         }
+    }
+
+    /**
+     * Parse with error recovery - continues parsing after errors and collects all errors.
+     *
+     * This is useful for IDEs/LSP to show all errors at once instead of stopping at the first one.
+     * Returns a partial AST with successfully parsed items plus a list of all parse errors.
+     */
+    fun parseWithRecovery(source: String, desugar: Boolean = true, file: String? = null): ParseResultWithRecovery {
+        currentSource = source
+        currentFile = file
+        warnings.clear()
+        SyntaxMetadata.clear()
+
+        val errors = mutableListOf<ParseException>()
+        val items = mutableListOf<ProgramItem>()
+
+        try {
+            val lexer = Lexer(source)
+            val tokens = lexer.tokenize()
+            var stream = TokenStream(tokens)
+
+            // Skip leading newlines
+            stream = skipNewlines(stream)
+
+            // Parse top-level items with recovery
+            while (stream.current()?.type != TokenType.EOF) {
+                when (val result = topLevelItem(stream)) {
+                    is ParseResult.Success -> {
+                        items.add(result.value)
+                        stream = skipNewlines(result.remaining)
+                    }
+                    is ParseResult.Failure -> {
+                        // Record the error
+                        errors.add(ParseException(
+                            result.message,
+                            result.position,
+                            result.line,
+                            result.column,
+                            source,
+                            file
+                        ))
+
+                        // Synchronize: skip to next top-level declaration
+                        stream = synchronizeToNextDeclaration(stream)
+                    }
+                }
+            }
+
+            val program = Program(items)
+            val finalProgram = if (desugar && errors.isEmpty()) desugarProgram(program) else program
+
+            return ParseResultWithRecovery(finalProgram, errors, warnings.toList())
+        } finally {
+            currentSource = null
+            currentFile = null
+        }
+    }
+
+    /**
+     * Skip tokens until we find a likely start of a new top-level declaration.
+     * This enables error recovery by jumping past problematic code.
+     */
+    private fun synchronizeToNextDeclaration(stream: TokenStream): TokenStream {
+        var current = stream.advance() // Skip at least one token
+
+        while (current.current()?.type != TokenType.EOF) {
+            val token = current.current() ?: break
+
+            // If we hit a newline followed by a declaration keyword, we've found a sync point
+            if (token.type == TokenType.NEWLINE) {
+                val afterNewline = skipNewlines(current)
+                val nextToken = afterNewline.current()
+
+                if (nextToken != null && isDeclarationStart(nextToken.type)) {
+                    return afterNewline
+                }
+            }
+
+            // Also sync if we directly hit a declaration keyword at start of line
+            // (after skipping bad tokens)
+            if (isDeclarationStart(token.type)) {
+                // Check if this looks like a fresh declaration (not in middle of expression)
+                // Heuristic: if previous was newline or we've skipped several tokens
+                return current
+            }
+
+            current = current.advance()
+        }
+
+        return current
+    }
+
+    /**
+     * Check if a token type typically starts a top-level declaration.
+     */
+    private fun isDeclarationStart(type: TokenType): Boolean {
+        return type in setOf(
+            TokenType.LET,
+            TokenType.TYPE,
+            TokenType.EFFECT,
+            TokenType.ABILITY,
+            TokenType.IMPL,
+            TokenType.USE,
+            TokenType.PUB
+        )
     }
 
     // ===== TOP LEVEL =====

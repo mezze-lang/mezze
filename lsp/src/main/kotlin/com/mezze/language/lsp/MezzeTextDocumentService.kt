@@ -170,19 +170,33 @@ class MezzeTextDocumentService(
         val filePath = uriToPath(uri)
         val fileName = filePath?.fileName?.toString()
 
-        // Step 1: Parse
-        try {
-            ast = parser.parse(content, file = fileName)
-        } catch (e: ParseException) {
+        // Step 1: Parse with error recovery to get ALL parse errors
+        val parseResult = parser.parseWithRecovery(content, file = fileName)
+        ast = parseResult.program
+
+        // Collect all parse errors as diagnostics
+        parseResult.errors.forEach { e ->
             diagnostics.add(createDiagnostic(
-                message = e.message ?: "Parse error",
+                message = e.errorMessage,
                 severity = DiagnosticSeverity.Error,
                 line = e.line - 1,  // LSP is 0-indexed
                 column = e.column - 1,
-                endColumn = e.column + 10  // Approximate
+                endColumn = e.column + e.length
             ))
-            return DocumentState(uri, content, version, null, null, emptyMap(), diagnostics)
         }
+
+        // Collect parse warnings
+        parseResult.warnings.forEach { w ->
+            diagnostics.add(createDiagnostic(
+                message = w.message,
+                severity = DiagnosticSeverity.Warning,
+                line = w.location.line - 1,
+                column = w.location.column - 1
+            ))
+        }
+
+        // If there are parse errors, still try to type check the partial AST
+        // This allows showing both parse errors and any type errors in successfully parsed code
 
         // Step 2: Type check with multi-error recovery
         try {
