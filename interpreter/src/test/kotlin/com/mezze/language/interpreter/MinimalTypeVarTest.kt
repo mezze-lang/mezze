@@ -74,7 +74,7 @@ class MinimalTypeVarTest {
     fun testTypeVarsWithEffectSystem() {
         // Test type variables with the effect system
         val code = """
-            use std::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync}
 
             perform LoomAsync in do
                 let p1 = Async.spawn {f = {} -> 1 * 2}

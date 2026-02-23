@@ -51,7 +51,13 @@ internal val MezzeParser.variablePatternForLet: Parser<Pattern>
                         ident.value.column
                     )
                 } else {
-                    ParseResult.Success(VariablePattern(name), ident.remaining)
+                    ParseResult.Success(
+                        VariablePattern(
+                            name,
+                            SourceLocation(ident.value.line, ident.value.column, length = name.length)
+                        ),
+                        ident.remaining
+                    )
                 }
             }
             is ParseResult.Failure -> ident
@@ -364,7 +370,13 @@ internal val MezzeParser.variablePattern: Parser<Pattern>
                             ident.value.column
                         )
                     } else {
-                        ParseResult.Success(VariablePattern(name), ident.remaining)
+                        ParseResult.Success(
+                            VariablePattern(
+                                name,
+                                SourceLocation(ident.value.line, ident.value.column, length = name.length)
+                            ),
+                            ident.remaining
+                        )
                     }
                 }
             }
@@ -420,12 +432,14 @@ internal val MezzeParser.constructorPattern: Parser<Pattern>
                                             varPat.value.column
                                         )
                                     } else {
+                                        val varLoc = SourceLocation(varPat.value.line, varPat.value.column, length = name.length)
                                         ParseResult.Success(
                                             ConstructorPattern(
                                                 ident.value.text,
                                                 RecordPattern(listOf(
-                                                    RecordPatternEntry("value", VariablePattern(name))
-                                                ), false)  // Shorthand patterns are always closed
+                                                    RecordPatternEntry("value", VariablePattern(name, varLoc), varLoc)
+                                                ), false),  // Shorthand patterns are always closed
+                                                SourceLocation(ident.value.line, ident.value.column, length = ident.value.text.length)
                                             ),
                                             varPat.remaining
                                         )
@@ -519,6 +533,7 @@ internal val MezzeParser.recordPatternEntryParser: Parser<RecordPatternEntry>
                 } else {
                     val stream1 = ident.remaining
                     val assign = tok(TokenType.ASSIGN)(stream1)
+                    val fieldLoc = SourceLocation(ident.value.line, ident.value.column, length = fieldName.length)
 
                     when (assign) {
                         is ParseResult.Success -> {
@@ -526,16 +541,16 @@ internal val MezzeParser.recordPatternEntryParser: Parser<RecordPatternEntry>
                             val pattern = patternParser(assign.remaining)
                             when (pattern) {
                                 is ParseResult.Success -> ParseResult.Success(
-                                    RecordPatternEntry(fieldName, pattern.value),
+                                    RecordPatternEntry(fieldName, pattern.value, fieldLoc),
                                     pattern.remaining
                                 )
                                 is ParseResult.Failure -> pattern
                             }
                         }
                         is ParseResult.Failure -> {
-                            // Punning: field
+                            // Punning: field - the field name IS the binding location
                             ParseResult.Success(
-                                RecordPatternEntry(fieldName, null),
+                                RecordPatternEntry(fieldName, null, fieldLoc),
                                 stream1
                             )
                         }

@@ -52,7 +52,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with single child task`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 Async.scoped {f = {scope} -> do
@@ -67,7 +67,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with multiple child tasks`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 Async.scoped {f = {scope} -> do
@@ -89,7 +89,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped returns function result`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 Async.scoped {f = {scope} -> do
@@ -105,7 +105,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with no child tasks`() {
         val code = """
-            use std::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync}
 
             perform LoomAsync in do
                 Async.scoped {f = {scope} -> 42}
@@ -117,7 +117,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test nested scopes`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 Async.scoped {f = {scope} -> do
@@ -139,7 +139,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with mixed spawn and join`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 Async.scoped {f = {scope} -> do
@@ -166,7 +166,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test multiple sequential scoped blocks`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 let r1 = Async.scoped {f = {scope} -> do
@@ -193,7 +193,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped computation inside spawned task`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 Async.scoped {f = {scope} -> do
@@ -218,7 +218,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with concurrent computation returning record`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 Async.scoped {f = {scope} -> do
@@ -238,7 +238,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test scoped with closure capturing outer variable`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 let multiplier = 10
@@ -254,7 +254,7 @@ class ScopedConcurrencyTest {
     @Test
     fun `test deeply nested scopes`() {
         val code = """
-            use std::async::{Async, LoomAsync, scope_spawn}
+            use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
                 Async.scoped {f = {scope} -> do

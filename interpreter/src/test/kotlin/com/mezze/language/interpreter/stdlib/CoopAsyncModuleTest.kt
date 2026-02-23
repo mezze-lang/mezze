@@ -56,7 +56,7 @@ class CoopAsyncModuleTest {
     @Test
     fun `test CoopAsync handler with Async effect`() {
         val result = eval("""
-            use std::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync}
             use std::control::continuation
 
             perform CoopAsync { cont = continuation::new {} } in do
@@ -69,7 +69,7 @@ class CoopAsyncModuleTest {
     @Test
     fun `test CoopAsync handler multiple spawns`() {
         val result = eval("""
-            use std::async::{Async, CoopAsync}
+            use std::effects::async::{Async, CoopAsync}
             use std::control::continuation
 
             perform CoopAsync { cont = continuation::new {} } in do

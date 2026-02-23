@@ -50,6 +50,8 @@ object LoomImplementations {
     fun registerAll(context: MutableMap<String, MezzeValue>) {
         registerSpawn(context)
         registerSpawnCfg(context)
+        registerSpawnAll(context)
+        registerSpawnRace(context)
         registerAwait(context)
         registerRace(context)
         registerAll_(context)
@@ -239,6 +241,166 @@ object LoomImplementations {
                     "f must be a function, got: ${computation::class.simpleName}"
                 )
             }
+        }
+    }
+
+    /**
+     * __native_loom_spawn_all - Spawn all computations and wait for all to complete.
+     *
+     * Takes: { fs: [{} -> 'a] }
+     * Returns: ['a]
+     *
+     * Spawns all computations on virtual threads in parallel, waits for all to complete,
+     * and returns array of results in the same order as input.
+     */
+    private fun registerSpawnAll(context: MutableMap<String, MezzeValue>) {
+        context["__native_loom_spawn_all"] = NativeMezzeFunction("__native_loom_spawn_all") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_loom_spawn_all", "expects MezzeRecord")
+
+            val fs = record.fields["fs"]
+                ?: throw NativeFunctionException("__native_loom_spawn_all", "expects 'fs' field")
+
+            val computations = when (fs) {
+                is MezzeArrayList -> fs.toList()
+                else -> throw NativeFunctionException("__native_loom_spawn_all", "fs must be an array")
+            }
+
+            val env = TruffleContextHolder.getEnv()
+                ?: throw NativeFunctionException("__native_loom_spawn_all", "No Truffle environment available")
+
+            // Spawn all computations in parallel
+            val promises = computations.map { computation ->
+                when (computation) {
+                    is MezzeTruffleFunction -> {
+                        val future = CompletableFuture<MezzeValue>()
+                        val thread = env.newTruffleThreadBuilder {
+                            try {
+                                val result = computation.callTarget.call(
+                                    MezzeRecord(emptyMap()),
+                                    computation.closureVariables,
+                                    computation.lexicalScope,
+                                    computation.lexicalScopeSlotMap
+                                ) as MezzeValue
+                                future.complete(result)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                future.completeExceptionally(e)
+                            }
+                        }
+                            .virtual(true)
+                            .build()
+                        thread.start()
+                        MezzePromise(future)
+                    }
+                    is NativeMezzeFunction -> {
+                        val future = CompletableFuture<MezzeValue>()
+                        val thread = env.newTruffleThreadBuilder {
+                            try {
+                                val result = computation.call(listOf(MezzeRecord(emptyMap())))
+                                future.complete(result)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                future.completeExceptionally(e)
+                            }
+                        }
+                            .virtual(true)
+                            .build()
+                        thread.start()
+                        MezzePromise(future)
+                    }
+                    else -> throw NativeFunctionException(
+                        "__native_loom_spawn_all",
+                        "computation must be a function, got: ${computation::class.simpleName}"
+                    )
+                }
+            }
+
+            // Wait for all to complete and collect results
+            val results = promises.map { it.await() }
+            MezzeArrayList(results)
+        }
+    }
+
+    /**
+     * __native_loom_spawn_race - Spawn all computations and return first result.
+     *
+     * Takes: { fs: [{} -> 'a] }
+     * Returns: 'a
+     *
+     * Spawns all computations on virtual threads in parallel and returns the first result.
+     */
+    private fun registerSpawnRace(context: MutableMap<String, MezzeValue>) {
+        context["__native_loom_spawn_race"] = NativeMezzeFunction("__native_loom_spawn_race") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_loom_spawn_race", "expects MezzeRecord")
+
+            val fs = record.fields["fs"]
+                ?: throw NativeFunctionException("__native_loom_spawn_race", "expects 'fs' field")
+
+            val computations = when (fs) {
+                is MezzeArrayList -> fs.toList()
+                else -> throw NativeFunctionException("__native_loom_spawn_race", "fs must be an array")
+            }
+
+            if (computations.isEmpty()) {
+                throw NativeFunctionException("__native_loom_spawn_race", "cannot race empty list")
+            }
+
+            val env = TruffleContextHolder.getEnv()
+                ?: throw NativeFunctionException("__native_loom_spawn_race", "No Truffle environment available")
+
+            // Spawn all computations in parallel
+            val promises = computations.map { computation ->
+                when (computation) {
+                    is MezzeTruffleFunction -> {
+                        val future = CompletableFuture<MezzeValue>()
+                        val thread = env.newTruffleThreadBuilder {
+                            try {
+                                val result = computation.callTarget.call(
+                                    MezzeRecord(emptyMap()),
+                                    computation.closureVariables,
+                                    computation.lexicalScope,
+                                    computation.lexicalScopeSlotMap
+                                ) as MezzeValue
+                                future.complete(result)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                future.completeExceptionally(e)
+                            }
+                        }
+                            .virtual(true)
+                            .build()
+                        thread.start()
+                        MezzePromise(future)
+                    }
+                    is NativeMezzeFunction -> {
+                        val future = CompletableFuture<MezzeValue>()
+                        val thread = env.newTruffleThreadBuilder {
+                            try {
+                                val result = computation.call(listOf(MezzeRecord(emptyMap())))
+                                future.complete(result)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                future.completeExceptionally(e)
+                            }
+                        }
+                            .virtual(true)
+                            .build()
+                        thread.start()
+                        MezzePromise(future)
+                    }
+                    else -> throw NativeFunctionException(
+                        "__native_loom_spawn_race",
+                        "computation must be a function, got: ${computation::class.simpleName}"
+                    )
+                }
+            }
+
+            // Race all promises - return first result
+            val futures = promises.map { it.future }
+            val firstFuture = CompletableFuture.anyOf(*futures.toTypedArray())
+            firstFuture.get() as MezzeValue
         }
     }
 

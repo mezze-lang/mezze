@@ -60,7 +60,7 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test structured module can be imported`() {
         val result = eval("""
-            use std::async::structured::{parallel, race, with_timeout, parallel_map, parallel_filter, join2, join3, parallel_for_each}
+            use std::effects::async::structured::{parallel, race, with_timeout, parallel_map, parallel_filter, join2, join3, parallel_for_each}
             42
         """)
         assertEquals(MezzeInt(42), result)
@@ -73,8 +73,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test parallel runs all tasks`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{parallel}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{parallel}
 
             run_coop {computation = {} -> do
                 let tasks = [
@@ -92,8 +92,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test parallel returns results in order`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{parallel}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{parallel}
 
             run_coop {computation = {} -> do
                 let tasks = [
@@ -117,8 +117,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test race returns first completed`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{race}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{race}
 
             run_coop {computation = {} -> do
                 let tasks = [
@@ -129,8 +129,9 @@ class StructuredConcurrencyModuleTest {
                 race {tasks = tasks}
             }
         """)
-        // In coop scheduler, first task completes first
-        assertEquals(MezzeInt(1), result)
+        // Race returns one of the results (order is non-deterministic with real threads)
+        val value = (result as MezzeInt).value
+        assertTrue(value in 1L..3L, "race should return one of 1, 2, or 3, got $value")
     }
 
     // =============================================================================
@@ -140,8 +141,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test with_timeout returns Some when task completes`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{with_timeout}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{with_timeout}
 
             run_coop {computation = {} -> do
                 let result = with_timeout {
@@ -163,8 +164,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test parallel_map applies function to all elements`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{parallel_map}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{parallel_map}
 
             run_coop {computation = {} -> do
                 let results = parallel_map {
@@ -180,8 +181,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test parallel_map preserves order`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{parallel_map}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{parallel_map}
 
             run_coop {computation = {} -> do
                 let results = parallel_map {
@@ -203,8 +204,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test parallel_filter keeps matching elements`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{parallel_filter}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{parallel_filter}
 
             run_coop {computation = {} -> do
                 let results = parallel_filter {
@@ -224,8 +225,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test join2 runs both computations`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{join2}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{join2}
 
             run_coop {computation = {} -> do
                 let r = join2 {
@@ -245,8 +246,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test join3 runs all three computations`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{join3}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{join3}
 
             run_coop {computation = {} -> do
                 let r = join3 {
@@ -267,8 +268,8 @@ class StructuredConcurrencyModuleTest {
     @Test
     fun `test parallel_for_each returns unit`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
-            use std::async::structured::{parallel_for_each}
+            use std::effects::async::{Async, run_coop}
+            use std::effects::async::structured::{parallel_for_each}
 
             run_coop {computation = {} -> do
                 parallel_for_each {

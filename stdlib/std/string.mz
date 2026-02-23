@@ -145,3 +145,29 @@ pub let pad_left = { s: String, len: Int, c: Char } ->
 # Example: pad_right {s = "hi", len = 5, c = '.'} -> "hi..."
 pub let pad_right = { s: String, len: Int, c: Char } ->
     __native_string_pad_right { s = s, len = len, c = c }
+
+# =============================================================================
+# Glob Pattern Matching
+# =============================================================================
+
+# Match a string against a glob pattern
+#
+# Supported patterns:
+#   *      - matches any characters except /
+#   **     - matches any characters including /
+#   ?      - matches a single character (not /)
+#   [abc]  - matches any character in the set
+#   [!abc] - matches any character not in the set
+#   [a-z]  - matches any character in the range
+#
+# Examples:
+#   glob_match { pattern = "/users/*", text = "/users/123" }           -> True
+#   glob_match { pattern = "/users/*", text = "/users/123/posts" }     -> False (stops at /)
+#   glob_match { pattern = "/api/**/health", text = "/api/v1/health" } -> True
+#   glob_match { pattern = "*.json", text = "config.json" }            -> True
+#   glob_match { pattern = "file?.txt", text = "file1.txt" }           -> True
+#   glob_match { pattern = "[abc].txt", text = "a.txt" }               -> True
+#   glob_match { pattern = "[!abc].txt", text = "d.txt" }              -> True
+#
+pub let glob_match = { pattern: String, text: String } ->
+    __native_string_glob_match { pattern = pattern, text = text }

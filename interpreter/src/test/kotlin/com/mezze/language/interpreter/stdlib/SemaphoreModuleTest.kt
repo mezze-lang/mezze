@@ -37,7 +37,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test semaphore creates with permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, available}
+            use std::effects::concurrent::semaphore::{semaphore, available}
 
             let sem = semaphore {permits = 5}
             available {sem = sem}
@@ -49,7 +49,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test acquire decreases available permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, acquire, available}
+            use std::effects::concurrent::semaphore::{semaphore, acquire, available}
 
             let sem = semaphore {permits = 3}
             let _ = acquire {sem = sem}
@@ -62,7 +62,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test release increases available permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, acquire, release, available}
+            use std::effects::concurrent::semaphore::{semaphore, acquire, release, available}
 
             let sem = semaphore {permits = 3}
             let _ = acquire {sem = sem}
@@ -76,7 +76,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test multiple acquires`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, acquire, available}
+            use std::effects::concurrent::semaphore::{semaphore, acquire, available}
 
             let sem = semaphore {permits = 5}
             let _ = acquire {sem = sem}
@@ -93,7 +93,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test acquire_n acquires multiple permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, acquire_n, available}
+            use std::effects::concurrent::semaphore::{semaphore, acquire_n, available}
 
             let sem = semaphore {permits = 10}
             let _ = acquire_n {sem = sem, permits = 4}
@@ -106,7 +106,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test release_n releases multiple permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, acquire_n, release_n, available}
+            use std::effects::concurrent::semaphore::{semaphore, acquire_n, release_n, available}
 
             let sem = semaphore {permits = 10}
             let _ = acquire_n {sem = sem, permits = 5}
@@ -122,7 +122,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test try_acquire succeeds with available permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, try_acquire, release}
+            use std::effects::concurrent::semaphore::{semaphore, try_acquire, release}
 
             let sem = semaphore {permits = 1}
             let success = try_acquire {sem = sem}
@@ -138,7 +138,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test try_acquire fails with no permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, acquire, try_acquire}
+            use std::effects::concurrent::semaphore::{semaphore, acquire, try_acquire}
 
             let sem = semaphore {permits = 1}
             let _ = acquire {sem = sem}
@@ -151,7 +151,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test try_acquire_n succeeds with enough permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, try_acquire_n, release_n}
+            use std::effects::concurrent::semaphore::{semaphore, try_acquire_n, release_n}
 
             let sem = semaphore {permits = 5}
             let success = try_acquire_n {sem = sem, permits = 3}
@@ -167,7 +167,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test try_acquire_n fails without enough permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, acquire_n, try_acquire_n}
+            use std::effects::concurrent::semaphore::{semaphore, acquire_n, try_acquire_n}
 
             let sem = semaphore {permits = 5}
             let _ = acquire_n {sem = sem, permits = 4}
@@ -182,7 +182,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test with_permit returns function result`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, with_permit}
+            use std::effects::concurrent::semaphore::{semaphore, with_permit}
 
             let sem = semaphore {permits = 3}
             with_permit {sem = sem, f = {} -> 42}
@@ -194,7 +194,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test with_permit releases after completion`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, with_permit, available}
+            use std::effects::concurrent::semaphore::{semaphore, with_permit, available}
 
             let sem = semaphore {permits = 3}
             let _ = with_permit {sem = sem, f = {} -> "done"}
@@ -207,7 +207,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test with_permit with computation`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, with_permit}
+            use std::effects::concurrent::semaphore::{semaphore, with_permit}
 
             let sem = semaphore {permits = 2}
             with_permit {sem = sem, f = {} -> do
@@ -225,7 +225,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test semaphore with single permit like mutex`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, with_permit, available}
+            use std::effects::concurrent::semaphore::{semaphore, with_permit, available}
 
             let binary = semaphore {permits = 1}
             let r = with_permit {sem = binary, f = {} -> 42}
@@ -239,7 +239,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test multiple semaphores independent`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, acquire, available}
+            use std::effects::concurrent::semaphore::{semaphore, acquire, available}
 
             let sem1 = semaphore {permits = 5}
             let sem2 = semaphore {permits = 10}
@@ -254,7 +254,7 @@ class SemaphoreModuleTest {
     @Test
     fun `test release can exceed initial permits`() {
         val result = eval("""
-            use std::concurrent::semaphore::{semaphore, release, available}
+            use std::effects::concurrent::semaphore::{semaphore, release, available}
 
             let sem = semaphore {permits = 1}
             let _ = release {sem = sem}

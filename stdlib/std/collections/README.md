@@ -7,15 +7,15 @@ Test files located in: `interpreter/src/test/kotlin/com/mezze/language/interpret
 | Module | Functions | Tested | Coverage |
 |--------|-----------|--------|----------|
 | array.mz | 34 | 34 | 100% |
-| list.mz | 40 | 39 | 98% |
+| list.mz | 40 | 40 | 100% |
 | map.mz | 19 | 19 | 100% |
 | set.mz | 23 | 23 | 100% |
 | deque.mz | 23 | 23 | 100% |
 | buffer.mz | 9 | 9 | 100% |
-| bytes.mz | 25 | ? | Needs audit |
-| nonemptylist.mz | 28 | ? | Needs audit |
-| sorted_map.mz | 17 | ? | Needs audit |
-| sorted_set.mz | 17 | ? | Needs audit |
+| bytes.mz | 25 | 25 | 100% |
+| nonemptylist.mz | 28 | 28 | 100% |
+| sorted_map.mz | 17 | 17 | 100% |
+| sorted_set.mz | 17 | 17 | 100% |
 
 ---
 
@@ -220,31 +220,31 @@ Test file: `BytesModuleTest.kt`
 
 | Function | Tested | Notes |
 |----------|--------|-------|
-| `empty` | :x: | Needs verification |
-| `from_string` | :x: | Needs verification |
-| `from_array` | :x: | Needs verification |
-| `from_hex` | :x: | Needs verification |
-| `from_base64` | :x: | Needs verification |
-| `length` | :x: | Needs verification |
-| `is_empty` | :x: | Needs verification |
-| `get` | :x: | Needs verification |
-| `slice` | :x: | Needs verification |
-| `take` | :x: | Needs verification |
-| `drop` | :x: | Needs verification |
-| `concat` | :x: | Needs verification |
-| `concat_all` | :x: | Needs verification |
-| `repeat` | :x: | Needs verification |
-| `index_of` | :x: | Needs verification |
-| `contains` | :x: | Needs verification |
-| `starts_with` | :x: | Needs verification |
-| `ends_with` | :x: | Needs verification |
-| `reverse` | :x: | Needs verification |
-| `map` | :x: | Needs verification |
-| `fold` | :x: | Needs verification |
-| `to_string` | :x: | Needs verification |
-| `to_array` | :x: | Needs verification |
-| `to_hex` | :x: | Needs verification |
-| `to_base64` | :x: | Needs verification |
+| `empty` | :white_check_mark: | |
+| `from_string` | :white_check_mark: | |
+| `from_array` | :white_check_mark: | |
+| `from_hex` | :white_check_mark: | |
+| `from_base64` | :white_check_mark: | |
+| `length` | :white_check_mark: | |
+| `is_empty` | :white_check_mark: | |
+| `get` | :white_check_mark: | |
+| `slice` | :white_check_mark: | |
+| `take` | :white_check_mark: | |
+| `drop` | :white_check_mark: | |
+| `concat` | :white_check_mark: | |
+| `concat_all` | :white_check_mark: | |
+| `repeat` | :white_check_mark: | |
+| `index_of` | :white_check_mark: | |
+| `contains` | :white_check_mark: | |
+| `starts_with` | :white_check_mark: | |
+| `ends_with` | :white_check_mark: | |
+| `reverse` | :white_check_mark: | |
+| `map` | :white_check_mark: | |
+| `fold` | :white_check_mark: | |
+| `to_string` | :white_check_mark: | |
+| `to_array` | :white_check_mark: | |
+| `to_hex` | :white_check_mark: | |
+| `to_base64` | :white_check_mark: | |
 
 ---
 
@@ -253,34 +253,34 @@ Test file: `NonEmptyListModuleTest.kt`
 
 | Function | Tested | Notes |
 |----------|--------|-------|
-| `singleton` | :x: | Needs verification |
-| `from_head_tail` | :x: | Needs verification |
-| `head` | :x: | Needs verification |
-| `tail` | :x: | Needs verification |
-| `length` | :x: | Needs verification |
-| `cons` | :x: | Needs verification |
-| `append` | :x: | Needs verification |
-| `prepend_list` | :x: | Needs verification |
-| `append_list` | :x: | Needs verification |
-| `get` | :x: | Needs verification |
-| `last` | :x: | Needs verification |
-| `map` | :x: | Needs verification |
-| `flat_map` | :x: | Needs verification |
-| `fold_left` | :x: | Needs verification |
-| `fold_right` | :x: | Needs verification |
-| `reduce` | :x: | Needs verification |
-| `any` | :x: | Needs verification |
-| `all` | :x: | Needs verification |
-| `contains` | :x: | Needs verification |
-| `reverse` | :x: | Needs verification |
-| `zip` | :x: | Needs verification |
-| `intersperse` | :x: | Needs verification |
-| `to_list` | :x: | Needs verification |
-| `from_list` | :x: | Needs verification |
-| `to_array` | :x: | Needs verification |
-| `from_array` | :x: | Needs verification |
-| `sort` | :x: | Needs verification |
-| `sort_by` | :x: | Needs verification |
+| `singleton` | :white_check_mark: | |
+| `from_head_tail` | :white_check_mark: | |
+| `head` | :white_check_mark: | |
+| `tail` | :white_check_mark: | |
+| `length` | :white_check_mark: | |
+| `cons` | :white_check_mark: | |
+| `append` | :white_check_mark: | |
+| `prepend_list` | :white_check_mark: | |
+| `append_list` | :white_check_mark: | |
+| `get` | :white_check_mark: | |
+| `last` | :white_check_mark: | |
+| `map` | :white_check_mark: | |
+| `flat_map` | :white_check_mark: | |
+| `fold_left` | :white_check_mark: | |
+| `fold_right` | :white_check_mark: | |
+| `reduce` | :white_check_mark: | |
+| `any` | :white_check_mark: | |
+| `all` | :white_check_mark: | |
+| `contains` | :white_check_mark: | |
+| `reverse` | :white_check_mark: | |
+| `zip` | :white_check_mark: | |
+| `intersperse` | :white_check_mark: | |
+| `to_list` | :white_check_mark: | |
+| `from_list` | :white_check_mark: | |
+| `to_array` | :white_check_mark: | |
+| `from_array` | :white_check_mark: | |
+| `sort` | :white_check_mark: | |
+| `sort_by` | :white_check_mark: | |
 
 ---
 
@@ -289,23 +289,23 @@ Test file: `SortedMapModuleTest.kt`
 
 | Function | Tested | Notes |
 |----------|--------|-------|
-| `empty` | :x: | Needs verification |
-| `insert` | :x: | Needs verification |
-| `get` | :x: | Needs verification |
-| `remove` | :x: | Needs verification |
-| `contains_key` | :x: | Needs verification |
-| `size` | :x: | Needs verification |
-| `is_empty` | :x: | Needs verification |
-| `keys` | :x: | Needs verification |
-| `values` | :x: | Needs verification |
-| `entries` | :x: | Needs verification |
-| `min_key` | :x: | Needs verification |
-| `max_key` | :x: | Needs verification |
-| `min_entry` | :x: | Needs verification |
-| `max_entry` | :x: | Needs verification |
-| `from_map` | :x: | Needs verification |
-| `to_map` | :x: | Needs verification |
-| `equals` | :x: | Needs verification |
+| `empty` | :white_check_mark: | |
+| `insert` | :white_check_mark: | |
+| `get` | :white_check_mark: | |
+| `remove` | :white_check_mark: | |
+| `contains_key` | :white_check_mark: | |
+| `size` | :white_check_mark: | |
+| `is_empty` | :white_check_mark: | |
+| `keys` | :white_check_mark: | |
+| `values` | :white_check_mark: | |
+| `entries` | :white_check_mark: | |
+| `min_key` | :white_check_mark: | |
+| `max_key` | :white_check_mark: | |
+| `min_entry` | :white_check_mark: | |
+| `max_entry` | :white_check_mark: | |
+| `from_map` | :white_check_mark: | |
+| `to_map` | :white_check_mark: | |
+| `equals` | :white_check_mark: | |
 
 ---
 
@@ -314,23 +314,23 @@ Test file: `SortedSetModuleTest.kt`
 
 | Function | Tested | Notes |
 |----------|--------|-------|
-| `empty` | :x: | Needs verification |
-| `singleton` | :x: | Needs verification |
-| `from_list` | :x: | Needs verification |
-| `add` | :x: | Needs verification |
-| `remove` | :x: | Needs verification |
-| `contains` | :x: | Needs verification |
-| `size` | :x: | Needs verification |
-| `is_empty` | :x: | Needs verification |
-| `union` | :x: | Needs verification |
-| `intersect` | :x: | Needs verification |
-| `difference` | :x: | Needs verification |
-| `min` | :x: | Needs verification |
-| `max` | :x: | Needs verification |
-| `to_list` | :x: | Needs verification |
-| `from_set` | :x: | Needs verification |
-| `to_set` | :x: | Needs verification |
-| `equals` | :x: | Needs verification |
+| `empty` | :white_check_mark: | |
+| `singleton` | :white_check_mark: | |
+| `from_list` | :white_check_mark: | |
+| `add` | :white_check_mark: | |
+| `remove` | :white_check_mark: | |
+| `contains` | :white_check_mark: | |
+| `size` | :white_check_mark: | |
+| `is_empty` | :white_check_mark: | |
+| `union` | :white_check_mark: | |
+| `intersect` | :white_check_mark: | |
+| `difference` | :white_check_mark: | |
+| `min` | :white_check_mark: | |
+| `max` | :white_check_mark: | |
+| `to_list` | :white_check_mark: | |
+| `from_set` | :white_check_mark: | |
+| `to_set` | :white_check_mark: | |
+| `equals` | :white_check_mark: | |
 
 ---
 

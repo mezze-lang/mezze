@@ -11,10 +11,10 @@ private fun resultType(valueType: MezzeType, errorType: MezzeType): MezzeType {
 }
 
 /**
- * Helper function to create List type (as TypeApplication)
+ * Helper function to create Array type
  */
-private fun listType(elementType: MezzeType): MezzeType {
-    return MezzeType.TypeApplication("List", listOf(elementType))
+private fun arrayType(elementType: MezzeType): MezzeType {
+    return MezzeType.ArrayType(elementType)
 }
 
 /**
@@ -36,17 +36,17 @@ private fun optionType(elementType: MezzeType): MezzeType {
  */
 object JsonTypes {
 
-    // DecodeError type: {path: List String, message: String, expected: String, found: Option String}
+    // DecodeError type: {path: [String], message: String, expected: String, found: Option String}
     private val decodeErrorType = MezzeType.RecordType(mapOf(
-        "path" to listType(MezzeType.StringType),
+        "path" to arrayType(MezzeType.StringType),
         "message" to MezzeType.StringType,
         "expected" to MezzeType.StringType,
         "found" to optionType(MezzeType.StringType)
     ))
 
-    // EncodeError type: {path: List String, message: String}
+    // EncodeError type: {path: [String], message: String}
     private val encodeErrorType = MezzeType.RecordType(mapOf(
-        "path" to listType(MezzeType.StringType),
+        "path" to arrayType(MezzeType.StringType),
         "message" to MezzeType.StringType
     ))
 
@@ -130,7 +130,7 @@ object JsonTypes {
         val streamDecodeParams = MezzeType.RecordType(mapOf(
             "bytes" to MezzeType.BytesType,
             "offset" to MezzeType.IntType,
-            "path" to listType(MezzeType.StringType)
+            "path" to arrayType(MezzeType.StringType)
         ))
 
         // stream_decode_int: -> Result {value: Int, offset: Int} DecodeError
@@ -205,7 +205,7 @@ object JsonTypes {
                 "bytes" to MezzeType.BytesType,
                 "offset" to MezzeType.IntType,
                 "key" to MezzeType.StringType,
-                "path" to listType(MezzeType.StringType)
+                "path" to arrayType(MezzeType.StringType)
             )),
             resultType(
                 MezzeType.RecordType(mapOf("value" to MezzeType.BytesType, "offset" to MezzeType.IntType)),

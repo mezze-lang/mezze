@@ -123,6 +123,11 @@ in
         exit 1
       fi
     '';
+
+    smoke-tests.exec = ''
+      echo "🧪 Running CLI smoke tests..."
+      ./docker-test-project/run-tests.sh "$@"
+    '';
   };
 
   enterShell = ''
@@ -140,6 +145,7 @@ in
     echo ""
     echo "🛠️  Tooling:"
     echo "  vscode-install - Package and install VSCode extension"
+    echo "  smoke-tests    - Run comprehensive CLI smoke tests"
     echo ""
     echo "📝 Examples:"
     echo "  mezze-dev parse examples/basic/hello_world.mezze"

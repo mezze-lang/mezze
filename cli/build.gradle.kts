@@ -21,6 +21,7 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":interpreter"))
+    implementation(project(":lsp"))
 
     // Polyglot API (Context, Value, Source) - host API - match native-image version
     implementation("org.graalvm.sdk:graal-sdk:24.2.2")
@@ -38,6 +39,9 @@ dependencies {
     implementation("io.ktor:ktor-client-core:2.3.12")            // HTTP client
     implementation("io.ktor:ktor-client-cio:2.3.12")             // CIO engine for Ktor
     implementation("org.apache.commons:commons-compress:1.28.0") // tar.gz handling
+
+    // Codebase module for content-addressed storage
+    implementation(project(":codebase"))
 }
 
 // Include stdlib mezze files as resources in the JAR

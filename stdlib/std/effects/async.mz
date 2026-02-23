@@ -1,80 +1,372 @@
-# std/effects/async.mezze - Promise-based async built on continuations
+# std/async.mezze - Unified Async Effect
+#
+# Provides asynchronous computation with multiple implementations:
+# - LoomAsync: Virtual threads (default, scales to millions, async I/O benefit)
+# - OSThreadAsync: Platform threads (true parallelism, thread-locals work, limited scale)
+# - CoopAsync: Continuations (single-threaded, cooperative, for testing/JS target)
+#
+# All implementations share the same interface. Pick based on your needs:
+# - LoomAsync: 99% use case - DB connections, file I/O, network calls
+# - OSThreadAsync: When you specifically need OS threads (JNI, thread-locals)
+# - CoopAsync: Single-threaded environments, testing, future JS compile target
+#
+# Usage:
+#   use std::effects::async::{Async, LoomAsync, Promise}
+#
+#   perform LoomAsync in do
+#       let p = Async.spawn {f = {} -> expensive_computation {}}
+#       let result = Async.await {p = p}
+#       result
 
 use std::control::continuation
 use std::control::continuation::{Continuation}
+use std::effects::concurrent::cancellation::{CancellationToken}
 
-# Promise type - wraps a suspended continuation
-pub type Promise 'a = Promise {
-  suspended: Suspended 'a
-}
+# Promise type - opaque wrapper around native promise/future
+pub newtype Promise 'a = Promise __NativePromise
 
-# Suspended type - what continuation::suspend_with returns
-type Suspended 'a = Suspended {
-  continuation: {value: 'a} -> 'a,
-  value: 'a
-}
+# Scope type - opaque wrapper for structured concurrency scopes
+# Used with `scoped` to ensure all spawned children complete before parent
+pub newtype Scope 'a = Scope __NativeScope
 
-# Async effect - Promise-based async programming
+# Error type for async operations
+# - AsyncFailed: Task failed with an exception
+# - AsyncCancelled: Task was cancelled
+# - AsyncTimedOut: Task timed out after ms milliseconds
+pub type AsyncError = | AsyncFailed { msg: String }, AsyncCancelled, AsyncTimedOut { ms: Int } |
+
+# Async effect - unified async operations
+# Note: Callback parameters use <...> for effect polymorphism - they accept any effects
 effect Async where {
-  # Start async computation, returns immediately with Promise
-  async: {computation: {} -> 'a} -> Promise 'a <Async>,
+    # Spawn a computation, returns immediately with Promise
+    # The computation can have any effects (<...>)
+    spawn: {f: {} -> 'a <...>} -> Promise 'a <Async>,
 
-  # Wait for Promise to complete, blocks until ready
-  await: {promise: Promise 'a} -> 'a <Async>,
+    # Await Promise to complete, returns result
+    await: {p: Promise 'a} -> 'a <Async>,
 
-  # Wait for all Promises to complete
-  await_all: {promises: [Promise 'a]} -> ['a] <Async>
+    # Wait for first Promise to complete (others continue running)
+    race: {ps: [Promise 'a]} -> 'a <Async>,
+
+    # Wait for all Promises to complete
+    all: {ps: [Promise 'a]} -> ['a] <Async>,
+
+    # Wait with timeout, returns None if timeout expires
+    timeout: {ms: Int, p: Promise 'a} -> Option 'a <Async>,
+
+    # Cancel a Promise (request cancellation, may not be immediate)
+    cancel: {p: Promise 'a} -> {} <Async>,
+
+    # Sleep for specified milliseconds
+    sleep: {ms: Int} -> {} <Async>,
+
+    # Check if Promise is complete (non-blocking)
+    is_done: {p: Promise 'a} -> Bool <Async>,
+
+    # Check if current computation was cancelled
+    is_cancelled: {} -> Bool <Async>,
+
+    # Cancellation checkpoint - throws if cancelled
+    check: {} -> {} <Async>,
+
+    # === Structured Concurrency ===
+
+    # Run two computations concurrently, return both results
+    # If either fails, the other is cancelled
+    join: {left: {} -> 'a <...>, right: {} -> 'b <...>} -> {left: 'a, right: 'b} <Async>,
+
+    # Run three computations concurrently
+    join3: {a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...>} -> {a: 'a, b: 'b, c: 'c} <Async>,
+
+    # === Collection Operations ===
+
+    # Apply function to each element concurrently, results in input order
+    map: {xs: ['a], f: {x: 'a} -> 'b <...>} -> ['b] <Async>,
+
+    # Run function on each element concurrently for side effects
+    for_each: {xs: ['a], f: {x: 'a} -> {} <...>} -> {} <Async>,
+
+    # Filter elements with predicate evaluated concurrently
+    filter: {xs: ['a], f: {x: 'a} -> Bool <...>} -> ['a] <Async>,
+
+    # === Error Handling ===
+
+    # Return first successful result, fail only if ALL fail
+    any: {ps: [Promise 'a]} -> 'a <Async>,
+
+    # Wait for all promises, return list of Results
+    # Never throws - each result is either Ok or Err
+    settle: {ps: [Promise 'a]} -> [Result 'a AsyncError] <Async>,
+
+    # === Structured Concurrency Scopes ===
+
+    # Run a function with a structured concurrency scope.
+    # All tasks spawned via Scope.spawn must complete before scoped returns.
+    # If the function fails, all children are cancelled.
+    # If any child fails, siblings are cancelled (fail-fast behavior).
+    # The callback can have any effects (<...>)
+    #
+    # Example:
+    #   Async.scoped {f = {scope} -> do
+    #       let p1 = Scope.spawn {scope = scope, f = {} -> task1 {}}
+    #       let p2 = Scope.spawn {scope = scope, f = {} -> task2 {}}
+    #       # Both p1 and p2 are awaited automatically before scoped returns
+    #       process {p1 = p1, p2 = p2}
+    #   }
+    scoped: {f: {scope: Scope 'a} -> 'a <...>} -> 'a <Async>
 }
 
-# Implementation built on Continuation primitives
-pub impl Async for AsyncRunner { cont: Continuation } where {
-  # async - wraps computation in Promise using suspend_with
-  async = {computation} -> do
-    # Suspend with the computation result
-    let suspended = cont.suspend_with {
-      value = computation {}
-    }
-    # Wrap in Promise type
-    Promise {suspended = suspended}
+# =============================================================================
+# LoomAsync Implementation - Virtual Threads (Default)
+# =============================================================================
+#
+# Uses Project Loom virtual threads (Java 21+).
+# - Scales to millions of concurrent tasks
+# - Blocking I/O becomes async automatically
+# - Best for I/O-bound workloads (DB, files, network)
+#
+# Example:
+#   perform LoomAsync in do
+#       let p1 = Async.spawn {f = {} -> fetch_url {url = "http://a.com"}}
+#       let p2 = Async.spawn {f = {} -> fetch_url {url = "http://b.com"}}
+#       let results = Async.all {ps = [p1, p2]}
+#       results
 
-  # await - resumes the Promise's continuation
-  await = {promise} ->
-    cont.resume {
-      cont = promise.suspended.continuation,
-      value = promise.suspended.value
-    }
-
-  # await_all - wait for all promises sequentially
-  await_all = {promises} ->
-    __native_await_all {promises = promises}
+# Default handler - unbounded virtual threads
+pub impl Async for LoomAsync where {
+    spawn = {f} -> __native_loom_spawn_cfg {f = f, max_concurrent = 0},
+    await = {p} -> __native_loom_await {p = p},
+    race = {ps} -> __native_loom_race {ps = ps},
+    all = {ps} -> __native_loom_all {ps = ps},
+    timeout = {ms, p} -> __native_loom_timeout {ms = ms, p = p},
+    cancel = {p} -> __native_loom_cancel {p = p},
+    sleep = {ms} -> __native_loom_sleep {ms = ms},
+    is_done = {p} -> __native_loom_is_done {p = p},
+    is_cancelled = {} -> __native_loom_is_cancelled {},
+    check = {} -> __native_loom_check {},
+    join = {left, right} -> __native_loom_join {left = left, right = right},
+    join3 = {a, b, c} -> __native_loom_join3 {a = a, b = b, c = c},
+    map = {xs, f} -> __native_loom_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_loom_filter {xs = xs, f = f},
+    any = {ps} -> __native_loom_any {ps = ps},
+    settle = {ps} -> __native_loom_settle {ps = ps},
+    scoped = {f} -> __native_loom_scoped {f = f}
 }
 
-# Helper: Create already-resolved Promise
-pub let resolved: {'a} -> Promise 'a = {value} ->
-  do
-    let suspended = continuation::suspend_with {value = value}
-    Promise {suspended = suspended}
+# Configurable handler - control concurrency limit
+# Parameters:
+#   max_concurrent: Maximum concurrent tasks (0 = unbounded)
+#
+# Example:
+#   perform LoomAsyncWith {max_concurrent = 100} in do
+#       Async.spawn {f = ...}
+pub impl Async for LoomAsyncWith { max_concurrent: Int } where {
+    spawn = {f} -> __native_loom_spawn_cfg {f = f, max_concurrent = max_concurrent},
+    await = {p} -> __native_loom_await {p = p},
+    race = {ps} -> __native_loom_race {ps = ps},
+    all = {ps} -> __native_loom_all {ps = ps},
+    timeout = {ms, p} -> __native_loom_timeout {ms = ms, p = p},
+    cancel = {p} -> __native_loom_cancel {p = p},
+    sleep = {ms} -> __native_loom_sleep {ms = ms},
+    is_done = {p} -> __native_loom_is_done {p = p},
+    is_cancelled = {} -> __native_loom_is_cancelled {},
+    check = {} -> __native_loom_check {},
+    join = {left, right} -> __native_loom_join {left = left, right = right},
+    join3 = {a, b, c} -> __native_loom_join3 {a = a, b = b, c = c},
+    map = {xs, f} -> __native_loom_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_loom_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_loom_filter {xs = xs, f = f},
+    any = {ps} -> __native_loom_any {ps = ps},
+    settle = {ps} -> __native_loom_settle {ps = ps},
+    scoped = {f} -> __native_loom_scoped {f = f}
+}
 
-# Helper: Create rejected Promise
-pub let rejected: {error: 'e} -> Promise 'a = {error} ->
-  # Implementation depends on error handling design
-  __native_promise_rejected {error = error}
+# =============================================================================
+# OSThreadAsync Implementation - Platform Threads
+# =============================================================================
+#
+# Uses OS-level platform threads.
+# - True parallelism for CPU-bound work
+# - Thread-locals work correctly
+# - Limited scale (thousands, not millions)
+# - Higher memory per thread
+#
+# Example:
+#   perform OSThreadAsync in do
+#       let p = Async.spawn {f = {} -> cpu_intensive_work {}}
+#       Async.await {p = p}
 
-# Usage examples:
+# Default handler - unbounded OS threads
+pub impl Async for OSThreadAsync where {
+    spawn = {f} -> __native_os_spawn_cfg {f = f, pool_size = 0},
+    await = {p} -> __native_os_await {p = p},
+    race = {ps} -> __native_os_race {ps = ps},
+    all = {ps} -> __native_os_all {ps = ps},
+    timeout = {ms, p} -> __native_os_timeout {ms = ms, p = p},
+    cancel = {p} -> __native_os_cancel {p = p},
+    sleep = {ms} -> __native_os_sleep {ms = ms},
+    is_done = {p} -> __native_os_is_done {p = p},
+    is_cancelled = {} -> __native_os_is_cancelled {},
+    check = {} -> __native_os_check {},
+    join = {left, right} -> __native_os_join {left = left, right = right},
+    join3 = {a, b, c} -> __native_os_join3 {a = a, b = b, c = c},
+    map = {xs, f} -> __native_os_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_os_filter {xs = xs, f = f},
+    any = {ps} -> __native_os_any {ps = ps},
+    settle = {ps} -> __native_os_settle {ps = ps},
+    scoped = {f} -> __native_os_scoped {f = f}
+}
+
+# Configurable handler - control thread pool size
+# Parameters:
+#   pool_size: Maximum concurrent OS threads (0 = unbounded)
 #
-# Basic async/await:
-# perform AsyncRunner in do
-#   let promise = Async.async {computation = {
-#     expensive_computation {}
-#   }}
-#   let result = Async.await {promise = promise}
-#   result
+# Example:
+#   perform OSThreadAsyncWith {pool_size = 4} in do
+#       Async.spawn {f = ...}
+pub impl Async for OSThreadAsyncWith { pool_size: Int } where {
+    spawn = {f} -> __native_os_spawn_cfg {f = f, pool_size = pool_size},
+    await = {p} -> __native_os_await {p = p},
+    race = {ps} -> __native_os_race {ps = ps},
+    all = {ps} -> __native_os_all {ps = ps},
+    timeout = {ms, p} -> __native_os_timeout {ms = ms, p = p},
+    cancel = {p} -> __native_os_cancel {p = p},
+    sleep = {ms} -> __native_os_sleep {ms = ms},
+    is_done = {p} -> __native_os_is_done {p = p},
+    is_cancelled = {} -> __native_os_is_cancelled {},
+    check = {} -> __native_os_check {},
+    join = {left, right} -> __native_os_join {left = left, right = right},
+    join3 = {a, b, c} -> __native_os_join3 {a = a, b = b, c = c},
+    map = {xs, f} -> __native_os_map {xs = xs, f = f},
+    for_each = {xs, f} -> __native_os_for_each {xs = xs, f = f},
+    filter = {xs, f} -> __native_os_filter {xs = xs, f = f},
+    any = {ps} -> __native_os_any {ps = ps},
+    settle = {ps} -> __native_os_settle {ps = ps},
+    scoped = {f} -> __native_os_scoped {f = f}
+}
+
+# =============================================================================
+# CoopAsync Implementation - Continuation-Based Cooperative Multitasking
+# =============================================================================
 #
-# Multiple concurrent operations:
-# perform AsyncRunner in do
-#   let p1 = Async.async {computation = {operation1 {}}}
-#   let p2 = Async.async {computation = {operation2 {}}}
-#   let p3 = Async.async {computation = {operation3 {}}}
+# Uses native scheduler for proper integration with continuation system.
+# Provides the same API as LoomAsync but uses cooperative scheduling internally.
 #
-#   let results = Async.await_all {promises = [p1, p2, p3]}
-#   results
+# - Single-threaded, no true parallelism
+# - Tasks interleave at await points
+# - Good for testing, JS compile target, workflow orchestration
+# - Deterministic execution order
+# - Supports serialization/checkpointing via continuation
+#
+# Usage:
+#   perform CoopAsync {cont = continuation::new {}} in do
+#       let p = Async.spawn {f = {} -> 42}
+#       Async.await {p = p}
+
+pub impl Async for CoopAsync { cont: Continuation 'a 'b 'c } where {
+    spawn = {f} -> __native_coop_spawn { f = f, cont = cont },
+    await = {p} -> __native_coop_await { p = p, cont = cont },
+    race = {ps} -> __native_coop_race { ps = ps, cont = cont },
+    all = {ps} -> __native_coop_all { ps = ps, cont = cont },
+    timeout = {ms, p} -> __native_coop_timeout { ms = ms, p = p, cont = cont },
+    cancel = {p} -> {},
+    sleep = {ms} -> __native_coop_sleep { ms = ms, cont = cont },
+    is_done = {p} -> __native_coop_is_done { p = p },
+    is_cancelled = {} -> False,
+    check = {} -> {},
+    join = {left, right} -> __native_coop_join { left = left, right = right, cont = cont },
+    join3 = {a, b, c} -> __native_coop_join3 { a = a, b = b, c = c, cont = cont },
+    map = {xs, f} -> __native_coop_map { xs = xs, f = f, cont = cont },
+    for_each = {xs, f} -> __native_coop_for_each { xs = xs, f = f, cont = cont },
+    filter = {xs, f} -> __native_coop_filter { xs = xs, f = f, cont = cont },
+    any = {ps} -> __native_coop_any { ps = ps, cont = cont },
+    settle = {ps} -> __native_coop_settle { ps = ps, cont = cont },
+    # For cooperative async, scoped is a no-op since there's no parallelism
+    # The function just runs with an empty scope
+    scoped = {f} -> __native_coop_scoped { f = f, cont = cont }
+}
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+# Short alias for spawn + wait (run synchronously)
+pub let run: {f: {} -> 'a} -> 'a <Async> = {f} -> do
+    let p = Async.spawn {f = f}
+    Async.await {p = p}
+
+# Spawn and immediately detach (fire and forget)
+pub let go: {f: {} -> 'a} -> {} <Async> = {f} -> do
+    let _ = Async.spawn {f = f}
+    {}
+
+# =============================================================================
+# Convenience Wrappers
+# =============================================================================
+
+# Run computation with CoopAsync handler (cooperative scheduling)
+# Equivalent to: perform CoopAsync {cont = continuation::new {}} in computation {}
+pub let run_coop: {computation: {} -> 'a <Async>} -> 'a = {computation} ->
+    perform CoopAsync {cont = continuation::new {}} in computation {}
+
+# =============================================================================
+# Scope Functions - Helpers for Structured Concurrency Scopes
+# =============================================================================
+#
+# These functions help with spawning tasks within a structured concurrency scope.
+# Tasks spawned via scope_spawn are tracked by the scope and automatically
+# awaited when the scope ends.
+#
+# Usage:
+#   perform LoomAsync in do
+#       Async.scoped {f = {scope} -> do
+#           let p1 = scope_spawn {scope = scope, f = {} -> task1 {}}
+#           let p2 = scope_spawn {scope = scope, f = {} -> task2 {}}
+#           # p1 and p2 are awaited automatically before scoped returns
+#           process {p1 = Async.await {p = p1}, p2 = Async.await {p = p2}}
+#       }
+
+# Spawn a task within a scope
+# The scope will wait for this task to complete before exiting
+# Note: f accepts any effects (<...>) for effect polymorphism
+#
+# Example:
+#   scope_spawn {scope = scope, f = {} -> expensive_computation {}}
+pub let scope_spawn: {scope: Scope 'a, f: {} -> 'b <...>} -> Promise 'b =
+    {scope, f} -> __native_loom_scope_spawn {scope = scope, f = f}
+
+# Cancel all tasks in the scope
+#
+# Example:
+#   scope_cancel_all {scope = scope}
+pub let scope_cancel_all: {scope: Scope 'a} -> {} =
+    {scope} -> __native_loom_scope_cancel_all {scope = scope}
+
+# Get the CancellationToken for a scope
+#
+# Each scope has an associated CancellationToken that tasks can use
+# to check for cancellation or register cleanup callbacks.
+#
+# Example:
+#   Async.scoped {f = {scope} -> do
+#       let token = scope_get_token {scope = scope}
+#       scope_spawn {scope = scope, f = {} -> do
+#           # Periodically check for cancellation
+#           while not (Cancellation.is_cancelled {token = token}) do
+#               process_batch {}
+#       }
+#   }
+pub let scope_get_token: {scope: Scope 'a} -> CancellationToken =
+    {scope} -> __native_loom_scope_get_token {scope = scope}
+
+# Check if a scope has been cancelled
+#
+# Example:
+#   if scope_is_cancelled {scope = scope} then
+#       cleanup {}
+#   else
+#       continue_work {}
+pub let scope_is_cancelled: {scope: Scope 'a} -> Bool =
+    {scope} -> __native_loom_scope_is_cancelled {scope = scope}

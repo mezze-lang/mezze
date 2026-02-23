@@ -248,8 +248,12 @@ class InitCommand {
     private fun createGitignore(file: File) {
         val content = """
             # Mezze build artifacts
+            *.jar
             Mezze.lock
             mezze_packages/
+
+            # Mezze codebase (generated)
+            .mez/
 
             # IDE
             .idea/

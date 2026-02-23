@@ -53,7 +53,7 @@ class CancellationModuleTest {
     @Test
     fun `test create token`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, is_cancelled}
+            use std::effects::concurrent::cancellation::{token, is_cancelled}
 
             let ct = token {}
             is_cancelled { token = ct }
@@ -64,7 +64,7 @@ class CancellationModuleTest {
     @Test
     fun `test cancel token`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, cancel, is_cancelled}
+            use std::effects::concurrent::cancellation::{token, cancel, is_cancelled}
 
             let ct = token {}
             let before = is_cancelled { token = ct }
@@ -80,7 +80,7 @@ class CancellationModuleTest {
     @Test
     fun `test get cancellation reason`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, cancel, get_reason}
+            use std::effects::concurrent::cancellation::{token, cancel, get_reason}
 
             let ct = token {}
             cancel { token = ct, reason = "User requested" }
@@ -94,7 +94,7 @@ class CancellationModuleTest {
     @Test
     fun `test uncancelled token has no reason`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, get_reason}
+            use std::effects::concurrent::cancellation::{token, get_reason}
 
             let ct = token {}
             match get_reason { token = ct } is
@@ -107,7 +107,7 @@ class CancellationModuleTest {
     @Test
     fun `test cancel is idempotent`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, cancel, is_cancelled}
+            use std::effects::concurrent::cancellation::{token, cancel, is_cancelled}
 
             let ct = token {}
             cancel { token = ct, reason = "first" }
@@ -125,7 +125,7 @@ class CancellationModuleTest {
     @Test
     fun `test child token cancelled when parent cancelled`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, cancel, create_child, is_cancelled}
+            use std::effects::concurrent::cancellation::{token, cancel, create_child, is_cancelled}
 
             let parent = token {}
             let child = create_child { token = parent }
@@ -144,7 +144,7 @@ class CancellationModuleTest {
     @Test
     fun `test parent not cancelled when child cancelled`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, cancel, create_child, is_cancelled}
+            use std::effects::concurrent::cancellation::{token, cancel, create_child, is_cancelled}
 
             let parent = token {}
             let child = create_child { token = parent }
@@ -163,7 +163,7 @@ class CancellationModuleTest {
     @Test
     fun `test deeply nested child tokens`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, cancel, create_child, is_cancelled}
+            use std::effects::concurrent::cancellation::{token, cancel, create_child, is_cancelled}
 
             let root = token {}
             let level1 = create_child { token = root }
@@ -189,7 +189,7 @@ class CancellationModuleTest {
     @Test
     fun `test sibling tokens are independent`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, cancel, create_child, is_cancelled}
+            use std::effects::concurrent::cancellation::{token, cancel, create_child, is_cancelled}
 
             let parent = token {}
             let child1 = create_child { token = parent }
@@ -216,7 +216,7 @@ class CancellationModuleTest {
     @Test
     fun `test with_cancellation on active token`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, with_cancellation}
+            use std::effects::concurrent::cancellation::{token, with_cancellation}
 
             let ct = token {}
             let result = with_cancellation { token = ct, f = {} -> 42 }
@@ -230,7 +230,7 @@ class CancellationModuleTest {
     @Test
     fun `test with_cancellation on cancelled token`() {
         val result = eval("""
-            use std::concurrent::cancellation::{token, cancel, with_cancellation}
+            use std::effects::concurrent::cancellation::{token, cancel, with_cancellation}
 
             let ct = token {}
             cancel { token = ct, reason = "Already cancelled" }
@@ -249,8 +249,8 @@ class CancellationModuleTest {
     @Test
     fun `test scope has cancellation token`() {
         val result = eval("""
-            use std::async::{Async, LoomAsync, scope_get_token, scope_is_cancelled}
-            use std::concurrent::cancellation::{is_cancelled}
+            use std::effects::async::{Async, LoomAsync, scope_get_token, scope_is_cancelled}
+            use std::effects::concurrent::cancellation::{is_cancelled}
 
             perform LoomAsync in do
                 Async.scoped { f = { scope } -> do
@@ -265,7 +265,7 @@ class CancellationModuleTest {
     @Test
     fun `test scope_cancel_all cancels scope`() {
         val result = eval("""
-            use std::async::{Async, LoomAsync, scope_spawn, scope_cancel_all, scope_is_cancelled}
+            use std::effects::async::{Async, LoomAsync, scope_spawn, scope_cancel_all, scope_is_cancelled}
 
             perform LoomAsync in do
                 Async.scoped { f = { scope } -> do

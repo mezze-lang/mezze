@@ -37,7 +37,7 @@ class AtomModuleTest {
     @Test
     fun `test atom creates atomic reference`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref}
+            use std::effects::concurrent::atom::{atom, deref}
 
             let counter = atom {value = 42}
             deref {atom = counter}
@@ -49,7 +49,7 @@ class AtomModuleTest {
     @Test
     fun `test atom with record value`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref}
+            use std::effects::concurrent::atom::{atom, deref}
 
             let state = atom {value = {count = 0, name = "test"}}
             let current = deref {atom = state}
@@ -62,7 +62,7 @@ class AtomModuleTest {
     @Test
     fun `test reset changes value`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, reset}
+            use std::effects::concurrent::atom::{atom, deref, reset}
 
             let counter = atom {value = 0}
             let _ = reset {atom = counter, value = 100}
@@ -75,7 +75,7 @@ class AtomModuleTest {
     @Test
     fun `test reset returns new value`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, reset}
+            use std::effects::concurrent::atom::{atom, reset}
 
             let counter = atom {value = 0}
             reset {atom = counter, value = 42}
@@ -89,7 +89,7 @@ class AtomModuleTest {
     @Test
     fun `test swap applies function`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, swap}
+            use std::effects::concurrent::atom::{atom, deref, swap}
 
             let counter = atom {value = 10}
             let _ = swap {atom = counter, f = {current} -> current + 1}
@@ -102,7 +102,7 @@ class AtomModuleTest {
     @Test
     fun `test swap returns new value`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, swap}
+            use std::effects::concurrent::atom::{atom, swap}
 
             let counter = atom {value = 5}
             swap {atom = counter, f = {current} -> current * 2}
@@ -114,7 +114,7 @@ class AtomModuleTest {
     @Test
     fun `test multiple swaps`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, swap}
+            use std::effects::concurrent::atom::{atom, deref, swap}
 
             let counter = atom {value = 0}
             let _ = swap {atom = counter, f = {current} -> current + 1}
@@ -129,7 +129,7 @@ class AtomModuleTest {
     @Test
     fun `test swap with record`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, swap}
+            use std::effects::concurrent::atom::{atom, deref, swap}
 
             let state = atom {value = {count = 0}}
             let _ = swap {atom = state, f = {current} -> {count = current.count + 5}}
@@ -145,7 +145,7 @@ class AtomModuleTest {
     @Test
     fun `test swap_with passes argument`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, swap_with}
+            use std::effects::concurrent::atom::{atom, deref, swap_with}
 
             let counter = atom {value = 10}
             let _ = swap_with {atom = counter, f = {current, arg} -> current + arg, arg = 5}
@@ -158,7 +158,7 @@ class AtomModuleTest {
     @Test
     fun `test swap_with with string argument`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, swap_with}
+            use std::effects::concurrent::atom::{atom, deref, swap_with}
 
             let state = atom {value = "Hello"}
             let _ = swap_with {atom = state, f = {current, arg} -> current, arg = " World"}
@@ -173,7 +173,7 @@ class AtomModuleTest {
     @Test
     fun `test compare_and_set succeeds when value matches`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, compare_and_set}
+            use std::effects::concurrent::atom::{atom, compare_and_set}
 
             let counter = atom {value = 0}
             compare_and_set {atom = counter, expected = 0, new = 1}
@@ -185,7 +185,7 @@ class AtomModuleTest {
     @Test
     fun `test compare_and_set fails when value differs`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, compare_and_set}
+            use std::effects::concurrent::atom::{atom, compare_and_set}
 
             let counter = atom {value = 5}
             compare_and_set {atom = counter, expected = 0, new = 1}
@@ -197,7 +197,7 @@ class AtomModuleTest {
     @Test
     fun `test compare_and_set updates value on success`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, compare_and_set}
+            use std::effects::concurrent::atom::{atom, deref, compare_and_set}
 
             let counter = atom {value = 0}
             let _ = compare_and_set {atom = counter, expected = 0, new = 42}
@@ -210,7 +210,7 @@ class AtomModuleTest {
     @Test
     fun `test compare_and_set does not update on failure`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, compare_and_set}
+            use std::effects::concurrent::atom::{atom, deref, compare_and_set}
 
             let counter = atom {value = 5}
             let _ = compare_and_set {atom = counter, expected = 0, new = 42}
@@ -225,7 +225,7 @@ class AtomModuleTest {
     @Test
     fun `test get_and_swap returns old and new values`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, get_and_swap}
+            use std::effects::concurrent::atom::{atom, get_and_swap}
 
             let counter = atom {value = 10}
             let result = get_and_swap {atom = counter, f = {current} -> current + 5}
@@ -238,7 +238,7 @@ class AtomModuleTest {
     @Test
     fun `test get_and_swap new value`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, get_and_swap}
+            use std::effects::concurrent::atom::{atom, get_and_swap}
 
             let counter = atom {value = 10}
             let result = get_and_swap {atom = counter, f = {current} -> current + 5}
@@ -253,7 +253,7 @@ class AtomModuleTest {
     @Test
     fun `test atom_validated creates validated atom`() {
         val result = eval("""
-            use std::concurrent::atom::{atom_validated, deref}
+            use std::effects::concurrent::atom::{atom_validated, deref}
 
             let positive = atom_validated {value = 5, validator = {val} -> val >= 0}
             deref {atom = positive}
@@ -265,7 +265,7 @@ class AtomModuleTest {
     @Test
     fun `test set_validator adds validator`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, swap, set_validator}
+            use std::effects::concurrent::atom::{atom, deref, swap, set_validator}
 
             let counter = atom {value = 10}
             let _ = set_validator {atom = counter, validator = {val} -> val >= 0}
@@ -281,7 +281,7 @@ class AtomModuleTest {
     @Test
     fun `test atom with boolean value`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, swap}
+            use std::effects::concurrent::atom::{atom, deref, swap}
 
             let flag = atom {value = False}
             let _ = swap {atom = flag, f = {current} -> True}
@@ -294,7 +294,7 @@ class AtomModuleTest {
     @Test
     fun `test atom with list value`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref}
+            use std::effects::concurrent::atom::{atom, deref}
 
             let items = atom {value = [1, 2, 3]}
             let current = deref {atom = items}
@@ -307,7 +307,7 @@ class AtomModuleTest {
     @Test
     fun `test atom identity check`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, reset}
+            use std::effects::concurrent::atom::{atom, deref, reset}
 
             let a = atom {value = 1}
             let _ = reset {atom = a, value = 2}
@@ -323,7 +323,7 @@ class AtomModuleTest {
     @Test
     fun `test add_watch and remove_watch`() {
         val result = eval("""
-            use std::concurrent::atom::{atom, deref, reset, add_watch, remove_watch}
+            use std::effects::concurrent::atom::{atom, deref, reset, add_watch, remove_watch}
 
             let counter = atom {value = 0}
             let _ = add_watch {atom = counter, key = "test", f = {key, old, new} -> {}}

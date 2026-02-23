@@ -33,30 +33,35 @@ sealed interface Pattern
 
 @Serializable
 data class WildcardPattern(
-    val dummy: Unit = Unit
+    val dummy: Unit = Unit,
+    val sourceLocation: SourceLocation? = null
 ) : Pattern
 
 @Serializable
 data class VariablePattern(
-    val name: String
+    val name: String,
+    val sourceLocation: SourceLocation? = null
 ) : Pattern
 
 @Serializable
 data class ConstructorPattern(
     val constructor: String,
-    val recordPattern: RecordPattern? = null
+    val recordPattern: RecordPattern? = null,
+    val sourceLocation: SourceLocation? = null
 ) : Pattern
 
 @Serializable
 data class RecordPattern(
     val entries: List<RecordPatternEntry>,
-    val isOpen: Boolean = false  // true if ... was used in the pattern
+    val isOpen: Boolean = false,  // true if ... was used in the pattern
+    val sourceLocation: SourceLocation? = null
 ) : Pattern
 
 @Serializable
 data class RecordPatternEntry(
     val name: String,
-    val pattern: Pattern? = null  // null for shorthand {x} instead of {x = x}
+    val pattern: Pattern? = null,  // null for shorthand {x} instead of {x = x}
+    val sourceLocation: SourceLocation? = null
 )
 
 /**
@@ -65,7 +70,8 @@ data class RecordPatternEntry(
  */
 @Serializable
 data class LiteralPattern(
-    val value: LiteralValue
+    val value: LiteralValue,
+    val sourceLocation: SourceLocation? = null
 ) : Pattern
 
 /**
@@ -75,7 +81,8 @@ data class LiteralPattern(
 @Serializable
 data class ArrayPattern(
     val elements: List<Pattern>,       // Fixed-position patterns
-    val restPattern: String? = null    // Optional rest pattern name (...tail)
+    val restPattern: String? = null,   // Optional rest pattern name (...tail)
+    val sourceLocation: SourceLocation? = null
 ) : Pattern
 
 /**

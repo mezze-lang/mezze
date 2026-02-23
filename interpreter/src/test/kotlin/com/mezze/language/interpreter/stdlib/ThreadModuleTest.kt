@@ -58,7 +58,7 @@ class ThreadModuleTest {
     fun `test thread module can be imported`() {
         // This test verifies that the module imports without type errors
         val result = eval("""
-            use std::async::thread::{park, unpark, current_thread, sleep, yield}
+            use std::effects::async::thread::{park, unpark, current_thread, sleep, yield}
             42
         """)
         assertEquals(MezzeInt(42), result)
@@ -72,7 +72,7 @@ class ThreadModuleTest {
     fun `test current_thread returns a thread handle`() {
         // current_thread is a pure function - doesn't need Async effect
         val result = eval("""
-            use std::async::thread::{current_thread}
+            use std::effects::async::thread::{current_thread}
 
             let t = current_thread {}
             42  # Return a value to verify we got past the call
@@ -88,7 +88,7 @@ class ThreadModuleTest {
     fun `test yield returns unit`() {
         // yield is a pure function - doesn't need Async effect
         val result = eval("""
-            use std::async::thread::{yield}
+            use std::effects::async::thread::{yield}
 
             yield {}
             42

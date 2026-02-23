@@ -20,7 +20,7 @@ let nestedAccess = {v} -> match v is
 # Open variant with list of variants
 let processList = {items} -> match items is
   Cons {head, tail} -> match head is
-    Some -> 1
+    Some { val = _ } -> 1
     _ -> 0
   _ -> 0                                                        # expected: processList : { items: List Option 'a } -> Int
 

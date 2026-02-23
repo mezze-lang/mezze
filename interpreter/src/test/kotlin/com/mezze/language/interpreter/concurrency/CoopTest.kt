@@ -45,7 +45,7 @@ class CoopTest {
 
     // Setup code for Coop operations using stdlib
     private val coopSetup = """
-        use std::async::{Async, CoopAsync}
+        use std::effects::async::{Async, CoopAsync}
         use std::control::continuation
     """.trimIndent()
 

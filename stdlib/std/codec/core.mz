@@ -1,0 +1,259 @@
+# std/codec.mezze - Core serialization/deserialization abilities
+#
+# This module defines the codec system for Mezze - a type-safe, automatic
+# serialization framework inspired by Rust's Serde.
+#
+# Architecture:
+# - Tier 1 (default): Build intermediate representation, then serialize
+# - Tier 2 (streaming): Write directly to ByteBuffer for large data (>100MB)
+#
+# The TypeChecker automatically generates Encode/Decode implementations
+# for any serializable type at the call site - no annotations needed.
+#
+# Example:
+#   use std::codec
+#   use std::json
+#
+#   let user = {name = "Alice", age = 30}
+#   let bytes = json::encode {value = user}  # Auto-generates impl!
+#   let decoded = json::decode {bytes = bytes}  # Result {name: String, age: Int} DecodeError
+
+use std::string
+use std::int
+use std::collections::array
+
+# ============================================================================
+# ERROR TYPES
+# ============================================================================
+
+# Error returned when encoding fails (e.g., CSV can't encode nested records)
+pub type EncodeError = {
+    path: [String],      # Path to the field that failed (e.g., ["user", "address"])
+    message: String      # Human-readable error message
+}
+
+# Error returned when decoding fails
+pub type DecodeError = {
+    path: [String],      # Path to the field that failed
+    message: String,     # Human-readable error message
+    expected: String,    # What type was expected (e.g., "Int")
+    found: Option String # What was actually found (e.g., "String")
+}
+
+# ============================================================================
+# CONFIGURATION TYPES
+# ============================================================================
+
+# Field name transformation strategies
+pub type FieldTransform = | Identity, SnakeCase, CamelCase, KebabCase, ScreamingSnakeCase |
+
+# Codec configuration for runtime customization
+pub type CodecConfig = {
+    field_transform: FieldTransform
+}
+
+# Default codec configuration (identity transform - no changes to field names)
+pub let default_config: CodecConfig = {field_transform = Identity}
+
+# ============================================================================
+# TYPE ALIASES
+# ============================================================================
+
+# Entry type for map key-value pairs
+pub type Entry 'k 'v = {key: 'k, value: 'v}
+
+# ============================================================================
+# TIER 1: INTERMEDIATE REPRESENTATION (Default)
+# ============================================================================
+
+# User-facing ability for encoding values to a format's intermediate representation
+# TypeChecker auto-generates implementations for serializable types
+ability Encode 'repr 'a where {
+    encode: {val: 'a, config: CodecConfig} -> (Result 'repr EncodeError)
+}
+
+# User-facing ability for decoding values from a format's intermediate representation
+# TypeChecker auto-generates implementations for serializable types
+ability Decode 'repr 'a where {
+    decode: {val: 'repr, config: CodecConfig} -> (Result 'a DecodeError)
+}
+
+# Format author ability - defines how to encode primitive values and structures
+# to the format's intermediate representation (e.g., Json variant)
+ability EncodeFormat 'repr where {
+    # Atoms (6 hooks)
+    encode_int: {val: Int, path: [String]} -> (Result 'repr EncodeError),
+    encode_float: {val: Float, path: [String]} -> (Result 'repr EncodeError),
+    encode_string: {val: String, path: [String]} -> (Result 'repr EncodeError),
+    encode_bool: {val: Bool, path: [String]} -> (Result 'repr EncodeError),
+    encode_frac: {val: Frac, path: [String]} -> (Result 'repr EncodeError),
+    encode_bytes: {val: Bytes, path: [String]} -> (Result 'repr EncodeError),
+
+    # Structures (2 hooks)
+    # Note: fields is Array for efficient construction with [...] syntax
+    # Using anonymous record {key: String, value: 'repr} instead of Entry for structural compatibility
+    encode_record: {fields: Array {key: String, value: 'repr}, path: [String]} -> (Result 'repr EncodeError),
+    encode_variant: {tag: String, payload: Option 'repr, path: [String]} -> (Result 'repr EncodeError),
+
+    # Collections (3 hooks)
+    encode_list: {elems: List 'repr, path: [String]} -> (Result 'repr EncodeError),
+    encode_set: {elems: Set 'repr, path: [String]} -> (Result 'repr EncodeError),
+    encode_map: {entries: List {key: 'repr, value: 'repr}, path: [String]} -> (Result 'repr EncodeError),
+
+    # Nullable (1 hook)
+    encode_option: {val: Option 'repr, path: [String]} -> (Result 'repr EncodeError),
+
+    # Field name transformation (1 hook)
+    # Transforms field names according to format config (e.g., camelCase -> snake_case)
+    # Uses the CodecConfig to determine the transformation strategy
+    transform_field: {name: String, config: CodecConfig} -> String
+}
+
+# Format author ability - defines how to decode values from the format's
+# intermediate representation back to Mezze types
+ability DecodeFormat 'repr where {
+    # Atoms (6 hooks)
+    decode_int: {val: 'repr, path: [String]} -> (Result Int DecodeError),
+    decode_float: {val: 'repr, path: [String]} -> (Result Float DecodeError),
+    decode_string: {val: 'repr, path: [String]} -> (Result String DecodeError),
+    decode_bool: {val: 'repr, path: [String]} -> (Result Bool DecodeError),
+    decode_frac: {val: 'repr, path: [String]} -> (Result Frac DecodeError),
+    decode_bytes: {val: 'repr, path: [String]} -> (Result Bytes DecodeError),
+
+    # Structures (2 hooks)
+    decode_record_field: {val: 'repr, key: String, path: [String]} -> (Result 'repr DecodeError),
+    decode_variant: {val: 'repr, path: [String]} -> (Result {tag: String, payload: Option 'repr} DecodeError),
+
+    # Collections (3 hooks)
+    decode_list: {val: 'repr, path: [String]} -> (Result (List 'repr) DecodeError),
+    decode_set: {val: 'repr, path: [String]} -> (Result (Set 'repr) DecodeError),
+    decode_map: {val: 'repr, path: [String]} -> (Result (List {key: 'repr, value: 'repr}) DecodeError),
+
+    # Nullable (1 hook)
+    decode_option: {val: 'repr, path: [String]} -> (Result (Option 'repr) DecodeError),
+
+    # Field name transformation (1 hook)
+    # Transforms field names according to format config (e.g., snake_case -> camelCase)
+    # This is the inverse of EncodeFormat.transform_field
+    # Uses the CodecConfig to determine the transformation strategy
+    transform_field: {name: String, config: CodecConfig} -> String
+}
+
+# ============================================================================
+# TIER 2: STREAMING (Optional, for >100MB data)
+# ============================================================================
+
+# User-facing ability for streaming encoding directly to ByteBuffer
+# Avoids building intermediate representation - better for large data
+ability StreamEncode 'format 'a where {
+    stream_encode: {value: 'a, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError)
+}
+
+# User-facing ability for streaming decoding directly from Bytes
+# Returns the decoded value and the new offset position
+ability StreamDecode 'format 'a where {
+    stream_decode: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: 'a, offset: Int} DecodeError)
+}
+
+# Format author ability for streaming encoding
+# Writes directly to ByteBuffer without intermediate representation
+ability StreamEncodeFormat 'format where {
+    # Atoms (6 hooks)
+    stream_int: {value: Int, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_float: {value: Float, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_string: {value: String, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_bool: {value: Bool, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_frac: {value: Frac, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_bytes: {value: Bytes, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+
+    # Record (3 hooks)
+    stream_record_start: {buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_record_field: {key: String, value: ByteBuffer, is_first: Bool, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_record_end: {buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+
+    # Variant (1 hook)
+    stream_variant: {tag: String, payload: Option ByteBuffer, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+
+    # List (3 hooks)
+    stream_list_start: {buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_list_element: {value: ByteBuffer, is_first: Bool, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_list_end: {buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+
+    # Set (3 hooks)
+    stream_set_start: {buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_set_element: {value: ByteBuffer, is_first: Bool, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_set_end: {buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+
+    # Map (3 hooks)
+    stream_map_start: {buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_map_entry: {key: ByteBuffer, value: ByteBuffer, is_first: Bool, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_map_end: {buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+
+    # Option (2 hooks)
+    stream_none: {buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError),
+    stream_some: {value: ByteBuffer, buffer: ByteBuffer, path: [String]} -> (Result ByteBuffer EncodeError)
+}
+
+# Format author ability for streaming decoding
+# Reads directly from Bytes with offset tracking
+ability StreamDecodeFormat 'format where {
+    # Atoms (6 hooks)
+    stream_decode_int: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: Int, offset: Int} DecodeError),
+    stream_decode_float: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: Float, offset: Int} DecodeError),
+    stream_decode_string: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: String, offset: Int} DecodeError),
+    stream_decode_bool: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: Bool, offset: Int} DecodeError),
+    stream_decode_frac: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: Frac, offset: Int} DecodeError),
+    stream_decode_bytes: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: Bytes, offset: Int} DecodeError),
+
+    # Record (2 hooks)
+    stream_decode_record_start: {bytes: Bytes, offset: Int, path: [String]} -> (Result {offset: Int} DecodeError),
+    stream_decode_record_field: {bytes: Bytes, offset: Int, key: String, path: [String]} -> (Result {value: Bytes, offset: Int} DecodeError),
+
+    # Variant (1 hook)
+    stream_decode_variant: {bytes: Bytes, offset: Int, path: [String]} -> (Result {tag: String, payload: Option Bytes, offset: Int} DecodeError),
+
+    # List (2 hooks)
+    stream_decode_list_start: {bytes: Bytes, offset: Int, path: [String]} -> (Result {offset: Int} DecodeError),
+    stream_decode_list_next: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: Option Bytes, offset: Int} DecodeError),
+
+    # Set (2 hooks)
+    stream_decode_set_start: {bytes: Bytes, offset: Int, path: [String]} -> (Result {offset: Int} DecodeError),
+    stream_decode_set_next: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: Option Bytes, offset: Int} DecodeError),
+
+    # Map (2 hooks)
+    stream_decode_map_start: {bytes: Bytes, offset: Int, path: [String]} -> (Result {offset: Int} DecodeError),
+    stream_decode_map_next: {bytes: Bytes, offset: Int, path: [String]} -> (Result {entry: Option {key: Bytes, value: Bytes}, offset: Int} DecodeError),
+
+    # Option (1 hook)
+    stream_decode_option: {bytes: Bytes, offset: Int, path: [String]} -> (Result {value: Option Bytes, offset: Int} DecodeError)
+}
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+# Create an empty path (for top-level encoding/decoding)
+pub let empty_path: [String] = []
+
+# Append a field name to a path
+pub let append_path = {path: [String], field: String} ->
+    array::add { xs = path, x = field }
+
+# Append an index to a path (for arrays/lists)
+pub let append_index = {path: [String], index: Int} ->
+    array::add { xs = path, x = int::to_string {n = index} }
+
+# Format a path as a string (e.g., "user.address.city")
+pub let format_path = {path: [String]} ->
+    if array::is_empty {xs = path} then
+        "<root>"
+    else
+        string::join {strings = path, separator = "."}
+
+# Create an encode error
+pub let encode_error = {path: [String], message: String} ->
+    Err {error = {path = path, message = message}}
+
+# Create a decode error
+pub let decode_error = {path: [String], message: String, expected: String, found: Option String} ->
+    Err {error = {path = path, message = message, expected = expected, found = found}}

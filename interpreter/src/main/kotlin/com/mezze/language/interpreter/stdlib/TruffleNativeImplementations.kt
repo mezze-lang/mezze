@@ -44,6 +44,7 @@ import com.mezze.language.interpreter.stdlib.conversion.TruffleConversionImpleme
 import com.mezze.language.interpreter.stdlib.io.TruffleIOImplementations
 import com.mezze.language.interpreter.stdlib.system.TruffleSystemImplementations
 import com.mezze.language.interpreter.stdlib.codec.JsonImplementations
+import com.mezze.language.interpreter.stdlib.effects.HttpImplementations
 
 
 /**
@@ -119,6 +120,9 @@ object TruffleNativeImplementations {
 
         // Register codec implementations (JSON serialization/deserialization)
         JsonImplementations.registerAll(context)
+
+        // Register HTTP client implementations (Vert.x)
+        HttpImplementations.registerAll(context)
 
         // Register legacy implementations (for backward compatibility)
         TruffleConversionImplementations.registerAll(context)

@@ -447,18 +447,15 @@ class CodecGenerator {
         return id("StreamDecodeFormat")
     }
 
-    /** Call append_path using native list operations directly */
+    /** Call append_path using native array operations directly */
     private fun appendPath(pathExpr: Expression, fieldName: String): Expression {
-        // Use native functions since they're always available
-        // Inline: __native_list_append {xs = path, ys = __native_list_cons {head = field, tail = __native_list_empty {}}}
+        // Use native arraylist functions since paths are now Array String
+        // Inline: __native_arraylist_add {xs = path, x = field}
         return call(
-            id("__native_list_append"),
+            id("__native_arraylist_add"),
             record(
                 "xs" to pathExpr,
-                "ys" to call(
-                    id("__native_list_cons"),
-                    record("head" to str(fieldName), "tail" to call(id("__native_list_empty"), record()))
-                )
+                "x" to str(fieldName)
             )
         )
     }
@@ -479,20 +476,15 @@ class CodecGenerator {
         )
     }
 
-    /** Call append_index using native list operations directly */
+    /** Call append_index using native array operations directly */
     private fun appendIndex(pathExpr: Expression, indexExpr: Expression): Expression {
-        // Use native functions since they're always available
+        // Use native arraylist functions since paths are now Array String
+        // Inline: __native_arraylist_add {xs = path, x = __native_int_to_string {n = index}}
         return call(
-            id("__native_list_append"),
+            id("__native_arraylist_add"),
             record(
                 "xs" to pathExpr,
-                "ys" to call(
-                    id("__native_list_cons"),
-                    record(
-                        "head" to call(id("__native_int_to_string"), record("n" to indexExpr)),
-                        "tail" to call(id("__native_list_empty"), record())
-                    )
-                )
+                "x" to call(id("__native_int_to_string"), record("n" to indexExpr))
             )
         )
     }
@@ -2067,9 +2059,9 @@ class CodecGenerator {
      * Generates single `encode` method that takes config parameter.
      */
     private fun createEncodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
-        // Wrap body in a do block that creates an empty path
+        // Wrap body in a do block that creates an empty path (Array String)
         // config is a parameter from the caller
-        val encodeBody = doWithLet("path", call(id("__native_list_empty"), record()), body)
+        val encodeBody = doWithLet("path", array(emptyList()), body)
 
         return ImplAbilityDeclaration(
             abilityName = "Encode",
@@ -2090,9 +2082,9 @@ class CodecGenerator {
      * Generates single `decode` method that takes config parameter.
      */
     private fun createDecodeImpl(formatType: MezzeType, dataType: MezzeType, body: Expression): ImplAbilityDeclaration {
-        // Wrap body in a do block that creates an empty path
+        // Wrap body in a do block that creates an empty path (Array String)
         // config is a parameter from the caller
-        val decodeBody = doWithLet("path", call(id("__native_list_empty"), record()), body)
+        val decodeBody = doWithLet("path", array(emptyList()), body)
 
         return ImplAbilityDeclaration(
             abilityName = "Decode",

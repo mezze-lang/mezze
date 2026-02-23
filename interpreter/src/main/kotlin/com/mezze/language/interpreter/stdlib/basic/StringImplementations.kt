@@ -389,5 +389,145 @@ object StringImplementations {
                 MezzeString(s.value + padding)
             }
         }
+
+        // === Glob Pattern Matching ===
+
+        // Match a string against a glob pattern
+        // Supports: * (any except /), ** (any including /), ? (single char), [abc], [!abc], [a-z]
+        context["__native_string_glob_match"] = NativeMezzeFunction("__native_string_glob_match") { args ->
+            val record = args.firstOrNull() as? MezzeRecord ?: throw NativeFunctionException("__native_string_glob_match", "expects MezzeRecord")
+            val pattern = record.fields["pattern"] as? MezzeString ?: throw NativeFunctionException("__native_string_glob_match", "expects 'pattern' as String")
+            val text = record.fields["text"] as? MezzeString ?: throw NativeFunctionException("__native_string_glob_match", "expects 'text' as String")
+
+            MezzeBool(globMatch(pattern.value, text.value))
+        }
+    }
+
+    // =========================================================================
+    // Glob Pattern Matching Implementation
+    // =========================================================================
+
+    /**
+     * Glob pattern matching implementation.
+     *
+     * Supports:
+     * - * matches any characters except /
+     * - ** matches any characters including /
+     * - ? matches a single character (not /)
+     * - [abc] matches any character in the set
+     * - [!abc] matches any character not in the set
+     * - [a-z] matches any character in the range
+     */
+    fun globMatch(pattern: String, text: String): Boolean {
+        return globMatchImpl(pattern, 0, text, 0)
+    }
+
+    private fun globMatchImpl(pattern: String, pi: Int, text: String, ti: Int): Boolean {
+        var p = pi
+        var t = ti
+
+        while (p < pattern.length) {
+            when {
+                // ** matches anything including /
+                pattern.startsWith("**", p) -> {
+                    p += 2
+                    // Skip any trailing / after **
+                    if (p < pattern.length && pattern[p] == '/') p++
+
+                    // ** at end matches everything
+                    if (p >= pattern.length) return true
+
+                    // Try matching rest of pattern at each position
+                    for (i in t..text.length) {
+                        if (globMatchImpl(pattern, p, text, i)) return true
+                    }
+                    return false
+                }
+
+                // * matches anything except /
+                pattern[p] == '*' -> {
+                    p++
+                    // * at end of pattern segment
+                    if (p >= pattern.length) {
+                        // Match rest only if no / in remaining text
+                        return !text.substring(t).contains('/')
+                    }
+
+                    // Try matching rest of pattern at each position (but stop at /)
+                    for (i in t..text.length) {
+                        if (i > t && text[i - 1] == '/') break
+                        if (globMatchImpl(pattern, p, text, i)) return true
+                    }
+                    return false
+                }
+
+                // ? matches single character (except /)
+                pattern[p] == '?' -> {
+                    if (t >= text.length || text[t] == '/') return false
+                    p++
+                    t++
+                }
+
+                // [...] character class
+                pattern[p] == '[' -> {
+                    if (t >= text.length) return false
+
+                    val (matched, newP) = matchCharClass(pattern, p, text[t])
+                    if (!matched) return false
+                    p = newP
+                    t++
+                }
+
+                // Literal character
+                else -> {
+                    if (t >= text.length || pattern[p] != text[t]) return false
+                    p++
+                    t++
+                }
+            }
+        }
+
+        // Pattern exhausted - text should also be exhausted
+        return t >= text.length
+    }
+
+    /**
+     * Match a character class [...] or [!...]
+     * Returns (matched, newPatternIndex)
+     */
+    private fun matchCharClass(pattern: String, startP: Int, char: Char): Pair<Boolean, Int> {
+        var p = startP + 1 // Skip opening [
+        var negate = false
+
+        if (p < pattern.length && pattern[p] == '!') {
+            negate = true
+            p++
+        }
+
+        var matched = false
+        var prevChar: Char? = null
+
+        while (p < pattern.length && pattern[p] != ']') {
+            when {
+                // Range: a-z
+                pattern[p] == '-' && prevChar != null && p + 1 < pattern.length && pattern[p + 1] != ']' -> {
+                    val rangeEnd = pattern[p + 1]
+                    if (char in prevChar..rangeEnd) matched = true
+                    p += 2
+                    prevChar = null
+                }
+                else -> {
+                    if (pattern[p] == char) matched = true
+                    prevChar = pattern[p]
+                    p++
+                }
+            }
+        }
+
+        // Skip closing ]
+        if (p < pattern.length && pattern[p] == ']') p++
+
+        val result = if (negate) !matched else matched
+        return Pair(result, p)
     }
 }

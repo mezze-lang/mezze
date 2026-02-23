@@ -1,43 +1,41 @@
 {
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Mezze",
   "scopeName": "source.mezze",
-  "fileTypes": ["mezze"],
+  "fileTypes": ["mz"],
   "patterns": [
     { "include": "#comments" },
-    { "include": "#module-declarations" },
-    { "include": "#let-binding" },
+    { "include": "#use-declaration" },
+    { "include": "#pub-use-declaration" },
+    { "include": "#newtype-declaration" },
     { "include": "#type-declaration" },
     { "include": "#effect-declaration" },
     { "include": "#ability-declaration" },
-    { "include": "#impl-declaration" },
+    { "include": "#impl-effect-declaration" },
     { "include": "#impl-ability-declaration" },
-    { "include": "#match-expression" },
-    { "include": "#lambda-expression" },
-    { "include": "#do-expression" },
-    { "include": "#perform-expression" },
-    { "include": "#if-expression" },
-    { "include": "#control-keywords" },
-    { "include": "#keywords" },
-    { "include": "#record-literal" },
-    { "include": "#strings" },
-    { "include": "#numbers" },
-    { "include": "#booleans" },
-    { "include": "#operators" },
-    { "include": "#ability-method-call" },
-    { "include": "#qualified-identifier" },
-    { "include": "#constructor-names" },
-    { "include": "#type-variables" },
-    { "include": "#identifiers" }
+    { "include": "#let-binding" },
+    { "include": "#expression" }
   ],
   "repository": {
     "comments": {
-      "name": "comment.line.hash.mezze",
+      "name": "comment.line.number-sign.mezze",
       "match": "#.*$"
     },
-    "module-declarations": {
+
+    "use-declaration": {
       "patterns": [
         {
-          "comment": "use module::path or pub module::path (re-export), but NOT pub let/type/etc",
+          "comment": "use with destructuring: use mod::{a, b}",
+          "match": "\\b(use)\\s+([a-z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)\\s*(::)\\s*({)",
+          "captures": {
+            "1": { "name": "keyword.control.import.mezze" },
+            "2": { "name": "entity.name.namespace.mezze" },
+            "3": { "name": "punctuation.separator.namespace.mezze" },
+            "4": { "name": "punctuation.definition.imports.begin.mezze" }
+          }
+        },
+        {
+          "comment": "use simple: use mod::path",
           "match": "\\b(use)\\s+([a-z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)(?:\\s+(as)\\s+([a-zA-Z_][a-zA-Z0-9_]*))?",
           "captures": {
             "1": { "name": "keyword.control.import.mezze" },
@@ -45,67 +43,50 @@
             "3": { "name": "keyword.control.as.mezze" },
             "4": { "name": "entity.name.type.alias.mezze" }
           }
-        },
-        {
-          "comment": "pub re-export: pub module::path (must contain ::)",
-          "match": "\\b(pub)\\s+([a-z_][a-zA-Z0-9_]*::[a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)",
-          "captures": {
-            "1": { "name": "keyword.control.import.mezze" },
-            "2": { "name": "entity.name.namespace.mezze" }
-          }
         }
       ]
     },
-    "let-binding": {
-      "patterns": [
-        {
-          "comment": "Let binding with simple identifier",
-          "begin": "\\b(pub\\s+)?(let)\\s+([a-z_][a-zA-Z0-9_]*)(?=\\s*[=:])",
-          "beginCaptures": {
-            "1": { "name": "storage.modifier.visibility.mezze" },
-            "2": { "name": "keyword.declaration.mezze" },
-            "3": { "name": "entity.name.function.mezze" }
-          },
-          "end": "(?=\\n(?!\\s))|(?=^[a-z])|(?=^(pub\\s+)?(let|type|effect|ability|impl)\\s)",
-          "patterns": [
-            { "include": "#type-annotation" },
-            { "include": "#comments" },
-            { "include": "#expression-contents" }
-          ]
-        },
-        {
-          "comment": "Let binding with destructuring pattern",
-          "begin": "\\b(pub\\s+)?(let)\\s+(?={)",
-          "beginCaptures": {
-            "1": { "name": "storage.modifier.visibility.mezze" },
-            "2": { "name": "keyword.declaration.mezze" }
-          },
-          "end": "(?=\\n(?!\\s))|(?=^[a-z])|(?=^(pub\\s+)?(let|type|effect|ability|impl)\\s)",
-          "patterns": [
-            { "include": "#record-pattern" },
-            { "include": "#comments" },
-            { "include": "#expression-contents" }
-          ]
-        }
-      ]
+
+    "pub-use-declaration": {
+      "match": "\\b(pub)\\s+([a-z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)+)",
+      "captures": {
+        "1": { "name": "storage.modifier.visibility.mezze" },
+        "2": { "name": "entity.name.namespace.mezze" }
+      }
     },
-    "type-declaration": {
-      "begin": "\\b(pub\\s+)?(type)\\s+([A-Z][a-zA-Z0-9_]*)\\s*('(?:[a-zA-Z][a-zA-Z0-9_]*))*\\s*(=)",
+
+    "newtype-declaration": {
+      "begin": "\\b(pub\\s+)?(newtype)\\s+([A-Z][a-zA-Z0-9_]*)((?:\\s+'[a-zA-Z][a-zA-Z0-9_]*)*)\\s*(=)\\s*([A-Z][a-zA-Z0-9_]*)",
       "beginCaptures": {
         "1": { "name": "storage.modifier.visibility.mezze" },
-        "2": { "name": "keyword.declaration.mezze" },
+        "2": { "name": "keyword.declaration.newtype.mezze" },
+        "3": { "name": "entity.name.type.mezze" },
+        "4": { "name": "variable.parameter.type.mezze" },
+        "5": { "name": "keyword.operator.assignment.mezze" },
+        "6": { "name": "entity.name.type.constructor.mezze" }
+      },
+      "end": "(?=\\n(?!\\s)|^(?:pub\\s+)?(?:let|type|newtype|effect|ability|impl|use)\\b)",
+      "patterns": [
+        { "include": "#type-expression" }
+      ]
+    },
+
+    "type-declaration": {
+      "begin": "\\b(pub\\s+)?(type)\\s+([A-Z][a-zA-Z0-9_]*)((?:\\s+'[a-zA-Z][a-zA-Z0-9_]*)*)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "storage.modifier.visibility.mezze" },
+        "2": { "name": "keyword.declaration.type.mezze" },
         "3": { "name": "entity.name.type.mezze" },
         "4": { "name": "variable.parameter.type.mezze" },
         "5": { "name": "keyword.operator.assignment.mezze" }
       },
-      "end": "(?=\\n(?!\\s))|(?=^[a-zA-Z])",
+      "end": "(?=\\n(?!\\s)|^(?:pub\\s+)?(?:let|type|newtype|effect|ability|impl|use)\\b)",
       "patterns": [
-        { "include": "#type-variables" },
         { "include": "#variant-type" },
-        { "include": "#record-type" },
-        { "include": "#comments" }
+        { "include": "#type-expression" }
       ]
     },
+
     "variant-type": {
       "begin": "\\|",
       "beginCaptures": {
@@ -118,12 +99,10 @@
       "patterns": [
         {
           "match": "([A-Z][a-zA-Z0-9_]*)",
-          "captures": {
-            "1": { "name": "entity.name.type.constructor.mezze" }
-          }
+          "name": "entity.name.type.constructor.mezze"
         },
         { "include": "#record-type" },
-        { "include": "#comments" },
+        { "include": "#type-expression" },
         {
           "name": "punctuation.separator.variant.mezze",
           "match": ","
@@ -134,35 +113,42 @@
         }
       ]
     },
+
     "effect-declaration": {
-      "begin": "\\b(pub\\s+)?(effect)\\s+([A-Z][a-zA-Z0-9_]*)\\s*({)",
+      "begin": "\\b(pub\\s+)?(effect)\\s+([A-Z][a-zA-Z0-9_]*)",
       "beginCaptures": {
         "1": { "name": "storage.modifier.visibility.mezze" },
-        "2": { "name": "keyword.declaration.mezze" },
-        "3": { "name": "entity.name.type.effect.mezze" },
-        "4": { "name": "punctuation.definition.block.begin.mezze" }
+        "2": { "name": "keyword.declaration.effect.mezze" },
+        "3": { "name": "entity.name.type.effect.mezze" }
       },
       "end": "}",
       "endCaptures": {
         "0": { "name": "punctuation.definition.block.end.mezze" }
       },
       "patterns": [
-        { "include": "#effect-operation" },
-        { "include": "#comments" }
+        {
+          "match": "\\b(having)\\b",
+          "name": "keyword.other.having.mezze"
+        },
+        {
+          "match": "\\b(where)\\b",
+          "name": "keyword.control.where.mezze"
+        },
+        { "include": "#type-variables" },
+        { "include": "#operation-signature" },
+        { "include": "#comments" },
+        {
+          "match": "{",
+          "name": "punctuation.definition.block.begin.mezze"
+        }
       ]
     },
-    "effect-operation": {
-      "match": "([a-z_][a-zA-Z0-9_]*)\\s*(:)",
-      "captures": {
-        "1": { "name": "entity.name.function.effect-operation.mezze" },
-        "2": { "name": "punctuation.separator.type.mezze" }
-      }
-    },
+
     "ability-declaration": {
       "begin": "\\b(pub\\s+)?(ability)\\s+([A-Z][a-zA-Z0-9_]*)",
       "beginCaptures": {
         "1": { "name": "storage.modifier.visibility.mezze" },
-        "2": { "name": "keyword.declaration.mezze" },
+        "2": { "name": "keyword.declaration.ability.mezze" },
         "3": { "name": "entity.name.type.ability.mezze" }
       },
       "end": "}",
@@ -170,77 +156,65 @@
         "0": { "name": "punctuation.definition.block.end.mezze" }
       },
       "patterns": [
-        { "include": "#type-variables" },
-        { "include": "#ability-dependencies" },
-        { "include": "#ability-operation" },
-        { "include": "#comments" },
         {
-          "match": "\\b(where)\\s*({)",
-          "captures": {
-            "1": { "name": "keyword.control.where.mezze" },
-            "2": { "name": "punctuation.definition.block.begin.mezze" }
-          }
+          "match": "\\b(having)\\b",
+          "name": "keyword.other.having.mezze"
         },
         {
-          "match": "({)(?!.*where)",
-          "captures": {
-            "1": { "name": "punctuation.definition.block.begin.mezze" }
-          }
+          "match": "\\b(where)\\b",
+          "name": "keyword.control.where.mezze"
+        },
+        {
+          "match": "\\b(with)\\b",
+          "name": "keyword.control.with.mezze"
+        },
+        { "include": "#type-variables" },
+        { "include": "#type-name" },
+        { "include": "#operation-signature" },
+        { "include": "#comments" },
+        {
+          "match": "{",
+          "name": "punctuation.definition.block.begin.mezze"
         }
       ]
     },
-    "ability-dependencies": {
-      "begin": "\\b(with)\\b",
-      "beginCaptures": {
-        "1": { "name": "keyword.control.with.mezze" }
-      },
-      "end": "(?=where|{)",
-      "patterns": [
-        {
-          "match": "([A-Z][a-zA-Z0-9_]*)",
-          "captures": {
-            "1": { "name": "entity.name.type.ability.mezze" }
-          }
-        },
-        { "include": "#type-variables" },
-        { "include": "#comments" }
-      ]
-    },
-    "ability-operation": {
-      "match": "([a-z_][a-zA-Z0-9_]*)\\s*(:)",
-      "captures": {
-        "1": { "name": "entity.name.function.ability-operation.mezze" },
-        "2": { "name": "punctuation.separator.type.mezze" }
-      }
-    },
-    "impl-declaration": {
+
+    "impl-effect-declaration": {
       "begin": "\\b(impl)\\s+([A-Z][a-zA-Z0-9_]*)\\s+(for)\\s+([A-Z][a-zA-Z0-9_]*)",
       "beginCaptures": {
-        "1": { "name": "keyword.declaration.mezze" },
+        "1": { "name": "keyword.declaration.impl.mezze" },
         "2": { "name": "entity.name.type.effect.mezze" },
         "3": { "name": "keyword.control.for.mezze" },
-        "4": { "name": "entity.name.type.mezze" }
+        "4": { "name": "entity.name.type.performer.mezze" }
       },
       "end": "}",
       "endCaptures": {
         "0": { "name": "punctuation.definition.block.end.mezze" }
       },
       "patterns": [
-        { "include": "#performer-operation" },
+        {
+          "match": "\\b(having)\\b",
+          "name": "keyword.other.having.mezze"
+        },
+        {
+          "match": "\\b(where)\\b",
+          "name": "keyword.control.where.mezze"
+        },
+        { "include": "#type-variables" },
+        { "include": "#type-expression" },
+        { "include": "#operation-impl" },
         { "include": "#comments" },
         {
-          "match": "\\b(where)\\s*({)",
-          "captures": {
-            "1": { "name": "keyword.control.where.mezze" },
-            "2": { "name": "punctuation.definition.block.begin.mezze" }
-          }
+          "match": "{",
+          "name": "punctuation.definition.block.begin.mezze"
         }
       ]
     },
+
     "impl-ability-declaration": {
       "begin": "\\b(impl)\\s+([A-Z][a-zA-Z0-9_]*)\\s+([A-Z][a-zA-Z0-9_]*)",
       "beginCaptures": {
-        "1": { "name": "keyword.declaration.mezze" },
+        "1": { "name": "keyword.declaration.impl.mezze" },
         "2": { "name": "entity.name.type.ability.mezze" },
         "3": { "name": "entity.name.type.mezze" }
       },
@@ -249,72 +223,273 @@
         "0": { "name": "punctuation.definition.block.end.mezze" }
       },
       "patterns": [
-        { "include": "#performer-operation" },
+        {
+          "match": "\\b(where)\\b",
+          "name": "keyword.control.where.mezze"
+        },
+        { "include": "#operation-impl" },
         { "include": "#comments" },
         {
-          "match": "\\b(where)\\s*({)",
-          "captures": {
-            "1": { "name": "keyword.control.where.mezze" },
-            "2": { "name": "punctuation.definition.block.begin.mezze" }
-          }
+          "match": "{",
+          "name": "punctuation.definition.block.begin.mezze"
         }
       ]
     },
-    "performer-operation": {
-      "match": "([a-z_][a-zA-Z0-9_]*)\\s*(:)",
-      "captures": {
-        "1": { "name": "entity.name.function.performer-operation.mezze" },
+
+    "operation-signature": {
+      "begin": "([a-z_][a-zA-Z0-9_]*)\\s*(:)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.operation.mezze" },
         "2": { "name": "punctuation.separator.type.mezze" }
-      }
+      },
+      "end": "(?=,|}|[a-z_][a-zA-Z0-9_]*\\s*:)",
+      "patterns": [
+        { "include": "#type-expression" }
+      ]
     },
+
+    "operation-impl": {
+      "begin": "([a-z_][a-zA-Z0-9_]*)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.operation.mezze" },
+        "2": { "name": "keyword.operator.assignment.mezze" }
+      },
+      "end": "(?=,|}|[a-z_][a-zA-Z0-9_]*\\s*[=:])",
+      "patterns": [
+        { "include": "#expression" }
+      ]
+    },
+
+    "let-binding": {
+      "patterns": [
+        {
+          "comment": "Let binding with destructuring pattern",
+          "begin": "\\b(pub\\s+)?(let)\\s+(?={)",
+          "beginCaptures": {
+            "1": { "name": "storage.modifier.visibility.mezze" },
+            "2": { "name": "keyword.declaration.let.mezze" }
+          },
+          "end": "(?=\\n(?!\\s)|^(?:pub\\s+)?(?:let|type|newtype|effect|ability|impl|use)\\b)",
+          "patterns": [
+            { "include": "#record-pattern" },
+            { "include": "#type-annotation" },
+            { "include": "#expression" }
+          ]
+        },
+        {
+          "comment": "Let binding with simple identifier",
+          "begin": "\\b(pub\\s+)?(let)\\s+([a-z_][a-zA-Z0-9_]*)\\b",
+          "beginCaptures": {
+            "1": { "name": "storage.modifier.visibility.mezze" },
+            "2": { "name": "keyword.declaration.let.mezze" },
+            "3": { "name": "entity.name.function.mezze" }
+          },
+          "end": "(?=\\n(?!\\s)|^(?:pub\\s+)?(?:let|type|newtype|effect|ability|impl|use)\\b)",
+          "patterns": [
+            { "include": "#type-annotation" },
+            { "include": "#expression" }
+          ]
+        }
+      ]
+    },
+
+    "type-annotation": {
+      "begin": "(:)(?!=)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.separator.type-annotation.mezze" }
+      },
+      "end": "(?==)|(?=\\n(?!\\s*->|\\s*<|\\s*with))",
+      "patterns": [
+        { "include": "#type-expression" }
+      ]
+    },
+
+    "type-expression": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#effect-row" },
+        { "include": "#ability-constraint" },
+        { "include": "#record-type" },
+        { "include": "#array-type" },
+        { "include": "#type-variables" },
+        { "include": "#type-name" },
+        {
+          "name": "keyword.operator.arrow.type.mezze",
+          "match": "->"
+        },
+        {
+          "name": "punctuation.separator.type.mezze",
+          "match": ","
+        },
+        {
+          "name": "keyword.operator.spread.mezze",
+          "match": "\\.\\.\\."
+        }
+      ]
+    },
+
+    "effect-row": {
+      "begin": "<",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.effect-row.begin.mezze" }
+      },
+      "end": ">",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.effect-row.end.mezze" }
+      },
+      "patterns": [
+        {
+          "name": "keyword.operator.performed.mezze",
+          "match": "\\*"
+        },
+        {
+          "match": "([A-Z][a-zA-Z0-9_]*)",
+          "name": "entity.name.type.effect.mezze"
+        },
+        { "include": "#type-variables" },
+        {
+          "name": "punctuation.separator.effect.mezze",
+          "match": ","
+        },
+        {
+          "name": "keyword.operator.spread.mezze",
+          "match": "\\.\\.\\."
+        }
+      ]
+    },
+
+    "ability-constraint": {
+      "begin": "\\b(with)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.with.mezze" }
+      },
+      "end": "(?==)|(?=\\n)",
+      "patterns": [
+        {
+          "match": "([A-Z][a-zA-Z0-9_]*)",
+          "name": "entity.name.type.ability.mezze"
+        },
+        { "include": "#type-variables" },
+        {
+          "name": "punctuation.separator.ability.mezze",
+          "match": ","
+        }
+      ]
+    },
+
+    "record-type": {
+      "begin": "{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.record-type.begin.mezze" }
+      },
+      "end": "}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.record-type.end.mezze" }
+      },
+      "patterns": [
+        {
+          "match": "([a-z_][a-zA-Z0-9_]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.mezze" },
+            "2": { "name": "punctuation.separator.type.mezze" }
+          }
+        },
+        { "include": "#type-expression" }
+      ]
+    },
+
+    "array-type": {
+      "begin": "\\[",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.array-type.begin.mezze" }
+      },
+      "end": "\\]",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.array-type.end.mezze" }
+      },
+      "patterns": [
+        { "include": "#type-expression" }
+      ]
+    },
+
+    "type-variables": {
+      "name": "variable.parameter.type.mezze",
+      "match": "'[a-zA-Z][a-zA-Z0-9_]*"
+    },
+
+    "type-name": {
+      "name": "entity.name.type.mezze",
+      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+    },
+
+    "expression": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#string-literal" },
+        { "include": "#number-literal" },
+        { "include": "#boolean-literal" },
+        { "include": "#match-expression" },
+        { "include": "#if-expression" },
+        { "include": "#do-expression" },
+        { "include": "#perform-expression" },
+        { "include": "#for-expression" },
+        { "include": "#lambda-expression" },
+        { "include": "#record-literal" },
+        { "include": "#array-literal" },
+        { "include": "#operators" },
+        { "include": "#ability-method-call" },
+        { "include": "#qualified-identifier" },
+        { "include": "#constructor" },
+        { "include": "#identifier" }
+      ]
+    },
+
     "match-expression": {
       "begin": "\\b(match)\\b",
       "beginCaptures": {
         "1": { "name": "keyword.control.match.mezze" }
       },
-      "end": "(?=\\n(?!\\s*[A-Z_a-z|]))",
+      "end": "(?=\\n(?!\\s*[A-Z_a-z|]))|(?=^(?:pub\\s+)?(?:let|type|newtype|effect|ability|impl|use)\\b)",
       "patterns": [
         {
           "match": "\\b(is)\\b",
           "name": "keyword.control.is.mezze"
         },
-        {
-          "match": "\\b(if)\\b",
-          "name": "keyword.control.if.mezze"
-        },
         { "include": "#pattern" },
-        { "include": "#expression-contents" }
+        { "include": "#expression" }
       ]
     },
+
     "pattern": {
       "patterns": [
         {
           "name": "constant.language.wildcard.mezze",
           "match": "\\b_\\b"
         },
+        { "include": "#number-literal" },
+        { "include": "#string-literal" },
+        { "include": "#boolean-literal" },
         {
           "match": "([A-Z][a-zA-Z0-9_]*)(?=\\s*{)",
-          "captures": {
-            "1": { "name": "entity.name.type.constructor.pattern.mezze" }
-          }
+          "name": "entity.name.type.constructor.mezze"
         },
         {
           "match": "([A-Z][a-zA-Z0-9_]*)",
-          "captures": {
-            "1": { "name": "entity.name.type.constructor.mezze" }
-          }
+          "name": "entity.name.type.constructor.mezze"
         },
-        { "include": "#record-pattern" }
+        { "include": "#record-pattern" },
+        { "include": "#array-pattern" }
       ]
     },
+
     "record-pattern": {
       "begin": "{",
       "beginCaptures": {
-        "0": { "name": "punctuation.definition.record.begin.mezze" }
+        "0": { "name": "punctuation.definition.record-pattern.begin.mezze" }
       },
       "end": "}",
       "endCaptures": {
-        "0": { "name": "punctuation.definition.record.end.mezze" }
+        "0": { "name": "punctuation.definition.record-pattern.end.mezze" }
       },
       "patterns": [
         {
@@ -324,44 +499,87 @@
             "2": { "name": "keyword.operator.assignment.mezze" }
           }
         },
-        { "include": "#pattern" },
-        { "include": "#comments" }
+        {
+          "name": "keyword.operator.spread.mezze",
+          "match": "\\.\\.\\."
+        },
+        { "include": "#pattern" }
       ]
     },
-    "lambda-expression": {
+
+    "array-pattern": {
+      "begin": "\\[",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.array-pattern.begin.mezze" }
+      },
+      "end": "\\]",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.array-pattern.end.mezze" }
+      },
       "patterns": [
         {
-          "match": "(->)",
-          "captures": {
-            "1": { "name": "storage.type.function.arrow.mezze" }
-          }
+          "name": "keyword.operator.spread.mezze",
+          "match": "\\.\\.\\."
+        },
+        { "include": "#pattern" }
+      ]
+    },
+
+    "if-expression": {
+      "patterns": [
+        {
+          "match": "\\b(if)\\b",
+          "name": "keyword.control.if.mezze"
+        },
+        {
+          "match": "\\b(then)\\b",
+          "name": "keyword.control.then.mezze"
+        },
+        {
+          "match": "\\b(else)\\b",
+          "name": "keyword.control.else.mezze"
         }
       ]
     },
+
     "do-expression": {
-      "begin": "\\b(do)\\b",
-      "beginCaptures": {
-        "1": { "name": "keyword.control.do.mezze" }
-      },
-      "end": "(?=\\n(?!\\s))",
-      "patterns": [
-        { "include": "#expression-contents" }
-      ]
+      "match": "\\b(do)\\b",
+      "name": "keyword.control.do.mezze"
     },
+
     "perform-expression": {
       "patterns": [
         {
-          "comment": "perform keyword followed by handler name",
-          "match": "\\b(perform)\\s+([A-Z][a-zA-Z0-9_]*)",
-          "captures": {
-            "1": { "name": "keyword.control.perform.mezze" },
-            "2": { "name": "entity.name.type.effect-handler.mezze" }
-          }
+          "match": "\\b(perform)\\b",
+          "name": "keyword.control.perform.mezze"
+        },
+        {
+          "match": "\\b(in)\\b(?=\\s|$)",
+          "name": "keyword.control.in.mezze"
         }
       ]
     },
+
+    "for-expression": {
+      "patterns": [
+        {
+          "match": "\\b(for)\\b",
+          "name": "keyword.control.for.mezze"
+        },
+        {
+          "match": "\\b(in)\\b",
+          "name": "keyword.control.in.mezze"
+        }
+      ]
+    },
+
+    "lambda-expression": {
+      "match": "(->)",
+      "name": "keyword.operator.arrow.lambda.mezze"
+    },
+
     "record-literal": {
-      "begin": "(?<![a-zA-Z0-9_])({)(?=\\s*[a-z_][a-zA-Z0-9_]*\\s*=|\\s*\\.\\.\\.)",
+      "begin": "(?<![a-zA-Z0-9_'])({)(?!}\\s*->)",
       "beginCaptures": {
         "1": { "name": "punctuation.definition.record.begin.mezze" }
       },
@@ -371,7 +589,7 @@
       },
       "patterns": [
         {
-          "match": "([a-z_][a-zA-Z0-9_]*)\\s*(=)",
+          "match": "([a-z_][a-zA-Z0-9_]*)\\s*(=)(?!=)",
           "captures": {
             "1": { "name": "entity.other.attribute-name.mezze" },
             "2": { "name": "keyword.operator.assignment.mezze" }
@@ -385,141 +603,11 @@
           "name": "punctuation.separator.record.mezze",
           "match": ","
         },
-        { "include": "#expression-contents" }
+        { "include": "#expression" }
       ]
     },
-    "if-expression": {
-      "patterns": [
-        {
-          "match": "\\b(if|then|else)\\b",
-          "name": "keyword.control.conditional.mezze"
-        }
-      ]
-    },
-    "control-keywords": {
-      "name": "keyword.control.mezze",
-      "match": "\\b(if|then|else|match|is|do|in)\\b"
-    },
-    "keywords": {
-      "patterns": [
-        {
-          "name": "keyword.declaration.mezze",
-          "match": "\\b(let|type|effect|impl|ability)\\b"
-        },
-        {
-          "name": "storage.modifier.visibility.mezze",
-          "match": "\\b(pub)\\b"
-        },
-        {
-          "name": "keyword.control.mezze",
-          "match": "\\b(for|where|perform|with|as|use)\\b"
-        }
-      ]
-    },
-    "type-annotation": {
-      "begin": ":",
-      "beginCaptures": {
-        "0": { "name": "punctuation.separator.type.mezze" }
-      },
-      "end": "(?==)|(?=\\n(?!\\s*->|\\s*<|\\s*with))",
-      "patterns": [
-        { "include": "#type-signature" }
-      ]
-    },
-    "type-signature": {
-      "patterns": [
-        {
-          "name": "storage.type.function.arrow.mezze",
-          "match": "->"
-        },
-        {
-          "name": "keyword.operator.double-slash.mezze",
-          "match": "//"
-        },
-        { "include": "#effect-row" },
-        { "include": "#ability-constraints" },
-        { "include": "#record-type" },
-        { "include": "#array-type" },
-        {
-          "name": "entity.name.type.mezze",
-          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
-        },
-        { "include": "#type-variables" },
-        {
-          "name": "punctuation.definition.typeparameters.mezze",
-          "match": "[{}\\[\\](),|]"
-        },
-        { "include": "#comments" }
-      ]
-    },
-    "effect-row": {
-      "begin": "<",
-      "beginCaptures": {
-        "0": { "name": "punctuation.definition.effect-row.begin.mezze" }
-      },
-      "end": ">",
-      "endCaptures": {
-        "0": { "name": "punctuation.definition.effect-row.end.mezze" }
-      },
-      "patterns": [
-        {
-          "match": "([A-Z][a-zA-Z0-9_]*)",
-          "captures": {
-            "1": { "name": "entity.name.type.effect.mezze" }
-          }
-        },
-        {
-          "name": "punctuation.separator.effect.mezze",
-          "match": ","
-        }
-      ]
-    },
-    "ability-constraints": {
-      "begin": "\\b(with)\\b",
-      "beginCaptures": {
-        "1": { "name": "keyword.control.with.mezze" }
-      },
-      "end": "(?=\\n|=)",
-      "patterns": [
-        {
-          "match": "([A-Z][a-zA-Z0-9_]*)",
-          "captures": {
-            "1": { "name": "entity.name.type.ability.mezze" }
-          }
-        },
-        { "include": "#type-variables" },
-        {
-          "name": "punctuation.separator.ability.mezze",
-          "match": ","
-        }
-      ]
-    },
-    "record-type": {
-      "begin": "{",
-      "beginCaptures": {
-        "0": { "name": "punctuation.definition.record.begin.mezze" }
-      },
-      "end": "}",
-      "endCaptures": {
-        "0": { "name": "punctuation.definition.record.end.mezze" }
-      },
-      "patterns": [
-        {
-          "match": "([a-z_][a-zA-Z0-9_]*)\\s*(:)",
-          "captures": {
-            "1": { "name": "entity.other.attribute-name.mezze" },
-            "2": { "name": "punctuation.separator.type.mezze" }
-          }
-        },
-        {
-          "name": "keyword.operator.spread.mezze",
-          "match": "\\.\\.\\."
-        },
-        { "include": "#type-signature" },
-        { "include": "#comments" }
-      ]
-    },
-    "array-type": {
+
+    "array-literal": {
       "begin": "\\[",
       "beginCaptures": {
         "0": { "name": "punctuation.definition.array.begin.mezze" }
@@ -529,38 +617,95 @@
         "0": { "name": "punctuation.definition.array.end.mezze" }
       },
       "patterns": [
-        { "include": "#type-signature" }
+        {
+          "name": "keyword.operator.spread.mezze",
+          "match": "\\.\\.\\."
+        },
+        {
+          "name": "punctuation.separator.array.mezze",
+          "match": ","
+        },
+        { "include": "#expression" }
       ]
     },
-    "operators": {
+
+    "string-literal": {
+      "name": "string.quoted.double.mezze",
+      "begin": "\"",
+      "end": "\"",
       "patterns": [
         {
-          "name": "keyword.operator.arrow.mezze",
-          "match": "->"
+          "name": "constant.character.escape.mezze",
+          "match": "\\\\."
         },
         {
-          "name": "keyword.operator.double-colon.mezze",
-          "match": "::"
+          "name": "meta.embedded.interpolation.mezze",
+          "begin": "\\$\\(",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.interpolation.begin.mezze" }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.interpolation.end.mezze" }
+          },
+          "patterns": [
+            { "include": "#expression" }
+          ]
+        }
+      ]
+    },
+
+    "number-literal": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.mezze",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*(?:[eE][+-]?[0-9]+)?\\b"
         },
+        {
+          "name": "constant.numeric.fraction.mezze",
+          "match": "\\b[0-9][0-9_]*//[0-9][0-9_]*\\b"
+        },
+        {
+          "name": "constant.numeric.natural.mezze",
+          "match": "\\b[0-9][0-9_]*n\\b"
+        },
+        {
+          "name": "constant.numeric.integer.mezze",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+
+    "boolean-literal": {
+      "name": "constant.language.boolean.mezze",
+      "match": "\\b(True|False)\\b"
+    },
+
+    "operators": {
+      "patterns": [
         {
           "name": "keyword.operator.pipe.mezze",
           "match": "\\|>"
         },
         {
+          "name": "keyword.operator.namespace.mezze",
+          "match": "::"
+        },
+        {
           "name": "keyword.operator.comparison.mezze",
-          "match": "==|!=|<=|>=|<(?!>)|>(?!<)"
-        },
-        {
-          "name": "keyword.operator.assignment.mezze",
-          "match": "="
-        },
-        {
-          "name": "keyword.operator.arithmetic.mezze",
-          "match": "\\+|(?<!-)\\*|/(?!/)|%|-(?!>)"
+          "match": "==|!=|<=|>=|<(?![>*])|>(?!<)"
         },
         {
           "name": "keyword.operator.logical.mezze",
           "match": "&&|\\|\\||!"
+        },
+        {
+          "name": "keyword.operator.arithmetic.mezze",
+          "match": "\\+|-(?!>)|\\*|/(?!/)|%"
+        },
+        {
+          "name": "keyword.operator.fraction.mezze",
+          "match": "//"
         },
         {
           "name": "keyword.operator.spread.mezze",
@@ -571,76 +716,20 @@
           "match": "@"
         },
         {
-          "name": "keyword.operator.wildcard.mezze",
-          "match": "\\b_\\b"
+          "name": "keyword.operator.member-access.mezze",
+          "match": "\\."
         }
       ]
     },
-    "strings": {
-      "name": "string.quoted.double.mezze",
-      "begin": "\"",
-      "end": "\"",
-      "patterns": [
-        {
-          "name": "constant.character.escape.mezze",
-          "match": "\\\\\\$\\(|\\\\."
-        },
-        {
-          "name": "meta.embedded.line.mezze",
-          "begin": "\\$\\(",
-          "end": "\\)",
-          "beginCaptures": {
-            "0": { "name": "punctuation.section.interpolation.begin.mezze" }
-          },
-          "endCaptures": {
-            "0": { "name": "punctuation.section.interpolation.end.mezze" }
-          },
-          "patterns": [
-            { "include": "#interpolation-contents" }
-          ]
-        }
-      ]
-    },
-    "interpolation-contents": {
-      "patterns": [
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#booleans" },
-        { "include": "#if-expression" },
-        { "include": "#operators" },
-        { "include": "#ability-method-call" },
-        { "include": "#qualified-identifier" },
-        { "include": "#constructor-names" },
-        { "include": "#identifiers" }
-      ]
-    },
-    "numbers": {
-      "patterns": [
-        {
-          "name": "constant.numeric.float.mezze",
-          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
-        },
-        {
-          "name": "constant.numeric.fraction.mezze",
-          "match": "\\b[0-9]+//[0-9]+\\b"
-        },
-        {
-          "name": "constant.numeric.integer.mezze",
-          "match": "\\b[0-9]+\\b"
-        }
-      ]
-    },
-    "booleans": {
-      "name": "constant.language.boolean.mezze",
-      "match": "\\b(true|false)\\b"
-    },
+
     "ability-method-call": {
       "match": "\\b([A-Z][a-zA-Z0-9_]*)\\.([a-z_][a-zA-Z0-9_]*)\\b",
       "captures": {
         "1": { "name": "entity.name.type.ability.mezze" },
-        "2": { "name": "entity.name.function.ability-method.mezze" }
+        "2": { "name": "entity.name.function.method.mezze" }
       }
     },
+
     "qualified-identifier": {
       "match": "\\b([a-z_][a-zA-Z0-9_]*)((?:::[a-zA-Z_][a-zA-Z0-9_]*)+)",
       "captures": {
@@ -648,35 +737,15 @@
         "2": { "name": "entity.name.function.qualified.mezze" }
       }
     },
-    "constructor-names": {
+
+    "constructor": {
       "name": "entity.name.type.constructor.mezze",
       "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
     },
-    "type-variables": {
-      "name": "variable.parameter.type.mezze",
-      "match": "'[a-zA-Z][a-zA-Z0-9_]*\\b"
-    },
-    "identifiers": {
+
+    "identifier": {
       "name": "variable.other.mezze",
       "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
-    },
-    "expression-contents": {
-      "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#booleans" },
-        { "include": "#record-literal" },
-        { "include": "#perform-expression" },
-        { "include": "#control-keywords" },
-        { "include": "#keywords" },
-        { "include": "#operators" },
-        { "include": "#ability-method-call" },
-        { "include": "#qualified-identifier" },
-        { "include": "#constructor-names" },
-        { "include": "#type-variables" },
-        { "include": "#identifiers" }
-      ]
     }
   }
 }

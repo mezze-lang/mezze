@@ -1,15 +1,16 @@
 {
   "name": "mezze-language",
   "displayName": "Mezze Language Support",
-  "description": "Comprehensive syntax highlighting and language support for the Mezze functional programming language with algebraic effects",
-  "version": "0.3.3",
+  "description": "Full language support for Mezze: syntax highlighting, type information, diagnostics, go to definition, and more",
+  "version": "0.4.0",
   "publisher": "mezze-lang",
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.74.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters"
   ],
   "keywords": [
     "mezze",
@@ -17,9 +18,12 @@
     "effects",
     "algebraic-effects",
     "type-inference",
-    "pattern-matching",
-    "string-interpolation"
+    "pattern-matching"
   ],
+  "activationEvents": [
+    "onLanguage:mezze"
+  ],
+  "main": "./out/extension.js",
   "contributes": {
     "languages": [
       {
@@ -29,7 +33,7 @@
           "mezze"
         ],
         "extensions": [
-          ".mezze"
+          ".mz"
         ],
         "configuration": "./language-configuration.json",
         "icon": {
@@ -57,7 +61,45 @@
         "label": "Mezze File Icons",
         "path": "./file-icons/mezze-icon-theme.json"
       }
+    ],
+    "configuration": {
+      "title": "Mezze",
+      "properties": {
+        "mezze.executablePath": {
+          "type": "string",
+          "default": "mez",
+          "description": "Path to the mez executable. If not absolute, it's resolved relative to the workspace root."
+        },
+        "mezze.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the Mezze language server."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "mezze.restartServer",
+        "title": "Mezze: Restart Language Server"
+      }
     ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^2.22.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   },
   "repository": {
     "type": "git",
@@ -69,4 +111,3 @@
   },
   "homepage": "https://github.com/mezze-lang/mezze#readme"
 }
-

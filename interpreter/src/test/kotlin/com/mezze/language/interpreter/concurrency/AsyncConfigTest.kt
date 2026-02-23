@@ -47,7 +47,7 @@ class AsyncConfigTest {
     @Test
     fun `test LoomAsyncWith basic spawn and await`() {
         val code = """
-            use std::async::{Async, LoomAsyncWith}
+            use std::effects::async::{Async, LoomAsyncWith}
 
             perform LoomAsyncWith {max_concurrent = 4} in do
                 let p = Async.spawn {f = {} -> 42}
@@ -60,7 +60,7 @@ class AsyncConfigTest {
     @Test
     fun `test LoomAsyncWith with multiple tasks`() {
         val code = """
-            use std::async::{Async, LoomAsyncWith}
+            use std::effects::async::{Async, LoomAsyncWith}
 
             perform LoomAsyncWith {max_concurrent = 2} in do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -80,7 +80,7 @@ class AsyncConfigTest {
     @Test
     fun `test LoomAsyncWith unbounded concurrency`() {
         val code = """
-            use std::async::{Async, LoomAsyncWith}
+            use std::effects::async::{Async, LoomAsyncWith}
 
             # max_concurrent = 0 means unbounded
             perform LoomAsyncWith {max_concurrent = 0} in do
@@ -104,7 +104,7 @@ class AsyncConfigTest {
     @Test
     fun `test OSThreadAsyncWith basic spawn and await`() {
         val code = """
-            use std::async::{Async, OSThreadAsyncWith}
+            use std::effects::async::{Async, OSThreadAsyncWith}
 
             perform OSThreadAsyncWith {pool_size = 2} in do
                 let p = Async.spawn {f = {} -> 42}
@@ -117,7 +117,7 @@ class AsyncConfigTest {
     @Test
     fun `test OSThreadAsyncWith with thread pool`() {
         val code = """
-            use std::async::{Async, OSThreadAsyncWith}
+            use std::effects::async::{Async, OSThreadAsyncWith}
 
             perform OSThreadAsyncWith {pool_size = 4} in do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -137,7 +137,7 @@ class AsyncConfigTest {
     @Test
     fun `test OSThreadAsyncWith no pool (new thread each time)`() {
         val code = """
-            use std::async::{Async, OSThreadAsyncWith}
+            use std::effects::async::{Async, OSThreadAsyncWith}
 
             # pool_size = 0 means create new thread for each spawn
             perform OSThreadAsyncWith {pool_size = 0} in do
@@ -157,7 +157,7 @@ class AsyncConfigTest {
     @Test
     fun `test LoomAsync default still works`() {
         val code = """
-            use std::async::{Async, LoomAsync}
+            use std::effects::async::{Async, LoomAsync}
 
             perform LoomAsync in do
                 let p = Async.spawn {f = {} -> 42}
@@ -170,7 +170,7 @@ class AsyncConfigTest {
     @Test
     fun `test OSThreadAsync default still works`() {
         val code = """
-            use std::async::{Async, OSThreadAsync}
+            use std::effects::async::{Async, OSThreadAsync}
 
             perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}

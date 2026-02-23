@@ -35,8 +35,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode int writes JSON integer to buffer`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -59,8 +59,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode float writes JSON float to buffer`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -82,8 +82,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode string writes JSON string with quotes to buffer`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -105,8 +105,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode bool true writes JSON true to buffer`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -128,8 +128,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode bool false writes JSON false to buffer`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -155,8 +155,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode empty record writes empty JSON object`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -185,8 +185,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode record with fields writes JSON object`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -242,8 +242,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode empty list writes empty JSON array`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -270,8 +270,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode list with elements writes JSON array`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -332,8 +332,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode none writes JSON null`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -355,8 +355,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode some writes wrapped value`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -390,8 +390,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream decode int reads JSON integer`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -413,8 +413,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream decode float reads JSON float`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -436,8 +436,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream decode string reads JSON string`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -459,8 +459,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream decode bool true reads JSON true`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -482,8 +482,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream decode bool false reads JSON false`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -509,8 +509,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream decode returns correct offset after reading`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -533,8 +533,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream decode can read multiple values with offset tracking`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -570,8 +570,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream decode invalid JSON returns error`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -593,8 +593,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream decode type mismatch returns error with path`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -621,8 +621,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode then decode int roundtrip`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -654,8 +654,8 @@ class JsonStreamCodecTest {
     @Disabled("Streaming codec not yet implemented")
     fun `stream encode then decode string roundtrip`() {
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 
@@ -695,8 +695,8 @@ class JsonStreamCodecTest {
         // The actual memory behavior is hard to test, but we can verify
         // the API works correctly for the streaming use case.
         val source = """
-            use std::codec
-            use std::json::stream
+            use std::codec::core
+            use std::codec::json::stream
             use std::collections::list
             use std::collections::bytes
 

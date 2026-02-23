@@ -4,16 +4,101 @@ This directory contains the Mezze standard library modules. Each subdirectory ha
 
 ## Module Index
 
-| Module | Path | Functions | Coverage |
-|--------|------|-----------|----------|
-| [Primitives](#primitives) | `std/` | 113 | See below |
-| [Collections](collections/README.md) | `std/collections/` | 224 | See README |
-| [Effects](effects/README.md) | `std/effects/` | 70 | See README |
-| [Concurrent](concurrent/README.md) | `std/concurrent/` | 64 | See README |
-| [Async](async/README.md) | `std/async/` | 44 | See README |
-| [Math](math/README.md) | `std/math/` | 40 | See README |
-| [Control](control/README.md) | `std/control/` | 1 | See README |
-| [JSON](json/README.md) | `std/json/` | 2 | See README |
+| Module | Path | Description |
+|--------|------|-------------|
+| [Primitives](#primitives) | `std/` | Core types (int, float, string, etc.) |
+| [Collections](collections/README.md) | `std/collections/` | List, Array, Map, Set, etc. |
+| [Effects](effects/README.md) | `std/effects/` | All effect handlers and concurrent primitives |
+| [Codec](codec/README.md) | `std/codec/` | Serialization (Codec, JSON) |
+| [Math](math/README.md) | `std/math/` | Mathematical functions |
+| [Control](control/README.md) | `std/control/` | Control flow utilities |
+
+---
+
+## Directory Structure
+
+```
+std/
+├── bool.mz              # Boolean utilities
+├── char.mz              # Character utilities
+├── float.mz             # Float utilities
+├── frac.mz              # Fraction utilities
+├── int.mz               # Integer utilities
+├── nat.mz               # Natural number utilities
+├── option.mz            # Option type utilities
+├── result.mz            # Result type utilities
+├── string.mz            # String utilities
+│
+├── collections/         # Collection types
+│   ├── array.mz         # Mutable arrays
+│   ├── list.mz          # Immutable lists
+│   ├── map.mz           # Hash maps
+│   ├── set.mz           # Sets
+│   └── ...
+│
+├── effects/             # Effect handlers and concurrent primitives
+│   ├── async.mz         # Async effect (LoomAsync, CoopAsync, OSThreadAsync)
+│   ├── async/           # Async utilities (stream, scope, channel, etc.)
+│   ├── stm.mz           # Software Transactional Memory
+│   ├── parallel.mz      # Parallel data processing
+│   ├── concurrency.mz   # Low-level concurrency (Loom virtual threads)
+│   ├── concurrent/      # Concurrent primitives (atom, channel, mutex, etc.)
+│   ├── time.mz          # Time effect
+│   ├── filesystem.mz    # File system effect
+│   ├── environment.mz   # Environment variables
+│   ├── random.mz        # Random number generation
+│   ├── generator.mz     # Generator/iterator effect
+│   ├── exception.mz     # Exception handling
+│   ├── early_return.mz  # Early return effect
+│   ├── choice.mz        # Non-deterministic choice
+│   ├── log.mz           # Logging effect
+│   └── inspect.mz       # Inspection ability
+│
+├── codec/               # Serialization
+│   ├── core.mz          # Generic encoding/decoding
+│   ├── json.mz          # JSON serialization
+│   └── json/            # JSON utilities
+│       └── stream.mz    # Streaming JSON
+│
+├── math/                # Mathematics
+│   ├── core.mz          # Core math functions
+│   └── trig.mz          # Trigonometric functions
+│
+└── control/             # Control flow
+    └── identity.mz      # Identity monad
+```
+
+---
+
+## Import Paths
+
+```mezze
+# Primitives
+use std::int::{add, subtract}
+use std::string::{concat, split}
+use std::option::{map, get_or_else}
+use std::result::{map, flat_map}
+
+# Collections
+use std::collections::list::{map, filter, fold}
+use std::collections::map::{get, insert}
+
+# Effects - Async/Concurrency
+use std::effects::async::{Async, run_coop, LoomAsync}
+use std::effects::stm::{STM, TVar, atomically}
+use std::effects::parallel::{Parallel, JoinFork}
+use std::effects::concurrent::atom::{Atom, new_atom}
+use std::effects::concurrent::channel::{Channel, send, receive}
+
+# Effects - Other
+use std::effects::time::{Time, now, sleep}
+use std::effects::filesystem::{FileSystem, read_file}
+use std::effects::random::{Random, random_int, SeededRandom}
+
+# Encoding
+use std::codec::core::{Encoder, Decoder}
+use std::codec::json::{Json, parse, to_string}
+```
 
 ---
 
@@ -70,7 +155,7 @@ Test file: `NatInterpreterTest.kt`, `NatModuleTest.kt`
 |----------|--------|-------|
 | `subtract_to_int` | :white_check_mark: | |
 | `from_int` | :white_check_mark: | |
-| `from_float` | :x: | Needs test |
+| `from_float` | :white_check_mark: | |
 | `from_string` | :white_check_mark: | |
 | `min` | :white_check_mark: | |
 | `max` | :white_check_mark: | |
@@ -216,115 +301,16 @@ Test file: `ResultModuleTest.kt`, `ResultInterpreterTest.kt`
 | `to_list` | :white_check_mark: | |
 | `zip` | :white_check_mark: | |
 
-### codec.mz - Serialization Utilities
-Test file: `CodecModuleTest.kt`
-
-| Function | Tested | Notes |
-|----------|--------|-------|
-| `default_config` | :x: | Needs test |
-| `empty_path` | :x: | Needs test |
-| `append_path` | :x: | Needs test |
-| `append_index` | :x: | Needs test |
-| `format_path` | :x: | Needs test |
-| `encode_error` | :x: | Needs test |
-| `decode_error` | :x: | Needs test |
-
-### json.mz - JSON Utilities
-Test file: `JsonModuleTest.kt`
-
-| Function | Tested | Notes |
-|----------|--------|-------|
-| `default_config` | :x: | Needs verification |
-| `config` | :x: | Needs verification |
-| `serialize_to_string` | :x: | Needs verification |
-| `to_string` | :x: | Needs verification |
-| `parse` | :x: | Needs verification |
-| `parse_str` | :x: | Needs verification |
-| `transform_field_name` | :x: | Needs verification |
-| `inverse_transform_field_name` | :x: | Needs verification |
-| `transform_fields` | :x: | Needs verification |
-| `inverse_transform_fields` | :x: | Needs verification |
-
-### stm.mz - Software Transactional Memory
-Test file: `concurrency/STMEffectTest.kt` (comprehensive - 50+ tests)
-
-| Function | Tested | Notes |
-|----------|--------|-------|
-| `tvar` | :white_check_mark: | Creation with various types |
-| `deref` | :white_check_mark: | Non-transactional read |
-| `atomically` | :white_check_mark: | Helper wrapper tested |
-| `transfer` | :white_check_mark: | Success and insufficient funds |
-| `transfer_or_wait` | :x: | Needs test |
-| `read_all` | :white_check_mark: | Bulk read tested |
-| `write_all` | :x: | Needs test |
-| `tmvar_empty` | :white_check_mark: | Empty TMVar creation |
-| `tmvar` | :white_check_mark: | TMVar with initial value |
-| `take_tmvar` | :white_check_mark: | Take from full |
-| `put_tmvar` | :white_check_mark: | Put to empty |
-| `read_tmvar` | :white_check_mark: | Read without taking |
-| `try_take_tmvar` | :white_check_mark: | From full and empty |
-| `try_put_tmvar` | :white_check_mark: | To empty and full |
-| `swap_tmvar` | :white_check_mark: | Atomic swap |
-| `is_empty_tmvar` | :white_check_mark: | Check empty status |
-| `tqueue` | :white_check_mark: | Queue creation |
-| `tqueue_from_list` | :x: | Needs test |
-| `write_tqueue` | :white_check_mark: | Write to queue |
-| `read_tqueue` | :white_check_mark: | Read from queue |
-| `try_read_tqueue` | :white_check_mark: | From empty and non-empty |
-| `peek_tqueue` | :white_check_mark: | Peek without removing |
-| `is_empty_tqueue` | :white_check_mark: | True for new, false after write |
-| `length_tqueue` | :x: | Needs test |
-| `tbqueue` | :white_check_mark: | Bounded queue creation |
-| `write_tbqueue` | :white_check_mark: | Write to bounded queue |
-| `read_tbqueue` | :white_check_mark: | Read from bounded queue |
-| `try_read_tbqueue` | :x: | Needs test |
-| `try_write_tbqueue` | :white_check_mark: | When full returns false |
-| `peek_tbqueue` | :x: | Needs test |
-| `is_empty_tbqueue` | :x: | Needs test |
-| `is_full_tbqueue` | :white_check_mark: | Check full status |
-| `size_tbqueue` | :white_check_mark: | Current size |
-| `capacity_tbqueue` | :white_check_mark: | Get capacity |
-
-**STM Effect Operations Tested:**
-- `STM.read`, `STM.write`, `STM.modify`, `STM.swap`, `STM.ensure`, `STM.check`
-- `OptimisticSTM`, `OptimisticSTMWith`, `SequentialSTM` handlers
-- Multiple TVars, nested transactions, read-your-own-writes
-
-### parallel.mz - Parallel Processing
-Test file: `ParallelEffectTest.kt`
-
-| Function | Tested | Notes |
-|----------|--------|-------|
-| `sum` | :x: | Needs verification |
-| `product` | :x: | Needs verification |
-| `count` | :x: | Needs verification |
-| `flatten` | :x: | Needs verification |
-| `flat_map` | :x: | Needs verification |
-
-### async.mz - Async Runtime
-Test file: `AsyncModuleTest.kt`
-
-| Function | Tested | Notes |
-|----------|--------|-------|
-| `run` | :x: | Needs verification |
-| `go` | :x: | Needs verification |
-| `run_coop` | :x: | Needs verification |
-| `scope_spawn` | :x: | Needs verification |
-| `scope_cancel_all` | :x: | Needs verification |
-| `scope_get_token` | :x: | Needs verification |
-| `scope_is_cancelled` | :x: | Needs verification |
-
 ---
 
 ## Legend
 
 - :white_check_mark: - Function has test coverage
 - :x: - Function needs test or verification
-- "Needs verification" - Test file exists but coverage not confirmed
 
 ## Test File Locations
 
-Test files are spread across the interpreter test directory:
+Test files are in the interpreter test directory:
 
 ```
 interpreter/src/test/kotlin/com/mezze/language/interpreter/
@@ -334,13 +320,6 @@ interpreter/src/test/kotlin/com/mezze/language/interpreter/
 ├── effects/             # Effect-specific tests
 └── *.kt                 # General interpreter tests
 ```
-
-**Key test files by category:**
-- **Primitives**: `stdlib/IntModuleTest.kt`, `stdlib/FloatModuleTest.kt`, `stdlib/StringModuleTest.kt`, etc.
-- **Collections**: `stdlib/ListModuleTest.kt`, `stdlib/ArrayModuleTest.kt`, `stdlib/MapModuleTest.kt`, etc.
-- **Concurrent**: `concurrency/AtomTest.kt`, `concurrency/ChannelTest.kt`, `concurrency/STMEffectTest.kt`, etc.
-- **Async**: `concurrency/CoopTest.kt`, `concurrency/OSThreadTest.kt`, `LoomConcurrencyTest.kt`, etc.
-- **Effects**: `ExceptionEffectTest.kt`, `GeneratorEffectTest.kt`, `ChoiceEffectTest.kt`, etc.
 
 ---
 

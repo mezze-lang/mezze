@@ -594,4 +594,28 @@ class TimeEffectTest {
         """)
         assertEquals(MezzeInt(1000L), result)
     }
+
+    @Test
+    fun `test format_iso8601`() {
+        val result = eval("""
+            use std::effects::time::{MockTime, format_iso8601}
+
+            perform MockTime { fixed_time = 1640995200000 } in do
+                let formatted = format_iso8601 { timestamp = 1640995200000 }
+                __native_string_contains { s = formatted, substring = "2022-01-01" }
+        """)
+        assertEquals(MezzeBool(true), result)
+    }
+
+    @Test
+    fun `test format_time_only`() {
+        val result = eval("""
+            use std::effects::time::{MockTime, format_time_only}
+
+            perform MockTime { fixed_time = 1640995200000 } in do
+                let formatted = format_time_only { timestamp = 1640995200000 }
+                __native_string_length { s = formatted } > 0
+        """)
+        assertEquals(MezzeBool(true), result)
+    }
 }

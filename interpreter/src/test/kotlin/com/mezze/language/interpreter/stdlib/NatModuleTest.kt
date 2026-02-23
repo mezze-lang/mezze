@@ -282,4 +282,89 @@ class NatModuleTest {
         val variant = variables["result"] as MezzeVariant
         assertEquals("None", variant.constructor)
     }
+
+    @Test
+    fun `test nat to_int`() {
+        val source = """
+            use std::nat
+            let result1 = nat::to_int { n = 0n }
+            let result2 = nat::to_int { n = 42n }
+            let result3 = nat::to_int { n = 1000000n }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(0L, (variables["result1"] as MezzeInt).value)
+        assertEquals(42L, (variables["result2"] as MezzeInt).value)
+        assertEquals(1000000L, (variables["result3"] as MezzeInt).value)
+    }
+
+    @Test
+    fun `test nat to_string`() {
+        val source = """
+            use std::nat
+            let result1 = nat::to_string { n = 0n }
+            let result2 = nat::to_string { n = 42n }
+            let result3 = nat::to_string { n = 12345n }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals("0", (variables["result1"] as com.mezze.language.interpreter.MezzeString).value)
+        assertEquals("42", (variables["result2"] as com.mezze.language.interpreter.MezzeString).value)
+        assertEquals("12345", (variables["result3"] as com.mezze.language.interpreter.MezzeString).value)
+    }
+
+    @Test
+    fun `test nat clamp - value in range`() {
+        val source = """
+            use std::nat
+            let result = nat::clamp { n = 5n, min = 0n, max = 10n }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(5L, (variables["result"] as MezzeNat).value)
+    }
+
+    @Test
+    fun `test nat clamp - value below min`() {
+        val source = """
+            use std::nat
+            let result = nat::clamp { n = 0n, min = 5n, max = 10n }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(5L, (variables["result"] as MezzeNat).value)
+    }
+
+    @Test
+    fun `test nat clamp - value above max`() {
+        val source = """
+            use std::nat
+            let result = nat::clamp { n = 15n, min = 0n, max = 10n }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(10L, (variables["result"] as MezzeNat).value)
+    }
+
+    @Test
+    fun `test nat clamp - value equals min`() {
+        val source = """
+            use std::nat
+            let result = nat::clamp { n = 5n, min = 5n, max = 10n }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(5L, (variables["result"] as MezzeNat).value)
+    }
+
+    @Test
+    fun `test nat clamp - value equals max`() {
+        val source = """
+            use std::nat
+            let result = nat::clamp { n = 10n, min = 5n, max = 10n }
+        """.trimIndent()
+
+        val variables = parseTypeCheckAndRun(source)
+        assertEquals(10L, (variables["result"] as MezzeNat).value)
+    }
 }

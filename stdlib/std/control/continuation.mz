@@ -1,49 +1,43 @@
-# std/control/continuation.mezze - Delimited continuations with opaque handles
+# std/control/continuation.mz - Delimited continuations with opaque handles
 #
-# This module provides the NEW continuation architecture using delimited continuations.
-# Unlike the old effect-based model, continuations are now explicit values with
-# delimiter boundaries.
+# This module provides delimited continuations using explicit delimiter handles.
 #
 # Key concepts:
-# - Opaque Cont handles: Unforgeable delimiter handles created by __native_continuation_delimit
-# - Continuation record: Public API with bound methods (capture, suspend_with, resume, etc.)
-# - Delimiter scoping: Each continuation has an explicit delimiter boundary
+# - Delim: Opaque delimiter handle created by `delimit {}`
+# - Continuation: Record type containing bound continuation methods
+# - Each continuation operation is scoped to its delimiter boundary
 #
 # Usage:
 #   use std::control::continuation
+#   use std::control::continuation::{Continuation}
 #
 #   let cont = continuation::new {}
 #   let k = cont.capture {}
 #   let result = cont.resume { cont = k, value = 42 }
 
-# Type alias for continuation record
-pub type Continuation = {
-    capture: {} -> ({ value: 'a } -> 'b),
-    suspend: {} -> 'suspended,
-    suspend_with: { value: 'a } -> 'suspended,
-    resume: { cont: { value: 'a } -> 'b, value: 'a } -> 'b,
-    fork: { cont: { value: 'a } -> 'b, values: ['a] } -> ['b],
-    abort: {} -> 'never,
-    is_suspended: { value: 'a } -> Bool,
-    extract_suspended: { suspended: 'a } -> (Option { value: 'v, cont: { value: 'x } -> 'c })
+# Opaque delimiter handle - wraps native implementation
+pub newtype Delim = Delim __NativeDelim
+
+# Continuation record type with bound methods.
+# Type parameters:
+#   'suspend - type of values passed to suspend_with (yielded/suspended value)
+#   'resume - type of values passed to resume (continuation input)
+#   'result - type returned by the continuation (result type)
+pub type Continuation 'suspend 'resume 'result = {
+    capture: {} -> ({ value: 'resume } -> 'result),
+    suspend: {} -> 'resume,
+    suspend_with: { value: 'suspend } -> 'result,
+    resume: { cont: { value: 'resume } -> 'result, value: 'resume } -> 'result,
+    fork: { cont: { value: 'resume } -> 'result, values: ['resume] } -> ['result],
+    abort: {} -> 'result,
+    extract_suspended: { suspended: 'result } -> (Option { value: 'suspend, cont: { value: 'resume } -> 'result })
 }
 
-# Create a new Continuation record with bound methods
-#
-# This creates a continuation context and returns a record with methods
-# that are bound to that context's delimiter. All operations on continuations
-# MUST go through this record - native methods are not exposed directly.
-#
-# Returns: A Continuation record with all methods bound to the same delimiter
-pub let new: {} -> Continuation = {} -> do
-    # Create delimiter - this is the unique identifier for this continuation
+# Create a new Continuation record with bound methods.
+# Returns a Continuation record with all methods bound to the same delimiter.
+pub let new: {} -> Continuation 'suspend 'resume 'result = {} -> do
     let delim_handle = __native_continuation_delimit {}
-
-    # Activate delimiter in thread-local state (for state machine context)
     let _ = __native_continuation_activate { delim = delim_handle }
-
-    # Return a record with bound methods
-    # ALL methods share the SAME delim_handle captured in their closures
     {
         capture = {} -> __native_continuation_capture { delim = delim_handle },
         suspend = {} -> __native_continuation_suspend {},
@@ -51,7 +45,41 @@ pub let new: {} -> Continuation = {} -> do
         resume = { cont, value } -> __native_continuation_resume { delim = delim_handle, cont = cont, value = value },
         fork = { cont, values } -> __native_continuation_fork { delim = delim_handle, cont = cont, values = values },
         abort = {} -> __native_continuation_abort { delim = delim_handle },
-        is_suspended = { value } -> False,  # TODO: implement
         extract_suspended = { suspended } -> __native_continuation_extract_suspended { delim = delim_handle, suspended = suspended }
     }
 
+# Standalone functions using Delim handle directly
+
+# Create a new delimiter for continuation capture/resume operations.
+pub let delimit: {} -> Delim = {} -> do
+    let handle = __native_continuation_delimit {}
+    Delim { val = handle }
+
+# Capture the current continuation up to the delimiter.
+pub let capture: { delim: Delim } -> ({ value: 'a } -> 'b) = { delim } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_capture { delim = handle }
+
+# Suspend execution, returning control to the delimiter.
+pub let suspend: {} -> 'a = {} ->
+    __native_continuation_suspend {}
+
+# Suspend execution with a value.
+pub let suspend_with: { delim: Delim, value: 'a } -> 'b = { delim, value } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_suspend_with { delim = handle, value = value }
+
+# Resume a captured continuation with a value.
+pub let resume: { delim: Delim, cont: { value: 'a } -> 'b, value: 'a } -> 'b = { delim, cont, value } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_resume { delim = handle, cont = cont, value = value }
+
+# Fork a continuation, running it multiple times with different values.
+pub let fork: { delim: Delim, cont: { value: 'a } -> 'b, values: ['a] } -> ['b] = { delim, cont, values } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_fork { delim = handle, cont = cont, values = values }
+
+# Abort the current continuation, discarding it entirely.
+pub let abort: { delim: Delim } -> 'a = { delim } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_abort { delim = handle }

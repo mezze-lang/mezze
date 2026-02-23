@@ -702,6 +702,12 @@ object BasicTypes {
             MezzeType.RecordType(mapOf("s" to MezzeType.StringType, "len" to MezzeType.IntType, "c" to MezzeType.CharType)),
             MezzeType.StringType
         )
+
+        // Glob pattern matching
+        context["__native_string_glob_match"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("pattern" to MezzeType.StringType, "text" to MezzeType.StringType)),
+            MezzeType.BooleanType
+        )
     }
 
     private fun registerFracTypes(context: MutableMap<String, MezzeType>) {

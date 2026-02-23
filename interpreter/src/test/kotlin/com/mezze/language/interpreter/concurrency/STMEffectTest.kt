@@ -55,7 +55,7 @@ class STMEffectTest {
     @Test
     fun `test tvar creation`() {
         val code = """
-            use std::stm::{tvar, deref}
+            use std::effects::stm::{tvar, deref}
 
             let counter = tvar {init = 42}
             deref {var = counter}
@@ -67,7 +67,7 @@ class STMEffectTest {
     @Test
     fun `test tvar with string value`() {
         val code = """
-            use std::stm::{tvar, deref}
+            use std::effects::stm::{tvar, deref}
 
             let name = tvar {init = "Alice"}
             deref {var = name}
@@ -79,7 +79,7 @@ class STMEffectTest {
     @Test
     fun `test tvar with record value`() {
         val code = """
-            use std::stm::{tvar, deref}
+            use std::effects::stm::{tvar, deref}
 
             let account = tvar {init = {balance = 1000, owner = "Bob"}}
             let acc = deref {var = account}
@@ -96,7 +96,7 @@ class STMEffectTest {
     @Test
     fun `test stm read`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar}
+            use std::effects::stm::{STM, OptimisticSTM, tvar}
 
             let counter = tvar {init = 100}
 
@@ -110,7 +110,7 @@ class STMEffectTest {
     @Test
     fun `test stm write`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
             let counter = tvar {init = 0}
 
@@ -126,7 +126,7 @@ class STMEffectTest {
     @Test
     fun `test read your own writes`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar}
+            use std::effects::stm::{STM, OptimisticSTM, tvar}
 
             let counter = tvar {init = 0}
 
@@ -141,7 +141,7 @@ class STMEffectTest {
     @Test
     fun `test multiple reads same tvar`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar}
+            use std::effects::stm::{STM, OptimisticSTM, tvar}
 
             let counter = tvar {init = 5}
 
@@ -157,7 +157,7 @@ class STMEffectTest {
     @Test
     fun `test multiple writes`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
             let counter = tvar {init = 0}
 
@@ -179,7 +179,7 @@ class STMEffectTest {
     @Test
     fun `test stm modify`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
             let counter = tvar {init = 10}
 
@@ -195,7 +195,7 @@ class STMEffectTest {
     @Test
     fun `test multiple modifies`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
             let counter = tvar {init = 1}
 
@@ -218,7 +218,7 @@ class STMEffectTest {
     @Test
     fun `test stm swap`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
             let counter = tvar {init = 100}
 
@@ -242,7 +242,7 @@ class STMEffectTest {
     @Test
     fun `test stm ensure reads value`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar}
+            use std::effects::stm::{STM, OptimisticSTM, tvar}
 
             let counter = tvar {init = 42}
 
@@ -260,7 +260,7 @@ class STMEffectTest {
     @Test
     fun `test stm check passes when true`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar}
+            use std::effects::stm::{STM, OptimisticSTM, tvar}
 
             let counter = tvar {init = 10}
 
@@ -280,7 +280,7 @@ class STMEffectTest {
     @Test
     fun `test multiple tvars`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
             let a = tvar {init = 10}
             let b = tvar {init = 20}
@@ -301,7 +301,7 @@ class STMEffectTest {
     @Test
     fun `test transfer between tvars`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
             let alice = tvar {init = 1000}
             let bob = tvar {init = 500}
@@ -328,7 +328,7 @@ class STMEffectTest {
     @Test
     fun `test sequential stm read write`() {
         val code = """
-            use std::stm::{STM, SequentialSTM, tvar, deref}
+            use std::effects::stm::{STM, SequentialSTM, tvar, deref}
 
             let counter = tvar {init = 0}
 
@@ -344,7 +344,7 @@ class STMEffectTest {
     @Test
     fun `test sequential stm modify`() {
         val code = """
-            use std::stm::{STM, SequentialSTM, tvar, deref}
+            use std::effects::stm::{STM, SequentialSTM, tvar, deref}
 
             let counter = tvar {init = 5}
 
@@ -364,7 +364,7 @@ class STMEffectTest {
     @Test
     fun `test atomically helper`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref, atomically}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref, atomically}
 
             let counter = tvar {init = 0}
 
@@ -382,7 +382,7 @@ class STMEffectTest {
     @Test
     fun `test transfer helper success`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref, transfer}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref, transfer}
 
             let from = tvar {init = 500}
             let to = tvar {init = 100}
@@ -405,7 +405,7 @@ class STMEffectTest {
     @Test
     fun `test transfer helper insufficient funds`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref, transfer}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref, transfer}
 
             let from = tvar {init = 50}
             let to = tvar {init = 100}
@@ -433,7 +433,7 @@ class STMEffectTest {
     @Test
     fun `test read_all`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, read_all}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, read_all}
 
             let a = tvar {init = 1}
             let b = tvar {init = 2}
@@ -455,7 +455,7 @@ class STMEffectTest {
     @Test
     fun `test nested perform uses outer transaction`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
             let counter = tvar {init = 0}
 
@@ -478,7 +478,7 @@ class STMEffectTest {
     @Test
     fun `test read only transaction`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar}
+            use std::effects::stm::{STM, OptimisticSTM, tvar}
 
             let counter = tvar {init = 42}
 
@@ -494,7 +494,7 @@ class STMEffectTest {
     @Test
     fun `test transaction with list of tvars`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
             let t1 = tvar {init = 1}
             let t2 = tvar {init = 2}
@@ -530,7 +530,7 @@ class STMEffectTest {
     @Test
     fun `test optimistic stm with config`() {
         val code = """
-            use std::stm::{STM, OptimisticSTMWith, tvar, deref}
+            use std::effects::stm::{STM, OptimisticSTMWith, tvar, deref}
 
             let counter = tvar {init = 0}
 
@@ -550,7 +550,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar creation empty`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar_empty, is_empty_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar_empty, is_empty_tmvar}
 
             let mvar = tmvar_empty {}
             perform OptimisticSTM in do
@@ -563,7 +563,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar creation with value`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar, is_empty_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar, is_empty_tmvar}
 
             let mvar = tmvar {init = 42}
             perform OptimisticSTM in do
@@ -576,7 +576,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar take from full`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar, take_tmvar, is_empty_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar, take_tmvar, is_empty_tmvar}
 
             let mvar = tmvar {init = 42}
             perform OptimisticSTM in do
@@ -592,7 +592,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar put to empty`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar_empty, put_tmvar, read_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar_empty, put_tmvar, read_tmvar}
 
             let mvar = tmvar_empty {}
             perform OptimisticSTM in do
@@ -606,7 +606,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar read without taking`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar, read_tmvar, is_empty_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar, read_tmvar, is_empty_tmvar}
 
             let mvar = tmvar {init = 100}
             perform OptimisticSTM in do
@@ -624,7 +624,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar try_take from full`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar, try_take_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar, try_take_tmvar}
 
             let mvar = tmvar {init = 42}
             perform OptimisticSTM in do
@@ -639,7 +639,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar try_take from empty`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar_empty, try_take_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar_empty, try_take_tmvar}
 
             let mvar = tmvar_empty {}
             perform OptimisticSTM in do
@@ -652,7 +652,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar try_put to empty`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar_empty, try_put_tmvar, read_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar_empty, try_put_tmvar, read_tmvar}
 
             let mvar = tmvar_empty {}
             perform OptimisticSTM in do
@@ -668,7 +668,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar try_put to full`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar, try_put_tmvar, read_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar, try_put_tmvar, read_tmvar}
 
             let mvar = tmvar {init = 42}
             perform OptimisticSTM in do
@@ -684,7 +684,7 @@ class STMEffectTest {
     @Test
     fun `test tmvar swap`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tmvar, swap_tmvar, read_tmvar}
+            use std::effects::stm::{STM, OptimisticSTM, tmvar, swap_tmvar, read_tmvar}
 
             let mvar = tmvar {init = 10}
             perform OptimisticSTM in do
@@ -704,7 +704,7 @@ class STMEffectTest {
     @Test
     fun `test tqueue creation and write read`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, read_tqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tqueue, write_tqueue, read_tqueue}
 
             let q = tqueue {}
             perform OptimisticSTM in do
@@ -718,7 +718,7 @@ class STMEffectTest {
     @Test
     fun `test tqueue fifo order`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, read_tqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tqueue, write_tqueue, read_tqueue}
 
             let q = tqueue {}
             perform OptimisticSTM in do
@@ -739,7 +739,7 @@ class STMEffectTest {
     @Test
     fun `test tqueue is_empty true for new queue`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tqueue, is_empty_tqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tqueue, is_empty_tqueue}
 
             let q = tqueue {}
             perform OptimisticSTM in do
@@ -752,7 +752,7 @@ class STMEffectTest {
     @Test
     fun `test tqueue is_empty false after write`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, is_empty_tqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tqueue, write_tqueue, is_empty_tqueue}
 
             let q = tqueue {}
             perform OptimisticSTM in do
@@ -766,7 +766,7 @@ class STMEffectTest {
     @Test
     fun `test tqueue try_read from empty`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tqueue, try_read_tqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tqueue, try_read_tqueue}
 
             let q = tqueue {}
             perform OptimisticSTM in do
@@ -779,7 +779,7 @@ class STMEffectTest {
     @Test
     fun `test tqueue try_read from non-empty`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, try_read_tqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tqueue, write_tqueue, try_read_tqueue}
 
             let q = tqueue {}
             perform OptimisticSTM in do
@@ -795,7 +795,7 @@ class STMEffectTest {
     @Test
     fun `test tqueue peek`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tqueue, write_tqueue, peek_tqueue, read_tqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tqueue, write_tqueue, peek_tqueue, read_tqueue}
 
             let q = tqueue {}
             perform OptimisticSTM in do
@@ -816,7 +816,7 @@ class STMEffectTest {
     @Test
     fun `test tbqueue creation and write read`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, read_tbqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, read_tbqueue}
 
             let q = tbqueue {capacity = 10}
             perform OptimisticSTM in do
@@ -830,7 +830,7 @@ class STMEffectTest {
     @Test
     fun `test tbqueue fifo order`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, read_tbqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, read_tbqueue}
 
             let q = tbqueue {capacity = 10}
             perform OptimisticSTM in do
@@ -851,7 +851,7 @@ class STMEffectTest {
     @Test
     fun `test tbqueue try_write when full`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, try_write_tbqueue, size_tbqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, try_write_tbqueue, size_tbqueue}
 
             let q = tbqueue {capacity = 2}
             perform OptimisticSTM in do
@@ -870,7 +870,7 @@ class STMEffectTest {
     @Test
     fun `test tbqueue is_full`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, is_full_tbqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, is_full_tbqueue}
 
             let q = tbqueue {capacity = 2}
             perform OptimisticSTM in do
@@ -890,7 +890,7 @@ class STMEffectTest {
     @Test
     fun `test tbqueue size_tbqueue`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, read_tbqueue, size_tbqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tbqueue, write_tbqueue, read_tbqueue, size_tbqueue}
 
             let q = tbqueue {capacity = 10}
             perform OptimisticSTM in do
@@ -913,7 +913,7 @@ class STMEffectTest {
     @Test
     fun `test tbqueue capacity_tbqueue`() {
         val code = """
-            use std::stm::{STM, OptimisticSTM, tbqueue, capacity_tbqueue}
+            use std::effects::stm::{STM, OptimisticSTM, tbqueue, capacity_tbqueue}
 
             let q = tbqueue {capacity = 50}
             perform OptimisticSTM in do

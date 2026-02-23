@@ -52,7 +52,7 @@ class OSThreadModuleTest {
     @Test
     fun `test os_spawn and os_await`() {
         val result = eval("""
-            use std::async::osthread::{os_spawn, os_await}
+            use std::effects::async::osthread::{os_spawn, os_await}
 
             let p = os_spawn { f = {} -> 42 }
             os_await { p = p }
@@ -63,7 +63,7 @@ class OSThreadModuleTest {
     @Test
     fun `test os_spawn with computation`() {
         val result = eval("""
-            use std::async::osthread::{os_spawn, os_await}
+            use std::effects::async::osthread::{os_spawn, os_await}
 
             let p = os_spawn { f = {} -> 10 + 20 + 12 }
             os_await { p = p }
@@ -74,7 +74,7 @@ class OSThreadModuleTest {
     @Test
     fun `test os_spawn multiple threads`() {
         val result = eval("""
-            use std::async::osthread::{os_spawn, os_await}
+            use std::effects::async::osthread::{os_spawn, os_await}
 
             let p1 = os_spawn { f = {} -> 10 }
             let p2 = os_spawn { f = {} -> 20 }
@@ -96,7 +96,7 @@ class OSThreadModuleTest {
     @Test
     fun `test os_is_done after await`() {
         val result = eval("""
-            use std::async::osthread::{os_spawn, os_await, os_is_done}
+            use std::effects::async::osthread::{os_spawn, os_await, os_is_done}
 
             let p = os_spawn { f = {} -> 42 }
             let _ = os_await { p = p }
@@ -108,7 +108,7 @@ class OSThreadModuleTest {
     @Test
     fun `test os_is_cancelled returns false`() {
         val result = eval("""
-            use std::async::osthread::{os_is_cancelled}
+            use std::effects::async::osthread::{os_is_cancelled}
 
             os_is_cancelled {}
         """)
@@ -118,7 +118,7 @@ class OSThreadModuleTest {
     @Test
     fun `test os_check is no-op when not cancelled`() {
         val result = eval("""
-            use std::async::osthread::{os_check}
+            use std::effects::async::osthread::{os_check}
 
             os_check {}
             42
@@ -133,7 +133,7 @@ class OSThreadModuleTest {
     @Test
     fun `test os_all executes all`() {
         val result = eval("""
-            use std::async::osthread::{os_spawn, os_all}
+            use std::effects::async::osthread::{os_spawn, os_all}
 
             let p1 = os_spawn { f = {} -> 10 }
             let p2 = os_spawn { f = {} -> 20 }
@@ -153,7 +153,7 @@ class OSThreadModuleTest {
     @Test
     fun `test os_race returns first completed`() {
         val result = eval("""
-            use std::async::osthread::{os_spawn, os_race}
+            use std::effects::async::osthread::{os_spawn, os_race}
 
             # All same computation, race should return one of them
             let p1 = os_spawn { f = {} -> 42 }
@@ -172,7 +172,7 @@ class OSThreadModuleTest {
     @Test
     fun `test os_timeout returns Some on completion`() {
         val result = eval("""
-            use std::async::osthread::{os_spawn, os_timeout}
+            use std::effects::async::osthread::{os_spawn, os_timeout}
 
             let p = os_spawn { f = {} -> 42 }
             match os_timeout { p = p, ms = 5000 } is
@@ -189,7 +189,7 @@ class OSThreadModuleTest {
     @Test
     fun `test OSThreadAsync handler with Async effect`() {
         val result = eval("""
-            use std::async::{Async, OSThreadAsync}
+            use std::effects::async::{Async, OSThreadAsync}
 
             perform OSThreadAsync in do
                 let p = Async.spawn { f = {} -> 42 }
@@ -201,7 +201,7 @@ class OSThreadModuleTest {
     @Test
     fun `test OSThreadAsync handler multiple spawns`() {
         val result = eval("""
-            use std::async::{Async, OSThreadAsync}
+            use std::effects::async::{Async, OSThreadAsync}
 
             perform OSThreadAsync in do
                 let p1 = Async.spawn { f = {} -> 10 }
@@ -220,7 +220,7 @@ class OSThreadModuleTest {
     @Test
     fun `test OSThreadAsync with join`() {
         val result = eval("""
-            use std::async::{Async, OSThreadAsync}
+            use std::effects::async::{Async, OSThreadAsync}
 
             perform OSThreadAsync in do
                 let result = Async.join {

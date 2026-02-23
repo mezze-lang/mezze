@@ -249,4 +249,5 @@ class ExceptionEffectTest {
         val errorValue = error.fields["error"] as MezzeRecord
         assertEquals(400L, (errorValue.fields["code"] as MezzeInt).value)
     }
+
 }

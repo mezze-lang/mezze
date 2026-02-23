@@ -37,7 +37,7 @@ class JsonModuleTest {
     @Test
     fun `test JNull construction`() {
         val result = eval("""
-            use std::json::{Json}
+            use std::codec::json::{Json}
 
             let j: Json = JNull
             match j is
@@ -51,7 +51,7 @@ class JsonModuleTest {
     @Test
     fun `test JBool construction`() {
         val result = eval("""
-            use std::json::{Json}
+            use std::codec::json::{Json}
 
             let j: Json = JBool {val = True}
             match j is
@@ -65,7 +65,7 @@ class JsonModuleTest {
     @Test
     fun `test JInt construction`() {
         val result = eval("""
-            use std::json::{Json}
+            use std::codec::json::{Json}
 
             let j: Json = JInt {val = 42}
             match j is
@@ -79,7 +79,7 @@ class JsonModuleTest {
     @Test
     fun `test JFloat construction`() {
         val result = eval("""
-            use std::json::{Json}
+            use std::codec::json::{Json}
 
             let j: Json = JFloat {val = 3.14}
             match j is
@@ -93,7 +93,7 @@ class JsonModuleTest {
     @Test
     fun `test JString construction`() {
         val result = eval("""
-            use std::json::{Json}
+            use std::codec::json::{Json}
 
             let j: Json = JString {val = "hello"}
             match j is
@@ -107,7 +107,7 @@ class JsonModuleTest {
     @Test
     fun `test JArray construction`() {
         val result = eval("""
-            use std::json::{Json}
+            use std::codec::json::{Json}
 
             let j: Json = JArray {items = [JInt {val = 1}, JInt {val = 2}, JInt {val = 3}]}
             match j is
@@ -121,7 +121,7 @@ class JsonModuleTest {
     @Test
     fun `test JObject construction`() {
         val result = eval("""
-            use std::json::{Json}
+            use std::codec::json::{Json}
 
             let j: Json = JObject {fields = [
                 {key = "name", value = JString {val = "Alice"}},
@@ -140,7 +140,7 @@ class JsonModuleTest {
     @Test
     fun `test to_string with JNull`() {
         val result = eval("""
-            use std::json::{Json, to_string}
+            use std::codec::json::{Json, to_string}
 
             to_string {json = JNull}
         """)
@@ -151,7 +151,7 @@ class JsonModuleTest {
     @Test
     fun `test to_string with JBool true`() {
         val result = eval("""
-            use std::json::{Json, to_string}
+            use std::codec::json::{Json, to_string}
 
             to_string {json = JBool {val = True}}
         """)
@@ -162,7 +162,7 @@ class JsonModuleTest {
     @Test
     fun `test to_string with JBool false`() {
         val result = eval("""
-            use std::json::{Json, to_string}
+            use std::codec::json::{Json, to_string}
 
             to_string {json = JBool {val = False}}
         """)
@@ -173,7 +173,7 @@ class JsonModuleTest {
     @Test
     fun `test to_string with JInt`() {
         val result = eval("""
-            use std::json::{Json, to_string}
+            use std::codec::json::{Json, to_string}
 
             to_string {json = JInt {val = 42}}
         """)
@@ -184,7 +184,7 @@ class JsonModuleTest {
     @Test
     fun `test to_string with JString`() {
         val result = eval("""
-            use std::json::{Json, to_string}
+            use std::codec::json::{Json, to_string}
 
             to_string {json = JString {val = "hello"}}
         """)
@@ -195,7 +195,7 @@ class JsonModuleTest {
     @Test
     fun `test to_string with JArray`() {
         val result = eval("""
-            use std::json::{Json, to_string}
+            use std::codec::json::{Json, to_string}
 
             to_string {json = JArray {items = [JInt {val = 1}, JInt {val = 2}]}}
         """)
@@ -206,7 +206,7 @@ class JsonModuleTest {
     @Test
     fun `test to_string with JObject`() {
         val result = eval("""
-            use std::json::{Json, to_string}
+            use std::codec::json::{Json, to_string}
 
             to_string {json = JObject {fields = [{key = "name", value = JString {val = "Alice"}}]}}
         """)
@@ -219,7 +219,7 @@ class JsonModuleTest {
     @Test
     fun `test to_string with empty array`() {
         val result = eval("""
-            use std::json::{Json, to_string}
+            use std::codec::json::{Json, to_string}
 
             to_string {json = JArray {items = []}}
         """)
@@ -230,7 +230,7 @@ class JsonModuleTest {
     @Test
     fun `test to_string with empty object`() {
         val result = eval("""
-            use std::json::{Json, to_string}
+            use std::codec::json::{Json, to_string}
 
             to_string {json = JObject {fields = []}}
         """)
@@ -243,7 +243,7 @@ class JsonModuleTest {
     @Test
     fun `test parse_str with null`() {
         val result = eval("""
-            use std::json::{Json, parse_str}
+            use std::codec::json::{Json, parse_str}
 
             let parsed = parse_str {s = "null"}
             match parsed is
@@ -259,7 +259,7 @@ class JsonModuleTest {
     @Test
     fun `test parse_str with boolean true`() {
         val result = eval("""
-            use std::json::{Json, parse_str}
+            use std::codec::json::{Json, parse_str}
 
             let parsed = parse_str {s = "true"}
             match parsed is
@@ -275,7 +275,7 @@ class JsonModuleTest {
     @Test
     fun `test parse_str with integer`() {
         val result = eval("""
-            use std::json::{Json, parse_str}
+            use std::codec::json::{Json, parse_str}
 
             let parsed = parse_str {s = "42"}
             match parsed is
@@ -291,7 +291,7 @@ class JsonModuleTest {
     @Test
     fun `test parse_str with string`() {
         val result = eval("""
-            use std::json::{Json, parse_str}
+            use std::codec::json::{Json, parse_str}
 
             let parsed = parse_str {s = "\"hello\""}
             match parsed is
@@ -307,7 +307,7 @@ class JsonModuleTest {
     @Test
     fun `test parse_str with array`() {
         val result = eval("""
-            use std::json::{Json, parse_str}
+            use std::codec::json::{Json, parse_str}
 
             let parsed = parse_str {s = "[1, 2, 3]"}
             match parsed is
@@ -323,7 +323,7 @@ class JsonModuleTest {
     @Test
     fun `test parse_str with object`() {
         val result = eval("""
-            use std::json::{Json, parse_str}
+            use std::codec::json::{Json, parse_str}
 
             let parsed = parse_str {s = "{\"name\": \"Alice\", \"age\": 30}"}
             match parsed is
@@ -339,7 +339,7 @@ class JsonModuleTest {
     @Test
     fun `test parse_str with invalid json`() {
         val result = eval("""
-            use std::json::{parse_str}
+            use std::codec::json::{parse_str}
 
             let parsed = parse_str {s = "{invalid}"}
             match parsed is
@@ -355,8 +355,8 @@ class JsonModuleTest {
     @Test
     fun `test transform_field_name identity`() {
         val result = eval("""
-            use std::json::{transform_field_name}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{transform_field_name}
+            use std::codec::core::{FieldTransform}
 
             transform_field_name {name = "userName", transform = Identity}
         """)
@@ -367,8 +367,8 @@ class JsonModuleTest {
     @Test
     fun `test transform_field_name snake_case`() {
         val result = eval("""
-            use std::json::{transform_field_name}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{transform_field_name}
+            use std::codec::core::{FieldTransform}
 
             transform_field_name {name = "userName", transform = SnakeCase}
         """)
@@ -379,8 +379,8 @@ class JsonModuleTest {
     @Test
     fun `test transform_field_name camel_case`() {
         val result = eval("""
-            use std::json::{transform_field_name}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{transform_field_name}
+            use std::codec::core::{FieldTransform}
 
             transform_field_name {name = "user_name", transform = CamelCase}
         """)
@@ -391,8 +391,8 @@ class JsonModuleTest {
     @Test
     fun `test transform_field_name kebab_case`() {
         val result = eval("""
-            use std::json::{transform_field_name}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{transform_field_name}
+            use std::codec::core::{FieldTransform}
 
             transform_field_name {name = "userName", transform = KebabCase}
         """)
@@ -403,8 +403,8 @@ class JsonModuleTest {
     @Test
     fun `test transform_field_name screaming_snake_case`() {
         val result = eval("""
-            use std::json::{transform_field_name}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{transform_field_name}
+            use std::codec::core::{FieldTransform}
 
             transform_field_name {name = "userName", transform = ScreamingSnakeCase}
         """)
@@ -417,8 +417,8 @@ class JsonModuleTest {
     @Test
     fun `test transform_fields on object with snake_case`() {
         val result = eval("""
-            use std::json::{Json, transform_fields, to_string}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{Json, transform_fields, to_string}
+            use std::codec::core::{FieldTransform}
 
             let obj: Json = JObject {fields = [
                 {key = "firstName", value = JString {val = "Alice"}},
@@ -436,8 +436,8 @@ class JsonModuleTest {
     @Test
     fun `test transform_fields on nested object`() {
         val result = eval("""
-            use std::json::{Json, transform_fields, to_string}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{Json, transform_fields, to_string}
+            use std::codec::core::{FieldTransform}
 
             let inner: Json = JObject {fields = [{key = "createdAt", value = JString {val = "2024"}}]}
             let outer: Json = JObject {fields = [{key = "userData", value = inner}]}
@@ -453,8 +453,8 @@ class JsonModuleTest {
     @Test
     fun `test transform_fields with identity is no-op`() {
         val result = eval("""
-            use std::json::{Json, transform_fields, to_string}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{Json, transform_fields, to_string}
+            use std::codec::core::{FieldTransform}
 
             let obj: Json = JObject {fields = [{key = "userName", value = JString {val = "Alice"}}]}
             let transformed = transform_fields {json = obj, transform = Identity}
@@ -470,8 +470,8 @@ class JsonModuleTest {
     @Test
     fun `test default_config`() {
         val result = eval("""
-            use std::json::{default_config}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{default_config}
+            use std::codec::core::{FieldTransform}
 
             match default_config.field_transform is
                 Identity -> True
@@ -484,8 +484,8 @@ class JsonModuleTest {
     @Test
     fun `test config constructor`() {
         val result = eval("""
-            use std::json::{config}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{config}
+            use std::codec::core::{FieldTransform}
 
             let cfg = config {
                 pretty = True,
@@ -504,8 +504,8 @@ class JsonModuleTest {
     @Test
     fun `test serialize_to_string with pretty config`() {
         val result = eval("""
-            use std::json::{Json, serialize_to_string, JsonConfig}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{Json, serialize_to_string, JsonConfig}
+            use std::codec::core::{FieldTransform}
 
             let obj: Json = JObject {fields = [{key = "x", value = JInt {val = 1}}]}
             let cfg: JsonConfig = {pretty = True, indent = 2, field_transform = Identity, skip_null = False}
@@ -519,8 +519,8 @@ class JsonModuleTest {
     @Test
     fun `test serialize_to_string with compact config`() {
         val result = eval("""
-            use std::json::{Json, serialize_to_string, JsonConfig}
-            use std::codec::{FieldTransform}
+            use std::codec::json::{Json, serialize_to_string, JsonConfig}
+            use std::codec::core::{FieldTransform}
 
             let obj: Json = JObject {fields = [{key = "x", value = JInt {val = 1}}]}
             let cfg: JsonConfig = {pretty = False, indent = 2, field_transform = Identity, skip_null = False}
@@ -536,7 +536,7 @@ class JsonModuleTest {
     @Test
     fun `test roundtrip parse and serialize`() {
         val result = eval("""
-            use std::json::{parse_str, to_string}
+            use std::codec::json::{parse_str, to_string}
 
             let original = "{\"count\":42}"
             let parsed = parse_str {s = original}

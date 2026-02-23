@@ -37,7 +37,7 @@ class MutexModuleTest {
     @Test
     fun `test mutex creates lock`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, with_lock}
+            use std::effects::concurrent::mutex::{mutex, with_lock}
 
             let m = mutex {}
             with_lock {mutex = m, f = {} -> 42}
@@ -49,7 +49,7 @@ class MutexModuleTest {
     @Test
     fun `test with_lock returns function result`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, with_lock}
+            use std::effects::concurrent::mutex::{mutex, with_lock}
 
             let m = mutex {}
             with_lock {mutex = m, f = {} -> "hello"}
@@ -61,7 +61,7 @@ class MutexModuleTest {
     @Test
     fun `test with_lock with computation`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, with_lock}
+            use std::effects::concurrent::mutex::{mutex, with_lock}
 
             let m = mutex {}
             with_lock {mutex = m, f = {} -> do
@@ -77,7 +77,7 @@ class MutexModuleTest {
     @Test
     fun `test multiple with_lock calls`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, with_lock}
+            use std::effects::concurrent::mutex::{mutex, with_lock}
 
             let m = mutex {}
             let r1 = with_lock {mutex = m, f = {} -> 1}
@@ -94,7 +94,7 @@ class MutexModuleTest {
     @Test
     fun `test lock and unlock`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, lock, unlock}
+            use std::effects::concurrent::mutex::{mutex, lock, unlock}
 
             let m = mutex {}
             let _ = lock {mutex = m}
@@ -109,7 +109,7 @@ class MutexModuleTest {
     @Test
     fun `test try_lock succeeds on unlocked mutex`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, try_lock, unlock}
+            use std::effects::concurrent::mutex::{mutex, try_lock, unlock}
 
             let m = mutex {}
             let success = try_lock {mutex = m}
@@ -125,7 +125,7 @@ class MutexModuleTest {
     @Test
     fun `test is_held_by_current_thread when locked`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, lock, unlock, is_held_by_current_thread}
+            use std::effects::concurrent::mutex::{mutex, lock, unlock, is_held_by_current_thread}
 
             let m = mutex {}
             let _ = lock {mutex = m}
@@ -140,7 +140,7 @@ class MutexModuleTest {
     @Test
     fun `test is_held_by_current_thread when unlocked`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, is_held_by_current_thread}
+            use std::effects::concurrent::mutex::{mutex, is_held_by_current_thread}
 
             let m = mutex {}
             is_held_by_current_thread {mutex = m}
@@ -154,7 +154,7 @@ class MutexModuleTest {
     @Test
     fun `test reentrant locking with with_lock`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, with_lock}
+            use std::effects::concurrent::mutex::{mutex, with_lock}
 
             let m = mutex {}
             with_lock {mutex = m, f = {} ->
@@ -170,7 +170,7 @@ class MutexModuleTest {
     @Test
     fun `test reentrant manual lock unlock`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, lock, unlock}
+            use std::effects::concurrent::mutex::{mutex, lock, unlock}
 
             let m = mutex {}
             let _ = lock {mutex = m}
@@ -190,7 +190,7 @@ class MutexModuleTest {
     @Test
     fun `test with_lock with record result`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, with_lock}
+            use std::effects::concurrent::mutex::{mutex, with_lock}
 
             let m = mutex {}
             let r = with_lock {mutex = m, f = {} -> {x = 10, y = 20}}
@@ -203,7 +203,7 @@ class MutexModuleTest {
     @Test
     fun `test with_lock with boolean result`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, with_lock}
+            use std::effects::concurrent::mutex::{mutex, with_lock}
 
             let m = mutex {}
             with_lock {mutex = m, f = {} -> True}
@@ -215,7 +215,7 @@ class MutexModuleTest {
     @Test
     fun `test with_lock with list result`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, with_lock}
+            use std::effects::concurrent::mutex::{mutex, with_lock}
 
             let m = mutex {}
             let list = with_lock {mutex = m, f = {} -> [1, 2, 3]}
@@ -230,7 +230,7 @@ class MutexModuleTest {
     @Test
     fun `test multiple independent mutexes`() {
         val result = eval("""
-            use std::concurrent::mutex::{mutex, with_lock}
+            use std::effects::concurrent::mutex::{mutex, with_lock}
 
             let m1 = mutex {}
             let m2 = mutex {}

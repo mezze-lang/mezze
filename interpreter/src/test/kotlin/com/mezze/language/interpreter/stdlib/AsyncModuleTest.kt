@@ -37,7 +37,7 @@ class AsyncModuleTest {
     @Test
     fun `test run_coop executes computation`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let p = Async.spawn {f = {} -> 42}
@@ -53,7 +53,7 @@ class AsyncModuleTest {
     @Test
     fun `test spawn and await returns result`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let p = Async.spawn {f = {} -> 42}
@@ -67,7 +67,7 @@ class AsyncModuleTest {
     @Test
     fun `test spawn multiple tasks`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -86,7 +86,7 @@ class AsyncModuleTest {
     @Test
     fun `test is_done on completed promise`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let p = Async.spawn {f = {} -> 42}
@@ -103,7 +103,7 @@ class AsyncModuleTest {
     @Test
     fun `test all waits for all promises`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let p1 = Async.spawn {f = {} -> 1}
@@ -120,7 +120,7 @@ class AsyncModuleTest {
     @Test
     fun `test all returns results in order`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let p1 = Async.spawn {f = {} -> 10}
@@ -140,7 +140,7 @@ class AsyncModuleTest {
     @Test
     fun `test race returns first completed`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let p1 = Async.spawn {f = {} -> 1}
@@ -158,7 +158,7 @@ class AsyncModuleTest {
     @Test
     fun `test join runs two computations`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let r = Async.join {
@@ -177,7 +177,7 @@ class AsyncModuleTest {
     @Test
     fun `test join3 runs three computations`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let r = Async.join3 {
@@ -197,7 +197,7 @@ class AsyncModuleTest {
     @Test
     fun `test map applies function concurrently`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let results = Async.map {xs = [1, 2, 3], f = {x} -> x * 2}
@@ -211,7 +211,7 @@ class AsyncModuleTest {
     @Test
     fun `test map preserves order`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let results = Async.map {xs = [10, 20, 30], f = {x} -> x + 1}
@@ -229,7 +229,7 @@ class AsyncModuleTest {
     @Test
     fun `test for_each returns unit`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 Async.for_each {xs = [1, 2, 3], f = {x} -> {}}
@@ -245,7 +245,7 @@ class AsyncModuleTest {
     @Test
     fun `test filter keeps matching elements`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let results = Async.filter {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
@@ -261,7 +261,7 @@ class AsyncModuleTest {
     @Test
     fun `test timeout returns Some when fast`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let p = Async.spawn {f = {} -> 42}
@@ -279,7 +279,7 @@ class AsyncModuleTest {
     @Test
     fun `test run helper spawns and awaits`() {
         val result = eval("""
-            use std::async::{Async, run_coop, run}
+            use std::effects::async::{Async, run_coop, run}
 
             run_coop {computation = {} -> do
                 run {f = {} -> 42}
@@ -294,7 +294,7 @@ class AsyncModuleTest {
     @Test
     fun `test go helper fires and forgets`() {
         val result = eval("""
-            use std::async::{Async, run_coop, go}
+            use std::effects::async::{Async, run_coop, go}
 
             run_coop {computation = {} -> do
                 go {f = {} -> 42}
@@ -310,7 +310,7 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncFailed construction`() {
         val result = eval("""
-            use std::async::{AsyncError}
+            use std::effects::async::{AsyncError}
 
             let err: AsyncError = AsyncFailed {msg = "test error"}
             match err is
@@ -324,7 +324,7 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncCancelled construction`() {
         val result = eval("""
-            use std::async::{AsyncError}
+            use std::effects::async::{AsyncError}
 
             let err: AsyncError = AsyncCancelled
             match err is
@@ -338,7 +338,7 @@ class AsyncModuleTest {
     @Test
     fun `test AsyncTimedOut construction`() {
         val result = eval("""
-            use std::async::{AsyncError}
+            use std::effects::async::{AsyncError}
 
             let err: AsyncError = AsyncTimedOut {ms = 5000}
             match err is
@@ -354,7 +354,7 @@ class AsyncModuleTest {
     @Test
     fun `test nested spawn and await`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let outer = Async.spawn {f = {} -> do
@@ -373,7 +373,7 @@ class AsyncModuleTest {
     @Test
     fun `test settle returns Results`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 let p1 = Async.spawn {f = {} -> 1}
@@ -391,7 +391,7 @@ class AsyncModuleTest {
     @Test
     fun `test complex async workflow`() {
         val result = eval("""
-            use std::async::{Async, run_coop}
+            use std::effects::async::{Async, run_coop}
 
             run_coop {computation = {} -> do
                 # Spawn multiple tasks

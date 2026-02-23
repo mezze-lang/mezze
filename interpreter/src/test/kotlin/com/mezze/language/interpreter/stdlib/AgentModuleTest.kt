@@ -54,7 +54,7 @@ class AgentModuleTest {
     @Test
     fun `test agent creation with initial value`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, deref_agent}
+            use std::effects::concurrent::agent::{agent, deref_agent}
 
             let counter = agent { value = 42 }
             deref_agent { agent = counter }
@@ -65,7 +65,7 @@ class AgentModuleTest {
     @Test
     fun `test agent with string value`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, deref_agent}
+            use std::effects::concurrent::agent::{agent, deref_agent}
 
             let name = agent { value = "hello" }
             deref_agent { agent = name }
@@ -76,7 +76,7 @@ class AgentModuleTest {
     @Test
     fun `test agent with record value`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, deref_agent}
+            use std::effects::concurrent::agent::{agent, deref_agent}
 
             let stats = agent { value = { count = 0, sum = 0 } }
             let current = deref_agent { agent = stats }
@@ -92,7 +92,7 @@ class AgentModuleTest {
     @Test
     fun `test agent send single update`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
 
             let counter = agent { value = 0 }
             send { agent = counter, f = { current } -> current + 1 }
@@ -105,7 +105,7 @@ class AgentModuleTest {
     @Test
     fun `test agent send multiple updates`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
 
             let counter = agent { value = 0 }
             send { agent = counter, f = { current } -> current + 10 }
@@ -120,7 +120,7 @@ class AgentModuleTest {
     @Test
     fun `test agent updates are sequential`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
 
             let counter = agent { value = 1 }
             send { agent = counter, f = { current } -> current * 2 }  # 2
@@ -135,7 +135,7 @@ class AgentModuleTest {
     @Test
     fun `test agent update with record value`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, send, deref_agent, await_agent}
+            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent}
 
             let stats = agent { value = { count = 0, sum = 0 } }
             send { agent = stats, f = { current } -> { count = current.count + 1, sum = current.sum + 10 } }
@@ -155,7 +155,7 @@ class AgentModuleTest {
     @Test
     fun `test agent_error returns None initially`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, agent_error}
+            use std::effects::concurrent::agent::{agent, agent_error}
 
             let counter = agent { value = 0 }
             match agent_error { agent = counter } is
@@ -168,7 +168,7 @@ class AgentModuleTest {
     @Test
     fun `test has_error returns false initially`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, has_error}
+            use std::effects::concurrent::agent::{agent, has_error}
 
             let counter = agent { value = 0 }
             has_error { agent = counter }
@@ -183,7 +183,7 @@ class AgentModuleTest {
     @Test
     fun `test await_agent_timeout success`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, send, await_agent_timeout}
+            use std::effects::concurrent::agent::{agent, send, await_agent_timeout}
 
             let counter = agent { value = 0 }
             send { agent = counter, f = { current } -> current + 1 }
@@ -195,7 +195,7 @@ class AgentModuleTest {
     @Test
     fun `test await_agent_timeout on idle agent`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, await_agent_timeout}
+            use std::effects::concurrent::agent::{agent, await_agent_timeout}
 
             let counter = agent { value = 42 }
             # No pending updates, should succeed immediately
@@ -211,7 +211,7 @@ class AgentModuleTest {
     @Test
     fun `test restart_agent sets new value`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, send, deref_agent, await_agent, restart_agent}
+            use std::effects::concurrent::agent::{agent, send, deref_agent, await_agent, restart_agent}
 
             let counter = agent { value = 0 }
             send { agent = counter, f = { current } -> current + 10 }
@@ -226,7 +226,7 @@ class AgentModuleTest {
     @Test
     fun `test restart_agent clears pending updates`() {
         val result = eval("""
-            use std::concurrent::agent::{agent, send, deref_agent, restart_agent, await_agent}
+            use std::effects::concurrent::agent::{agent, send, deref_agent, restart_agent, await_agent}
 
             let counter = agent { value = 0 }
             restart_agent { agent = counter, value = 999 }

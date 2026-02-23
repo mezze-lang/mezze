@@ -57,8 +57,8 @@ class ContentAddressableHashingE2ETest {
 
         for (binding in letBindings) {
             assertNotNull(binding.contentHash, "LetBinding '${binding.variableName}' should have contentHash")
-            assertTrue(binding.contentHash!!.startsWith("#"), "Content hash should start with #")
-            assertEquals(33, binding.contentHash!!.length, "Content hash should be # + 32 hex chars")
+            assertTrue(binding.contentHash!!.matches(Regex("[0-9a-f]{128}")), "Content hash should be 128 hex chars (SHA3-512)")
+            assertEquals(128, binding.contentHash!!.length, "Content hash should be 128 hex chars")
         }
     }
 
@@ -174,7 +174,7 @@ class ContentAddressableHashingE2ETest {
 
         assertNotNull(impl, "Should find Describable impl")
         assertNotNull(impl!!.contentHash, "Ability impl should have contentHash")
-        assertTrue(impl.contentHash!!.startsWith("#"), "Content hash should start with #")
+        assertTrue(impl.contentHash!!.matches(Regex("[0-9a-f]{128}")), "Content hash should be 128 hex chars")
     }
 
     @Test
@@ -258,7 +258,7 @@ class ContentAddressableHashingE2ETest {
 
         assertNotNull(impl, "Should find Log effect handler")
         assertNotNull(impl!!.contentHash, "Effect handler should have contentHash")
-        assertTrue(impl.contentHash!!.startsWith("#"), "Content hash should start with #")
+        assertTrue(impl.contentHash!!.matches(Regex("[0-9a-f]{128}")), "Content hash should be 128 hex chars")
     }
 
     @Test

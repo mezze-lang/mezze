@@ -107,4 +107,3148 @@
     "allPublicFields": true,
     "allDeclaredFields": true
   }
+,
+  {
+    "name": "org.eclipse.lsp4j.AbstractTextDocumentRegistrationAndWorkDoneProgressOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.AbstractWorkDoneProgressOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.AnnotatedTextEdit",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ApplyWorkspaceEditParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ApplyWorkspaceEditResponse",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CallHierarchyCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CallHierarchyIncomingCall",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CallHierarchyIncomingCallsParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CallHierarchyItem",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CallHierarchyOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CallHierarchyOutgoingCall",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CallHierarchyOutgoingCallsParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CallHierarchyPrepareParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CallHierarchyRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ChangeAnnotation",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ClientCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ClientInfo",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeAction",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionContext",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionDisabled",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionKindCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionLiteralSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionResolveSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeActionTriggerKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeLens",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeLensCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeLensOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeLensParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeLensRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CodeLensWorkspaceCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Color",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ColorInformation",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ColorPresentation",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ColorPresentationParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ColorProviderCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ColorProviderOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Command",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionContext",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItem",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemDefaults",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemInsertTextModeSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemKindCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemLabelDetails",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemResolveSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemTag",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionItemTagSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionList",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionListCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CompletionTriggerKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ConfigurationItem",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ConfigurationParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CreateFile",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CreateFileOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.CreateFilesParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DeclarationCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DeclarationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DeclarationParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DeclarationRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DefinitionCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DefinitionOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DefinitionParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DefinitionRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DeleteFile",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DeleteFileOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DeleteFilesParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Diagnostic",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DiagnosticCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DiagnosticCodeDescription",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DiagnosticRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DiagnosticRelatedInformation",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DiagnosticServerCancellationData",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DiagnosticSeverity",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DiagnosticTag",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DiagnosticWorkspaceCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DiagnosticsTagSupport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidChangeConfigurationCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidChangeConfigurationParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidChangeNotebookDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidChangeTextDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidChangeWatchedFilesCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidChangeWatchedFilesParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidChangeWatchedFilesRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidChangeWorkspaceFoldersParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidCloseNotebookDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidCloseTextDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidOpenNotebookDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidOpenTextDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidSaveNotebookDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DidSaveTextDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentColorParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentDiagnosticParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentDiagnosticReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentDiagnosticReportKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentDiagnosticReportPartialResult",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentFilter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentFormattingOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentFormattingParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentFormattingRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentHighlight",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentHighlightCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentHighlightKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentHighlightOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentHighlightParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentHighlightRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentLink",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentLinkCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentLinkOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentLinkParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentLinkRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentOnTypeFormattingOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentOnTypeFormattingParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentOnTypeFormattingRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentRangeFormattingOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentRangeFormattingParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentRangeFormattingRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentSymbol",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentSymbolCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentSymbolOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentSymbolParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DocumentSymbolRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.DynamicRegistrationCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ExecuteCommandCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ExecuteCommandOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ExecuteCommandParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ExecuteCommandRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ExecutionSummary",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FailureHandlingKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileChangeType",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileCreate",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileDelete",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileEvent",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileOperationFilter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileOperationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileOperationPattern",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileOperationPatternKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileOperationPatternOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileOperationsServerCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileOperationsWorkspaceCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileRename",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FileSystemWatcher",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FoldingRange",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FoldingRangeCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FoldingRangeKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FoldingRangeKindSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FoldingRangeProviderOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FoldingRangeRequestParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FoldingRangeSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FormattingCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FormattingOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.FullDocumentDiagnosticReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.GeneralClientCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Hover",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.HoverCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.HoverOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.HoverParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.HoverRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ImplementationCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ImplementationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ImplementationParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ImplementationRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InitializeError",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InitializeErrorCode",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InitializeParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InitializeResult",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InitializedParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlayHint",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlayHintCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlayHintKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlayHintLabelPart",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlayHintParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlayHintRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlayHintResolveSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlayHintWorkspaceCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlineValue",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlineValueCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlineValueContext",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlineValueEvaluatableExpression",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlineValueParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlineValueRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlineValueText",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlineValueVariableLookup",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InlineValueWorkspaceCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InsertReplaceEdit",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InsertReplaceRange",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InsertTextFormat",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.InsertTextMode",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.LinkedEditingRangeCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.LinkedEditingRangeOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.LinkedEditingRangeParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.LinkedEditingRangeRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.LinkedEditingRanges",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Location",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.LocationLink",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.LogTraceParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MarkdownCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MarkedString",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MarkupContent",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MarkupKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MessageActionItem",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MessageParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MessageType",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Moniker",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MonikerCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MonikerKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MonikerOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MonikerParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.MonikerRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookCell",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookCellArrayChange",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookCellKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookCellTextDocumentFilter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocument",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentChangeEvent",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentChangeEventCellStructure",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentChangeEventCellTextContent",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentChangeEventCells",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentClientCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentFilter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentIdentifier",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentSyncClientCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentSyncOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookDocumentSyncRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookSelector",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.NotebookSelectorCell",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.OnTypeFormattingCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ParameterInformation",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ParameterInformationCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.PartialResultParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Position",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.PositionEncodingKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.PrepareRenameDefaultBehavior",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.PrepareRenameParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.PrepareRenameResult",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.PrepareSupportDefaultBehavior",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.PreviousResultId",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ProgressParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.PublishDiagnosticsCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.PublishDiagnosticsParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Range",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RangeFormattingCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ReferenceContext",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ReferenceOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ReferenceParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ReferenceRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ReferencesCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Registration",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RegistrationParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RegularExpressionsCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RelatedFullDocumentDiagnosticReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RelatedUnchangedDocumentDiagnosticReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RelativePattern",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RenameCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RenameFile",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RenameFileOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RenameFilesParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RenameOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.RenameParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ResourceOperation",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ResourceOperationKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SaveOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SelectionRange",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SelectionRangeCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SelectionRangeOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SelectionRangeParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SelectionRangeRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokenModifiers",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokenTypes",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokens",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensClientCapabilitiesRequests",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensClientCapabilitiesRequestsFull",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensDelta",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensDeltaParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensDeltaPartialResult",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensEdit",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensLegend",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensPartialResult",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensRangeParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensServerFull",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensWithRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SemanticTokensWorkspaceCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ServerCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ServerInfo",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SetTraceParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ShowDocumentCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ShowDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ShowDocumentResult",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.ShowMessageRequestParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SignatureHelp",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SignatureHelpCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SignatureHelpContext",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SignatureHelpOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SignatureHelpParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SignatureHelpRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SignatureHelpTriggerKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SignatureInformation",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SignatureInformationCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.StaleRequestCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.StaticRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SymbolCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SymbolInformation",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SymbolKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SymbolKindCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SymbolTag",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SymbolTagSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.SynchronizationCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentChangeRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentClientCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentContentChangeEvent",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentEdit",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentIdentifier",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentItem",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentPositionAndWorkDoneProgressAndPartialResultParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentPositionAndWorkDoneProgressParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentPositionParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentSaveReason",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentSaveRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentSyncKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextDocumentSyncOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TextEdit",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TokenFormat",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TraceValue",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeDefinitionCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeDefinitionOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeDefinitionParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeDefinitionRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeHierarchyCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeHierarchyItem",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeHierarchyPrepareParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeHierarchyRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeHierarchySubtypesParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.TypeHierarchySupertypesParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.UnchangedDocumentDiagnosticReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.UniquenessLevel",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.Unregistration",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.UnregistrationParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.VersionedNotebookDocumentIdentifier",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.VersionedTextDocumentIdentifier",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WatchKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WillSaveTextDocumentParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WindowClientCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WindowShowMessageRequestActionItemCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WindowShowMessageRequestCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressAndPartialResultParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressBegin",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressCancelParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressCreateParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressEnd",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressKind",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressNotification",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkDoneProgressReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceClientCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceDiagnosticParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceDiagnosticReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceDiagnosticReportPartialResult",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceDocumentDiagnosticReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceEdit",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceEditCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceEditChangeAnnotationSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceFolder",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceFoldersChangeEvent",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceFoldersOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceFullDocumentDiagnosticReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceServerCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceSymbol",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceSymbolLocation",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceSymbolOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceSymbolParams",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceSymbolRegistrationOptions",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceSymbolResolveSupportCapabilities",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.WorkspaceUnchangedDocumentDiagnosticReport",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "allDeclaredFields": true,
+    "unsafeAllocated": true
+  }
+,
+  {
+    "name": "org.eclipse.lsp4j.adapters.CodeActionResponseAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.CodeActionResponseAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.CompletionItemDefaultsEditRangeTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.CompletionItemDefaultsEditRangeTypeAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.CompletionItemTextEditTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.CompletionItemTextEditTypeAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.DocumentChangeListAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.DocumentChangeListAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.DocumentDiagnosticReportTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.DocumentDiagnosticReportTypeAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.DocumentSymbolResponseAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.DocumentSymbolResponseAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.HoverTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.HoverTypeAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.HoverTypeAdapter$2",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.HoverTypeAdapter$3",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.HoverTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.InitializeParamsTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.InitializeParamsTypeAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.InitializeParamsTypeAdapter$2",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.InitializeParamsTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.LocationLinkListAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.LocationLinkListAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.PrepareRenameResponseAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.PrepareRenameResponseAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.PrepareRenameResponseAdapter$2",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.ProgressNotificationAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.ProgressNotificationAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.ResourceOperationTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.ResourceOperationTypeAdapter$InnerResourceOperationTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.SemanticTokensFullDeltaResponseAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.SemanticTokensFullDeltaResponseAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.SymbolInformationTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.SymbolInformationTypeAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.SymbolInformationTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.VersionedTextDocumentIdentifierTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.VersionedTextDocumentIdentifierTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.WorkDoneProgressNotificationAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.WorkDoneProgressNotificationAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.WorkDoneProgressNotificationAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.WorkspaceDocumentDiagnosticReportListAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.WorkspaceDocumentDiagnosticReportListAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.WorkspaceSymbolLocationTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.WorkspaceSymbolLocationTypeAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.WorkspaceSymbolResponseAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.adapters.WorkspaceSymbolResponseAdapter$1",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  }
+,
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.CollectionTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.CollectionTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.CollectionTypeAdapterFactory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.CollectionTypeAdapterFactory$Adapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EitherTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EitherTypeAdapter$EitherTypeArgument",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EitherTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EitherTypeAdapter$ListChecker",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EitherTypeAdapter$PropertyChecker",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EitherTypeAdapterFactory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EitherTypeAdapterFactory$Adapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EnumTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EnumTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.EnumTypeAdapterFactory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.JsonElementTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.JsonElementTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.MessageTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.MessageTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.MessageTypeAdapterFactory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.ThrowableTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.ThrowableTypeAdapter$Factory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.TupleTypeAdapters",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.TupleTypeAdapters$TwoTypeAdapter",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.TupleTypeAdapters$TwoTypeAdapterFactory",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.TypeUtils",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  },
+  {
+    "name": "org.eclipse.lsp4j.jsonrpc.json.adapters.TypeUtils$ParameterizedTypeImpl",
+    "allDeclaredConstructors": true,
+    "allPublicMethods": true,
+    "unsafeAllocated": true
+  }
 ]

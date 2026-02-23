@@ -47,7 +47,7 @@ class OSThreadConcurrencyTest {
     }
 
     private val setupCode = """
-        use std::async::{Async, OSThreadAsync}
+        use std::effects::async::{Async, OSThreadAsync}
     """.trimIndent()
 
     // =============================================================================

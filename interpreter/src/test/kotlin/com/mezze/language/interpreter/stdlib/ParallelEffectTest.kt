@@ -37,7 +37,7 @@ class ParallelEffectTest {
     @Test
     fun `test map doubles each element`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.map {xs = [1, 2, 3], f = {x} -> x * 2}
@@ -51,7 +51,7 @@ class ParallelEffectTest {
     @Test
     fun `test map with empty array`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 let result = Parallel.map {xs = [], f = {x} -> x * 2}
@@ -64,7 +64,7 @@ class ParallelEffectTest {
     @Test
     fun `test map preserves order`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.map {xs = [3, 1, 4, 1, 5], f = {x} -> x + 10}
@@ -79,7 +79,7 @@ class ParallelEffectTest {
     @Test
     fun `test for_each returns unit`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.for_each {xs = [1, 2, 3], f = {x} -> {}}
@@ -94,7 +94,7 @@ class ParallelEffectTest {
     @Test
     fun `test filter keeps matching elements`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.filter {xs = [1, 2, 3, 4, 5, 6], f = {x} -> x % 2 == 0}
@@ -107,7 +107,7 @@ class ParallelEffectTest {
     @Test
     fun `test filter with no matches`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 let result = Parallel.filter {xs = [1, 3, 5], f = {x} -> x % 2 == 0}
@@ -120,7 +120,7 @@ class ParallelEffectTest {
     @Test
     fun `test filter with all matches`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 let result = Parallel.filter {xs = [2, 4, 6], f = {x} -> x % 2 == 0}
@@ -135,7 +135,7 @@ class ParallelEffectTest {
     @Test
     fun `test reduce with sum`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 match Parallel.reduce {xs = [1, 2, 3, 4, 5], f = {left, right} -> left + right} is
@@ -149,7 +149,7 @@ class ParallelEffectTest {
     @Test
     fun `test reduce with product`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 match Parallel.reduce {xs = [1, 2, 3, 4], f = {left, right} -> left * right} is
@@ -163,7 +163,7 @@ class ParallelEffectTest {
     @Test
     fun `test reduce with empty array returns None`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 match Parallel.reduce {xs = [], f = {left, right} -> left + right} is
@@ -177,7 +177,7 @@ class ParallelEffectTest {
     @Test
     fun `test reduce with single element`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 match Parallel.reduce {xs = [42], f = {left, right} -> left + right} is
@@ -193,7 +193,7 @@ class ParallelEffectTest {
     @Test
     fun `test fold with sum`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.fold {
@@ -210,7 +210,7 @@ class ParallelEffectTest {
     @Test
     fun `test fold with transform and combine`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.fold {
@@ -227,7 +227,7 @@ class ParallelEffectTest {
     @Test
     fun `test fold with empty array returns zero`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.fold {
@@ -246,7 +246,7 @@ class ParallelEffectTest {
     @Test
     fun `test both runs two computations`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 let r = Parallel.both {
@@ -264,7 +264,7 @@ class ParallelEffectTest {
     @Test
     fun `test both3 runs three computations`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 let r = Parallel.both3 {
@@ -283,7 +283,7 @@ class ParallelEffectTest {
     @Test
     fun `test find returns first match`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 match Parallel.find {xs = [1, 2, 3, 4, 5], f = {x} -> x > 2} is
@@ -297,7 +297,7 @@ class ParallelEffectTest {
     @Test
     fun `test find returns None when no match`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 match Parallel.find {xs = [1, 2, 3], f = {x} -> x > 10} is
@@ -313,7 +313,7 @@ class ParallelEffectTest {
     @Test
     fun `test any returns true when some match`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.any {xs = [1, 2, 3, 4], f = {x} -> x > 3}
@@ -325,7 +325,7 @@ class ParallelEffectTest {
     @Test
     fun `test any returns false when none match`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.any {xs = [1, 2, 3], f = {x} -> x > 10}
@@ -337,7 +337,7 @@ class ParallelEffectTest {
     @Test
     fun `test any with empty array`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.any {xs = [], f = {x} -> True}
@@ -351,7 +351,7 @@ class ParallelEffectTest {
     @Test
     fun `test all returns true when all match`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.all {xs = [2, 4, 6], f = {x} -> x % 2 == 0}
@@ -363,7 +363,7 @@ class ParallelEffectTest {
     @Test
     fun `test all returns false when some don't match`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.all {xs = [2, 3, 6], f = {x} -> x % 2 == 0}
@@ -375,7 +375,7 @@ class ParallelEffectTest {
     @Test
     fun `test all with empty array`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 Parallel.all {xs = [], f = {x} -> False}
@@ -389,7 +389,7 @@ class ParallelEffectTest {
     @Test
     fun `test partition separates by predicate`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 let r = Parallel.partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
@@ -402,7 +402,7 @@ class ParallelEffectTest {
     @Test
     fun `test partition returns not_matching`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 let r = Parallel.partition {xs = [1, 2, 3, 4, 5], f = {x} -> x % 2 == 0}
@@ -417,7 +417,7 @@ class ParallelEffectTest {
     @Test
     fun `test group_by groups by key`() {
         val result = eval("""
-            use std::parallel::{Parallel, Sequential}
+            use std::effects::parallel::{Parallel, Sequential}
 
             perform Sequential in do
                 let groups = Parallel.group_by {xs = [1, 2, 3, 4, 5, 6], f = {x} -> x % 2}
@@ -432,7 +432,7 @@ class ParallelEffectTest {
     @Test
     fun `test sum helper`() {
         val result = eval("""
-            use std::parallel::{sum, Sequential}
+            use std::effects::parallel::{sum, Sequential}
 
             perform Sequential in sum {xs = [1, 2, 3, 4, 5]}
         """)
@@ -443,7 +443,7 @@ class ParallelEffectTest {
     @Test
     fun `test sum with empty array`() {
         val result = eval("""
-            use std::parallel::{sum, Sequential}
+            use std::effects::parallel::{sum, Sequential}
 
             perform Sequential in sum {xs = []}
         """)
@@ -454,7 +454,7 @@ class ParallelEffectTest {
     @Test
     fun `test product helper`() {
         val result = eval("""
-            use std::parallel::{product, Sequential}
+            use std::effects::parallel::{product, Sequential}
 
             perform Sequential in product {xs = [1, 2, 3, 4]}
         """)
@@ -465,7 +465,7 @@ class ParallelEffectTest {
     @Test
     fun `test product with empty array`() {
         val result = eval("""
-            use std::parallel::{product, Sequential}
+            use std::effects::parallel::{product, Sequential}
 
             perform Sequential in product {xs = []}
         """)
@@ -476,7 +476,7 @@ class ParallelEffectTest {
     @Test
     fun `test count helper`() {
         val result = eval("""
-            use std::parallel::{count, Sequential}
+            use std::effects::parallel::{count, Sequential}
 
             perform Sequential in count {xs = [1, 2, 3, 4, 5], f = {x} -> x > 2}
         """)
@@ -487,7 +487,7 @@ class ParallelEffectTest {
     @Test
     fun `test flatten helper`() {
         val result = eval("""
-            use std::parallel::{flatten, Sequential}
+            use std::effects::parallel::{flatten, Sequential}
 
             perform Sequential in do
                 let result = flatten {xs = [[1, 2], [3], [4, 5, 6]]}
@@ -500,7 +500,7 @@ class ParallelEffectTest {
     @Test
     fun `test flat_map helper`() {
         val result = eval("""
-            use std::parallel::{flat_map, Sequential}
+            use std::effects::parallel::{flat_map, Sequential}
 
             perform Sequential in do
                 let result = flat_map {xs = [1, 2, 3], f = {x} -> [x, x * 10]}

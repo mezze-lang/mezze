@@ -4,119 +4,233 @@
 
 # Module imports
 use std::io
-use math::geometry::{area, perimeter} as geo
+use std::effects::log::{println, Console}
+use math::geometry::{area, perimeter}
 pub std::collections::list
 
-# Type declarations
+# ==========================================
+# Type Declarations
+# ==========================================
+
+# Simple type alias
+type Point = {x: Int, y: Int}
+
+# Parameterized types
 type Option 'a = | Some {value: 'a}, None |
 type Result 'e 'a = | Ok {value: 'a}, Err {error: 'e} |
-type Point = {x: Int, y: Int}
+
+# Variant types
 type Color = | Red, Green, Blue, Custom {r: Int, g: Int, b: Int} |
 
-# Effect declarations
-effect State {
-  get: {} -> Int <>
-  put: {value: Int} -> {} <>
+# Open variant (extensible)
+type ExtensibleEnum = | A, B, C, ... |
+
+# Newtype declarations
+newtype Email = Email String
+pub newtype UserId = UserId Int
+newtype Point3D = Point3D { x: Float, y: Float, z: Float }
+
+# ==========================================
+# Effect Declarations
+# ==========================================
+
+effect Log where {
+    info: {msg: String} -> {} <Log>,
+    warn: {msg: String} -> {} <Log>
 }
 
-effect IO {
-  print: {message: String} -> {} <>
-  read: {} -> String <>
+effect State having 'state where {
+    get: {} -> 'state <State>,
+    put: {value: 'state} -> {} <State>
 }
 
-# Ability declarations
-ability NumAdd 'a where {
-  add: {left: 'a, right: 'a} -> 'a
+effect IO where {
+    print: {message: String} -> {} <IO>,
+    read: {} -> String <IO>
 }
 
-ability NumAdd 'a with Eq 'a where {
-  add: {left: 'a, right: 'a} -> 'a
+# ==========================================
+# Ability Declarations
+# ==========================================
+
+ability Eq 'a where {
+    eq: {left: 'a, right: 'a} -> Bool
 }
 
-# Implementation - Effect
-impl State for Counter where {
-  get: {} -> Int = {} -> state
-  put: {value: Int} -> {} = {value} -> value
+ability Ord 'a with Eq 'a where {
+    compare: {left: 'a, right: 'a} -> Int
 }
 
-# Implementation - Ability
-impl NumAdd Int where {
-  add: {left: Int, right: Int} -> Int = {left, right} -> left + right
+ability Show 'a where {
+    show: {val: 'a} -> String
 }
 
-# Let bindings
+ability Encoder 'a having 'output where {
+    encode: {val: 'a} -> 'output
+}
+
+# ==========================================
+# Effect Implementations
+# ==========================================
+
+impl Log for ConsoleLogger where {
+    info = {msg} -> {},
+    warn = {msg} -> {}
+}
+
+impl State for Counter having 'state = Int where {
+    get = {} -> 0,
+    put = {value} -> {}
+}
+
+# ==========================================
+# Ability Implementations
+# ==========================================
+
+impl Eq Int where {
+    eq = {left, right} -> left == right
+}
+
+impl Show Int where {
+    show = {val} -> "Int"
+}
+
+impl Show String where {
+    show = {val} -> val
+}
+
+# ==========================================
+# Let Bindings
+# ==========================================
+
+# Simple values
 let simpleValue = 42
 pub let publicValue = "Hello, Mezze!"
 let typedValue: Int = 100
 
-# Lambda expressions - untyped
+# Numeric literals
+let integer = 42
+let negative = -10
+let float = 3.14159
+let scientific = 1.5e10
+let fraction = 1//2
+let anotherFrac = 22//7
+let natural = 42n
+let bigNat = 1_000_000n
+
+# Boolean literals (capital T/F)
+let truthy = True
+let falsy = False
+
+# ==========================================
+# Lambda Expressions
+# ==========================================
+
+# Untyped lambdas
 let add = {x, y} -> x + y
 let triple = {x} -> x * 3
 let identity = {x} -> x
+let noParams = {} -> 42
 
-# Lambda expressions - typed
+# Typed lambdas
 let typedAdd: {x: Int, y: Int} -> Int = {x, y} -> x + y
+
+# Lambda with effects
 let withEffects: {x: Int} -> Int <State> = {x} ->
-  do
-    let current = get {}
-    put {value = current + x}
-    current + x
+    do
+        let current = get {}
+        put {value = current + x}
+        current + x
 
 # Lambda with ability constraints
-let genericAdd: {x: 'a, y: 'a} -> 'a with NumAdd 'a = {x, y} ->
-  add {left = x, right = y}
+let genericAdd: {x: 'a, y: 'a} -> 'a with Eq 'a = {x, y} ->
+    x
 
-# Function application with named parameters
-let result1 = add {x = 5, y = 3}
-let result2 = typedAdd {x = 10, y = 20}
+# Lambda with performed marker
+let effectful: {} -> {} <Log, *> = {} ->
+    info {msg = "Hello"}
 
-# Pattern matching
-let optionToInt = {opt: Option Int} -> Int =
-  {opt} ->
+# ==========================================
+# Pattern Matching
+# ==========================================
+
+let optionToInt = {opt} ->
     match opt is
-      Some {value = x} -> x
-      None -> 0
+        Some {value = x} -> x
+        None -> 0
 
-let colorToString = {color: Color} -> String =
-  {color} ->
+let colorToString = {color} ->
     match color is
-      Red -> "Red"
-      Green -> "Green"
-      Blue -> "Blue"
-      Custom {r, g, b} -> "Custom RGB"
+        Red -> "Red"
+        Green -> "Green"
+        Blue -> "Blue"
+        Custom {r, g, b} -> "Custom RGB"
+        _ -> "Unknown"
 
 # Pattern matching with guards
-let classify = {x: Int} -> String =
-  {x} ->
+let classify = {x} ->
     match x is
-      n if n < 0 -> "negative"
-      0 -> "zero"
-      n if n > 0 -> "positive"
-      _ -> "unknown"
+        n if n < 0 -> "negative"
+        0 -> "zero"
+        n if n > 0 -> "positive"
+        _ -> "unknown"
 
-# If expressions
-let max = {x: Int, y: Int} -> Int =
-  {x, y} ->
+# Array patterns
+let head = {arr} ->
+    match arr is
+        [] -> None
+        [x] -> Some {value = x}
+        [x, ...rest] -> Some {value = x}
+
+# Literal patterns
+let describeFrac = {f} ->
+    match f is
+        1//2 -> "half"
+        1//4 -> "quarter"
+        _ -> "other"
+
+# ==========================================
+# If Expressions
+# ==========================================
+
+let max = {x, y} ->
     if x > y
     then x
     else y
 
-# Do expressions
-let computation = {x: Int} -> Int <State> =
-  {x} ->
+let classify2 = {age} ->
+    if age < 18 then "minor" else "adult"
+
+# ==========================================
+# Do Expressions
+# ==========================================
+
+let computation = {x} ->
     do
-      let a = get {}
-      put {value = a + 1}
-      let b = get {}
-      b + x
+        let a = x + 1
+        let b = a * 2
+        let c = b - 3
+        c
 
-# Perform expressions
-let runWithHandler = {value: Int} -> Int =
-  {value} ->
-    perform StateHandler {initial = 0} in
-      computation {x = value}
+# ==========================================
+# Perform Expressions
+# ==========================================
 
-# Record literals
+let runWithHandler = {value} ->
+    perform Console in
+        println {msg = "Hello World"}
+
+let multiHandler = {value} ->
+    perform Console, Counter in
+        do
+            let x = get {}
+            println {msg = "Value"}
+            x
+
+# ==========================================
+# Record Literals
+# ==========================================
+
 let point = {x = 10, y = 20}
 let point3d = {x = 1, y = 2, z = 3}
 
@@ -124,98 +238,105 @@ let point3d = {x = 1, y = 2, z = 3}
 let updatedPoint = {...point, y = 30}
 let extendedPoint = {...point, z = 0}
 
-# Array literals
+# Record punning
+let x = 5
+let y = 10
+let punnedPoint = {x, y}
+
+# ==========================================
+# Array Literals
+# ==========================================
+
 let numbers = [1, 2, 3, 4, 5]
 let strings = ["hello", "world"]
 let empty = []
+let nested = [[1, 2], [3, 4]]
 
-# Pipe operator
+# ==========================================
+# Pipe Operator
+# ==========================================
+
 let piped = 10
-  |> {x} -> x + 5
-  |> {x} -> x * 2
-  |> {x} -> x - 3
+    |> {x} -> x + 5
+    |> {x} -> x * 2
+    |> {x} -> x - 3
 
-# Qualified identifiers
-let area = geo::area {width = 10, height = 20}
-let result = math::operations::multiply {x = 5, y = 6}
+# With placeholder
+let result = 5 |> add {x = @, y = 3}
 
-# String interpolation
+# ==========================================
+# Qualified Identifiers
+# ==========================================
+
+let area = math::geometry::area {width = 10, height = 20}
+let stringified = std::int::to_string {n = 42}
+
+# ==========================================
+# String Interpolation
+# ==========================================
+
 let firstName = "John"
 let lastName = "Doe"
 let fullName = "$(firstName) $(lastName)"
 let greeting = "Hello, $(firstName)!"
 let escaped = "Use \$(var) for interpolation"
-let nested = "outer: $("inner $(firstName)")"
-let multiInterp = "$(firstName) is $(lastName)"
+let nested = "outer: $(firstName)"
+let computed = "Result: $(add {x = 1, y = 2})"
 
-# Let destructuring
-let point = {x = 10, y = 20}
+# String escapes
+let withNewline = "Hello\nWorld"
+let withTab = "Col1\tCol2"
+let withQuote = "She said \"Hello\""
+let withBackslash = "C:\\Users\\mezze"
+
+# ==========================================
+# Let Destructuring
+# ==========================================
+
 let { x, y } = point
 let { x = px, y = py } = point
 let { x, ... } = {x = 1, y = 2, z = 3}
 
-# Operators showcase
+# ==========================================
+# Operators
+# ==========================================
+
 let arithmetic = 1 + 2 - 3 * 4 / 2 % 3
 let comparison = 5 == 5 && 10 != 20 || 3 < 4 && 7 >= 6 && 8 <= 9 && 9 > 8
-let logical = true && false || !true
-let spread = {...record, ...otherRecord}
-let placeholder = numbers |> map @ |> filter @
+let logical = True && False || !True
+let fractionOp = 1//2 + 1//4
 
-# Type annotations with effect rows
+# ==========================================
+# Type Annotations
+# ==========================================
+
+# With effect rows
 let stateful: {x: Int} -> Int <State> = {x} -> x + 1
-let multiEffect: {x: Int} -> Int <State, IO> = {x} ->
-  do
-    print {message = "Computing"}
-    x + 1
+let multiEffect: {x: Int} -> Int <State, IO> = {x} -> x
+let polymorphicEffect: {x: Int} -> Int <...> = {x} -> x
+let purePerformed: {} -> {} <*> = {} -> {}
+let effectPerformed: {} -> {} <Log, *> = {} -> {}
 
-# Type annotations with ability constraints
+# With ability constraints
 let constrained: {x: 'a} -> 'a with Eq 'a = {x} -> x
-let multiConstrained: {x: 'a, y: 'b} -> 'a with NumAdd 'a, Eq 'b = {x, y} -> x
+let multiConstrained: {x: 'a, y: 'b} -> 'a with Eq 'a, Show 'b = {x, y} -> x
 
-# Complex nested patterns
-let complexMatch = {value: Result String (Option Int)} -> Int =
-  {value} ->
-    match value is
-      Ok {value = Some {value = x}} -> x
-      Ok {value = None} -> 0
-      Err {error = msg} -> -1
+# Open records in types
+let processUser: {user: {name: String, age: Int, ...}} -> String =
+    {user} -> user.name
 
-# Variant with trailing comma and spread
-type ExtensibleEnum = | A, B, C, ... |
+# ==========================================
+# Ability Method Calls
+# ==========================================
 
+let showInt = Show.show {val = 42}
+let eqResult = Eq.eq {left = 1, right = 2}
+
+# ==========================================
 # Comments
+# ==========================================
+
 # This is a single-line comment
-# Multi-line comments can be
-# written like this
-
-# Bool literals
-let truthy = true
-let falsy = false
-
-# Numeric literals
-let integer = 42
-let float = 3.14159
-let scientific = 1.5e10
-let fraction = 1//2
-let anotherFrac = 3//4
-
-# String literals with escapes
-let greeting = "Hello, \"World\"!\n"
-let path = "C:\\Users\\mezze\\file.txt"
-
-# Ability method calls
-let showInt = Show.show { val = 42 }
-let addResult = NumOps.add { l = 1, r = 2 }
-let logMsg = Log.println { msg = "Hello" }
-
-# Type variables in different contexts
-type Functor 'f where {
-  map: {'a -> 'b, 'f 'a} -> 'f 'b
-}
-
-type Monad 'm with Functor 'm where {
-  bind: {'m 'a, 'a -> 'm 'b} -> 'm 'b
-  pure: {'a} -> 'm 'a
-}
+# Another comment
 
 # End of test file

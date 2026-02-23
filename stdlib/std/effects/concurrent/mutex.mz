@@ -1,0 +1,77 @@
+# std/concurrent/mutex.mezze - Mutual exclusion locks
+#
+# Mutexes provide exclusive access to shared resources.
+# Only one thread can hold the lock at a time.
+#
+# Key properties:
+# - Reentrant: same thread can lock multiple times (must unlock same number)
+# - Blocking: lock waits until available
+# - with_lock is the RECOMMENDED API (guarantees unlock)
+#
+# Usage:
+#   use std::effects::concurrent::mutex::{Mutex, mutex, with_lock}
+#
+#   let m = mutex {}
+#   let result = with_lock {mutex = m, f = {} -> do
+#       # Critical section - exclusive access here
+#       update_shared_state {}
+#   }
+
+# Mutex type wrapping Java's ReentrantLock
+pub newtype Mutex = Mutex __NativeLock
+
+# Create a new mutex
+#
+# Example:
+#   let m = mutex {}
+pub let mutex: {} -> Mutex =
+    {} -> __native_mutex_new {}
+
+# Acquire lock, run function, release lock automatically
+# This is the RECOMMENDED way to use mutexes - guarantees unlock even on error
+#
+# Example:
+#   let result = with_lock {mutex = m, f = {} -> do
+#       # Critical section
+#       shared_counter + 1
+#   }
+pub let with_lock: {mutex: Mutex, f: {} -> 'a} -> 'a =
+    {mutex, f} -> __native_mutex_with_lock {mutex = mutex, f = f}
+
+# Acquire lock (blocking)
+# WARNING: You MUST call unlock when done. Prefer with_lock instead.
+#
+# Example:
+#   let _ = lock {mutex = m}
+#   # ... critical section ...
+#   let _ = unlock {mutex = m}
+pub let lock: {mutex: Mutex} -> {} =
+    {mutex} -> __native_mutex_lock {mutex = mutex}
+
+# Release lock
+# Must be called by the thread that holds the lock
+#
+# Example:
+#   unlock {mutex = m}
+pub let unlock: {mutex: Mutex} -> {} =
+    {mutex} -> __native_mutex_unlock {mutex = mutex}
+
+# Try to acquire lock without blocking
+# Returns true if lock acquired, false if already held by another thread
+#
+# Example:
+#   if try_lock {mutex = m} then do
+#       # Got the lock - do work
+#       let result = do_work {}
+#       let _ = unlock {mutex = m}
+#       result
+#   else
+#       # Lock was busy
+#       fallback_value
+pub let try_lock: {mutex: Mutex} -> Bool =
+    {mutex} -> __native_mutex_try_lock {mutex = mutex}
+
+# Check if mutex is held by current thread
+# Useful for assertions/debugging
+pub let is_held_by_current_thread: {mutex: Mutex} -> Bool =
+    {mutex} -> __native_mutex_is_held_by_current_thread {mutex = mutex}

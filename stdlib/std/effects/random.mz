@@ -67,8 +67,48 @@ pub let random_element: { xs: ['a] } -> Option 'a <Random> = { xs } -> do
             __native_arraylist_get { xs = xs, i = idx }
         False -> None
 
-# Usage examples:
-# 
+# =============================================================================
+# Pure Mathematical Functions (no effect required)
+# =============================================================================
+
+# Box-Muller transform for normal distribution
+# Takes two uniform random values and returns a normal distributed value
+pub let box_muller: { u1: Float, u2: Float, mean: Float, std_dev: Float } -> Float = { u1, u2, mean, std_dev } -> do
+    let z0 = core::sqrt { n = -2.0 * core::ln { n = u1 } } * trig::cos { n = 2.0 * trig::pi * u2 }
+    mean + (std_dev * z0)
+
+# Inverse transform for exponential distribution
+pub let exponential_inverse: { u: Float, rate: Float } -> Float = { u, rate } ->
+    (-1.0 / rate) * core::ln { n = u }
+
+# Linear interpolation for uniform distribution
+pub let uniform_transform: { u: Float, min: Float, max: Float } -> Float = { u, min, max } ->
+    min + (u * (max - min))
+
+# Probability density function for normal distribution
+pub let normal_pdf: { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } -> do
+    let variance = std_dev * std_dev
+    let coefficient = 1.0 / core::sqrt { n = 2.0 * trig::pi * variance }
+    let exponent = -((x - mean) * (x - mean)) / (2.0 * variance)
+    coefficient * core::exp { n = exponent }
+
+# Cumulative distribution function approximation for normal distribution
+pub let normal_cdf_approx: { x: Float, mean: Float, std_dev: Float } -> Float = { x, mean, std_dev } -> do
+    let z = (x - mean) / std_dev
+    0.5 * (1.0 + trig::tanh { n = z * core::sqrt { n = 2.0 / trig::pi } })
+
+# Probability density function for exponential distribution
+pub let exponential_pdf: { x: Float, rate: Float } -> Float = { x, rate } ->
+    if x < 0.0 then 0.0 else rate * core::exp { n = -rate * x }
+
+# Cumulative distribution function for exponential distribution
+pub let exponential_cdf: { x: Float, rate: Float } -> Float = { x, rate } ->
+    if x < 0.0 then 0.0 else 1.0 - core::exp { n = -rate * x }
+
+# =============================================================================
+# Usage examples
+# =============================================================================
+#
 # Using seeded random for deterministic behavior:
 # perform SeededRandom { seed = 42 } in do {
 #     let x = random_float { }  # Always same sequence with seed 42

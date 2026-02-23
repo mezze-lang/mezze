@@ -54,7 +54,7 @@ class CoopConcurrencyTest {
     }
 
     private val setupCode = """
-        use std::async::{Async, CoopAsync}
+        use std::effects::async::{Async, CoopAsync}
         use std::control::continuation
     """.trimIndent()
 

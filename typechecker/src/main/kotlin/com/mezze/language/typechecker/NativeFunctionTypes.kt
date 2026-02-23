@@ -27,6 +27,7 @@ import com.mezze.language.typechecker.types.effects.OSThreadTypes
 import com.mezze.language.typechecker.types.effects.CoopTypes
 import com.mezze.language.typechecker.types.effects.ParallelTypes
 import com.mezze.language.typechecker.types.effects.STMTypes
+import com.mezze.language.typechecker.types.effects.HttpTypes
 import com.mezze.language.typechecker.types.concurrent.AtomTypes
 import com.mezze.language.typechecker.types.concurrent.AgentTypes
 import com.mezze.language.typechecker.types.concurrent.ChannelTypes
@@ -100,6 +101,9 @@ object NativeFunctionTypes {
 
         // Codec types (JSON serialization/deserialization)
         JsonTypes.registerAll(context)
+
+        // HTTP effect types
+        HttpTypes.registerAll(context)
 
         // crash is a built-in function, no import needed
         // Terminates the program with an error message (like Rust's panic!)

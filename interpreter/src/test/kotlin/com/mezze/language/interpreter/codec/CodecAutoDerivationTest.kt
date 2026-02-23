@@ -37,9 +37,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode simple record with primitive fields`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let person = {name = "Alice", age = 30}
             let result = Encode.encode {val = person, config = default_config}
@@ -61,9 +61,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode record with all primitive types`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let data = {
                 str = "hello",
@@ -90,9 +90,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode empty record`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let empty = {}
             let result = Encode.encode {val = empty, config = default_config}
@@ -118,9 +118,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode nested record`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let address = {city = "NYC", zip = 10001}
             let person = {name = "Alice", address = address}
@@ -143,9 +143,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode deeply nested record`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let inner = {value = 42}
             let middle = {inner = inner}
@@ -173,9 +173,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `same structure records use same encoder`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             # Two records with same structure but different values
             let person1 = {name = "Alice", age = 30}
@@ -202,9 +202,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `records with fields in different order use same encoder`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             # Two records with same fields but different order
             let person1 = {name = "Alice", age = 30}
@@ -235,9 +235,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode Int value`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let result = Encode.encode {val = 42, config = default_config}
 
@@ -258,9 +258,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode String value`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let result = Encode.encode {val = "hello", config = default_config}
 
@@ -281,9 +281,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode Float value`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let result = Encode.encode {val = 3.14, config = default_config}
 
@@ -304,9 +304,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode Bool value`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let result = Encode.encode {val = True, config = default_config}
 
@@ -331,9 +331,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode type alias`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             type Person = {name: String, age: Int}
 
@@ -375,9 +375,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode Some value`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let maybe: Option Int = Some {val = 42}
             let result = Encode.encode {val = maybe, config = default_config}
@@ -399,9 +399,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode None value`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let maybe: Option Int = None
             let result = Encode.encode {val = maybe, config = default_config}
@@ -423,9 +423,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode record with optional field`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let person = {name = "Alice", nickname = Some {val = "Ali"}}
             let result = Encode.encode {val = person, config = default_config}
@@ -451,9 +451,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode simple variant without payload`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             type Color = | Red, Green, Blue |
 
@@ -477,9 +477,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode variant with payload`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             type Shape = | Circle { radius: Int }, Rectangle { width: Int, height: Int } |
 
@@ -513,9 +513,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode complex nested structure`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let author = {name = "Alice", email = "alice@example.com"}
             let post = {
@@ -546,9 +546,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode Frac value`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
             use std::frac
 
             let f = frac::make {numerator = 1, denominator = 2}
@@ -571,9 +571,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode record with Frac field`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
             use std::frac
 
             let measurement = {value = frac::make {numerator = 3, denominator = 4}, unit = "inches"}
@@ -600,9 +600,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `multiple encodes of different types`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             let int_result = Encode.encode {val = 42, config = default_config}
             let str_result = Encode.encode {val = "hello", config = default_config}
@@ -639,9 +639,9 @@ class CodecAutoDerivationTest {
     @Test
     fun `encode newtype fails without manual implementation`() {
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, default_config}
 
             # Define a newtype that wraps an Int
             newtype UserId = UserId Int
@@ -676,25 +676,24 @@ class CodecAutoDerivationTest {
         // Test that a newtype can be encoded when user provides manual impl
         // Newtypes are opaque - we use match in the same module to extract the value
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, EncodeFormat, default_config}
-            use std::collections::list
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, EncodeFormat, default_config}
 
             newtype UserId = UserId Int
 
             # Helper function to extract the inner value (only works in same module)
             let unwrap_user_id = {id: UserId} ->
                 match id is
-                    UserId {value} -> value
+                    UserId {val = inner_val} -> inner_val
 
             impl Encode Json UserId where {
                 encode = {val, config} -> do
                     let inner = unwrap_user_id {id = val}
-                    EncodeFormat.encode_int {val = inner, path = list::empty {}}
+                    EncodeFormat.encode_int {val = inner, path = []}
             }
 
-            let id: UserId = UserId {value = 42}
+            let id: UserId = UserId {val = 42}
             let result = Encode.encode {val = id, config = default_config}
 
             match result is
@@ -744,9 +743,9 @@ class CodecAutoDerivationTest {
         // Note: Currently requires type annotation for bidirectional inference to work
         // TODO: Fix constraint solving to infer return type from match pattern usage
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Decode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Decode, default_config}
 
             let json_int = JInt {val = 42}
             let result: Result Int DecodeError = Decode.decode {val = json_int, config = default_config}
@@ -768,9 +767,9 @@ class CodecAutoDerivationTest {
         // Note: Currently requires type annotation for bidirectional inference to work
         // TODO: Fix constraint solving to infer return type from match pattern usage
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Decode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Decode, default_config}
 
             let json_str = JString {val = "hello"}
             let result: Result String DecodeError = Decode.decode {val = json_str, config = default_config}
@@ -791,9 +790,9 @@ class CodecAutoDerivationTest {
     fun `decode record from constructed json`() {
         // Full decode test using encode/decode round-trip
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, Decode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, Decode, default_config}
 
             # First encode a record to JSON
             let person = {name = "Alice", age = 30}
@@ -826,9 +825,9 @@ class CodecAutoDerivationTest {
         // Note: Currently requires type annotation for bidirectional inference to work
         // TODO: Fix constraint solving to infer return type from match pattern usage
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, Decode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, Decode, default_config}
 
             let person = {name = "Alice", age = 30}
             let encode_result = Encode.encode {val = person, config = default_config}
@@ -861,9 +860,9 @@ class CodecAutoDerivationTest {
     fun `encode with identity transform does not change field names`() {
         // Test that encode with Identity transform doesn't change field names
         val source = """
-            use std::json
-            use std::json::{Json, to_string}
-            use std::codec::{Encode, CodecConfig, FieldTransform}
+            use std::codec::json
+            use std::codec::json::{Json, to_string}
+            use std::codec::core::{Encode, CodecConfig, FieldTransform}
 
             let person = {userName = "Alice"}
             let config: CodecConfig = {field_transform = Identity}
@@ -885,9 +884,9 @@ class CodecAutoDerivationTest {
     fun `encode with snake_case transforms field names`() {
         // Test that encode with SnakeCase transform converts field names
         val source = """
-            use std::json
-            use std::json::{Json, to_string}
-            use std::codec::{Encode, CodecConfig, FieldTransform}
+            use std::codec::json
+            use std::codec::json::{Json, to_string}
+            use std::codec::core::{Encode, CodecConfig, FieldTransform}
 
             let person = {userName = "Alice"}
             let config: CodecConfig = {field_transform = SnakeCase}
@@ -909,9 +908,9 @@ class CodecAutoDerivationTest {
     fun `round trip encode and decode with snake_case`() {
         // Test round-trip
         val source = """
-            use std::json
-            use std::json::{Json}
-            use std::codec::{Encode, Decode, default_config}
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Encode, Decode, default_config}
 
             let person = {name = "Alice", age = 30}
 

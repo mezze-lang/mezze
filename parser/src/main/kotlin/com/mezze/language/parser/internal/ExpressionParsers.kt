@@ -854,6 +854,8 @@ internal val MezzeParser.doExpression: Parser<Expression>
                 val statements = mutableListOf<Statement>()
                 var currentStream = stream1
                 var finalResult: Pair<Expression, TokenStream>? = null
+                var lastStatementWasLet = false
+                var lastLetName: String? = null
 
                 // Track the column of the first token in the do block to determine scope
                 val doBlockColumn = stream1.current()?.column
@@ -916,6 +918,11 @@ internal val MezzeParser.doExpression: Parser<Expression>
                                                     )
                                                 )
                                                 currentStream = skipNewlines(expr.remaining)
+                                                lastStatementWasLet = true
+                                                lastLetName = when (pattern) {
+                                                    is VariablePattern -> pattern.name
+                                                    else -> null
+                                                }
                                             }
                                             is ParseResult.Failure -> break
                                         }
@@ -950,6 +957,8 @@ internal val MezzeParser.doExpression: Parser<Expression>
                                     // Next token is still inside the do block, so current expression is a statement
                                     statements.add(ExpressionStatement(expr.value))
                                     currentStream = streamAfterExpr
+                                    lastStatementWasLet = false
+                                    lastLetName = null
                                 } else {
                                     // Next token is outside do block or at EOF, this is the final result
                                     finalResult = Pair(expr.value, streamAfterExpr)
@@ -970,7 +979,41 @@ internal val MezzeParser.doExpression: Parser<Expression>
                         finalResult.second
                     )
                 } else {
-                    currentStream.failure("Do block must end with a result expression. Example:\n  do\n    let x = 1\n    x + 1")
+                    val errorMsg = if (lastStatementWasLet && lastLetName != null) {
+                        """Do block must end with a result expression, not a 'let' statement.
+The last statement is 'let $lastLetName = ...', but 'do' blocks need a final expression that produces the result.
+
+Fix: Add an expression after the let statement, for example:
+  do
+    let $lastLetName = ...
+    $lastLetName  # <-- Return the value
+
+Or if you meant to use 'let rec' for a recursive function:
+  let rec $lastLetName = { ... } -> ...  # Define at module level instead"""
+                    } else if (lastStatementWasLet) {
+                        """Do block must end with a result expression, not a 'let' statement.
+
+Fix: Add an expression after your let statements:
+  do
+    let x = 1
+    let y = 2
+    x + y  # <-- Final expression returns the result"""
+                    } else if (statements.isEmpty()) {
+                        """Do block is empty. A 'do' block needs at least one expression.
+
+Example:
+  do
+    let x = 1
+    x + 1"""
+                    } else {
+                        """Do block must end with a result expression.
+
+Example:
+  do
+    let x = 1
+    x + 1  # <-- Final expression"""
+                    }
+                    currentStream.failure(errorMsg)
                 }
             }
             is ParseResult.Failure -> {

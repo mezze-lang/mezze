@@ -310,5 +310,35 @@
       "}"
     ],
     "description": "Create an ability declaration without where keyword"
+  },
+  "Newtype Declaration": {
+    "prefix": "newtype",
+    "body": [
+      "newtype ${1:Name} = ${1:Name} ${2:Type}"
+    ],
+    "description": "Create a newtype declaration"
+  },
+  "Public Newtype Declaration": {
+    "prefix": "pubnewtype",
+    "body": [
+      "pub newtype ${1:Name} = ${1:Name} ${2:Type}"
+    ],
+    "description": "Create a public newtype declaration"
+  },
+  "Effect with Associated Type": {
+    "prefix": "effecthaving",
+    "body": [
+      "effect ${1:Name} having '${2:state} where {",
+      "  ${3:operation}: {${4:params}} -> '${2:state} <${1:Name}>",
+      "}"
+    ],
+    "description": "Create an effect with associated type parameter"
+  },
+  "Natural Number Literal": {
+    "prefix": "nat",
+    "body": [
+      "${1:value}n"
+    ],
+    "description": "Create a natural number literal"
   }
 }

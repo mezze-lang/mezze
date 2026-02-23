@@ -435,4 +435,141 @@ class ListInterpreterTest {
         val result = eval(code)
         assertEquals(MezzeInt(1), result) // Smallest first
     }
+
+    // ========================================
+    // Find Operations
+    // ========================================
+
+    @Test
+    fun `find returns first matching element`() {
+        val code = """
+            use std::collections::list
+            let xs = list::range { start = 1, end = 10 }
+            match list::find { xs = xs, p = { x } -> x > 5 } is
+                Some { val } -> val
+                None -> 0
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(6), result)
+    }
+
+    @Test
+    fun `find returns None when no match`() {
+        val code = """
+            use std::collections::list
+            let xs = list::range { start = 1, end = 5 }
+            match list::find { xs = xs, p = { x } -> x > 100 } is
+                Some { val } -> 1
+                None -> 0
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(0), result)
+    }
+
+    @Test
+    fun `find_index returns index of first match`() {
+        val code = """
+            use std::collections::list
+            let xs = list::range { start = 1, end = 10 }
+            match list::find_index { xs = xs, p = { x } -> x > 5 } is
+                Some { val } -> val
+                None -> -1
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(5), result)  // index 5 is value 6
+    }
+
+    @Test
+    fun `find_index returns None when no match`() {
+        val code = """
+            use std::collections::list
+            let xs = list::range { start = 1, end = 5 }
+            match list::find_index { xs = xs, p = { x } -> x > 100 } is
+                Some { val } -> val
+                None -> -1
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(-1), result)
+    }
+
+    // ========================================
+    // Partition
+    // ========================================
+
+    @Test
+    fun `partition splits by predicate matching`() {
+        val code = """
+            use std::collections::list
+            let xs = list::range { start = 1, end = 6 }
+            let result = list::partition { xs = xs, p = { x } -> x > 3 }
+            list::length { xs = result.matching }
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(2), result)  // 4, 5
+    }
+
+    @Test
+    fun `partition splits by predicate non_matching`() {
+        val code = """
+            use std::collections::list
+            let xs = list::range { start = 1, end = 6 }
+            let result = list::partition { xs = xs, p = { x } -> x > 3 }
+            list::length { xs = result.not_matching }
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(3), result)  // 1, 2, 3
+    }
+
+    // ========================================
+    // Last and Init
+    // ========================================
+
+    @Test
+    fun `last returns last element`() {
+        val code = """
+            use std::collections::list
+            let xs = list::range { start = 1, end = 5 }
+            match list::last { xs = xs } is
+                Some { val } -> val
+                None -> 0
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(4), result)
+    }
+
+    @Test
+    fun `last returns None for empty list`() {
+        val code = """
+            use std::collections::list
+            match list::last { xs = list::empty {} } is
+                Some { val } -> 1
+                None -> 0
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(0), result)
+    }
+
+    @Test
+    fun `init returns all but last element`() {
+        val code = """
+            use std::collections::list
+            let xs = list::range { start = 1, end = 5 }
+            let inits = list::init { xs = xs }
+            list::length { xs = inits }
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(3), result)  // [1, 2, 3]
+    }
+
+    @Test
+    fun `init of singleton is empty`() {
+        val code = """
+            use std::collections::list
+            let xs = list::singleton { x = 42 }
+            let inits = list::init { xs = xs }
+            list::is_empty { xs = inits }
+        """
+        val result = eval(code)
+        assertEquals(MezzeBool(true), result)
+    }
 }

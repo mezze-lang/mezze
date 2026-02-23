@@ -16,7 +16,7 @@ use std::control::continuation::{Continuation}
 # Create a generator continuation context
 # This should be called once at the start of a generator function
 # Returns a Continuation record that can be used to yield values
-pub let new_generator: {} -> Continuation = {} ->
+pub let new_generator: {} -> Continuation 'suspend 'resume 'result = {} ->
     continuation::new {}
 
 # Yield a value from a generator

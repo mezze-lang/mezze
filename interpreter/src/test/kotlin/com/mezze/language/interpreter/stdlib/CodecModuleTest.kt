@@ -37,7 +37,7 @@ class CodecModuleTest {
     @Test
     fun `test Identity field transform`() {
         val result = eval("""
-            use std::codec::{FieldTransform}
+            use std::codec::core::{FieldTransform}
 
             let t: FieldTransform = Identity
             match t is
@@ -51,7 +51,7 @@ class CodecModuleTest {
     @Test
     fun `test SnakeCase field transform`() {
         val result = eval("""
-            use std::codec::{FieldTransform}
+            use std::codec::core::{FieldTransform}
 
             let t: FieldTransform = SnakeCase
             match t is
@@ -65,7 +65,7 @@ class CodecModuleTest {
     @Test
     fun `test CamelCase field transform`() {
         val result = eval("""
-            use std::codec::{FieldTransform}
+            use std::codec::core::{FieldTransform}
 
             let t: FieldTransform = CamelCase
             match t is
@@ -79,7 +79,7 @@ class CodecModuleTest {
     @Test
     fun `test KebabCase field transform`() {
         val result = eval("""
-            use std::codec::{FieldTransform}
+            use std::codec::core::{FieldTransform}
 
             let t: FieldTransform = KebabCase
             match t is
@@ -93,7 +93,7 @@ class CodecModuleTest {
     @Test
     fun `test ScreamingSnakeCase field transform`() {
         val result = eval("""
-            use std::codec::{FieldTransform}
+            use std::codec::core::{FieldTransform}
 
             let t: FieldTransform = ScreamingSnakeCase
             match t is
@@ -109,7 +109,7 @@ class CodecModuleTest {
     @Test
     fun `test default_config has Identity transform`() {
         val result = eval("""
-            use std::codec::{default_config}
+            use std::codec::core::{default_config}
 
             match default_config.field_transform is
                 Identity -> True
@@ -122,7 +122,7 @@ class CodecModuleTest {
     @Test
     fun `test CodecConfig construction`() {
         val result = eval("""
-            use std::codec::{CodecConfig, FieldTransform}
+            use std::codec::core::{CodecConfig, FieldTransform}
 
             let t: FieldTransform = SnakeCase
             let config: CodecConfig = {field_transform = t}
@@ -139,11 +139,10 @@ class CodecModuleTest {
     @Test
     fun `test EncodeError construction`() {
         val result = eval("""
-            use std::codec::{EncodeError}
-            use std::collections::list
+            use std::codec::core::{EncodeError}
 
             let error: EncodeError = {
-                path = list::from_array {xs = ["user", "address"]},
+                path = ["user", "address"],
                 message = "Cannot encode nested record"
             }
             error.message
@@ -155,14 +154,14 @@ class CodecModuleTest {
     @Test
     fun `test EncodeError path`() {
         val result = eval("""
-            use std::codec::{EncodeError}
-            use std::collections::list
+            use std::codec::core::{EncodeError}
+            use std::collections::array
 
             let error: EncodeError = {
-                path = list::from_array {xs = ["user", "name"]},
+                path = ["user", "name"],
                 message = "Encoding failed"
             }
-            list::length {xs = error.path}
+            array::length {xs = error.path}
         """)
         assertTrue(result is MezzeInt)
         assertEquals(2L, (result as MezzeInt).value)
@@ -173,11 +172,10 @@ class CodecModuleTest {
     @Test
     fun `test DecodeError construction with found`() {
         val result = eval("""
-            use std::codec::{DecodeError}
-            use std::collections::list
+            use std::codec::core::{DecodeError}
 
             let error: DecodeError = {
-                path = list::from_array {xs = ["data"]},
+                path = ["data"],
                 message = "Type mismatch",
                 expected = "Int",
                 found = Some {val = "String"}
@@ -191,11 +189,10 @@ class CodecModuleTest {
     @Test
     fun `test DecodeError construction without found`() {
         val result = eval("""
-            use std::codec::{DecodeError}
-            use std::collections::list
+            use std::codec::core::{DecodeError}
 
             let error: DecodeError = {
-                path = list::empty {},
+                path = [],
                 message = "Missing field",
                 expected = "name",
                 found = None
@@ -211,12 +208,12 @@ class CodecModuleTest {
     // === Helper Functions Tests ===
 
     @Test
-    fun `test empty_path is empty list`() {
+    fun `test empty_path is empty array`() {
         val result = eval("""
-            use std::codec::{empty_path}
-            use std::collections::list
+            use std::codec::core::{empty_path}
+            use std::collections::array
 
-            list::is_empty {xs = empty_path}
+            array::is_empty {xs = empty_path}
         """)
         assertTrue(result is MezzeBool)
         assertTrue((result as MezzeBool).value)
@@ -225,11 +222,11 @@ class CodecModuleTest {
     @Test
     fun `test append_path adds field`() {
         val result = eval("""
-            use std::codec::{empty_path, append_path}
-            use std::collections::list
+            use std::codec::core::{empty_path, append_path}
+            use std::collections::array
 
             let path = append_path {path = empty_path, field = "user"}
-            list::length {xs = path}
+            array::length {xs = path}
         """)
         assertTrue(result is MezzeInt)
         assertEquals(1L, (result as MezzeInt).value)
@@ -238,12 +235,12 @@ class CodecModuleTest {
     @Test
     fun `test append_path chains correctly`() {
         val result = eval("""
-            use std::codec::{empty_path, append_path}
-            use std::collections::list
+            use std::codec::core::{empty_path, append_path}
+            use std::collections::array
 
             let path1 = append_path {path = empty_path, field = "user"}
             let path2 = append_path {path = path1, field = "address"}
-            list::length {xs = path2}
+            array::length {xs = path2}
         """)
         assertTrue(result is MezzeInt)
         assertEquals(2L, (result as MezzeInt).value)
@@ -252,12 +249,11 @@ class CodecModuleTest {
     @Test
     fun `test append_index adds index as string`() {
         val result = eval("""
-            use std::codec::{empty_path, append_index}
-            use std::collections::list
-            use std::int
+            use std::codec::core::{empty_path, append_index}
+            use std::collections::array
 
             let path = append_index {path = empty_path, index = 0}
-            list::length {xs = path}
+            array::length {xs = path}
         """)
         assertTrue(result is MezzeInt)
         assertEquals(1L, (result as MezzeInt).value)
@@ -266,7 +262,7 @@ class CodecModuleTest {
     @Test
     fun `test format_path with empty path`() {
         val result = eval("""
-            use std::codec::{empty_path, format_path}
+            use std::codec::core::{empty_path, format_path}
 
             format_path {path = empty_path}
         """)
@@ -277,7 +273,7 @@ class CodecModuleTest {
     @Test
     fun `test format_path with single field`() {
         val result = eval("""
-            use std::codec::{empty_path, append_path, format_path}
+            use std::codec::core::{empty_path, append_path, format_path}
 
             let path = append_path {path = empty_path, field = "user"}
             format_path {path = path}
@@ -289,7 +285,7 @@ class CodecModuleTest {
     @Test
     fun `test format_path with multiple fields`() {
         val result = eval("""
-            use std::codec::{empty_path, append_path, format_path}
+            use std::codec::core::{empty_path, append_path, format_path}
 
             let path1 = append_path {path = empty_path, field = "user"}
             let path2 = append_path {path = path1, field = "address"}
@@ -305,7 +301,7 @@ class CodecModuleTest {
     @Test
     fun `test encode_error creates Err variant`() {
         val result = eval("""
-            use std::codec::{encode_error, empty_path}
+            use std::codec::core::{encode_error, empty_path}
 
             let err = encode_error {path = empty_path, message = "Test error"}
             match err is
@@ -319,7 +315,7 @@ class CodecModuleTest {
     @Test
     fun `test decode_error creates Err variant`() {
         val result = eval("""
-            use std::codec::{decode_error, empty_path}
+            use std::codec::core::{decode_error, empty_path}
 
             let err = decode_error {
                 path = empty_path,
@@ -340,7 +336,7 @@ class CodecModuleTest {
     @Test
     fun `test Entry type construction`() {
         val result = eval("""
-            use std::codec::{Entry}
+            use std::codec::core::{Entry}
 
             let entry: Entry String Int = {key = "count", value = 42}
             entry.value
@@ -352,7 +348,7 @@ class CodecModuleTest {
     @Test
     fun `test Entry with complex types`() {
         val result = eval("""
-            use std::codec::{Entry}
+            use std::codec::core::{Entry}
 
             let entry: Entry Int {name: String} = {key = 1, value = {name = "Alice"}}
             entry.value.name

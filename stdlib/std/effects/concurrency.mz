@@ -1,11 +1,13 @@
 # std/effects/concurrency.mezze - Virtual thread concurrency using Promises
 
-use std::async::{Promise}
+use std::effects::async::{Promise}
 
 # Concurrency effect - spawn computations on virtual threads
+# Note: Callback parameters use <...> for effect polymorphism - they accept any effects
 effect Concurrency where {
   # Spawn computation on new virtual thread, returns Promise
-  spawn: {computation: {} -> 'a} -> Promise 'a <Concurrency>,
+  # The computation can have any effects (<...>)
+  spawn: {computation: {} -> 'a <...>} -> Promise 'a <Concurrency>,
 
   # Wait for Promise (blocks current thread until result ready)
   await: {promise: Promise 'a} -> 'a <Concurrency>
@@ -29,15 +31,10 @@ pub let run: {computation: {} -> 'a} -> 'a <Concurrency> = {computation} -> do
   Concurrency.await {promise = promise}
 
 # Helper: spawn multiple, await all
+# Uses native loom spawn_all which handles the concurrent spawning internally
 pub let all: {computations: [{} -> 'a]} -> ['a] <Concurrency> = {computations} -> do
-  # Spawn all computations
-  let promises = computations |> __native_arraylist_map {xs = @, f = {x} ->
-    Concurrency.spawn {computation = x}
-  }
-  # Wait for all to complete
-  promises |> __native_arraylist_map {xs = @, f = {x} ->
-    Concurrency.await {promise = x}
-  }
+  # Native spawn_all spawns all computations and returns array of results
+  __native_loom_spawn_all {fs = computations}
 
 # Usage examples:
 #

@@ -35,7 +35,7 @@ class MathRandomModuleTest {
     @Test
     fun `test box_muller with standard normal`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::box_muller { u1 = 0.5, u2 = 0.5, mean = 0.0, std_dev = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -47,7 +47,7 @@ class MathRandomModuleTest {
     @Test
     fun `test box_muller with custom mean and std_dev`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::box_muller { u1 = 0.5, u2 = 0.5, mean = 10.0, std_dev = 2.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -62,7 +62,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_inverse`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_inverse { u = 0.5, rate = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -73,7 +73,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_inverse with different rate`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_inverse { u = 0.5, rate = 2.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -86,7 +86,7 @@ class MathRandomModuleTest {
     @Test
     fun `test uniform_transform - midpoint`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::uniform_transform { u = 0.5, min = 0.0, max = 10.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -97,7 +97,7 @@ class MathRandomModuleTest {
     @Test
     fun `test uniform_transform - at min`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::uniform_transform { u = 0.0, min = 5.0, max = 15.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -107,7 +107,7 @@ class MathRandomModuleTest {
     @Test
     fun `test uniform_transform - at max`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::uniform_transform { u = 1.0, min = 5.0, max = 15.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -119,7 +119,7 @@ class MathRandomModuleTest {
     @Test
     fun `test normal_pdf at mean`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::normal_pdf { x = 0.0, mean = 0.0, std_dev = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -130,7 +130,7 @@ class MathRandomModuleTest {
     @Test
     fun `test normal_pdf - one std_dev away`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::normal_pdf { x = 1.0, mean = 0.0, std_dev = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -142,7 +142,7 @@ class MathRandomModuleTest {
     @Test
     fun `test normal_pdf with custom mean and std_dev`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::normal_pdf { x = 10.0, mean = 10.0, std_dev = 2.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -156,7 +156,7 @@ class MathRandomModuleTest {
     @Test
     fun `test normal_cdf_approx at mean`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::normal_cdf_approx { x = 0.0, mean = 0.0, std_dev = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -167,7 +167,7 @@ class MathRandomModuleTest {
     @Test
     fun `test normal_cdf_approx - far positive`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::normal_cdf_approx { x = 3.0, mean = 0.0, std_dev = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -178,7 +178,7 @@ class MathRandomModuleTest {
     @Test
     fun `test normal_cdf_approx - far negative`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::normal_cdf_approx { x = -3.0, mean = 0.0, std_dev = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -191,7 +191,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_pdf at zero`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_pdf { x = 0.0, rate = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -202,7 +202,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_pdf - negative x`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_pdf { x = -1.0, rate = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -213,7 +213,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_pdf - positive x`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_pdf { x = 1.0, rate = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -224,7 +224,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_pdf with different rate`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_pdf { x = 1.0, rate = 2.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -237,7 +237,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_cdf at zero`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_cdf { x = 0.0, rate = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -248,7 +248,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_cdf - negative x`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_cdf { x = -1.0, rate = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -259,7 +259,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_cdf - positive x`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_cdf { x = 1.0, rate = 1.0 }
         """)
         val value = (result as MezzeFloat).value
@@ -270,7 +270,7 @@ class MathRandomModuleTest {
     @Test
     fun `test exponential_cdf with different rate`() {
         val result = eval("""
-            use std::math::random
+            use std::effects::random
             random::exponential_cdf { x = 1.0, rate = 2.0 }
         """)
         val value = (result as MezzeFloat).value

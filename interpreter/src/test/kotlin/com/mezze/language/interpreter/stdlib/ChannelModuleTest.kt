@@ -52,7 +52,7 @@ class ChannelModuleTest {
     @Test
     fun `test chan creates unbounded channel`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -64,7 +64,7 @@ class ChannelModuleTest {
     @Test
     fun `test chan_bounded creates bounded channel`() {
         val result = eval("""
-            use std::concurrent::channel::{chan_bounded, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan_bounded, Channel, MockChannel}
 
             let ch = chan_bounded { cap = 10 }
             perform MockChannel in do
@@ -80,7 +80,7 @@ class ChannelModuleTest {
     @Test
     fun `test MockChannel send and recv`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -93,7 +93,7 @@ class ChannelModuleTest {
     @Test
     fun `test MockChannel multiple values in order`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -111,7 +111,7 @@ class ChannelModuleTest {
     @Test
     fun `test MockChannel with string values`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -124,7 +124,7 @@ class ChannelModuleTest {
     @Test
     fun `test MockChannel with record values`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -142,7 +142,7 @@ class ChannelModuleTest {
     @Test
     fun `test try_send returns true when space available`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -154,7 +154,7 @@ class ChannelModuleTest {
     @Test
     fun `test try_recv returns Some when value available`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -169,7 +169,7 @@ class ChannelModuleTest {
     @Test
     fun `test try_recv returns None when empty`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -187,7 +187,7 @@ class ChannelModuleTest {
     @Test
     fun `test is_closed returns false for new channel`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -199,7 +199,7 @@ class ChannelModuleTest {
     @Test
     fun `test close marks channel as closed`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -216,7 +216,7 @@ class ChannelModuleTest {
     @Test
     fun `test try_send returns false on closed channel`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch = chan {}
             perform MockChannel in do
@@ -233,8 +233,8 @@ class ChannelModuleTest {
     @Test
     fun `test BlockingChannel send and recv with Loom`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, BlockingChannel}
-            use std::async::{Async, LoomAsync}
+            use std::effects::concurrent::channel::{chan, Channel, BlockingChannel}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
             perform LoomAsync in do
@@ -256,8 +256,8 @@ class ChannelModuleTest {
     @Test
     fun `test BlockingChannel producer consumer pattern`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, BlockingChannel}
-            use std::async::{Async, LoomAsync}
+            use std::effects::concurrent::channel::{chan, Channel, BlockingChannel}
+            use std::effects::async::{Async, LoomAsync}
 
             let ch = chan {}
             perform LoomAsync in do
@@ -290,7 +290,7 @@ class ChannelModuleTest {
         // Skip for now - recv_any with MockChannel has type compatibility issues
         // The implementation works correctly when tested directly in ChannelTest.kt
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch1 = chan {}
             perform MockChannel in do
@@ -304,7 +304,7 @@ class ChannelModuleTest {
     @Test
     fun `test recv_any_timeout returns None when no data`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch1 = chan {}
             let ch2 = chan {}
@@ -319,7 +319,7 @@ class ChannelModuleTest {
     @Test
     fun `test recv_any_timeout returns Some when data available`() {
         val result = eval("""
-            use std::concurrent::channel::{chan, Channel, MockChannel}
+            use std::effects::concurrent::channel::{chan, Channel, MockChannel}
 
             let ch1 = chan {}
             let ch2 = chan {}
