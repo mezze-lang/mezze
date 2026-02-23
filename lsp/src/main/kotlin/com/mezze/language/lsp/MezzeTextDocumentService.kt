@@ -186,7 +186,14 @@ class MezzeTextDocumentService(
 
         // Step 2: Type check with multi-error recovery
         try {
-            val projectRoot = filePath?.parent ?: Paths.get(".")
+            // Use workspace root for module resolution (where Mezze.toml is located)
+            // Fall back to file's parent directory if no workspace root is set
+            val workspaceRoot = server.getWorkspaceRoot()
+            val projectRoot = if (workspaceRoot != null) {
+                Paths.get(workspaceRoot)
+            } else {
+                filePath?.parent ?: Paths.get(".")
+            }
 
             // Use checkProgramWithRecovery to get ALL errors and partial type info
             val recoveryResult = typeChecker.checkProgramWithRecovery(ast, projectRoot)
@@ -1311,10 +1318,20 @@ class MezzeTextDocumentService(
         // Build the text from current line back to find 'match ... is'
         val currentLineText = lines[position.line].substring(0, minOf(position.character, lines[position.line].length))
 
-        // Search backwards for 'match X is' pattern
+        // Search backwards for 'match X is' pattern, but stop at top-level declarations
         var searchText = ""
         for (i in position.line downTo maxOf(0, position.line - 20)) {
             val line = if (i == position.line) currentLineText else lines[i]
+
+            // Stop if we hit a top-level declaration (means we're not inside the match anymore)
+            if (i < position.line && line.trimStart().let {
+                it.startsWith("let ") || it.startsWith("type ") || it.startsWith("effect ") ||
+                it.startsWith("ability ") || it.startsWith("impl ") || it.startsWith("pub ") ||
+                it.startsWith("use ")
+            }) {
+                break
+            }
+
             searchText = line + "\n" + searchText
         }
 
@@ -1324,6 +1341,24 @@ class MezzeTextDocumentService(
         val matchResult = matchRegex.findAll(searchText).lastOrNull() ?: return null
 
         val scrutinee = matchResult.groupValues[1].trim()
+
+        // Check if cursor is actually after the 'is' keyword - if not, we're not in pattern position
+        val matchEndIndex = matchResult.range.last
+        val textAfterMatch = searchText.substring(matchEndIndex + 1)
+
+        // If the cursor is on the same line as 'match X is' but before completing a pattern,
+        // and there's no newline or arrow yet, we're in pattern position
+        // Otherwise, check that we're actually in a pattern area (after a newline or arrow)
+        val currentLineInSearch = searchText.lines().lastOrNull() ?: ""
+        val isInPatternPosition = textAfterMatch.contains("\n") ||
+                                   textAfterMatch.trim().isEmpty() ||
+                                   currentLineInSearch.trim().let {
+                                       it.isEmpty() ||
+                                       it.matches(Regex("""^[A-Z][a-zA-Z0-9_]*.*""")) ||
+                                       it.endsWith("->")
+                                   }
+
+        if (!isInPatternPosition) return null
 
         // Find existing patterns in this match (to avoid suggesting them again)
         // Look for patterns like: Constructor ->, Constructor { ... } ->
