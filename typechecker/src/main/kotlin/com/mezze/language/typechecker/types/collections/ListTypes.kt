@@ -371,19 +371,21 @@ object ListTypes {
             )
         }
 
-        // __native_list_unzip: {xs: List {fst: 'a, snd: 'a}} -> {fst: List 'a, snd: List 'a}
+        // __native_list_unzip: {xs: List {fst: 'a, snd: 'b}} -> {fsts: List 'a, snds: List 'b}
         run {
-            val elemType = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
-            val listType = MezzeType.ListType(elemType)
+            val elemTypeA = MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
+            val elemTypeB = MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))
+            val listTypeA = MezzeType.ListType(elemTypeA)
+            val listTypeB = MezzeType.ListType(elemTypeB)
             val pairType = MezzeType.RecordType(mapOf(
-                "fst" to elemType,
-                "snd" to elemType
+                "fst" to elemTypeA,
+                "snd" to elemTypeB
             ))
             context["__native_list_unzip"] = MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("xs" to MezzeType.ListType(pairType))),
                 MezzeType.RecordType(mapOf(
-                    "fst" to listType,
-                    "snd" to listType
+                    "fsts" to listTypeA,
+                    "snds" to listTypeB
                 ))
             )
         }

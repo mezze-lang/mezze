@@ -397,6 +397,45 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         type1 is MezzeType.NatType && type2 is MezzeType.NatType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.FracType && type2 is MezzeType.FracType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.OrderingType && type2 is MezzeType.OrderingType -> UnificationResult.Success(Substitution.empty)
+
+        // OrderingType can unify with VariantType([LT, EQ, GT]) and vice versa
+        // This supports pattern matching where the scrutinee is OrderingType but patterns create a VariantType
+        type1 is MezzeType.OrderingType && type2 is MezzeType.VariantType -> {
+            // Check if the variant contains exactly LT, EQ, GT with no payloads and is closed
+            val expectedConstructors = setOf("LT", "EQ", "GT")
+            val actualConstructors = type2.constructors.keys
+            val allMatch = actualConstructors == expectedConstructors &&
+                           type2.constructors.all { (_, payload) -> payload == null } &&
+                           type2.rowVar == null
+            if (allMatch || (actualConstructors.all { it in expectedConstructors } && type2.rowVar == null)) {
+                // Compatible - OrderingType matches the Ordering variant
+                UnificationResult.Success(Substitution.empty)
+            } else {
+                UnificationResult.Failure(
+                    message = "Type mismatch: expected ${formatType(type2)}, but got ${formatType(type1)}",
+                    type1 = type1,
+                    type2 = type2
+                )
+            }
+        }
+        type1 is MezzeType.VariantType && type2 is MezzeType.OrderingType -> {
+            // Symmetric case
+            val expectedConstructors = setOf("LT", "EQ", "GT")
+            val actualConstructors = type1.constructors.keys
+            val allMatch = actualConstructors == expectedConstructors &&
+                           type1.constructors.all { (_, payload) -> payload == null } &&
+                           type1.rowVar == null
+            if (allMatch || (actualConstructors.all { it in expectedConstructors } && type1.rowVar == null)) {
+                UnificationResult.Success(Substitution.empty)
+            } else {
+                UnificationResult.Failure(
+                    message = "Type mismatch: expected ${formatType(type2)}, but got ${formatType(type1)}",
+                    type1 = type1,
+                    type2 = type2
+                )
+            }
+        }
+
         type1 is MezzeType.BytesType && type2 is MezzeType.BytesType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.ByteBufferType && type2 is MezzeType.ByteBufferType -> UnificationResult.Success(Substitution.empty)
         type1 is MezzeType.CharType && type2 is MezzeType.CharType -> UnificationResult.Success(Substitution.empty)

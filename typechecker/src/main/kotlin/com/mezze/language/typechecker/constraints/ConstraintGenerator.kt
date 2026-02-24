@@ -29,7 +29,8 @@ import com.mezze.language.typechecker.debug.DebugLogger.Category
 data class ProgramConstraintResult(
     val constraintResults: Map<String, ConstraintResult>,
     val perBindingMustBeOpenRowVars: Set<RowVar>,  // Row variables that must stay open from per-binding solving
-    val perBindingSolveErrors: List<com.mezze.language.typechecker.solving.ConstraintSolver.ConstraintError> = emptyList()  // Errors from per-binding solving
+    val perBindingSolveErrors: List<com.mezze.language.typechecker.solving.ConstraintSolver.ConstraintError> = emptyList(),  // Errors from per-binding solving
+    val perBindingSubstitution: com.mezze.language.typechecker.solving.Substitution = com.mezze.language.typechecker.solving.Substitution.empty  // Accumulated substitution from per-binding solving (for bidirectional inference)
 ) {
     /**
      * Get all referenced bindings for each binding name.
@@ -94,6 +95,9 @@ class ConstraintGenerator(
 
         // Track errors from per-binding solving
         val perBindingSolveErrors = mutableListOf<com.mezze.language.typechecker.solving.ConstraintSolver.ConstraintError>()
+
+        // Track accumulated substitution from per-binding solving (for bidirectional inference)
+        var perBindingSubstitution = com.mezze.language.typechecker.solving.Substitution.empty
 
         // Import constraint solver for incremental solving
         val solver = com.mezze.language.typechecker.solving.ConstraintSolver(context, typeDeclarations, abilityDeclarations)
@@ -190,6 +194,9 @@ class ConstraintGenerator(
                         }
                         is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {
                             val substitution = solveResult.substitution
+                            // NOTE: We do NOT accumulate substitution from regular bindings.
+                            // Only TopLevelExpression substitutions are accumulated for bidirectional type inference.
+                            // Accumulating from all bindings causes conflicts with type aliases (e.g., Ordering).
 
                             // CRITICAL: If there's a type annotation, use the ANNOTATED type (with substitution applied)
                             // as the authoritative type. This ensures closed variant/record types from annotations
@@ -361,7 +368,7 @@ class ConstraintGenerator(
                                         // Built-in abilities like NumAdd, Eq, etc. should allow generalization
                                         false
                                     } else {
-                                        // User-defined ability - check if the type variable is quantifiable
+                                        // User-defined ability - check if the type variable OR any typeArgs are quantifiable
                                         // Apply substitution to handle 'a -> 'b chains
                                         val resolvedType = substitution.apply(MezzeType.VarType(constraint.typeVar))
                                         val resolvedTypeVar = if (resolvedType is MezzeType.VarType) {
@@ -370,7 +377,26 @@ class ConstraintGenerator(
                                             // If resolved to concrete type, constraint is satisfied
                                             null
                                         }
-                                        resolvedTypeVar != null && quantifiableVars.contains(resolvedTypeVar)
+                                        val mainVarIsQuantifiable = resolvedTypeVar != null && quantifiableVars.contains(resolvedTypeVar)
+
+                                        // CRITICAL FIX: Also check typeArgs for multi-parameter abilities like Decode
+                                        // If ANY type argument contains a quantifiable variable, don't generalize.
+                                        // This ensures bidirectional type inference works for abilities like Decode
+                                        // where the target type ('a in Result 'a Error) needs to stay monomorphic
+                                        // so later usage (val.name) can constrain it.
+                                        val typeArgsHaveQuantifiableVars = constraint.typeArgs.any { typeArg ->
+                                            val freeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(typeArg)
+                                            freeVars.any { freeVar ->
+                                                val resolved = substitution.apply(MezzeType.VarType(freeVar))
+                                                if (resolved is MezzeType.VarType) {
+                                                    quantifiableVars.contains(resolved.variable)
+                                                } else {
+                                                    false
+                                                }
+                                            }
+                                        }
+
+                                        mainVarIsQuantifiable || typeArgsHaveQuantifiableVars
                                     }
                                 }
 
@@ -446,10 +472,35 @@ class ConstraintGenerator(
                 is TopLevelExpression -> {
                     // Top-level expressions (for REPL)
                     val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
-                    results["_toplevel"] = expressionGenerator.generate(
+                    val result = expressionGenerator.generate(
                         item.expression,
                         constraintContext
                     )
+                    results["_toplevel"] = result
+
+                    // BIDIRECTIONAL TYPE INFERENCE: Solve HasField and HasConstructor constraints
+                    // for TopLevelExpression to enable type inference from usage sites.
+                    // For example, `val.name` creates a HasField constraint that binds the type variable.
+                    //
+                    // We solve these constraints here (per-binding) rather than globally because:
+                    // 1. The global solver filters out HasField/HasConstructor to avoid interference
+                    // 2. We need the substitution to contain the bindings for bidirectional inference
+                    //
+                    // IMPORTANT: We ignore solving errors here because some constraints may involve
+                    // types that can't be expanded (e.g., type aliases like CodecConfig). These will
+                    // be handled during validation or produce more meaningful errors elsewhere.
+                    val structuralConstraints = result.constraints.filter { constraint ->
+                        constraint is Constraint.HasField || constraint is Constraint.HasConstructor
+                    }
+                    if (structuralConstraints.isNotEmpty()) {
+                        // Solve constraints but don't fail on errors - just accumulate substitutions
+                        val solveResult = solver.solve(structuralConstraints)
+                        // Accumulate the substitution from successful solving
+                        if (solveResult is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success) {
+                            perBindingSubstitution = solveResult.substitution.compose(perBindingSubstitution)
+                        }
+                        // We don't add errors to perBindingSolveErrors - the global solver will catch real issues
+                    }
                 }
                 is UseDeclaration,
                 is PubUseDeclaration -> {
@@ -462,7 +513,8 @@ class ConstraintGenerator(
         return ProgramConstraintResult(
             constraintResults = results,
             perBindingMustBeOpenRowVars = solver.getMustBeOpenRowVars(),
-            perBindingSolveErrors = perBindingSolveErrors
+            perBindingSolveErrors = perBindingSolveErrors,
+            perBindingSubstitution = perBindingSubstitution
         )
     }
 

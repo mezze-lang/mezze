@@ -856,20 +856,29 @@ class ConstraintSolver(
                         }
                     }
 
+                    // For codec abilities with open record types, close them for generation
+                    // This enables bidirectional inference from field access: val.name tells us
+                    // the record has a "name" field, and we close the record to generate the codec.
+                    val closedTypeArgs = if (isCodecAbility(abilityName)) {
+                        concreteTypeArgs.map { closeOpenRecordsForCodec(it) }
+                    } else {
+                        concreteTypeArgs
+                    }
+
                     // Check if all types are now concrete
-                    val allConcrete = concreteTypeArgs.all { isConcrete(it) }
+                    val allConcrete = closedTypeArgs.all { isConcrete(it) }
 
                     if (allConcrete) {
                         // Check if implementation exists
-                        val hasImpl = checkAbilityImplementation(abilityName, concreteTypeArgs)
+                        val hasImpl = checkAbilityImplementation(abilityName, closedTypeArgs)
                         if (!hasImpl) {
-                            return Pair(generateAbilityErrorMessage(abilityName, concreteTypeArgs), sourceLocation)
+                            return Pair(generateAbilityErrorMessage(abilityName, closedTypeArgs), sourceLocation)
                         }
                     } else {
                         // Some types are still type variables - try bidirectional inference!
                         // This is key for multi-parameter abilities like Convert 'a 'b
                         // When 'a = Int, we can look for impl Convert Int String and infer 'b = String
-                        val inferredSubst = tryBidirectionalInference(abilityName, concreteTypeArgs)
+                        val inferredSubst = tryBidirectionalInference(abilityName, closedTypeArgs)
                         if (inferredSubst != null) {
                             // Store the inferred substitution for later application
                             deferredInference.putAll(inferredSubst.mappings)
@@ -1140,6 +1149,55 @@ class ConstraintSolver(
             is MezzeType.TypeApplication -> type.args.any { containsVarType(it) }
             is MezzeType.FunctionType -> containsVarType(type.paramType) || containsVarType(type.returnType)
             else -> false
+        }
+    }
+
+    /**
+     * Close open record types for codec generation.
+     *
+     * When inferring types from field access (e.g., val.name), we get open records
+     * with row variables. For codec generation, we close these records (remove the
+     * row variable) so they can be treated as concrete types.
+     *
+     * This enables bidirectional type inference for Decode without explicit annotation:
+     * - `let user = Decode.decode {...}` returns Result 'a DecodeError
+     * - `match user is Ok { val } -> val.name` constrains 'a to {name: 'b, ...}
+     * - We close this to {name: String} (after field type resolution) for codec generation
+     */
+    private fun closeOpenRecordsForCodec(type: MezzeType): MezzeType {
+        return when (type) {
+            is MezzeType.RecordType -> {
+                // Close the record (remove row variable) and recursively close nested types
+                val closedFields = type.fields.mapValues { (_, fieldType) ->
+                    closeOpenRecordsForCodec(fieldType)
+                }
+                MezzeType.RecordType(fields = closedFields, rowVar = null, typeName = type.typeName)
+            }
+            is MezzeType.TypeApplication -> {
+                // For Result {name: String} DecodeError, close nested records in args
+                val closedArgs = type.args.map { closeOpenRecordsForCodec(it) }
+                MezzeType.TypeApplication(type.constructor, closedArgs)
+            }
+            is MezzeType.VariantType -> {
+                // Close records in variant payloads
+                val closedConstructors = type.constructors.mapValues { (_, payload) ->
+                    payload?.let { closeOpenRecordsForCodec(it) }
+                }
+                MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName)
+            }
+            is MezzeType.ListType -> MezzeType.ListType(closeOpenRecordsForCodec(type.elementType))
+            is MezzeType.ArrayType -> MezzeType.ArrayType(closeOpenRecordsForCodec(type.elementType))
+            is MezzeType.SetType -> MezzeType.SetType(closeOpenRecordsForCodec(type.elementType))
+            is MezzeType.SortedSetType -> MezzeType.SortedSetType(closeOpenRecordsForCodec(type.elementType))
+            is MezzeType.MapType -> MezzeType.MapType(
+                closeOpenRecordsForCodec(type.keyType),
+                closeOpenRecordsForCodec(type.valueType)
+            )
+            is MezzeType.SortedMapType -> MezzeType.SortedMapType(
+                closeOpenRecordsForCodec(type.keyType),
+                closeOpenRecordsForCodec(type.valueType)
+            )
+            else -> type
         }
     }
 
@@ -2340,6 +2398,25 @@ class ConstraintSolver(
             }
         }
 
+        // Special handling for OrderingType - allows pattern matching with LT/EQ/GT
+        // Ordering is internally OrderingType for optimization, but users can pattern match
+        // on it as if it were `type Ordering = | LT | EQ | GT |`
+        if (variantType is MezzeType.OrderingType) {
+            if (constructorName == "LT" || constructorName == "EQ" || constructorName == "GT") {
+                // Valid Ordering constructor with no payload
+                if (expectedPayloadType != null) {
+                    return ConstraintResult.Failure(
+                        "Constructor '$constructorName' does not have a payload"
+                    )
+                }
+                return ConstraintResult.Success(Substitution.empty)
+            } else {
+                return ConstraintResult.Failure(
+                    "Ordering type only has constructors 'LT', 'EQ', and 'GT', not '$constructorName'"
+                )
+            }
+        }
+
         // If it's a concrete variant type, check if constructor exists
         if (variantType is MezzeType.VariantType) {
             val actualPayloadType = variantType.constructors[constructorName]
@@ -2397,13 +2474,28 @@ class ConstraintSolver(
             // Constructor exists - validate payload presence/absence and unify types
             if (expectedPayloadType != null && actualPayloadType != null) {
                 // Both pattern and constructor have payload - unify them
-                // CRITICAL FIX: Instantiate the actual payload type with fresh type variables
-                // This prevents occurs check failures where the same TypeVar instance from the variant
-                // definition is shared across multiple uses of the constructor (in patterns and expressions).
-                // Each use of a polymorphic constructor should get independent type variables.
-                val freshPayloadType = instantiateWithFreshVars(actualPayloadType)
+                //
+                // CRITICAL: Only instantiate with fresh vars when the type variables come from a
+                // TYPE DECLARATION (created fresh in solveHasConstructor's VarType branch), NOT when
+                // they come from a TypeApplication expansion.
+                //
+                // When expanding `Result 'a DecodeError` to a VariantType, the 'a is the SAME type
+                // variable that needs to be connected to usages (like `val.name`). If we replace it
+                // with a fresh var, bidirectional type inference breaks because the type variable
+                // is no longer connected.
+                //
+                // The occurs check issue mentioned in the old comment is avoided because type variables
+                // from TypeApplications are already instantiated per-use-site (during constraint generation
+                // when the TypeApplication is created).
+                val payloadTypeToUnify = if (originalConstraint?.variantType is MezzeType.TypeApplication) {
+                    // Type variables came from TypeApplication expansion - preserve them for bidirectional inference
+                    actualPayloadType
+                } else {
+                    // Type variables came from type declaration lookup - instantiate with fresh vars
+                    instantiateWithFreshVars(actualPayloadType)
+                }
 
-                val result = unify(freshPayloadType, expectedPayloadType, typeDeclarations)
+                val result = unify(payloadTypeToUnify, expectedPayloadType, typeDeclarations)
                 return when (result) {
                     is UnificationResult.Success -> ConstraintResult.Success(result.substitution)
                     is UnificationResult.Failure -> ConstraintResult.Failure(

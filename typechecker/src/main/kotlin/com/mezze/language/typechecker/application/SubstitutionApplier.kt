@@ -772,6 +772,10 @@ class SubstitutionApplier(
             val methodName = expr.member
 
             // Look up the ability declaration to get the method type
+            // NOTE: For Encode/Decode, the type created here may have fresh type variables
+            // that won't be resolved by the substitution. But for local bindings in do blocks,
+            // we still need to compute the method type so applyToFunctionCall can extract
+            // the return type structure (even if inner type vars aren't fully resolved).
             if (abilityName != null) {
                 val abilityDecl = abilityDeclarations[abilityName]
                 if (abilityDecl != null) {
@@ -1229,42 +1233,23 @@ class SubstitutionApplier(
             //             We need the return type, which is Result 'a DecodeError
             //             The 'a is what we need to decode to
             val dataType = if (abilityName == "Decode") {
-                // The return type may be null on the AST node, but we can compute it
-                // from the function's type. For Decode.decode, the function type is:
-                //   {val: 'repr} -> Result 'a DecodeError
-                // We need to extract 'a after applying the substitution.
+                // BIDIRECTIONAL INFERENCE: For Decode without type annotation, the target type
+                // is inferred from usage (e.g., field access like val.name). This creates
+                // HasField constraints that bind type variables to record types in the substitution.
+                //
+                // Strategy 1: Try to extract from returnType if it's concrete
+                val extractedFromReturnType = extractDecodeTargetType(returnType)
 
-                // First, try the passed returnType (may have been computed)
-                val computedReturnType = returnType ?: run {
-                    // Try to compute from the function's type
-                    val funcType = memberAccess.inferredType?.let { substitution.apply(it) }
-                    when (funcType) {
-                        is MezzeType.FunctionType -> funcType.returnType
-                        else -> null
-                    }
+                // Strategy 2: If returnType has unbound VarTypes, look through substitution
+                // for record types that could be the decode target.
+                val extractedType = if (extractedFromReturnType != null && !containsVarType(extractedFromReturnType)) {
+                    extractedFromReturnType
+                } else {
+                    // Look for record types in the substitution that match the expected pattern
+                    // The decode target type is bound via HasField constraints from field access
+                    findDecodeTargetFromSubstitution() ?: extractedFromReturnType
                 }
 
-                // Extract the target type from Result 'a DecodeError -> 'a
-                val extractedType = when (computedReturnType) {
-                    is MezzeType.TypeApplication -> {
-                        if (computedReturnType.constructor == "Result" && computedReturnType.args.isNotEmpty()) {
-                            computedReturnType.args.first() // The 'a in Result 'a DecodeError
-                        } else {
-                            null
-                        }
-                    }
-                    is MezzeType.VariantType -> {
-                        // Result is represented as a variant: | Ok {val: 'a} | Err {error: 'e} |
-                        // Look for the Ok constructor's payload type
-                        val okConstructor = computedReturnType.constructors["Ok"]
-                        if (okConstructor is MezzeType.RecordType) {
-                            okConstructor.fields["val"]
-                        } else {
-                            null
-                        }
-                    }
-                    else -> null
-                }
                 extractedType ?: primaryType
             } else {
                 primaryType // For Encode, use the argument type
@@ -1279,7 +1264,14 @@ class SubstitutionApplier(
                 resolveTypeAlias(dataType)
             }
 
-            if (formatImpl != null && codecGenerator.isSerializable(resolvedPrimaryType) && !containsVarType(resolvedPrimaryType)) {
+            // BIDIRECTIONAL INFERENCE: Close open records for codec generation
+            // When types are inferred from field access (e.g., val.name), we get open records
+            // with row variables like {name: String, ...}. For codec generation, we close
+            // these to {name: String} so they're treated as concrete serializable types.
+            val closedType = closeOpenRecords(resolvedPrimaryType)
+
+
+            if (formatImpl != null && codecGenerator.isSerializable(closedType) && !containsVarType(closedType)) {
                 // Get the format type (e.g., "Json")
                 val formatTypeName = formatImpl.targetTypes.firstOrNull() ?: return resolvedAbilities
                 val formatType = MezzeType.TypeApplication(formatTypeName, emptyList())
@@ -1287,7 +1279,8 @@ class SubstitutionApplier(
                 // Recursively generate implementations for all nested types
                 // The record/variant encode calls Encode.encode for each field/variant
                 // Filter out VarTypes since we can't generate code for unknown types
-                val allTypesToGenerate = collectNestedTypes(resolvedPrimaryType)
+                // Use closedType to ensure nested open records are also closed
+                val allTypesToGenerate = collectNestedTypes(closedType)
                     .filter { !containsVarType(it) }
                 for (nestedType in allTypesToGenerate) {
                     val nestedImpl = if (abilityName == "Encode") {
@@ -1298,11 +1291,11 @@ class SubstitutionApplier(
                     registerGeneratedCodecImpl(nestedImpl)
                 }
 
-                // Generate the main implementation using the resolved (structural) type
+                // Generate the main implementation using the closed type
                 val generatedImpl = if (abilityName == "Encode") {
-                    codecGenerator.generateEncodeImpl(formatType, resolvedPrimaryType)
+                    codecGenerator.generateEncodeImpl(formatType, closedType)
                 } else {
-                    codecGenerator.generateDecodeImpl(formatType, resolvedPrimaryType)
+                    codecGenerator.generateDecodeImpl(formatType, closedType)
                 }
 
                 // Track the generated impl for later registration
@@ -1315,7 +1308,7 @@ class SubstitutionApplier(
 
                 resolvedAbilities[implHash] = ResolvedAbility(
                     abilityName = abilityName,
-                    typeArgs = listOf(formatType, resolvedPrimaryType),
+                    typeArgs = listOf(formatType, closedType),
                     isBuiltin = false,
                     implementationHash = implHash
                 )
@@ -1541,6 +1534,52 @@ class SubstitutionApplier(
     }
 
     /**
+     * Close open record types for codec generation.
+     *
+     * When types are inferred from field access (e.g., val.name), we get open records
+     * with row variables like {name: String, ...rowVar}. For codec generation, we close
+     * these records (remove the row variable) so they can be treated as concrete types.
+     *
+     * This enables bidirectional type inference for Decode without explicit annotation.
+     */
+    private fun closeOpenRecords(type: MezzeType): MezzeType {
+        return when (type) {
+            is MezzeType.RecordType -> {
+                // Close the record (remove row variable) and recursively close nested types
+                val closedFields = type.fields.mapValues { (_, fieldType) ->
+                    closeOpenRecords(fieldType)
+                }
+                MezzeType.RecordType(fields = closedFields, rowVar = null, typeName = type.typeName)
+            }
+            is MezzeType.TypeApplication -> {
+                // For Result {name: String} DecodeError, close nested records in args
+                val closedArgs = type.args.map { closeOpenRecords(it) }
+                MezzeType.TypeApplication(type.constructor, closedArgs)
+            }
+            is MezzeType.VariantType -> {
+                // Close records in variant payloads
+                val closedConstructors = type.constructors.mapValues { (_, payload) ->
+                    payload?.let { closeOpenRecords(it) }
+                }
+                MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName)
+            }
+            is MezzeType.ListType -> MezzeType.ListType(closeOpenRecords(type.elementType))
+            is MezzeType.ArrayType -> MezzeType.ArrayType(closeOpenRecords(type.elementType))
+            is MezzeType.SetType -> MezzeType.SetType(closeOpenRecords(type.elementType))
+            is MezzeType.SortedSetType -> MezzeType.SortedSetType(closeOpenRecords(type.elementType))
+            is MezzeType.MapType -> MezzeType.MapType(
+                closeOpenRecords(type.keyType),
+                closeOpenRecords(type.valueType)
+            )
+            is MezzeType.SortedMapType -> MezzeType.SortedMapType(
+                closeOpenRecords(type.keyType),
+                closeOpenRecords(type.valueType)
+            )
+            else -> type
+        }
+    }
+
+    /**
      * Check if a type contains any unresolved type variables.
      */
     private fun containsVarType(type: MezzeType): Boolean {
@@ -1557,6 +1596,108 @@ class SubstitutionApplier(
             is MezzeType.TypeApplication -> type.args.any { containsVarType(it) }
             is MezzeType.FunctionType -> containsVarType(type.paramType) || containsVarType(type.returnType)
             else -> false
+        }
+    }
+
+    /**
+     * Extract the Decode target type from a return type.
+     * For Result 'a DecodeError, extracts 'a.
+     * For | Ok {val: 'a}, Err {...} |, extracts 'a.
+     */
+    private fun extractDecodeTargetType(returnType: MezzeType?): MezzeType? {
+        if (returnType == null) return null
+        return when (returnType) {
+            is MezzeType.TypeApplication -> {
+                if (returnType.constructor == "Result" && returnType.args.isNotEmpty()) {
+                    returnType.args.first() // The 'a in Result 'a DecodeError
+                } else {
+                    null
+                }
+            }
+            is MezzeType.VariantType -> {
+                // Result is represented as a variant: | Ok {val: 'a} | Err {error: 'e} |
+                val okConstructor = returnType.constructors["Ok"]
+                if (okConstructor is MezzeType.RecordType) {
+                    okConstructor.fields["val"]
+                } else {
+                    null
+                }
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Find the Decode target type by looking through the substitution.
+     *
+     * For bidirectional type inference, when Decode.decode is called without a type annotation,
+     * the target type is inferred from usage sites (e.g., field access like val.name).
+     * This creates HasField constraints that bind type variables to record types.
+     *
+     * This function looks through the substitution for record types that could be
+     * the decode target, filtering out known format types (like Json types).
+     */
+    private fun findDecodeTargetFromSubstitution(): MezzeType? {
+        // Known format types that should NOT be the decode target
+        val formatTypes = setOf("Json", "JString", "JInt", "JBool", "JArray", "JObject", "JNull", "JFloat")
+        // Known pattern fields that indicate format types, not data types
+        val formatFields = setOf("fields", "elements", "key", "value")
+
+        // Look for record types in the substitution that could be the decode target
+        for ((_, boundType) in substitution.mappings) {
+            val resolvedType = resolveVarChain(boundType)
+            when (resolvedType) {
+                is MezzeType.RecordType -> {
+                    // Found a record type - check if it's a plausible decode target
+                    val fieldNames = resolvedType.fields.keys
+                    // Skip format-related types (they have specific field patterns)
+                    val isFormatType = fieldNames.all { it in formatFields } && fieldNames.size <= 2
+                    // Skip records that only have 'val' field (these are usually Ok/Some payloads)
+                    val isPayloadWrapper = fieldNames == setOf("val")
+                    // Skip records that only have 'error' field (these are usually Err payloads)
+                    val isErrorWrapper = fieldNames == setOf("error")
+                    // Apply substitution to field types to resolve VarTypes
+                    // This is necessary because HasField creates records with type variable fields
+                    // that need to be resolved to their concrete types
+                    val fullyResolvedType = MezzeType.RecordType(
+                        fields = resolvedType.fields.mapValues { (_, fieldType) -> substitution.apply(fieldType) },
+                        rowVar = resolvedType.rowVar
+                    )
+                    if (!isFormatType && !isPayloadWrapper && !isErrorWrapper && !containsVarType(fullyResolvedType)) {
+                        return fullyResolvedType
+                    }
+                }
+                is MezzeType.TypeApplication -> {
+                    // Skip known format types
+                    if (resolvedType.constructor !in formatTypes && !containsVarType(resolvedType)) {
+                        // Could be a valid target type (e.g., custom types)
+                    }
+                }
+                else -> {
+                    // Skip other types
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Resolve chains of VarType -> VarType -> ... to get the final concrete type.
+     */
+    private fun resolveVarChain(type: MezzeType, visited: Set<TypeVar> = emptySet()): MezzeType {
+        return when (type) {
+            is MezzeType.VarType -> {
+                // Prevent infinite loops
+                if (type.variable in visited) return type
+                // Look up in substitution
+                val bound = substitution.mappings[type.variable]
+                if (bound != null) {
+                    resolveVarChain(bound, visited + type.variable)
+                } else {
+                    type
+                }
+            }
+            else -> type
         }
     }
 

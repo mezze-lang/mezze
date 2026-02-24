@@ -8,8 +8,8 @@ import org.junit.jupiter.api.Test
 class HttpModuleTest {
 
     @Test
-    fun `test simple decode record with type annotation`() {
-        // This test verifies that Decode.decode works OUTSIDE a perform block
+    fun `test decode with type annotation`() {
+        // This test verifies that Decode.decode works with explicit type annotation
         val result = MezzeTestHelper.run("""
             use std::codec::json
             use std::codec::json::{Json}
@@ -29,9 +29,31 @@ class HttpModuleTest {
     }
 
     @Test
-    fun `test decode inside perform block`() {
+    fun `test decode with bidirectional type inference`() {
+        // This test verifies that Decode.decode works WITHOUT type annotation
+        // The type is inferred from field access in the match body (val.name)
+        val result = MezzeTestHelper.run("""
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Decode, DecodeError, default_config}
+
+            let json_obj = JObject { fields = [
+                {key = "name", value = JString {val = "Bob"}},
+                {key = "age", value = JInt {val = 30}}
+            ] }
+
+            let user = Decode.decode {val = json_obj, config = default_config}
+            match user is
+                Ok { val } -> val.name
+                Err { error } -> "error"
+        """)
+        assertEquals("Bob", (result as MezzeString).value)
+    }
+
+    @Test
+    fun `test decode inside perform block with bidirectional inference`() {
         // This test verifies that Decode.decode works INSIDE a perform block
-        // The type annotation on the let binding guides ability resolution
+        // WITHOUT type annotation - type inferred from field access
         val result = MezzeTestHelper.run("""
             use std::effects::log::{Log, Console, println}
             use std::codec::json
@@ -39,16 +61,16 @@ class HttpModuleTest {
             use std::codec::core::{Decode, DecodeError, default_config}
 
             let json_obj = JObject { fields = [
-                {key = "name", value = JString {val = "Bob"}}
+                {key = "name", value = JString {val = "Charlie"}}
             ] }
 
             perform Console in do
                 println { msg = "Starting decode" }
-                let user: Result {name: String} DecodeError = Decode.decode {val = json_obj, config = default_config}
+                let user = Decode.decode {val = json_obj, config = default_config}
                 match user is
                     Ok { val } -> val.name
                     Err { error } -> "error"
         """)
-        assertEquals("Bob", (result as MezzeString).value)
+        assertEquals("Charlie", (result as MezzeString).value)
     }
 }

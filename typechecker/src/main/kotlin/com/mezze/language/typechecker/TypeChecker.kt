@@ -274,6 +274,7 @@ class TypeChecker(
         val constraintResults = programConstraintResult.constraintResults
         val perBindingMustBeOpenRowVars = programConstraintResult.perBindingMustBeOpenRowVars
         val perBindingSolveErrors = programConstraintResult.perBindingSolveErrors
+        val perBindingSubstitution = programConstraintResult.perBindingSubstitution
 
         // Check for per-binding solve errors (e.g., type mismatches in variant payloads)
         if (perBindingSolveErrors.isNotEmpty()) {
@@ -416,7 +417,10 @@ class TypeChecker(
             }
             is ConstraintSolver.SolveResult.Success -> {
                 // Continue to validation
-                val substitution = solveResult.substitution
+                // Compose global substitution with per-binding substitution for bidirectional inference.
+                // The per-binding substitution contains HasField/HasConstructor bindings from TopLevelExpression
+                // that enable type inference from usage sites (e.g., val.name binding the type variable).
+                val substitution = solveResult.substitution.compose(perBindingSubstitution)
                 // Convert solver string warnings to structured warnings
                 val warnings = solveResult.warnings.map { msg ->
                     TypeCheckWarning(message = msg, sourceLocation = null)
