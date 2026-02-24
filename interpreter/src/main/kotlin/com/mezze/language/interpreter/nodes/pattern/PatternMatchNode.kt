@@ -1,5 +1,6 @@
 package com.mezze.language.interpreter.nodes.pattern
 
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.dsl.Cached
 import com.oracle.truffle.api.dsl.Specialization
 import com.oracle.truffle.api.frame.VirtualFrame
@@ -29,7 +30,7 @@ class PatternMatchNode(
     
     override fun execute(frame: VirtualFrame): MezzeValue {
         val value = valueNode.execute(frame)
-        
+
         // Try each case in order
         for (caseNode in caseNodes) {
             val result = when (value) {
@@ -40,11 +41,16 @@ class PatternMatchNode(
                 is MezzeRecord -> caseNode.tryMatchRecord(frame, value)
                 else -> caseNode.tryMatchGeneric(frame, value)
             }
-            
+
             if (result != null) return result
         }
-        
-        // No pattern matched
+
+        // No pattern matched - throw via TruffleBoundary
+        throwNoMatchingPattern(value)
+    }
+
+    @TruffleBoundary
+    private fun throwNoMatchingPattern(value: MezzeValue): Nothing {
         throw RuntimeException("No matching pattern found for value: ${value.getDisplayString()}")
     }
 }
@@ -173,25 +179,33 @@ class PatternCaseNode(
      */
     private fun executeWithGuard(frame: VirtualFrame, value: MezzeValue): MezzeValue? {
         // Check if-let bindings first (they may add bindings used by guard)
-        for (ifLetBinding in ifLetBindings) {
-            if (!ifLetBinding.tryMatch(frame)) {
+        var i = 0
+        while (i < ifLetBindings.size) {
+            if (!ifLetBindings[i].tryMatch(frame)) {
                 return null // If-let binding failed, try next pattern
             }
+            i++
         }
 
         // Check guard condition if present
-        if (guardNode != null) {
-            val guardResult = guardNode!!.execute(frame)
-            val guardPassed = when (guardResult) {
-                is MezzeBool -> guardResult.value
-                else -> throw RuntimeException("Guard condition must be boolean")
-            }
+        val guard = guardNode
+        if (guard != null) {
+            val guardResult = guard.execute(frame)
+            val guardPassed = checkGuardBoolean(guardResult)
             if (!guardPassed) {
                 return null // Guard failed, try next pattern
             }
         }
 
         return bodyNode.execute(frame)
+    }
+
+    @TruffleBoundary
+    private fun checkGuardBoolean(guardResult: MezzeValue): Boolean {
+        return when (guardResult) {
+            is MezzeBool -> guardResult.value
+            else -> throw RuntimeException("Guard condition must be boolean")
+        }
     }
 }
 
@@ -214,33 +228,47 @@ abstract class PatternNode : MezzeNode() {
 
 /**
  * Literal pattern node (matches exact values)
+ *
+ * NOTE: matchesRecord and matchesGeneric delegate to @TruffleBoundary methods
+ * because MezzeRecord.fields is a lazy property which can trigger concurrent
+ * exception handling when accessed (SafePublicationLazyImpl.getValue).
  */
 @NodeInfo(shortName = "literal-pattern")
 class LiteralPatternNode(private val expectedValue: MezzeValue) : PatternNode() {
-    
+
     override fun matchesInt(frame: VirtualFrame, value: MezzeInt): Boolean {
         return expectedValue is MezzeInt && expectedValue.value == value.value
     }
-    
+
     override fun matchesString(frame: VirtualFrame, value: MezzeString): Boolean {
         return expectedValue is MezzeString && expectedValue.value == value.value
     }
-    
+
     override fun matchesBoolean(frame: VirtualFrame, value: MezzeBool): Boolean {
         return expectedValue is MezzeBool && expectedValue.value == value.value
     }
-    
+
     override fun matchesVariant(frame: VirtualFrame, value: MezzeVariant): Boolean {
-        return expectedValue is MezzeVariant && 
+        return expectedValue is MezzeVariant &&
                expectedValue.constructor == value.constructor &&
                expectedValue.value == value.value
     }
-    
+
     override fun matchesRecord(frame: VirtualFrame, value: MezzeRecord): Boolean {
+        return compareRecords(value)
+    }
+
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun compareRecords(value: MezzeRecord): Boolean {
         return expectedValue is MezzeRecord && expectedValue.fields == value.fields
     }
-    
+
     override fun matchesGeneric(frame: VirtualFrame, value: MezzeValue): Boolean {
+        return compareGeneric(value)
+    }
+
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun compareGeneric(value: MezzeValue): Boolean {
         return expectedValue == value
     }
 }
@@ -309,13 +337,75 @@ class WildcardPatternNode : PatternNode() {
  * - Some { val } -> matches Some variant, extracts `val` field
  * - None -> matches None variant (no fields)
  * - Ok { value } -> matches Ok variant, extracts `value` field
+ *
+ * TRUFFLE COMPLIANCE:
+ * - Pattern bindings are pre-computed at construction time (parse time)
+ * - Stored as @CompilationFinal arrays for JIT-friendly access
+ * - No AST iteration at runtime
  */
 @NodeInfo(shortName = "constructor-pattern")
 class ConstructorPatternNode(
     private val constructorName: String,
-    private val recordPattern: com.mezze.language.ast.RecordPattern?,
+    recordPattern: com.mezze.language.ast.RecordPattern?,
     private val variableSlots: Map<String, Int>  // Pre-allocated slots for pattern variables
 ) : PatternNode() {
+
+    /**
+     * Pre-computed pattern bindings: array of (fieldPath, varName, slotIndex)
+     * Computed once at construction time, used at runtime for O(1) access
+     */
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal(dimensions = 1)
+    private val bindingFieldPaths: Array<Array<String>>
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal(dimensions = 1)
+    private val bindingVarNames: Array<String>
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal(dimensions = 1)
+    private val bindingSlotIndices: IntArray
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private val hasBindings: Boolean
+
+    init {
+        // Pre-compute bindings at construction time
+        if (recordPattern != null) {
+            val bindings = computeBindingsAtParseTime(recordPattern)
+            bindingFieldPaths = bindings.map { it.first.toTypedArray() }.toTypedArray()
+            bindingVarNames = bindings.map { it.second }.toTypedArray()
+            bindingSlotIndices = bindings.map { variableSlots[it.second] ?: -1 }.toIntArray()
+            hasBindings = bindings.isNotEmpty()
+        } else {
+            bindingFieldPaths = emptyArray()
+            bindingVarNames = emptyArray()
+            bindingSlotIndices = IntArray(0)
+            hasBindings = false
+        }
+    }
+
+    /**
+     * Compute bindings from a record pattern at parse time.
+     * This is only called during construction, not at runtime.
+     */
+    private fun computeBindingsAtParseTime(
+        pattern: com.mezze.language.ast.RecordPattern,
+        prefix: List<String> = emptyList()
+    ): List<Pair<List<String>, String>> {
+        val bindings = mutableListOf<Pair<List<String>, String>>()
+
+        for (entry in pattern.entries) {
+            val fieldPath = prefix + entry.name
+
+            when (val entryPattern = entry.pattern) {
+                null -> bindings.add(fieldPath to entry.name)
+                is com.mezze.language.ast.VariablePattern -> bindings.add(fieldPath to entryPattern.name)
+                is com.mezze.language.ast.RecordPattern -> bindings.addAll(computeBindingsAtParseTime(entryPattern, fieldPath))
+                is com.mezze.language.ast.WildcardPattern -> { /* ignore */ }
+                else -> { /* unsupported */ }
+            }
+        }
+
+        return bindings
+    }
 
     override fun matchesInt(frame: VirtualFrame, value: MezzeInt): Boolean = false
     override fun matchesString(frame: VirtualFrame, value: MezzeString): Boolean = false
@@ -348,125 +438,119 @@ class ConstructorPatternNode(
      * Match against MezzeNil (specialized List Nil constructor)
      */
     private fun matchesNil(frame: VirtualFrame): Boolean {
-        // Nil pattern must match Nil constructor with no record pattern
-        return constructorName == "Nil" && recordPattern == null
+        // Nil pattern must match Nil constructor with no bindings
+        return constructorName == "Nil" && !hasBindings
     }
 
     /**
      * Match against MezzeCons (specialized List Cons constructor)
      * Pattern: Cons { head, tail } or Cons { head = x, tail = xs }
+     * Uses pre-computed bindings for JIT-friendly access.
      */
+    @com.oracle.truffle.api.nodes.ExplodeLoop
     private fun matchesCons(frame: VirtualFrame, value: MezzeCons): Boolean {
         // Must be matching against Cons constructor
         if (constructorName != "Cons") {
             return false
         }
 
-        // Must have a record pattern to extract head/tail
-        if (recordPattern == null) {
-            return true  // Just matching constructor without binding
+        // If no bindings, just match constructor name
+        if (!hasBindings) {
+            return true
         }
 
-        // Extract bindings from the pattern
-        val bindings = collectRecordPatternBindings(recordPattern)
-        for ((fieldPath, varName) in bindings) {
+        // Use pre-computed bindings (JIT-friendly loop)
+        for (i in bindingFieldPaths.indices) {
+            val fieldPath = bindingFieldPaths[i]
+            val slotIndex = bindingSlotIndices[i]
+
             // For Cons, we only support direct field access (head, tail)
             if (fieldPath.size != 1) {
-                return false  // Nested patterns not supported for Cons
+                return false
             }
 
             val fieldName = fieldPath[0]
             val fieldValue: MezzeValue = when (fieldName) {
                 "head" -> value.head
                 "tail" -> value.tail
-                else -> return false  // Unknown field
+                else -> return false
             }
 
             // Bind the value to the variable slot
-            val slot = variableSlots[varName] ?: return false
-            frame.setObject(slot, fieldValue)
-        }
-
-        return true
-    }
-
-    override fun matchesVariant(frame: VirtualFrame, value: MezzeVariant): Boolean {
-        // Check if constructor name matches
-        if (value.constructor != constructorName) {
-            return false
-        }
-
-        // If there's no record pattern, just check constructor name
-        if (recordPattern == null) {
-            return true
-        }
-
-        // If there's a record pattern, extract and bind fields from the variant's value
-        val variantValue = value.value
-        if (variantValue !is MezzeRecord) {
-            // Pattern expects a record but variant has no record value
-            return false
-        }
-
-        // Extract bindings from the pattern and bind them to frame slots
-        val bindings = collectRecordPatternBindings(recordPattern)
-        for ((fieldPath, varName) in bindings) {
-            var currentValue: MezzeValue = variantValue
-
-            // Navigate the field path (for nested patterns)
-            for (fieldName in fieldPath) {
-                if (currentValue !is MezzeRecord) {
-                    return false  // Pattern doesn't match structure
-                }
-                currentValue = currentValue.fields[fieldName] ?: return false
-            }
-
-            // Bind the value to the variable slot
-            val slot = variableSlots[varName] ?: return false
-            frame.setObject(slot, currentValue)
+            if (slotIndex < 0) return false
+            frame.setObject(slotIndex, fieldValue)
         }
 
         return true
     }
 
     /**
-     * Helper to collect bindings from a record pattern
-     * (Duplicates logic from ASTToTruffleConverter for pattern matching)
+     * Match against MezzeVariant using pre-computed bindings.
+     * Uses JIT-friendly loops with @ExplodeLoop where possible.
      */
-    private fun collectRecordPatternBindings(
-        pattern: com.mezze.language.ast.RecordPattern,
-        prefix: List<String> = emptyList()
-    ): List<Pair<List<String>, String>> {
-        val bindings = mutableListOf<Pair<List<String>, String>>()
+    override fun matchesVariant(frame: VirtualFrame, value: MezzeVariant): Boolean {
+        // Check if constructor name matches
+        if (value.constructor != constructorName) {
+            return false
+        }
 
-        for (entry in pattern.entries) {
-            val fieldPath = prefix + entry.name
+        // If no bindings, just check constructor name
+        if (!hasBindings) {
+            return true
+        }
 
-            when (val entryPattern = entry.pattern) {
-                null -> {
-                    // Shorthand: {val} means {val = val}
-                    bindings.add(fieldPath to entry.name)
-                }
-                is com.mezze.language.ast.VariablePattern -> {
-                    // Renamed: {val = x}
-                    bindings.add(fieldPath to entryPattern.name)
-                }
-                is com.mezze.language.ast.RecordPattern -> {
-                    // Nested: {inner = {value}}
-                    bindings.addAll(collectRecordPatternBindings(entryPattern, fieldPath))
-                }
-                is com.mezze.language.ast.WildcardPattern -> {
-                    // {val = _} - ignore this field
-                }
-                else -> {
-                    // Unsupported pattern - fail to match
-                    return emptyList()
-                }
+        // If there are bindings, extract and bind fields from the variant's value
+        val variantValue = value.value
+        if (variantValue !is MezzeRecord) {
+            return false
+        }
+
+        // Extract field values using boundary method (Map navigation)
+        val extractedValues = extractFieldValues(variantValue)
+        if (extractedValues == null) {
+            return false
+        }
+
+        // Bind values to frame slots (hot path, no boundary)
+        for (i in extractedValues.indices) {
+            val slotIndex = bindingSlotIndices[i]
+            if (slotIndex >= 0) {
+                frame.setObject(slotIndex, extractedValues[i])
             }
         }
 
-        return bindings
+        return true
     }
+
+    /**
+     * Extract field values from variant using pre-computed bindings.
+     * Marked @TruffleBoundary because it navigates record fields via Map.
+     * Returns null if any field path is invalid.
+     */
+    @TruffleBoundary
+    private fun extractFieldValues(variantValue: MezzeRecord): Array<MezzeValue>? {
+        val values = Array<MezzeValue>(bindingFieldPaths.size) { MezzeNull }
+
+        for (i in bindingFieldPaths.indices) {
+            val fieldPath = bindingFieldPaths[i]
+            var currentValue: MezzeValue = variantValue
+
+            // Navigate the field path (for nested patterns)
+            for (fieldName in fieldPath) {
+                if (currentValue !is MezzeRecord) {
+                    return null
+                }
+                currentValue = currentValue.fields[fieldName] ?: return null
+            }
+
+            values[i] = currentValue
+        }
+
+        return values
+    }
+
+    // NOTE: collectRecordPatternBindings was removed - all bindings are now
+    // pre-computed in init {} block using computeBindingsAtParseTime()
 }
 
 /**
@@ -476,6 +560,9 @@ class ConstructorPatternNode(
  * - [x] -> matches single element array, binds x
  * - [x, y] -> matches two element array, binds x and y
  * - [head, ...tail] -> matches array with at least one element, binds head and tail
+ *
+ * NOTE: Collection operations (toList, drop) are moved to @TruffleBoundary methods
+ * to avoid JIT blockers from Kotlin's exception handling code paths.
  */
 @NodeInfo(shortName = "array-pattern")
 class ArrayPatternNode(
@@ -485,6 +572,13 @@ class ArrayPatternNode(
     private val restSlot: Int?  // Pre-allocated slot for rest pattern
 ) : PatternNode() {
 
+    // Pre-compute the number of element patterns for bounds checking
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private val numElementPatterns: Int = elementPatterns.size
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private val hasRestPattern: Boolean = restPatternName != null
+
     override fun matchesInt(frame: VirtualFrame, value: MezzeInt): Boolean = false
     override fun matchesString(frame: VirtualFrame, value: MezzeString): Boolean = false
     override fun matchesBoolean(frame: VirtualFrame, value: MezzeBool): Boolean = false
@@ -492,29 +586,26 @@ class ArrayPatternNode(
     override fun matchesRecord(frame: VirtualFrame, value: MezzeRecord): Boolean = false
 
     override fun matchesGeneric(frame: VirtualFrame, value: MezzeValue): Boolean {
-        // Check if value is an array or list
-        val arrayElements = when (value) {
-            is MezzeArrayList -> value.toList()
-            is MezzeList -> value.toKotlinList()
-            else -> return false
-        }
+        // Extract array elements via boundary method
+        val arrayElements = extractArrayElements(value) ?: return false
+        val arraySize = arrayElements.size
 
         // Check if array length is compatible with pattern
-        val minLength = elementPatterns.size
-        if (restPatternName == null) {
+        if (!hasRestPattern) {
             // No rest pattern - array must have exactly the right number of elements
-            if (arrayElements.size != minLength) {
+            if (arraySize != numElementPatterns) {
                 return false
             }
         } else {
             // Rest pattern present - array must have at least the required elements
-            if (arrayElements.size < minLength) {
+            if (arraySize < numElementPatterns) {
                 return false
             }
         }
 
         // Match each element pattern
-        for (i in elementPatterns.indices) {
+        var i = 0
+        while (i < numElementPatterns) {
             val elementValue = arrayElements[i]
             val elementPattern = elementPatterns[i]
 
@@ -531,23 +622,45 @@ class ArrayPatternNode(
             if (!matched) {
                 return false
             }
+            i++
         }
 
         // Bind rest pattern if present (anonymous rest patterns have null name)
         if (restPatternName != null && restSlot != null) {
-            val restElements = arrayElements.drop(elementPatterns.size)
-            // Create the same type of collection as the input
-            val restValue = when (value) {
-                is MezzeArrayList -> MezzeArrayList(restElements)
-                is MezzeList -> MezzeList.fromKotlinList(restElements)
-                else -> MezzeList.fromKotlinList(restElements)  // Fallback
-            }
+            val restValue = extractRestElements(value, arrayElements)
             frame.setObject(restSlot, restValue)
         }
         // For anonymous rest patterns ([x, ...]), we still check length compatibility
         // but don't bind the rest elements
 
         return true
+    }
+
+    /**
+     * Extract array elements from the value.
+     * Marked @TruffleBoundary because toList()/toKotlinList() may trigger collection operations.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun extractArrayElements(value: MezzeValue): Array<MezzeValue>? {
+        return when (value) {
+            is MezzeArrayList -> value.toList().toTypedArray()
+            is MezzeList -> value.toKotlinList().toTypedArray()
+            else -> null
+        }
+    }
+
+    /**
+     * Extract rest elements and create the appropriate collection type.
+     * Marked @TruffleBoundary because it uses drop() and collection creation.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun extractRestElements(originalValue: MezzeValue, arrayElements: Array<MezzeValue>): MezzeValue {
+        val restElements = arrayElements.drop(numElementPatterns)
+        return when (originalValue) {
+            is MezzeArrayList -> MezzeArrayList(restElements)
+            is MezzeList -> MezzeList.fromKotlinList(restElements)
+            else -> MezzeList.fromKotlinList(restElements)  // Fallback
+        }
     }
 }
 
@@ -557,11 +670,14 @@ class ArrayPatternNode(
  * - "hello $(name)" -> matches "hello world", binds name = "world"
  * - "$(a)-$(b)" -> matches "foo-bar", binds a = "foo", b = "bar"
  * - "prefix-$(middle)-suffix" -> matches "prefix-value-suffix", binds middle = "value"
+ *
+ * NOTE: String matching is performed in @TruffleBoundary methods to avoid JIT blockers
+ * from Map operations and collection manipulation.
  */
 @NodeInfo(shortName = "string-interpolation-pattern")
 class StringInterpolationPatternNode(
-    private val parts: List<StringPatternPart>,
-    private val variableSlots: Map<String, Int>  // Pre-allocated slots for capture variables
+    parts: List<StringPatternPart>,
+    variableSlots: Map<String, Int>  // Pre-allocated slots for capture variables
 ) : PatternNode() {
 
     /**
@@ -570,6 +686,27 @@ class StringInterpolationPatternNode(
     sealed interface StringPatternPart {
         data class Literal(val value: String) : StringPatternPart
         data class Capture(val variableName: String) : StringPatternPart
+    }
+
+    // Convert to arrays for JIT optimization
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal(dimensions = 1)
+    private val partsArray: Array<StringPatternPart> = parts.toTypedArray()
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal(dimensions = 1)
+    private val captureVarNames: Array<String>
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal(dimensions = 1)
+    private val captureSlotIndices: IntArray
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private val numCaptures: Int
+
+    init {
+        // Pre-compute capture variable names and slots
+        val captures = parts.filterIsInstance<StringPatternPart.Capture>()
+        captureVarNames = captures.map { it.variableName }.toTypedArray()
+        captureSlotIndices = captures.map { variableSlots[it.variableName] ?: -1 }.toIntArray()
+        numCaptures = captures.size
     }
 
     override fun matchesInt(frame: VirtualFrame, value: MezzeInt): Boolean = false
@@ -584,23 +721,42 @@ class StringInterpolationPatternNode(
     }
 
     override fun matchesString(frame: VirtualFrame, value: MezzeString): Boolean {
-        val inputString = value.value
+        // Perform matching in boundary method
+        val captureValues = performMatching(value.value) ?: return false
+
+        // Bind captured values to frame slots
+        var i = 0
+        while (i < numCaptures) {
+            val slot = captureSlotIndices[i]
+            if (slot >= 0 && i < captureValues.size) {
+                frame.setObject(slot, MezzeString(captureValues[i]))
+            }
+            i++
+        }
+
+        return true
+    }
+
+    /**
+     * Perform the actual string matching.
+     * Returns an array of captured values in order, or null if no match.
+     * Marked @TruffleBoundary because it uses Map operations and string manipulation.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun performMatching(inputString: String): Array<String>? {
         val captureValues = mutableMapOf<String, String>()
 
         // Try to match the string against the pattern
         val matched = matchPattern(inputString, 0, 0, captureValues)
 
         if (!matched) {
-            return false
+            return null
         }
 
-        // Bind all captured values to their variable slots
-        for ((varName, capturedValue) in captureValues) {
-            val slot = variableSlots[varName] ?: return false
-            frame.setObject(slot, MezzeString(capturedValue))
+        // Build result array in capture order
+        return Array(numCaptures) { i ->
+            captureValues[captureVarNames[i]] ?: ""
         }
-
-        return true
     }
 
     /**
@@ -619,11 +775,11 @@ class StringInterpolationPatternNode(
         captures: MutableMap<String, String>
     ): Boolean {
         // If we've processed all parts, we should be at the end of the input
-        if (partIndex >= parts.size) {
+        if (partIndex >= partsArray.size) {
             return inputPos == input.length
         }
 
-        val part = parts[partIndex]
+        val part = partsArray[partIndex]
 
         when (part) {
             is StringPatternPart.Literal -> {
@@ -642,7 +798,7 @@ class StringInterpolationPatternNode(
             is StringPatternPart.Capture -> {
                 // Capture matches a portion of the string
                 // We need to find where the next literal starts (if any)
-                val nextPart = parts.getOrNull(partIndex + 1)
+                val nextPart = if (partIndex + 1 < partsArray.size) partsArray[partIndex + 1] else null
 
                 when (nextPart) {
                     null -> {

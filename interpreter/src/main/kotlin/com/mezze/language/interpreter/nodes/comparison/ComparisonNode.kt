@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.nodes.comparison
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.NodeInfo
 import com.oracle.truffle.api.profiles.ConditionProfile
@@ -192,6 +193,15 @@ abstract class BinaryComparisonNode(
 
     // Complex types (Bytes, Variants, Collections) - fallback path
     protected abstract fun executeComplex(left: MezzeValue, right: MezzeValue): MezzeBool
+
+    /**
+     * Throw comparison error for incompatible types.
+     * Marked as TruffleBoundary to keep string interpolation out of JIT path.
+     */
+    @TruffleBoundary
+    protected fun throwCannotCompare(left: MezzeValue, right: MezzeValue): Nothing {
+        throw IllegalArgumentException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+    }
 }
 
 /**
@@ -327,7 +337,7 @@ class LessThanNode(leftNode: MezzeNode, rightNode: MezzeNode) : BinaryComparison
                 MezzeBool(compareArrays(left, right) < 0)
             left is MezzeList && right is MezzeList ->
                 MezzeBool(compareLists(left, right) < 0)
-            else -> throw IllegalArgumentException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+            else -> throwCannotCompare(left, right)
         }
     }
 }
@@ -371,7 +381,7 @@ class GreaterThanNode(leftNode: MezzeNode, rightNode: MezzeNode) : BinaryCompari
                 MezzeBool(compareArrays(left, right) > 0)
             left is MezzeList && right is MezzeList ->
                 MezzeBool(compareLists(left, right) > 0)
-            else -> throw IllegalArgumentException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+            else -> throwCannotCompare(left, right)
         }
     }
 }
@@ -413,7 +423,7 @@ class LessEqualNode(leftNode: MezzeNode, rightNode: MezzeNode) : BinaryCompariso
                 MezzeBool(compareArrays(left, right) <= 0)
             left is MezzeList && right is MezzeList ->
                 MezzeBool(compareLists(left, right) <= 0)
-            else -> throw IllegalArgumentException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+            else -> throwCannotCompare(left, right)
         }
     }
 }
@@ -455,7 +465,7 @@ class GreaterEqualNode(leftNode: MezzeNode, rightNode: MezzeNode) : BinaryCompar
                 MezzeBool(compareArrays(left, right) >= 0)
             left is MezzeList && right is MezzeList ->
                 MezzeBool(compareLists(left, right) >= 0)
-            else -> throw IllegalArgumentException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+            else -> throwCannotCompare(left, right)
         }
     }
 }
@@ -553,6 +563,15 @@ private fun compareValues(left: MezzeValue, right: MezzeValue): Int {
         left is MezzeVariant && right is MezzeVariant -> compareVariants(left, right)
         left is MezzeArrayList && right is MezzeArrayList -> compareArrays(left, right)
         left is MezzeList && right is MezzeList -> compareLists(left, right)
-        else -> throw IllegalArgumentException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
+        else -> throwCompareError(left, right)
     }
+}
+
+/**
+ * Throws a comparison error for incompatible types.
+ * Top-level boundary function for use in private helper functions.
+ */
+@TruffleBoundary
+private fun throwCompareError(left: MezzeValue, right: MezzeValue): Nothing {
+    throw IllegalArgumentException("Cannot compare ${left::class.simpleName} and ${right::class.simpleName}")
 }

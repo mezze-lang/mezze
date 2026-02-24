@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib.concurrent
 
 import com.mezze.language.interpreter.*
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import java.util.concurrent.locks.ReentrantLock
 
 /**
@@ -126,7 +127,9 @@ object MutexImplementations {
 
     /**
      * Helper to call a Mezze function with no arguments.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunction(f: MezzeValue): MezzeValue {
         val emptyArgs = MezzeRecord(emptyMap())
         return when (f) {
@@ -152,7 +155,7 @@ object MutexImplementations {
 data class MezzeMutex(
     val lock: ReentrantLock
 ) : MezzeValue() {
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         val state = if (lock.isLocked) "locked" else "unlocked"
         val holdCount = lock.holdCount
         return "<mutex:$state" + (if (holdCount > 1) ":hold=$holdCount" else "") + ">"

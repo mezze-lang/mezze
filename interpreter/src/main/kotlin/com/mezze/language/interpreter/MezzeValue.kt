@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter
 
 import com.oracle.truffle.api.CallTarget
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.interop.InteropLibrary
 import com.oracle.truffle.api.interop.TruffleObject
 import com.oracle.truffle.api.library.ExportLibrary
@@ -13,22 +14,34 @@ import com.mezze.language.ast.Expression
  */
 @ExportLibrary(InteropLibrary::class)
 abstract class MezzeValue : TruffleObject {
-    
+
     /**
-     * Get a string representation of this value for debugging
+     * Get a string representation of this value for debugging.
+     * Subclasses override this to provide their display string.
+     * Note: These should not be JIT-compiled, so they're wrapped by the
+     * @TruffleBoundary methods below.
      */
-    abstract fun getDisplayString(): String
-    
+    protected abstract fun computeDisplayString(): String
+
+    /**
+     * Get a string representation of this value for debugging.
+     * Marked as TruffleBoundary to avoid JIT compilation issues with complex string operations.
+     */
+    @TruffleBoundary
+    fun getDisplayString(): String = computeDisplayString()
+
     @ExportMessage
-    fun toDisplayString(allowSideEffects: Boolean): String = getDisplayString()
-    
+    @TruffleBoundary
+    fun toDisplayString(allowSideEffects: Boolean): String = computeDisplayString()
+
     @ExportMessage
     open fun hasLanguage(): Boolean = true
-    
+
     @ExportMessage
     open fun getLanguage(): Class<out com.oracle.truffle.api.TruffleLanguage<*>> = MezzeLanguage::class.java
-    
-    override fun toString(): String = getDisplayString()
+
+    @TruffleBoundary
+    override fun toString(): String = computeDisplayString()
 }
 
 /**
@@ -36,7 +49,7 @@ abstract class MezzeValue : TruffleObject {
  */
 @ExportLibrary(InteropLibrary::class)
 object MezzeNull : MezzeValue() {
-    override fun getDisplayString(): String = "null"
+    override fun computeDisplayString(): String = "null"
     
     @ExportMessage
     fun isNull(): Boolean = true
@@ -47,18 +60,19 @@ object MezzeNull : MezzeValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class MezzeMemberKeysArray(val keys: List<String>) : MezzeValue() {
-    override fun getDisplayString(): String = keys.toString()
-    
+    override fun computeDisplayString(): String = keys.toString()
+
     @ExportMessage
     fun hasArrayElements(): Boolean = true
-    
+
     @ExportMessage
     fun getArraySize(): Long = keys.size.toLong()
-    
+
     @ExportMessage
     fun isArrayElementReadable(index: Long): Boolean = index >= 0 && index < keys.size
-    
+
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readArrayElement(index: Long): String {
         if (index < 0 || index >= keys.size) {
             throw MezzeException("Array index out of bounds: $index")
@@ -72,7 +86,7 @@ data class MezzeMemberKeysArray(val keys: List<String>) : MezzeValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class MezzeInt(val value: Long) : MezzeValue() {
-    override fun getDisplayString(): String = value.toString()
+    override fun computeDisplayString(): String = value.toString()
     
     @ExportMessage
     fun isNumber(): Boolean = true
@@ -115,8 +129,9 @@ data class MezzeInt(val value: Long) : MezzeValue() {
     
     @ExportMessage
     fun fitsInBigInteger(): Boolean = true
-    
+
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun asBigInteger(): java.math.BigInteger = java.math.BigInteger.valueOf(value)
 }
 
@@ -125,7 +140,7 @@ data class MezzeInt(val value: Long) : MezzeValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class MezzeFloat(val value: Double) : MezzeValue() {
-    override fun getDisplayString(): String = value.toString()
+    override fun computeDisplayString(): String = value.toString()
     
     @ExportMessage
     fun isNumber(): Boolean = true
@@ -156,9 +171,10 @@ data class MezzeFloat(val value: Double) : MezzeValue() {
     
     @ExportMessage
     fun fitsInBigInteger(): Boolean = false
-    
+
     @ExportMessage
     @Throws(com.oracle.truffle.api.interop.UnsupportedMessageException::class)
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun asBigInteger(): java.math.BigInteger {
         throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
     }
@@ -195,7 +211,7 @@ data class MezzeFloat(val value: Double) : MezzeValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class MezzeString(val value: String) : MezzeValue() {
-    override fun getDisplayString(): String = "\"$value\""
+    override fun computeDisplayString(): String = "\"$value\""
 
     @ExportMessage
     fun isString(): Boolean = true
@@ -209,7 +225,7 @@ data class MezzeString(val value: String) : MezzeValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class MezzeChar(val value: Char) : MezzeValue() {
-    override fun getDisplayString(): String = "'$value'"
+    override fun computeDisplayString(): String = "'$value'"
 
     @ExportMessage
     fun isString(): Boolean = true
@@ -260,6 +276,7 @@ data class MezzeChar(val value: Char) : MezzeValue() {
     fun fitsInBigInteger(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun asBigInteger(): java.math.BigInteger = java.math.BigInteger.valueOf(value.code.toLong())
 }
 
@@ -268,7 +285,7 @@ data class MezzeChar(val value: Char) : MezzeValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class MezzeBool(val value: Boolean) : MezzeValue() {
-    override fun getDisplayString(): String = value.toString()
+    override fun computeDisplayString(): String = value.toString()
 
     @ExportMessage
     fun isBoolean(): Boolean = true
@@ -280,75 +297,200 @@ data class MezzeBool(val value: Boolean) : MezzeValue() {
 /**
  * Record value (similar to objects/structs)
  */
+/**
+ * Record value with both map-based and array-based field access.
+ *
+ * ARCHITECTURE:
+ * - `shape`: RecordShape that maps field names to indices (shared across records with same fields)
+ * - `values`: Array of field values in shape order (for O(1) indexed access)
+ * - `fields`: Lazy map view for compatibility with existing code (behind @TruffleBoundary)
+ *
+ * JIT-FRIENDLY ACCESS:
+ * - Use `getByIndex(index)` in hot paths (Truffle nodes)
+ * - Pre-compute indices at parse time using `shape.getIndex(fieldName)`
+ *
+ * COMPATIBILITY ACCESS:
+ * - Use `fields[fieldName]` in slow paths (native functions, @TruffleBoundary methods)
+ * - This triggers map creation on first access
+ *
+ * This design enables Truffle JIT compilation while maintaining backward compatibility.
+ */
 @ExportLibrary(InteropLibrary::class)
-data class MezzeRecord(val fields: Map<String, MezzeValue>) : MezzeValue() {
-    override fun getDisplayString(): String {
-        val fieldStrings = fields.map { (key, value) -> "$key = ${value.getDisplayString()}" }
+class MezzeRecord private constructor(
+    val shape: RecordShape,
+    private val values: Array<MezzeValue>
+) : MezzeValue() {
+
+    /**
+     * Map view of fields for backward compatibility.
+     * ALWAYS accessed via @TruffleBoundary methods to avoid JIT blockers.
+     *
+     * NOTE: This is NOT a lazy delegate because Kotlin's lazy uses SynchronizedLazyImpl
+     * which triggers blocklisted methods (ConcurrentHashMap operations) in the JIT path.
+     * Instead, we eagerly build the map but ensure it's only accessed via @TruffleBoundary.
+     */
+    val fields: Map<String, MezzeValue>
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+        get() = buildFieldsMap()
+
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun buildFieldsMap(): Map<String, MezzeValue> {
+        val map = LinkedHashMap<String, MezzeValue>(shape.size)
+        for (i in 0 until shape.size) {
+            map[shape.fieldNamesArray[i]] = values[i]
+        }
+        return map
+    }
+
+    /**
+     * JIT-friendly field access by pre-computed index.
+     * Use this in Truffle nodes for hot path access.
+     */
+    fun getByIndex(index: Int): MezzeValue {
+        return values[index]
+    }
+
+    /**
+     * Get field count.
+     */
+    fun size(): Int = shape.size
+
+    /**
+     * Check if record has a field by name.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    fun hasField(name: String): Boolean = shape.hasField(name)
+
+    override fun computeDisplayString(): String {
+        return computeDisplayStringBoundary()
+    }
+
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun computeDisplayStringBoundary(): String {
+        val fieldStrings = (0 until shape.size).map { i ->
+            "${shape.fieldNamesArray[i]} = ${values[i].getDisplayString()}"
+        }
         return "{ ${fieldStrings.joinToString(", ")} }"
     }
-    
+
     @ExportMessage
     fun hasMembers(): Boolean = true
-    
+
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
-        return MezzeMemberKeysArray(fields.keys.toList())
+        return MezzeMemberKeysArray(shape.fieldNamesArray.toList())
     }
-    
+
     @ExportMessage
-    fun isMemberReadable(member: String): Boolean = fields.containsKey(member)
-    
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    fun isMemberReadable(member: String): Boolean = shape.hasField(member)
+
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): MezzeValue {
-        return fields[member] ?: throw MezzeException("Field '$member' not found in record")
+        val index = shape.getIndex(member)
+        if (index < 0) throw MezzeException("Field '$member' not found in record")
+        return values[index]
     }
-    
+
     @ExportMessage
     fun isMemberModifiable(member: String): Boolean = true
-    
+
     @ExportMessage
-    fun isMemberInsertable(member: String): Boolean = !fields.containsKey(member)
-    
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    fun isMemberInsertable(member: String): Boolean = !shape.hasField(member)
+
     @ExportMessage
     fun writeMember(member: String, value: Any?): Unit {
-        // For immutable records, we don't support direct mutation
-        // This would need to be handled at a higher level
         throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
     }
-    
-    // Array-like access for better interop
+
     @ExportMessage
     fun hasArrayElements(): Boolean = true
-    
+
     @ExportMessage
-    fun getArraySize(): Long = fields.size.toLong()
-    
+    fun getArraySize(): Long = shape.size.toLong()
+
     @ExportMessage
     fun isArrayElementReadable(index: Long): Boolean {
-        return index >= 0 && index < fields.size
+        return index >= 0 && index < shape.size
     }
-    
+
     @ExportMessage
     fun readArrayElement(index: Long): Any {
-        if (index < 0 || index >= fields.size) {
+        if (index < 0 || index >= shape.size) {
             throw com.oracle.truffle.api.interop.InvalidArrayIndexException.create(index)
         }
-        val key = fields.keys.elementAt(index.toInt())
-        return fields[key]!!
+        return values[index.toInt()]
     }
-    
+
     /**
-     * Read a member field (non-interop version)
+     * Read a member field (non-interop version).
+     * Uses @TruffleBoundary for map access.
      */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readField(member: String): MezzeValue {
-        return fields[member] ?: throw MezzeException("Field '$member' not found in record")
+        val index = shape.getIndex(member)
+        if (index < 0) throw MezzeException("Field '$member' not found in record")
+        return values[index]
     }
-    
+
     /**
-     * Create a new record with updated fields
+     * Create a new record with updated fields.
      */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun withUpdates(updates: Map<String, MezzeValue>): MezzeRecord {
         return MezzeRecord(fields + updates)
+    }
+
+    // Data class-like equals/hashCode for semantic equality
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MezzeRecord) return false
+        if (shape.size != other.shape.size) return false
+        // Compare fields via map for correct semantics
+        return fields == other.fields
+    }
+
+    override fun hashCode(): Int {
+        return fields.hashCode()
+    }
+
+    override fun toString(): String = "MezzeRecord(${fields})"
+
+    companion object {
+        /**
+         * Create a record from a map (primary constructor for compatibility).
+         * This is the most common way records are created in the codebase.
+         */
+        @JvmStatic
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+        operator fun invoke(fields: Map<String, MezzeValue>): MezzeRecord {
+            if (fields.isEmpty()) {
+                return MezzeRecord(RecordShape.EMPTY, emptyArray())
+            }
+            val shape = RecordShape.fromMap(fields)
+            val values = Array(shape.size) { i ->
+                fields[shape.fieldNamesArray[i]] ?: MezzeNull
+            }
+            return MezzeRecord(shape, values)
+        }
+
+        /**
+         * Create a record from shape and values array (fast path for known shapes).
+         * Use this when you know the shape at compile time.
+         */
+        @JvmStatic
+        fun fromShapeAndValues(shape: RecordShape, values: Array<MezzeValue>): MezzeRecord {
+            return MezzeRecord(shape, values)
+        }
+
+        /**
+         * Create an empty record.
+         */
+        @JvmStatic
+        val EMPTY: MezzeRecord = MezzeRecord(RecordShape.EMPTY, emptyArray())
     }
 }
 
@@ -357,7 +499,7 @@ data class MezzeRecord(val fields: Map<String, MezzeValue>) : MezzeValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class MezzeVariant(val constructor: String, val value: MezzeValue?) : MezzeValue() {
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         return if (value != null) {
             // Use braces for record values, parentheses for other values
             if (value is MezzeRecord) {
@@ -369,22 +511,25 @@ data class MezzeVariant(val constructor: String, val value: MezzeValue?) : Mezze
             constructor
         }
     }
-    
+
     @ExportMessage
     fun hasMembers(): Boolean = true
-    
+
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
         val memberList = if (value != null) listOf("constructor", "value") else listOf("constructor")
         return memberList
     }
-    
+
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean {
         return member == "constructor" || (member == "value" && value != null)
     }
-    
+
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): Any {
         return when (member) {
             "constructor" -> MezzeString(constructor)
@@ -456,7 +601,7 @@ object MezzeNil : MezzeList() {
     override fun length(): Int = 0
     override fun headOrNull(): MezzeValue? = null
     override fun tailOrNull(): MezzeList? = null
-    override fun getDisplayString(): String = "Nil"
+    override fun computeDisplayString(): String = "Nil"
 
     @ExportMessage
     fun hasArrayElements(): Boolean = true
@@ -468,6 +613,7 @@ object MezzeNil : MezzeList() {
     fun isArrayElementReadable(index: Long): Boolean = false
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readArrayElement(index: Long): MezzeValue {
         throw MezzeException("List index out of bounds: $index (list is empty)")
     }
@@ -476,16 +622,19 @@ object MezzeNil : MezzeList() {
     fun hasMembers(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
         return MezzeMemberKeysArray(listOf("length", "isEmpty"))
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean {
-        return member in setOf("length", "isEmpty")
+        return member == "length" || member == "isEmpty"
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): Any {
         return when (member) {
             "length" -> MezzeInt(0)
@@ -517,7 +666,7 @@ data class MezzeCons(
         return cachedLength
     }
 
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         val elements = toKotlinList()
         return "Cons [${elements.joinToString(", ") { it.getDisplayString() }}]"
     }
@@ -532,6 +681,7 @@ data class MezzeCons(
     fun isArrayElementReadable(index: Long): Boolean = index >= 0 && index < length()
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readArrayElement(index: Long): MezzeValue {
         if (index < 0) {
             throw MezzeException("List index out of bounds: $index")
@@ -550,16 +700,19 @@ data class MezzeCons(
     fun hasMembers(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
         return MezzeMemberKeysArray(listOf("length", "head", "tail", "isEmpty"))
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean {
-        return member in setOf("length", "head", "tail", "isEmpty")
+        return member == "length" || member == "head" || member == "tail" || member == "isEmpty"
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): Any {
         return when (member) {
             "length" -> MezzeInt(length().toLong())
@@ -580,7 +733,7 @@ data class MezzeNonEmptyList(val elements: List<MezzeValue>) : MezzeValue() {
         require(elements.isNotEmpty()) { "NonEmptyList must have at least one element" }
     }
 
-    override fun getDisplayString(): String = "NonEmptyList (${elements.joinToString(", ") { it.getDisplayString() }})"
+    override fun computeDisplayString(): String = "NonEmptyList (${elements.joinToString(", ") { it.getDisplayString() }})"
 
     @ExportMessage
     fun hasArrayElements(): Boolean = true
@@ -592,6 +745,7 @@ data class MezzeNonEmptyList(val elements: List<MezzeValue>) : MezzeValue() {
     fun isArrayElementReadable(index: Long): Boolean = index >= 0 && index < elements.size
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readArrayElement(index: Long): MezzeValue {
         if (index < 0 || index >= elements.size) {
             throw MezzeException("NonEmptyList index out of bounds: $index")
@@ -603,16 +757,19 @@ data class MezzeNonEmptyList(val elements: List<MezzeValue>) : MezzeValue() {
     fun hasMembers(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
         return MezzeMemberKeysArray(listOf("length", "head", "tail", "last"))
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean {
-        return member in listOf("length", "head", "tail", "last")
+        return member == "length" || member == "head" || member == "tail" || member == "last"
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): MezzeValue {
         return when (member) {
             "length" -> MezzeInt(elements.size.toLong())
@@ -660,7 +817,7 @@ data class MezzeMap(val entries: io.vavr.collection.HashMap<MezzeValue, MezzeVal
 
     fun toKotlinMap(): Map<MezzeValue, MezzeValue> = entries.toJavaMap()
 
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         val entriesStr = entries.toJavaMap().entries.joinToString(", ") { (k, v) ->
             "${k.getDisplayString()} = ${v.getDisplayString()}"
         }
@@ -671,16 +828,19 @@ data class MezzeMap(val entries: io.vavr.collection.HashMap<MezzeValue, MezzeVal
     fun hasMembers(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
         return MezzeMemberKeysArray(listOf("size", "keys", "values", "isEmpty"))
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean {
-        return member in setOf("size", "keys", "values", "isEmpty")
+        return member == "size" || member == "keys" || member == "values" || member == "isEmpty"
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): Any {
         return when (member) {
             "size" -> MezzeInt(entries.size().toLong())
@@ -746,22 +906,25 @@ data class MezzeSet(val elements: io.vavr.collection.HashSet<MezzeValue>) : Mezz
 
     fun toList(): List<MezzeValue> = elements.toJavaList()
 
-    override fun getDisplayString(): String = "{${elements.toJavaList().joinToString(", ") { it.getDisplayString() }}}"
+    override fun computeDisplayString(): String = "{${elements.toJavaList().joinToString(", ") { it.getDisplayString() }}}"
 
     @ExportMessage
     fun hasMembers(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
         return MezzeMemberKeysArray(listOf("size", "isEmpty"))
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean {
-        return member in setOf("size", "isEmpty")
+        return member == "size" || member == "isEmpty"
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): Any {
         return when (member) {
             "size" -> MezzeInt(elements.size().toLong())
@@ -823,7 +986,7 @@ data class MezzeSortedMap(val entries: io.vavr.collection.TreeMap<MezzeValue, Me
 
     fun toKotlinMap(): Map<MezzeValue, MezzeValue> = entries.toJavaMap()
 
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         val entriesStr = entries.toJavaMap().entries.joinToString(", ") { (k, v) ->
             "${k.getDisplayString()} = ${v.getDisplayString()}"
         }
@@ -834,16 +997,19 @@ data class MezzeSortedMap(val entries: io.vavr.collection.TreeMap<MezzeValue, Me
     fun hasMembers(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
         return MezzeMemberKeysArray(listOf("size", "keys", "values", "isEmpty"))
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean {
-        return member in setOf("size", "keys", "values", "isEmpty")
+        return member == "size" || member == "keys" || member == "values" || member == "isEmpty"
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): Any {
         return when (member) {
             "size" -> MezzeInt(entries.size().toLong())
@@ -917,22 +1083,25 @@ data class MezzeSortedSet(val elements: io.vavr.collection.TreeSet<MezzeValue>) 
 
     fun toList(): List<MezzeValue> = elements.toJavaList()
 
-    override fun getDisplayString(): String = "SortedSet {${elements.toJavaList().joinToString(", ") { it.getDisplayString() }}}"
+    override fun computeDisplayString(): String = "SortedSet {${elements.toJavaList().joinToString(", ") { it.getDisplayString() }}}"
 
     @ExportMessage
     fun hasMembers(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
         return MezzeMemberKeysArray(listOf("size", "isEmpty"))
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean {
-        return member in setOf("size", "isEmpty")
+        return member == "size" || member == "isEmpty"
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): Any {
         return when (member) {
             "size" -> MezzeInt(elements.size().toLong())
@@ -1047,7 +1216,9 @@ data class MezzeDeque(
     val back: List<MezzeValue>
 ) : MezzeValue() {
 
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun size(): Int = front.size + back.size
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isEmpty(): Boolean = front.isEmpty() && back.isEmpty()
 
     /**
@@ -1124,7 +1295,7 @@ data class MezzeDeque(
 
     fun toList(): List<MezzeValue> = front + back.reversed()
 
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         val elements = toList()
         return "Deque(${elements.joinToString(", ") { it.getDisplayString() }})"
     }
@@ -1133,16 +1304,19 @@ data class MezzeDeque(
     fun hasMembers(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any {
         return MezzeMemberKeysArray(listOf("length", "isEmpty"))
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean {
-        return member in setOf("length", "isEmpty")
+        return member == "length" || member == "isEmpty"
     }
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): Any {
         return when (member) {
             "length" -> MezzeInt(size().toLong())
@@ -1296,7 +1470,7 @@ data class MezzeBytes(
         return MezzeInt((bytes[index.toInt()].toInt() and 0xFF).toLong())
     }
 
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         val preview = if (bytes.size <= 20) {
             bytes.joinToString("") {
                 val c = it.toInt() and 0xFF
@@ -1377,20 +1551,23 @@ class MezzeByteBuffer(
         return this
     }
 
-    override fun getDisplayString(): String = "<ByteBuffer size=${stream.size()}>"
+    override fun computeDisplayString(): String = "<ByteBuffer size=${stream.size()}>"
 
     // Truffle interop - expose size as readable property
     @ExportMessage
     fun hasMembers(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getMembers(includeInternal: Boolean): Any =
         MezzeArrayList(listOf(MezzeString("size")))
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun isMemberReadable(member: String): Boolean = member == "size"
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun readMember(member: String): Any = when (member) {
         "size" -> MezzeInt(stream.size().toLong())
         else -> throw MezzeException("Unknown member: $member")
@@ -1403,21 +1580,26 @@ class MezzeByteBuffer(
 
 /**
  * Function value for Truffle-based execution with closure support
+ *
+ * NOTE: This is NOT a data class to avoid auto-generated hashCode/equals
+ * which would trigger JIT blockers when used with Maps containing MezzeValues.
+ * Uses identity-based hashCode/equals instead.
  */
 @ExportLibrary(InteropLibrary::class)
-data class MezzeTruffleFunction(
+class MezzeTruffleFunction(
     val callTarget: CallTarget,
     val name: String? = null,
     val closureVariables: Map<String, MezzeValue> = emptyMap(),
     val lexicalScope: com.oracle.truffle.api.frame.MaterializedFrame? = null,  // TRUFFLE BEST PRACTICE: Store lexical scope
     val lexicalScopeSlotMap: Map<String, Int> = emptyMap()  // Maps variable names to slot numbers in lexical scope frame
 ) : MezzeValue() {
-    override fun getDisplayString(): String = name ?: "<function>"
+    override fun computeDisplayString(): String = name ?: "<function>"
 
     @ExportMessage
     fun isExecutable(): Boolean = true
 
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun execute(arguments: Array<Any?>): Any {
         // CRITICAL: MezzeFunctionRootNode expects 4 arguments for lexical scope support:
         // [0] = MezzeRecord of parameters
@@ -1438,6 +1620,12 @@ data class MezzeTruffleFunction(
 
         return callTarget.call(argsRecord, closureVariables, lexicalScope, lexicalScopeSlotMap)
     }
+
+    // Identity-based hashCode to avoid JIT blockers from Map iteration
+    override fun hashCode(): Int = System.identityHashCode(this)
+
+    // Identity-based equals to avoid JIT blockers from Map comparison
+    override fun equals(other: Any?): Boolean = this === other
 
     override fun toString(): String = "MezzeTruffleFunction(${name ?: "anonymous"}, ${closureVariables.size} closure vars, lexicalScope=${lexicalScope != null})"
 }
@@ -1462,7 +1650,7 @@ data class MezzeNat(val value: Long) : MezzeValue() {
         }
     }
     
-    override fun getDisplayString(): String = value.toString()
+    override fun computeDisplayString(): String = value.toString()
     
     @ExportMessage
     fun isNumber(): Boolean = true
@@ -1505,8 +1693,9 @@ data class MezzeNat(val value: Long) : MezzeValue() {
     
     @ExportMessage
     fun fitsInBigInteger(): Boolean = true
-    
+
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun asBigInteger(): java.math.BigInteger = java.math.BigInteger.valueOf(value)
 }
 
@@ -1521,7 +1710,7 @@ data class MezzeFrac(val numerator: Long, val denominator: Long) : MezzeValue() 
         }
     }
     
-    override fun getDisplayString(): String = "$numerator/$denominator"
+    override fun computeDisplayString(): String = "$numerator/$denominator"
     
     @ExportMessage
     fun isNumber(): Boolean = true
@@ -1564,8 +1753,9 @@ data class MezzeFrac(val numerator: Long, val denominator: Long) : MezzeValue() 
     
     @ExportMessage
     fun fitsInBigInteger(): Boolean = true
-    
+
     @ExportMessage
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun asBigInteger(): java.math.BigInteger = java.math.BigInteger.valueOf(numerator).divide(java.math.BigInteger.valueOf(denominator))
     
     /**
@@ -1590,7 +1780,7 @@ data class MezzeFrac(val numerator: Long, val denominator: Long) : MezzeValue() 
  */
 @ExportLibrary(InteropLibrary::class)
 object MezzeUnit : MezzeValue() {
-    override fun getDisplayString(): String = "()"
+    override fun computeDisplayString(): String = "()"
     
     @ExportMessage
     fun isNull(): Boolean = false
@@ -1601,7 +1791,7 @@ object MezzeUnit : MezzeValue() {
  */
 @ExportLibrary(InteropLibrary::class)
 data class MezzeTuple(val elements: List<MezzeValue>) : MezzeValue() {
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         return "(${elements.joinToString(", ") { it.getDisplayString() }})"
     }
     
@@ -1634,12 +1824,13 @@ data class NativeMezzeFunction(
     val implementation: (List<MezzeValue>) -> MezzeValue
 ) : MezzeValue() {
 
-    override fun getDisplayString(): String = "<native-function:$name>"
+    override fun computeDisplayString(): String = "<native-function:$name>"
 
     @ExportMessage
     fun isExecutable(): Boolean = true
 
     @ExportMessage
+    @TruffleBoundary
     fun execute(arguments: Array<Any?>): Any {
         // Convert arguments to MezzeValues and call implementation
         val mezzeArgs = arguments.map { arg ->
@@ -1656,8 +1847,11 @@ data class NativeMezzeFunction(
     }
 
     /**
-     * Call function with MezzeValue arguments
+     * Call function with MezzeValue arguments.
+     * Marked as TruffleBoundary because native functions often perform operations
+     * that shouldn't be JIT compiled (string formatting, exception handling, etc.)
      */
+    @TruffleBoundary
     fun call(arguments: List<MezzeValue>): MezzeValue {
         return implementation(arguments)
     }
@@ -1690,7 +1884,7 @@ data class MezzeSuspended(
     val unhandledEffects: Set<String>,       // Effects that need handlers
     val capturedHandlers: Map<String, MezzeValue> = emptyMap()  // Handlers already applied
 ) : MezzeValue() {
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         val effectList = unhandledEffects.sorted().joinToString(", ")
         return "<suspended <$effectList>>"
     }
@@ -1717,11 +1911,26 @@ data class MezzeSuspended(
     /**
      * Execute the suspended computation with handlers available in context.
      * This is called by perform when all handlers are available.
+     * Note: The frame parameter is unused but kept for API compatibility.
      */
     fun executeWith(
         handlers: Map<String, MezzeValue>,
         context: MezzeContext,
-        frame: com.oracle.truffle.api.frame.VirtualFrame
+        @Suppress("UNUSED_PARAMETER") frame: com.oracle.truffle.api.frame.VirtualFrame
+    ): MezzeValue {
+        // Delegate to boundary version since frame is not actually used
+        return executeWithBoundary(handlers, context)
+    }
+
+    /**
+     * Execute the suspended computation with handlers available in context.
+     * This version does not require VirtualFrame and is marked @TruffleBoundary
+     * because it performs Map/Set operations.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    fun executeWithBoundary(
+        handlers: Map<String, MezzeValue>,
+        context: MezzeContext
     ): MezzeValue {
         // Merge captured handlers with new handlers
         val allHandlers = capturedHandlers + handlers
@@ -1783,7 +1992,7 @@ data class MezzeThunk(
     val function: MezzeValue,
     val arguments: MezzeValue
 ) : MezzeValue() {
-    override fun getDisplayString(): String = "<thunk>"
+    override fun computeDisplayString(): String = "<thunk>"
 
     @ExportMessage
     fun isExecutable(): Boolean = false  // Not directly executable - must be unwrapped first
@@ -1808,7 +2017,7 @@ data class MezzeThunk(
 data class MezzeCont(
     val delimiterId: String  // Opaque delimiter ID
 ) : MezzeValue() {
-    override fun getDisplayString(): String = "<cont:$delimiterId>"
+    override fun computeDisplayString(): String = "<cont:$delimiterId>"
 
     @ExportMessage
     fun isExecutable(): Boolean = false
@@ -1832,7 +2041,7 @@ data class MezzeContinuation(
     val resumeFunction: MezzeValue,  // The function to call to resume the continuation
     val capturePoint: String  // For debugging - location where continuation was captured
 ) : MezzeValue() {
-    override fun getDisplayString(): String = "<continuation@$capturePoint>"
+    override fun computeDisplayString(): String = "<continuation@$capturePoint>"
 
     @ExportMessage
     fun isExecutable(): Boolean = true
@@ -1860,7 +2069,7 @@ data class MezzeContinuationSuspended(
     val continuation: MezzeContinuation,
     val suspendedValue: MezzeValue = MezzeNull  // Optional value at suspension point
 ) : MezzeValue() {
-    override fun getDisplayString(): String = "<suspended-continuation>"
+    override fun computeDisplayString(): String = "<suspended-continuation>"
 
     @ExportMessage
     fun isExecutable(): Boolean = false
@@ -1883,7 +2092,7 @@ data class MezzePromise(
     val future: java.util.concurrent.CompletableFuture<MezzeValue>,
     val promiseId: String = java.util.UUID.randomUUID().toString()
 ) : MezzeValue() {
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         return if (future.isDone) {
             try {
                 val value = future.get()
@@ -1951,7 +2160,7 @@ data class MezzeThread(
     val thread: Thread,
     val threadId: String = thread.toString()
 ) : MezzeValue() {
-    override fun getDisplayString(): String = "<thread:$threadId>"
+    override fun computeDisplayString(): String = "<thread:$threadId>"
 
     @ExportMessage
     fun isExecutable(): Boolean = false

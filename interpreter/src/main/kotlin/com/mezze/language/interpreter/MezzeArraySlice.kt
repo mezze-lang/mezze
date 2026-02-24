@@ -138,7 +138,7 @@ class MezzeArraySlice(
         throw com.oracle.truffle.api.interop.UnsupportedMessageException.create()
     }
 
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         val elementsStr = (startIndex until endIndex)
             .take(10)
             .map { backing.elements.get(it).getDisplayString() }

@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib.collections
 
 import com.mezze.language.interpreter.*
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 
 /**
  * Truffle-optimized implementations for ArrayList operations.
@@ -600,7 +601,9 @@ object TruffleArrayListImplementations {
 
     /**
      * Helper function to call a Mezze function
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunction(f: MezzeValue, argRecord: MezzeRecord, funcName: String): MezzeValue {
         return when (f) {
             is MezzeTruffleFunction -> {

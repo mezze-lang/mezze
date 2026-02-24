@@ -209,5 +209,5 @@ object CancellationTokenImplementations {
 data class MezzeCancellationToken(
     val token: CancellationToken
 ) : MezzeValue() {
-    override fun getDisplayString(): String = "<cancellation-token:${if (token.isCancelled()) "cancelled" else "active"}>"
+    override fun computeDisplayString(): String = "<cancellation-token:${if (token.isCancelled()) "cancelled" else "active"}>"
 }

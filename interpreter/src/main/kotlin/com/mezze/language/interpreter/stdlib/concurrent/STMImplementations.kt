@@ -671,5 +671,5 @@ object STMImplementations {
 data class MezzeTVar(
     val tvar: STMImplementations.TVar
 ) : MezzeValue() {
-    override fun getDisplayString(): String = "<tvar:${tvar.getId()}>"
+    override fun computeDisplayString(): String = "<tvar:${tvar.getId()}>"
 }

@@ -1,5 +1,7 @@
 package com.mezze.language.interpreter.nodes.function
 
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.Truffle
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.LoopNode
@@ -30,11 +32,22 @@ import com.mezze.language.interpreter.MezzeNull
  */
 @NodeInfo(shortName = "tail-call-loop")
 class TailCallLoopNode(
-    private val parameterNames: List<String>,
+    parameterNames: List<String>,
     @field:Child private var bodyNode: MezzeNode
 ) : MezzeNode() {
 
-    @field:Child private var loopNode: LoopNode? = null
+    // Pre-compute parameter names array and count for fast access
+    @CompilationFinal(dimensions = 1)
+    private val paramNamesArray: Array<String> = parameterNames.toTypedArray()
+
+    @CompilationFinal
+    private val paramCount: Int = parameterNames.size
+
+    /**
+     * LoopNode created at construction time per Truffle's compilation model.
+     * Nodes must be created at parse time, not during execution.
+     */
+    @field:Child private var loopNode: LoopNode = createLoopNodeAtConstruction()
 
     /**
      * Mutable state for the current iteration.
@@ -47,48 +60,67 @@ class TailCallLoopNode(
     override fun execute(frame: VirtualFrame): MezzeValue {
         // Initialize current arguments from the frame
         // Arguments were already bound by MezzeFunctionRootNode before calling body
-        currentArguments = extractArgumentsFromFrame(frame)
-
-        // Initialize loop node lazily
-        if (loopNode == null) {
-            loopNode = createLoopNode()
+        // Extract values in hot path, build record via boundary
+        val values = Array(paramCount) { i ->
+            frame.getObject(i) as? MezzeValue ?: MezzeNull
         }
+        currentArguments = buildRecordFromValues(values)
 
         // Execute the loop - this will run until a normal return or an exception
-        loopNode!!.execute(frame)
+        loopNode.execute(frame)
 
         // Return the result stored by the repeating node
         return result ?: MezzeNull
     }
 
-    private fun createLoopNode(): LoopNode {
+    /**
+     * Create the loop node at construction time.
+     * This is called from the field initializer to ensure nodes are created at parse time.
+     */
+    private fun createLoopNodeAtConstruction(): LoopNode {
         return Truffle.getRuntime().createLoopNode(TailCallRepeatingNode(this))
     }
 
     /**
-     * Extract current arguments from frame as a record.
-     * This is used when we need to capture the current state.
+     * Build a record from extracted values.
+     * Marked as @TruffleBoundary because Map operations trigger JIT blockers.
      */
-    private fun extractArgumentsFromFrame(frame: VirtualFrame): MezzeValue {
+    @TruffleBoundary
+    private fun buildRecordFromValues(values: Array<MezzeValue>): MezzeRecord {
         val fields = mutableMapOf<String, MezzeValue>()
-        for ((index, paramName) in parameterNames.withIndex()) {
-            val value = frame.getObject(index) as? MezzeValue ?: MezzeNull
-            fields[paramName] = value
+        for (i in 0 until paramCount) {
+            fields[paramNamesArray[i]] = values[i]
         }
         return MezzeRecord(fields)
     }
 
     /**
      * Rebind arguments in the frame for the next iteration.
+     * Must extract values via boundary, then write to frame in hot path.
      */
     fun rebindArguments(frame: VirtualFrame, arguments: MezzeValue) {
         if (arguments is MezzeRecord) {
-            for ((index, paramName) in parameterNames.withIndex()) {
-                val value = arguments.fields[paramName] ?: MezzeNull
-                frame.setObject(index, value)
+            // Extract values via boundary (Map operations)
+            val values = extractValuesFromRecord(arguments)
+            // Write to frame in hot path
+            var i = 0
+            while (i < paramCount) {
+                frame.setObject(i, values[i])
+                i++
             }
         }
         currentArguments = arguments
+    }
+
+    /**
+     * Extract values from record in parameter order.
+     * Marked as @TruffleBoundary because Map.get() triggers JIT blockers.
+     */
+    @TruffleBoundary
+    private fun extractValuesFromRecord(record: MezzeRecord): Array<MezzeValue> {
+        return Array(paramCount) { i ->
+            record.fields[paramNamesArray[i]] ?: MezzeNull
+        }
     }
 
     /**

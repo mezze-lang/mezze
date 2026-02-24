@@ -120,7 +120,7 @@ class MezzeArrayList(
     @ExportMessage
     fun isArrayElementInsertable(index: Long): Boolean = false  // Immutable
 
-    override fun getDisplayString(): String = "[${elements.toJavaList().joinToString(", ") { it.getDisplayString() }}]"
+    override fun computeDisplayString(): String = "[${elements.toJavaList().joinToString(", ") { it.getDisplayString() }}]"
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

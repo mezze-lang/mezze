@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib.effects
 
 import com.mezze.language.interpreter.*
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -50,9 +51,6 @@ object CoopImplementations {
         // Structured concurrency scopes
         registerScoped(context)
 
-        // Keep legacy functions for compatibility
-        registerWrapPromise(context)
-        registerUnwrapPromise(context)
     }
 
     /**
@@ -509,7 +507,7 @@ object CoopImplementations {
                         "error" to MezzeVariant("AsyncCancelled", MezzeRecord(emptyMap()))
                     )))
                 } catch (e: Exception) {
-                    val message = e.cause?.message ?: e.message ?: "Unknown error"
+                    val message = safeGetExceptionMessage(e)
                     MezzeVariant("Err", MezzeRecord(mapOf(
                         "error" to MezzeVariant("AsyncFailed", MezzeRecord(mapOf(
                             "msg" to MezzeString(message)
@@ -591,68 +589,16 @@ object CoopImplementations {
         }
     }
 
-    // =========================================================================
-    // Legacy functions (for compatibility)
-    // =========================================================================
+}
 
-    private fun registerWrapPromise(context: MutableMap<String, MezzeValue>) {
-        context["__native_coop_wrap_promise"] = NativeMezzeFunction("__native_coop_wrap_promise") { args ->
-            val record = args.firstOrNull() as? MezzeRecord
-                ?: throw NativeFunctionException("__native_coop_wrap_promise", "expects MezzeRecord")
-
-            val f = record.fields["f"]
-                ?: throw NativeFunctionException("__native_coop_wrap_promise", "expects 'f' field")
-
-            val wrapper = MezzeRecord(mapOf(
-                "tag" to MezzeString(COOP_PROMISE_TAG),
-                "f" to f
-            ))
-            val future = CompletableFuture.completedFuture<MezzeValue>(wrapper)
-            MezzePromise(future)
-        }
-    }
-
-    private fun registerUnwrapPromise(context: MutableMap<String, MezzeValue>) {
-        context["__native_coop_unwrap_promise"] = NativeMezzeFunction("__native_coop_unwrap_promise") { args ->
-            val record = args.firstOrNull() as? MezzeRecord
-                ?: throw NativeFunctionException("__native_coop_unwrap_promise", "expects MezzeRecord")
-
-            val promise = record.fields["p"]
-                ?: throw NativeFunctionException("__native_coop_unwrap_promise", "expects 'p' field")
-
-            when (promise) {
-                is MezzePromise -> {
-                    val wrapper = promise.future.get()
-                    when (wrapper) {
-                        is MezzeRecord -> {
-                            val tag = wrapper.fields["tag"]
-                            if (tag is MezzeString && tag.value == COOP_PROMISE_TAG) {
-                                val f = wrapper.fields["f"]
-                                    ?: throw NativeFunctionException(
-                                        "__native_coop_unwrap_promise",
-                                        "Coop promise missing 'f' field"
-                                    )
-                                MezzeRecord(mapOf("f" to f))
-                            } else {
-                                throw NativeFunctionException(
-                                    "__native_coop_unwrap_promise",
-                                    "expected Coop promise, got different tag"
-                                )
-                            }
-                        }
-                        else -> throw NativeFunctionException(
-                            "__native_coop_unwrap_promise",
-                            "expected Coop promise wrapper record"
-                        )
-                    }
-                }
-                else -> throw NativeFunctionException(
-                    "__native_coop_unwrap_promise",
-                    "p must be a MezzePromise, got: ${promise::class.simpleName}"
-                )
-            }
-        }
-    }
+/**
+ * Helper to safely extract exception messages without triggering JIT compilation issues.
+ * Some exception types (like UnsupportedSpecializationException) have getMessage() methods
+ * that are marked as neverPartOfCompilation.
+ */
+@TruffleBoundary
+fun safeGetExceptionMessage(e: Exception): String {
+    return e.cause?.message ?: e.message ?: "Unknown error"
 }
 
 /**
@@ -663,5 +609,5 @@ object CoopImplementations {
  * execute when awaited.
  */
 class CoopScope : MezzeValue() {
-    override fun getDisplayString(): String = "<coop-scope>"
+    override fun computeDisplayString(): String = "<coop-scope>"
 }

@@ -4,6 +4,7 @@ import com.mezze.language.interpreter.MezzeValue
 import com.mezze.language.interpreter.MezzeArrayList
 import com.mezze.language.interpreter.MezzeInt
 import com.mezze.language.interpreter.nodes.MezzeNode
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.NodeInfo
 
@@ -18,22 +19,32 @@ class ArrayAccessNode(
 
     @field:Child
     private var arrayChild: MezzeNode = arrayNode
-    
+
     @field:Child
     private var indexChild: MezzeNode = indexNode
 
     override fun execute(frame: VirtualFrame): MezzeValue {
         val arrayValue = arrayChild.execute(frame)
         val indexValue = indexChild.execute(frame)
-        
+
+        // Delegate validation and access to TruffleBoundary method
+        return performAccess(arrayValue, indexValue)
+    }
+
+    /**
+     * Validate and perform array access.
+     * Marked as @TruffleBoundary because exception creation uses String operations.
+     */
+    @TruffleBoundary
+    private fun performAccess(arrayValue: MezzeValue, indexValue: MezzeValue): MezzeValue {
         if (arrayValue !is MezzeArrayList) {
             throw RuntimeException("Cannot index into non-array type: ${arrayValue::class.simpleName}")
         }
-        
+
         if (indexValue !is MezzeInt) {
             throw RuntimeException("Array index must be an integer, got: ${indexValue::class.simpleName}")
         }
-        
+
         val indexInt = indexValue.value.toInt()
         if (indexInt < 0 || indexInt >= arrayValue.size()) {
             throw RuntimeException("Array index out of bounds: $indexInt (array size: ${arrayValue.size()})")

@@ -206,4 +206,9 @@ class BidirectionalAbilityInferenceTest {
             fail("No usage context should keep type polymorphic: ${e.message}")
         }
     }
+
+    // NOTE: Bidirectional inference from usage context (like 10 + val or val.name)
+    // does NOT currently work for Decode ability. Type annotation is required.
+    // TODO: Fix constraint solving to infer type from match pattern usage
+    // See: interpreter/.../codec/CodecAutoDerivationTest.kt lines 743-744
 }

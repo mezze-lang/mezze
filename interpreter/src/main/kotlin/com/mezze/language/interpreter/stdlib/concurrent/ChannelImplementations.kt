@@ -480,7 +480,7 @@ data class MezzeChannel(
     val queue: LinkedBlockingQueue<MezzeValue>,
     private val closed: AtomicBoolean = AtomicBoolean(false)
 ) : MezzeValue() {
-    override fun getDisplayString(): String = "<channel:${if (isClosed()) "closed" else "open"}:${queue.size}>"
+    override fun computeDisplayString(): String = "<channel:${if (isClosed()) "closed" else "open"}:${queue.size}>"
 
     fun isClosed(): Boolean = closed.get()
 

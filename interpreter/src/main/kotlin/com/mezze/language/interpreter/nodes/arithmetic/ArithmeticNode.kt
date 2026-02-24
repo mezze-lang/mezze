@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.nodes.arithmetic
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.NodeInfo
 import com.oracle.truffle.api.profiles.ConditionProfile
@@ -141,8 +142,18 @@ abstract class BinaryArithmeticNode(
                 executeNatNat(left as MezzeNat, right as MezzeNat)
             fracProfile.profile(left is MezzeFrac && right is MezzeFrac) ->
                 executeFracFrac(left as MezzeFrac, right as MezzeFrac)
-            else -> throw IllegalArgumentException("Cannot perform arithmetic on ${left::class.simpleName} and ${right::class.simpleName}")
+            else -> throwUnsupportedTypes(left, right)
         }
+    }
+
+    @TruffleBoundary
+    protected fun throwUnsupportedTypes(left: MezzeValue, right: MezzeValue): Nothing {
+        throw IllegalArgumentException("Cannot perform arithmetic on ${left::class.simpleName} and ${right::class.simpleName}")
+    }
+
+    @TruffleBoundary
+    protected fun throwOverflow(operation: String, left: Long, right: Long): Nothing {
+        throw ArithmeticException("Integer overflow in $operation: $left and $right")
     }
 
     // Type-specialized methods - subclasses override these
@@ -162,7 +173,7 @@ class AddNode(leftNode: MezzeNode, rightNode: MezzeNode) : BinaryArithmeticNode(
         try {
             return MezzeInt(Math.addExact(left.value, right.value))
         } catch (e: ArithmeticException) {
-            throw ArithmeticException("Integer overflow in addition: ${left.value} + ${right.value}")
+            throwOverflow("addition", left.value, right.value)
         }
     }
 
@@ -191,7 +202,7 @@ class SubtractNode(leftNode: MezzeNode, rightNode: MezzeNode) : BinaryArithmetic
         try {
             return MezzeInt(Math.subtractExact(left.value, right.value))
         } catch (e: ArithmeticException) {
-            throw ArithmeticException("Integer overflow in subtraction: ${left.value} - ${right.value}")
+            throwOverflow("subtraction", left.value, right.value)
         }
     }
 
@@ -221,7 +232,7 @@ class MultiplyNode(leftNode: MezzeNode, rightNode: MezzeNode) : BinaryArithmetic
         try {
             return MezzeInt(Math.multiplyExact(left.value, right.value))
         } catch (e: ArithmeticException) {
-            throw ArithmeticException("Integer overflow in multiplication: ${left.value} * ${right.value}")
+            throwOverflow("multiplication", left.value, right.value)
         }
     }
 

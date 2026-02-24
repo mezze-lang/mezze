@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib.concurrent
 
 import com.mezze.language.interpreter.*
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import java.util.concurrent.Semaphore
 
 /**
@@ -197,7 +198,9 @@ object SemaphoreImplementations {
 
     /**
      * Helper to call a Mezze function with no arguments.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunction(f: MezzeValue): MezzeValue {
         val emptyArgs = MezzeRecord(emptyMap())
         return when (f) {
@@ -223,7 +226,7 @@ object SemaphoreImplementations {
 data class MezzeSemaphore(
     val semaphore: Semaphore
 ) : MezzeValue() {
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         return "<semaphore:${semaphore.availablePermits()} available>"
     }
 }

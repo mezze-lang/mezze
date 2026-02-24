@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib.effects
 
 import com.mezze.language.interpreter.*
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -25,7 +26,6 @@ object OSThreadImplementations {
     }
 
     fun registerAll(context: MutableMap<String, MezzeValue>) {
-        registerSpawn(context)
         registerSpawnCfg(context)
         registerAwait(context)
         registerRace(context)
@@ -36,10 +36,7 @@ object OSThreadImplementations {
         registerIsDone(context)
         registerIsCancelled(context)
         registerCheck(context)
-        registerCurrentThread(context)
-        registerPark(context)
-        registerUnpark(context)
-        // New structured concurrency operations
+        // Structured concurrency operations
         registerJoin(context)
         registerJoin3(context)
         // New collection operations
@@ -53,62 +50,6 @@ object OSThreadImplementations {
         registerScoped(context)
         registerScopeSpawn(context)
         registerScopeCancelAll(context)
-    }
-
-    /**
-     * __native_os_spawn - Spawn a computation on an OS platform thread.
-     */
-    private fun registerSpawn(context: MutableMap<String, MezzeValue>) {
-        context["__native_os_spawn"] = NativeMezzeFunction("__native_os_spawn") { args ->
-            val record = args.firstOrNull() as? MezzeRecord
-                ?: throw NativeFunctionException("__native_os_spawn", "expects MezzeRecord")
-
-            val computation = record.fields["f"]
-                ?: throw NativeFunctionException("__native_os_spawn", "expects 'f' field")
-
-            when (computation) {
-                is MezzeTruffleFunction, is NativeMezzeFunction -> {
-                    val future = CompletableFuture<MezzeValue>()
-
-                    val env = TruffleContextHolder.getEnv()
-                        ?: throw NativeFunctionException("__native_os_spawn", "No Truffle environment available")
-
-                    // Use platform threads (not virtual)
-                    val thread = env.newTruffleThreadBuilder {
-                        try {
-                            val result = when (computation) {
-                                is MezzeTruffleFunction -> {
-                                    val emptyArgs = MezzeRecord(emptyMap())
-                                    computation.callTarget.call(
-                                        emptyArgs,
-                                        computation.closureVariables,
-                                        computation.lexicalScope,
-                                        computation.lexicalScopeSlotMap
-                                    ) as MezzeValue
-                                }
-                                is NativeMezzeFunction -> {
-                                    computation.call(emptyList())
-                                }
-                                else -> throw MezzeException("Unexpected function type")
-                            }
-                            future.complete(result)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            future.completeExceptionally(e)
-                        }
-                    }
-                        .virtual(false)  // Use OS platform threads
-                        .build()
-
-                    thread.start()
-                    MezzePromise(future)
-                }
-                else -> throw NativeFunctionException(
-                    "__native_os_spawn",
-                    "computation must be a function"
-                )
-            }
-        }
     }
 
     /**
@@ -344,49 +285,6 @@ object OSThreadImplementations {
                 throw InterruptedException("Computation was cancelled")
             }
             MezzeRecord(emptyMap())
-        }
-    }
-
-    /**
-     * __native_os_current_thread - Get a handle to the current thread.
-     */
-    private fun registerCurrentThread(context: MutableMap<String, MezzeValue>) {
-        context["__native_os_current_thread"] = NativeMezzeFunction("__native_os_current_thread") { args ->
-            MezzeThread(Thread.currentThread())
-        }
-    }
-
-    /**
-     * __native_os_park - Park (suspend) the current thread.
-     */
-    private fun registerPark(context: MutableMap<String, MezzeValue>) {
-        context["__native_os_park"] = NativeMezzeFunction("__native_os_park") { args ->
-            java.util.concurrent.locks.LockSupport.park()
-            MezzeRecord(emptyMap())
-        }
-    }
-
-    /**
-     * __native_os_unpark - Unpark (resume) a parked thread.
-     */
-    private fun registerUnpark(context: MutableMap<String, MezzeValue>) {
-        context["__native_os_unpark"] = NativeMezzeFunction("__native_os_unpark") { args ->
-            val record = args.firstOrNull() as? MezzeRecord
-                ?: throw NativeFunctionException("__native_os_unpark", "expects MezzeRecord")
-
-            val threadValue = record.fields["thread"]
-                ?: throw NativeFunctionException("__native_os_unpark", "expects 'thread' field")
-
-            when (threadValue) {
-                is MezzeThread -> {
-                    java.util.concurrent.locks.LockSupport.unpark(threadValue.thread)
-                    MezzeRecord(emptyMap())
-                }
-                else -> throw NativeFunctionException(
-                    "__native_os_unpark",
-                    "thread must be a MezzeThread, got: ${threadValue::class.simpleName}"
-                )
-            }
         }
     }
 
@@ -716,6 +614,7 @@ object OSThreadImplementations {
     // Helper Functions
     // =========================================================================
 
+    @TruffleBoundary
     private fun callFunction(fn: MezzeValue): MezzeValue {
         return when (fn) {
             is MezzeTruffleFunction -> {
@@ -735,7 +634,9 @@ object OSThreadImplementations {
     /**
      * Call a function with a single argument wrapped in a record {x = arg}.
      * This is the Mezze convention for functions taking a single argument.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunctionWithArg(fn: MezzeValue, arg: MezzeValue): MezzeValue {
         // Wrap the argument in a record with field "x"
         val recordArg = MezzeRecord(mapOf("x" to arg))
@@ -842,7 +743,9 @@ object OSThreadImplementations {
 
     /**
      * Call a function with a scope argument wrapped in a record {scope = arg}.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunctionWithScopeArg(fn: MezzeValue, scope: OSScope): MezzeValue {
         val recordArg = MezzeRecord(mapOf("scope" to scope))
         return when (fn) {
@@ -962,5 +865,5 @@ class OSScope(
      */
     fun getFirstError(): Throwable? = firstError.get()
 
-    override fun getDisplayString(): String = "<os-scope:${tasks.size} tasks>"
+    override fun computeDisplayString(): String = "<os-scope:${tasks.size} tasks>"
 }

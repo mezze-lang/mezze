@@ -16,8 +16,8 @@ import com.mezze.language.interpreter.MezzeArraySlice
  */
 @NodeInfo(shortName = "array-spread")
 class ArraySpreadNode(
-    private val spreadArrays: Array<MezzeNode>,
-    private val appendElements: Array<MezzeNode>
+    spreadArrays: Array<MezzeNode>,
+    appendElements: Array<MezzeNode>
 ) : MezzeNode() {
 
     @field:Children
@@ -26,12 +26,35 @@ class ArraySpreadNode(
     @field:Children
     private val appendChildren: Array<MezzeNode> = appendElements
 
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private val numSpreadChildren: Int = spreadArrays.size
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private val numAppendChildren: Int = appendElements.size
+
     override fun execute(frame: VirtualFrame): MezzeValue {
+        // Execute child nodes in hot path
+        val spreadValues = Array(numSpreadChildren) { i ->
+            spreadChildren[i].execute(frame)
+        }
+        val appendValues = Array(numAppendChildren) { i ->
+            appendChildren[i].execute(frame)
+        }
+
+        // Build result list in boundary method
+        return buildArrayWithSpread(spreadValues, appendValues)
+    }
+
+    /**
+     * Build the array with spread elements.
+     * Marked @TruffleBoundary to exclude ArrayList operations and exception handling.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun buildArrayWithSpread(spreadValues: Array<MezzeValue>, appendValues: Array<MezzeValue>): MezzeValue {
         val result = ArrayList<MezzeValue>()
 
         // First, add all elements from spread arrays (handles both MezzeArrayList and MezzeArraySlice)
-        for (spreadNode in spreadChildren) {
-            val spreadValue = spreadNode.execute(frame)
+        for (spreadValue in spreadValues) {
             when (spreadValue) {
                 is MezzeArrayList -> result.addAll(spreadValue.toList())
                 is MezzeArraySlice -> {
@@ -44,8 +67,7 @@ class ArraySpreadNode(
         }
 
         // Then append the regular elements
-        for (appendNode in appendChildren) {
-            val appendValue = appendNode.execute(frame)
+        for (appendValue in appendValues) {
             result.add(appendValue)
         }
 

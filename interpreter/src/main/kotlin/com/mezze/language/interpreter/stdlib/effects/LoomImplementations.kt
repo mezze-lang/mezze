@@ -3,34 +3,29 @@ package com.mezze.language.interpreter.stdlib.effects
 import com.mezze.language.interpreter.*
 import com.mezze.language.interpreter.concurrency.LoomConcurrencyManager
 import com.mezze.language.interpreter.stdlib.concurrent.MezzeCancellationToken
-import java.util.concurrent.CompletableFuture
 import com.oracle.truffle.api.CallTarget
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+import java.util.concurrent.CompletableFuture
 
 /**
  * Truffle-optimized implementations for Project Loom virtual thread concurrency.
  *
- * Phase 8 of Truffle migration: Effect system optimized for JIT performance.
  * Provides native functions for lightweight concurrency with virtual threads.
  *
- * Optimizations:
+ * Features:
  * - TruffleThreadBuilder for proper Truffle context sharing across threads
  * - CompletableFuture-based promises for async result handling
  * - Virtual threads (Project Loom) for efficient concurrency
- * - LockSupport.park/unpark for low-level thread coordination
  * - Proper Truffle function calling (4 arguments: args, closure, scope, slot map)
  * - Thread-local state management via TruffleContextHolder
  *
  * CRITICAL: Uses TruffleThreadBuilder to avoid "Multi threaded access not allowed" errors.
  * Each spawned thread has proper access to the TruffleContext via newTruffleThreadBuilder.
  *
- * Operations: spawn, await, current_thread, park, unpark
- *
  * These implementations allow Mezze programs to:
  * - Spawn computations on virtual threads (lightweight concurrency)
  * - Wait for concurrent computations to complete (structured concurrency)
- * - Coordinate threads with park/unpark primitives
- *
- * Total: 5 Loom functions
+ * - Use structured concurrency scopes for lifecycle management
  */
 object LoomImplementations {
 
@@ -61,10 +56,7 @@ object LoomImplementations {
         registerIsDone(context)
         registerIsCancelled(context)
         registerCheck(context)
-        registerCurrentThread(context)
-        registerPark(context)
-        registerUnpark(context)
-        // New structured concurrency operations
+        // Structured concurrency operations
         registerJoin(context)
         registerJoin3(context)
         // New collection operations
@@ -586,92 +578,6 @@ object LoomImplementations {
         }
     }
 
-    /**
-     * __native_loom_current_thread - Get a handle to the current thread.
-     *
-     * Takes: {}
-     * Returns: Thread
-     *
-     * Returns an opaque handle to the current Java thread (typically a virtual thread).
-     * This handle can be passed to other threads for coordination via unpark.
-     *
-     * Example usage in Mezze:
-     *   let receiver_thread = current_thread {}
-     *   # Pass this handle to other threads for signaling
-     */
-    private fun registerCurrentThread(context: MutableMap<String, MezzeValue>) {
-        context["__native_loom_current_thread"] = NativeMezzeFunction("__native_loom_current_thread") { args ->
-            // Get current thread and wrap it in MezzeThread
-            val currentThread = Thread.currentThread()
-            MezzeThread(currentThread)
-        }
-    }
-
-    /**
-     * __native_loom_park - Park (suspend) the current virtual thread.
-     *
-     * Takes: {}
-     * Returns: {}
-     *
-     * Parks (suspends) the current virtual thread until it is unparked by another thread.
-     * While parked, the thread does not consume CPU resources. Uses LockSupport.park()
-     * internally for efficient blocking.
-     *
-     * CRITICAL: This is a low-level synchronization primitive. The thread will remain
-     * parked until another thread calls unpark on this thread's handle.
-     *
-     * Example usage in Mezze:
-     *   park {}  # Suspends current thread until unparked
-     */
-    private fun registerPark(context: MutableMap<String, MezzeValue>) {
-        context["__native_loom_park"] = NativeMezzeFunction("__native_loom_park") { args ->
-
-            // Park the current thread using LockSupport
-            java.util.concurrent.locks.LockSupport.park()
-
-            MezzeRecord(emptyMap())  // Return empty record (unit type)
-        }
-    }
-
-    /**
-     * __native_loom_unpark - Unpark (resume) a parked virtual thread.
-     *
-     * Takes: { thread: Thread }
-     * Returns: {}
-     *
-     * Unparks the given thread, allowing it to resume execution if it was parked.
-     * If the thread is not currently parked, the next park() call will return immediately.
-     * Uses LockSupport.unpark() internally.
-     *
-     * CRITICAL: This is a low-level synchronization primitive for custom coordination
-     * patterns between threads.
-     *
-     * Example usage in Mezze:
-     *   unpark {thread = receiver_thread}  # Wakes up the parked thread
-     */
-    private fun registerUnpark(context: MutableMap<String, MezzeValue>) {
-        context["__native_loom_unpark"] = NativeMezzeFunction("__native_loom_unpark") { args ->
-            val record = args.firstOrNull() as? MezzeRecord
-                ?: throw NativeFunctionException("__native_loom_unpark", "expects MezzeRecord")
-
-            val threadValue = record.fields["thread"]
-                ?: throw NativeFunctionException("__native_loom_unpark", "expects 'thread' field")
-
-            when (threadValue) {
-                is MezzeThread -> {
-
-                    // Unpark the thread using LockSupport
-                    java.util.concurrent.locks.LockSupport.unpark(threadValue.thread)
-                    MezzeRecord(emptyMap())  // Return empty record (unit type)
-                }
-                else -> throw NativeFunctionException(
-                    "__native_loom_unpark",
-                    "thread must be a MezzeThread, got: ${threadValue::class.simpleName}"
-                )
-            }
-        }
-    }
-
     // =========================================================================
     // Structured Concurrency Operations
     // =========================================================================
@@ -1027,7 +933,9 @@ object LoomImplementations {
 
     /**
      * Call a function with no arguments.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunction(fn: MezzeValue): MezzeValue {
         return when (fn) {
             is MezzeTruffleFunction -> {
@@ -1047,7 +955,9 @@ object LoomImplementations {
     /**
      * Call a function with a single argument wrapped in a record {x = arg}.
      * This is the Mezze convention for functions taking a single argument.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunctionWithArg(fn: MezzeValue, arg: MezzeValue): MezzeValue {
         // Wrap the argument in a record with field "x"
         val recordArg = MezzeRecord(mapOf("x" to arg))
@@ -1224,7 +1134,9 @@ object LoomImplementations {
 
     /**
      * Call a function with a scope argument wrapped in a record {scope = arg}.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunctionWithScopeArg(fn: MezzeValue, scope: MezzeScope): MezzeValue {
         val recordArg = MezzeRecord(mapOf("scope" to scope))
         return when (fn) {
@@ -1371,7 +1283,7 @@ class MezzeScope(
      */
     fun isCancelled(): Boolean = cancelled.get() || cancellationToken.isCancelled()
 
-    override fun getDisplayString(): String = "<scope:${tasks.size} tasks>"
+    override fun computeDisplayString(): String = "<scope:${tasks.size} tasks>"
 }
 
 /**

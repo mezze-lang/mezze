@@ -1,15 +1,9 @@
 package com.mezze.language.interpreter.nodes.function
 
 import com.oracle.truffle.api.CallTarget
-import com.oracle.truffle.api.Truffle
-import com.oracle.truffle.api.dsl.Cached
-import com.oracle.truffle.api.dsl.Specialization
 import com.oracle.truffle.api.frame.FrameDescriptor
 import com.oracle.truffle.api.frame.VirtualFrame
-import com.oracle.truffle.api.nodes.DirectCallNode
-import com.oracle.truffle.api.nodes.IndirectCallNode
 import com.oracle.truffle.api.nodes.NodeInfo
-import com.oracle.truffle.api.nodes.RootNode
 import com.mezze.language.interpreter.nodes.MezzeNode
 import com.mezze.language.interpreter.MezzeValue
 import com.mezze.language.interpreter.MezzeRecord
@@ -19,48 +13,84 @@ import com.mezze.language.interpreter.NativeMezzeFunction
 import com.mezze.language.interpreter.MezzeTruffleFunction
 
 /**
- * Function definition node that creates a callable function with closure support
+ * Function definition node that creates a callable function with closure support.
+ *
+ * IMPORTANT: The CallTarget is created lazily on first access, but this is marked
+ * as a TruffleBoundary to avoid triggering JIT compilation issues. The RootNode
+ * creation happens outside the compilation path.
+ *
+ * TRUFFLE OPTIMIZATION NOTES:
+ * - closureVarNamesArray is marked @CompilationFinal(dimensions = 1) so Graal
+ *   can constant-fold iterations during JIT compilation
+ * - closureSlotIndices pre-computes slot indices to avoid Map lookups
  */
 @NodeInfo(shortName = "function-def")
 class FunctionDefinitionNode(
     private val name: String,
-    private val parameterNames: List<String>,
+    parameterNames: List<String>,
     @field:Child private var bodyNode: MezzeNode,
     private val frameDescriptor: FrameDescriptor,
-    private val closureVariableNames: List<String> = emptyList(),
-    private val closureVariableSlots: Map<String, Int> = emptyMap()
+    closureVariableNames: List<String> = emptyList(),
+    closureVariableSlots: Map<String, Int> = emptyMap()
 ) : MezzeNode() {
 
-    private val callTarget: CallTarget by lazy {
-        val rootNode = MezzeFunctionRootNode(
-            language = getLanguage(),
-            name = name,
-            parameterNames = parameterNames,
-            bodyNode = bodyNode,
-            frameDescriptor = frameDescriptor,
-            closureVariableNames = closureVariableNames,
-            closureVariableSlots = closureVariableSlots
-        )
-        rootNode.callTarget
+    // Convert lists to arrays with @CompilationFinal for JIT optimization
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal(dimensions = 1)
+    private val parameterNamesArray: Array<String> = parameterNames.toTypedArray()
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal(dimensions = 1)
+    private val closureVarNamesArray: Array<String> = closureVariableNames.toTypedArray()
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private var _callTarget: CallTarget? = null
+
+    /**
+     * Get or create the CallTarget. Marked as TruffleBoundary to ensure
+     * RootNode creation happens outside the JIT compilation path.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun getOrCreateCallTarget(): CallTarget {
+        if (_callTarget == null) {
+            // MezzeFunctionRootNode is a Java class, so we can't use named arguments
+            val rootNode = MezzeFunctionRootNode(
+                getLanguage(),
+                name,
+                parameterNamesArray.toList(),
+                bodyNode,
+                frameDescriptor,
+                closureVarNamesArray.toList(),
+                closureSlotMap
+            )
+            _callTarget = rootNode.callTarget
+        }
+        return _callTarget!!
     }
 
-    override fun execute(frame: VirtualFrame): MezzeValue {
-        // CRITICAL FIX: Eagerly capture closure variable VALUES at closure creation time.
-        //
-        // We must NOT just store a reference to the materialized frame, because:
-        // 1. The frame slots may be modified by subsequent code (e.g., tail recursion)
-        // 2. If a closure is executed later (e.g., by a virtual thread), it would see
-        //    the modified values, not the values at the time of closure creation.
-        //
-        // This is especially important for concurrent code where closures may be
-        // executed on different threads after the original function has returned
-        // or modified its local variables.
+    // Store the original slots map for passing to RootNode (Map operations are in @TruffleBoundary)
+    private val closureSlotMap: Map<String, Int> = closureVariableSlots
 
-        val closureVariables = if (closureVariableNames.isNotEmpty()) {
-            // Eagerly copy values from the current frame
-            closureVariableNames.mapIndexed { index, varName ->
-                val slot = closureVariableSlots[varName]
-                val value = if (slot != null && slot < frame.frameDescriptor.numberOfSlots) {
+    // Pre-compute slot indices array at construction time to avoid Map lookups during execution
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal(dimensions = 1)
+    private val closureSlotIndices: IntArray = closureVarNamesArray.map { varName ->
+        closureVariableSlots[varName] ?: -1
+    }.toIntArray()
+
+    // Number of closure variables (pre-computed for array allocation)
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private val numClosureVars: Int = closureVarNamesArray.size
+
+    // Whether we have closure variables
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private val hasClosureVars: Boolean = closureVarNamesArray.isNotEmpty()
+
+    override fun execute(frame: VirtualFrame): MezzeValue {
+        // Eagerly capture closure variable VALUES at closure creation time.
+        // We use pre-computed slot indices to avoid Map lookups in the hot path.
+        val closureVariables = if (hasClosureVars) {
+            // Read values from frame first (can't pass VirtualFrame to TruffleBoundary)
+            val values = Array(numClosureVars) { index ->
+                val slot = closureSlotIndices[index]
+                if (slot >= 0) {
                     try {
                         frame.getObject(slot) as? MezzeValue ?: MezzeNull
                     } catch (e: Exception) {
@@ -69,26 +99,43 @@ class FunctionDefinitionNode(
                 } else {
                     MezzeNull
                 }
-                varName to value
-            }.toMap()
+            }
+            // Build the map via TruffleBoundary
+            buildClosureMap(values)
         } else {
             emptyMap()
         }
 
         // Create function with eagerly captured closure variables
-        // We no longer use MaterializedFrame since we've already captured the values
         return MezzeTruffleFunction(
-            callTarget,
+            getOrCreateCallTarget(),
             name,
-            closureVariables,  // Eagerly captured values
-            null,              // No materialized frame needed
-            emptyMap()         // No slot map needed
+            closureVariables,
+            null,
+            emptyMap()
         )
+    }
+
+    /**
+     * Build the closure variables map from pre-extracted values.
+     * Marked as @TruffleBoundary to keep Map creation outside JIT path.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun buildClosureMap(values: Array<MezzeValue>): Map<String, MezzeValue> {
+        val result = mutableMapOf<String, MezzeValue>()
+        for (index in 0 until numClosureVars) {
+            result[closureVarNamesArray[index]] = values[index]
+        }
+        return result
     }
 }
 
 /**
  * Function call node with manual call site optimization
+ *
+ * NOTE: The actual function call is done via @TruffleBoundary to avoid
+ * JIT blockers from exception handling code paths (Kotlin null checks,
+ * Intrinsics.throwJavaNpe, etc.)
  */
 @NodeInfo(shortName = "function-call")
 class FunctionCallNode(
@@ -99,19 +146,24 @@ class FunctionCallNode(
     override fun execute(frame: VirtualFrame): MezzeValue {
         val function = functionNode.execute(frame)
         val arguments = argumentsNode.execute(frame)
+        return dispatchCall(function, arguments)
+    }
 
-        val result = when (function) {
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun dispatchCall(function: MezzeValue, arguments: MezzeValue): MezzeValue {
+        return when (function) {
             is MezzeTruffleFunction -> {
                 // Direct call to Truffle function with closure variables
                 // CRITICAL: MezzeFunctionRootNode expects 4 arguments:
                 // [0] = args record, [1] = closure variables map (legacy),
                 // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
-                function.callTarget.call(
+                val result = function.callTarget.call(
                     arguments,
                     function.closureVariables,
                     function.lexicalScope,
                     function.lexicalScopeSlotMap
-                ) as MezzeValue
+                )
+                result as? MezzeValue ?: MezzeNull
             }
             is NativeMezzeFunction -> {
                 // Call native function
@@ -121,226 +173,10 @@ class FunctionCallNode(
                 throw RuntimeException("Cannot call non-function value: ${function::class.simpleName}")
             }
         }
-
-        return result
     }
 }
 
-/**
- * Root node for Mezze functions
- */
-class MezzeFunctionRootNode(
-    language: MezzeLanguage,
-    private val name: String,
-    private val parameterNames: List<String>,
-    @field:Child private var bodyNode: MezzeNode,
-    frameDescriptor: FrameDescriptor,
-    private val closureVariableNames: List<String> = emptyList(),
-    private val closureVariableSlots: Map<String, Int> = emptyMap()
-) : RootNode(language, frameDescriptor) {
-
-    override fun execute(frame: VirtualFrame): Any {
-        // Arguments:
-        // [0] = MezzeRecord of parameters
-        // [1] = Map<String, MezzeValue> of closure variables (legacy, for backward compat)
-        // [2] = MaterializedFrame lexical scope (new approach)
-        // [3] = Map<String, Int> lexical scope slot mapping
-        val arguments = frame.getArguments()
-
-
-
-        // Get context for registering variables
-        val context = MezzeLanguage.getCurrentContext(this)
-
-        // CRITICAL: Propagate handlers from the call site to this function's execution
-        // This ensures that effects called within this function can access the active handlers
-        // Without this, functions in modules can't use effects from perform blocks
-        val effectHandler = context.effectHandler
-        val activeHandlers = effectHandler.getCurrentHandlers()
-        if (activeHandlers != null) {
-            // Store handlers in context so nested effect calls can find them
-            context.defineLocal("__handlers", activeHandlers)
-        }
-
-        // Extract lexical scope (MaterializedFrame) from argument [2]
-        @Suppress("UNCHECKED_CAST")
-        val lexicalScope = if (arguments.size > 2) {
-            arguments[2] as? com.oracle.truffle.api.frame.MaterializedFrame
-        } else {
-            null
-        }
-
-        // Extract lexical scope slot mapping from argument [3]
-        @Suppress("UNCHECKED_CAST")
-        val lexicalScopeSlotMap = if (arguments.size > 3) {
-            arguments[3] as? Map<String, Int> ?: emptyMap()
-        } else {
-            emptyMap()
-        }
-
-        // Extract closure variables map from argument [1] (for backward compatibility)
-        @Suppress("UNCHECKED_CAST")
-        val closureVariables = if (arguments.size > 1) {
-            arguments[1] as? Map<String, MezzeValue> ?: emptyMap()
-        } else {
-            emptyMap()
-        }
-
-        // Collect provided and missing parameters for partial application support
-        val argsRecord = if (arguments.isNotEmpty()) arguments[0] as? MezzeRecord else null
-        val providedParams = mutableMapOf<String, MezzeValue>()
-        val missingParams = mutableListOf<String>()
-
-        // DEBUG: Log parameter checking
-
-
-
-
-        // Special case: zero-parameter functions should always execute
-        if (parameterNames.isEmpty()) {
-            // Zero-parameter function - execute normally
-            // Continue to normal execution (no partial application)
-        } else if (argsRecord != null) {
-            for (paramName in parameterNames) {
-                val value = argsRecord.fields[paramName]
-
-                if (value != null && value !is MezzeNull) {
-                    providedParams[paramName] = value
-
-                } else {
-                    missingParams.add(paramName)
-
-                }
-            }
-
-        } else {
-            missingParams.addAll(parameterNames)
-
-        }
-
-
-
-        // If not all parameters are provided (and function has > 0 parameters), return a partially applied function
-        if (parameterNames.isNotEmpty() && missingParams.isNotEmpty()) {
-            // Create a new function that captures the provided parameters
-            // and waits for the remaining parameters
-            val partiallyAppliedFunc = createPartiallyAppliedFunction(
-                providedParams,
-                missingParams,
-                closureVariables,
-                lexicalScope,
-                lexicalScopeSlotMap
-            )
-            return partiallyAppliedFunc
-        }
-
-        // All parameters provided - execute the function body
-        // Bind parameters to frame slots only (NOT context.locals to avoid polluting global namespace)
-        for ((index, paramName) in parameterNames.withIndex()) {
-            val value = providedParams[paramName] ?: MezzeNull
-            // Write to frame slot only
-            // Parameters should NOT be written to context.locals as they're function-local
-            // Closure capture is handled via the closure variables mechanism
-            frame.setObject(index, value)
-        }
-
-        // Bind closure variables from the eagerly captured closureVariables map
-        // These values were captured at closure creation time, ensuring they
-        // reflect the state when the closure was created, not when it's executed.
-        val paramCount = parameterNames.size
-        for ((index, varName) in closureVariableNames.withIndex()) {
-            val slotIndex = paramCount + index
-            val value = closureVariables[varName]
-            if (value != null && value !is MezzeNull) {
-                frame.setObject(slotIndex, value)
-            } else {
-                frame.setObject(slotIndex, MezzeNull)
-            }
-        }
-
-        return bodyNode.execute(frame)
-    }
-
-    /**
-     * Create a partially applied function that captures the provided parameters
-     * and waits for the remaining parameters
-     */
-    private fun createPartiallyAppliedFunction(
-        providedParams: Map<String, MezzeValue>,
-        missingParams: List<String>,
-        originalClosureVars: Map<String, MezzeValue>,
-        lexicalScope: com.oracle.truffle.api.frame.MaterializedFrame?,
-        lexicalScopeSlotMap: Map<String, Int>
-    ): MezzeTruffleFunction {
-        // Create a new root node for the partially applied function
-        val partialRootNode = PartiallyAppliedFunctionRootNode(
-            originalCallTarget = this.callTarget,
-            originalFunctionName = this.name,
-            providedParams = providedParams,
-            missingParams = missingParams,
-            originalClosureVars = originalClosureVars,
-            lexicalScope = lexicalScope,
-            lexicalScopeSlotMap = lexicalScopeSlotMap
-        )
-
-        val partialCallTarget = partialRootNode.callTarget
-
-        // Return a new function that takes the missing parameters
-        return MezzeTruffleFunction(
-            partialCallTarget,
-            "$name(partial)",
-            emptyMap(), // Closure variables are handled internally
-            null, // Lexical scope is handled internally
-            emptyMap() // Slot mapping is handled internally
-        )
-    }
-
-    override fun getName(): String = name
-
-    override fun toString(): String = "MezzeFunction($name)"
-}
-
-/**
- * Root node for partially applied functions
- * This node captures the provided parameters and waits for the remaining parameters
- */
-class PartiallyAppliedFunctionRootNode(
-    private val originalCallTarget: CallTarget,
-    private val originalFunctionName: String,
-    private val providedParams: Map<String, MezzeValue>,
-    private val missingParams: List<String>,
-    private val originalClosureVars: Map<String, MezzeValue>,
-    private val lexicalScope: com.oracle.truffle.api.frame.MaterializedFrame?,
-    private val lexicalScopeSlotMap: Map<String, Int>
-) : RootNode(null, FrameDescriptor()) {
-
-    override fun execute(frame: VirtualFrame): Any {
-        // Get the new arguments provided to this partially applied function
-        val arguments = frame.getArguments()
-        val newArgsRecord = if (arguments.isNotEmpty()) arguments[0] as? MezzeRecord else null
-
-        // Merge the previously provided parameters with the new ones
-        val mergedParams = mutableMapOf<String, MezzeValue>()
-        mergedParams.putAll(providedParams)
-
-        if (newArgsRecord != null) {
-            for (paramName in missingParams) {
-                val value = newArgsRecord.fields[paramName]
-                if (value != null && value !is MezzeNull) {
-                    mergedParams[paramName] = value
-                }
-            }
-        }
-
-        // Create a record with all parameters and call the original function
-        val allParamsRecord = MezzeRecord(mergedParams)
-
-        // Call the original function with all parameters
-        // MezzeFunctionRootNode expects 4 arguments now: params, closureVars, lexicalScope, slot map
-        return originalCallTarget.call(allParamsRecord, originalClosureVars, lexicalScope, lexicalScopeSlotMap) as MezzeValue
-    }
-
-    override fun getName(): String = "${originalFunctionName}(partial)"
-
-    override fun toString(): String = "${originalFunctionName}(partial)"
-}
+// MezzeFunctionRootNode and PartiallyAppliedFunctionRootNode are now implemented in Java
+// to avoid Kotlin intrinsics that trigger JIT compilation blockers in GraalVM native image.
+// See: src/main/java/com/mezze/language/interpreter/nodes/function/MezzeFunctionRootNode.java
+// See: src/main/java/com/mezze/language/interpreter/nodes/function/PartiallyAppliedFunctionRootNode.java

@@ -2227,8 +2227,21 @@ class ExpressionConstraintGenerator {
         for (stmt in expr.statements) {
             when (stmt) {
                 is LetStatement -> {
-                    // Generate constraints for the expression
-                    val exprResult = generate(stmt.expression, currentContext)
+                    // BIDIRECTIONAL TYPING: If there's a type annotation, use it as expected type
+                    // This is CRITICAL for polymorphic abilities like Decode to work correctly
+                    // (e.g., `let user: Result {name: String} DecodeError = Decode.decode {...}`)
+                    val annotatedType = stmt.typeAnnotation?.let { annotation ->
+                        val contextBuilder = com.mezze.language.typechecker.context.ContextBuilder()
+                        contextBuilder.convertTypeAnnotation(annotation)
+                    }
+
+                    // Generate constraints for the expression, with expected type if annotated
+                    val exprContext = if (annotatedType != null) {
+                        currentContext.withExpectedType(annotatedType)
+                    } else {
+                        currentContext
+                    }
+                    val exprResult = generate(stmt.expression, exprContext)
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)
@@ -2236,6 +2249,20 @@ class ExpressionConstraintGenerator {
                     abilityConstraints.addAll(exprResult.abilityConstraints)
                     referencedBindings.addAll(exprResult.referencedBindings)
                     usedVars.addAll(exprResult.usedVariables)
+
+                    // CRITICAL: If there's a type annotation, add equality constraint to unify
+                    // the expression type with the annotated type. This ensures type variables
+                    // in the expression type get resolved.
+                    if (annotatedType != null) {
+                        constraints.add(
+                            Constraint.Equality(
+                                left = exprResult.type,
+                                right = annotatedType,
+                                context = "Type annotation on let binding in do block",
+                                sourceLocation = stmt.expression.sourceLocation
+                            )
+                        )
+                    }
 
                     // CRITICAL: Inside a do block, unwrap SuspendedType for let bindings.
                     // Data types (Result, Option, etc.) are orthogonal to effects.

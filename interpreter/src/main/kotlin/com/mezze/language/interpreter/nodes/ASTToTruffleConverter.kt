@@ -9,6 +9,9 @@ import com.mezze.language.interpreter.nodes.control.*
 import com.mezze.language.interpreter.nodes.function.*
 import com.mezze.language.interpreter.nodes.pattern.*
 import com.mezze.language.interpreter.nodes.variable.*
+import com.mezze.language.interpreter.nodes.control.RecordPatternBindingNode
+import com.mezze.language.interpreter.nodes.impl.EffectImplStorageNode
+import com.mezze.language.interpreter.nodes.effect.DynamicEffectOrFunctionCallNode
 import com.mezze.language.interpreter.MezzeValue
 import com.mezze.language.interpreter.MezzeInt
 import com.mezze.language.interpreter.MezzeFloat
@@ -124,26 +127,8 @@ class ASTToTruffleConverter(
                     // Full qualified name for lookup (e.g., "std::types::int::abs")
                     val qualifiedImportName = "$modulePath::$importedName"
 
-                    object : MezzeNode() {
-                        override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                            val context = getContext()
-
-                            // Look up the imported value from global context using qualified name
-                            val value = context.lookupGlobal(qualifiedImportName)
-                                ?: com.mezze.language.interpreter.MezzeNull
-
-                            // Bind it in the current frame
-                            frame.setObject(slot, value)
-
-                            // CRITICAL: Define in both locals AND globals
-                            // This ensures module imports are accessible to lambdas in impl declarations
-                            // which execute in different contexts and need global access to imports
-                            context.defineLocal(localName, value)
-                            context.defineGlobal(localName, value)
-
-                            return com.mezze.language.interpreter.MezzeNull
-                        }
-                    }
+                    // Use proper named node with @TruffleBoundary for context lookups
+                    com.mezze.language.interpreter.nodes.variable.UseBindingNode(slot, qualifiedImportName, localName)
                 }
 
                 if (bindingNodes.isEmpty()) {
@@ -221,27 +206,14 @@ class ASTToTruffleConverter(
         // Also store by performer name for imports
         val performerSlot = getOrCreateSlot(impl.performerName)
 
-        return object : MezzeNode() {
-            @field:Child private var recordChild = recordNode
-
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                val value = recordChild.execute(frame)
-
-                // Store in frame slots
-                frame.setObject(hashSlot, value)
-                frame.setObject(performerSlot, value)
-
-                // Store in context by hash (for cross-module lookups) and by name (for imports)
-                val context = getContext()
-                context.defineGlobal(contentHash, value)
-                context.defineLocal(impl.performerName, value)
-
-                // Register the performer at runtime
-                context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
-
-                return value
-            }
-        }
+        return EffectImplStorageNode(
+            recordChild = recordNode,
+            hashSlot = hashSlot,
+            performerSlot = performerSlot,
+            contentHash = contentHash,
+            performerName = impl.performerName,
+            effectName = impl.effectName
+        )
     }
 
     /**
@@ -250,6 +222,11 @@ class ASTToTruffleConverter(
      *
      * Example: impl Choice for AllPaths { cont: Continuation } where { ... }
      * Creates: {cont} -> { choose = {options} -> cont.fork {...}, fail = {} -> cont.abort {} }
+     *
+     * This implementation uses proper Truffle patterns:
+     * - All FrameDescriptors created at parse time (not runtime)
+     * - No frame materialization in execute() methods
+     * - Uses ParameterizedImplDefinitionNode which creates a proper CallTarget
      */
     private fun convertParameterizedImplDeclaration(impl: ImplDeclaration): MezzeNode {
         // Use content hash as the primary identifier
@@ -267,20 +244,28 @@ class ASTToTruffleConverter(
             context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
         }
 
+        // Get impl parameter names and create slots for them in the impl's frame
+        val implParamNames = impl.performerParams.map { it.name }
+
+        // Create the impl frame descriptor builder - holds slots for impl parameters
+        val implFrameBuilder = FrameDescriptor.newBuilder()
+        val implParamSlots = mutableMapOf<String, Int>()
+        for (paramName in implParamNames) {
+            val slot = implFrameBuilder.addSlot(com.oracle.truffle.api.frame.FrameSlotKind.Object, paramName, null)
+            implParamSlots[paramName] = slot
+        }
+        val implFrameDescriptor = implFrameBuilder.build()
+
         // Pre-convert operations with parameters as free variables
         // Each operation will capture impl parameters (like 'cont') as closure variables
-        val operationConverters = mutableListOf<Pair<String, ASTToTruffleConverter>>()
-        val operationNodes = mutableMapOf<String, FunctionDefinitionNode>()
+        val operationNames = mutableListOf<String>()
+        val operationBodyNodes = mutableListOf<MezzeNode>()
+        val operationParamNamesList = mutableListOf<List<String>>()
+        val operationFrameDescriptors = mutableListOf<FrameDescriptor>()
+        val operationClosureVarNames = mutableListOf<List<String>>()
+        val operationClosureVarSlots = mutableListOf<Map<String, Int>>()
 
         for (op in impl.operations) {
-            // Create a converter for this operation
-            val opConverter = ASTToTruffleConverter(
-                context = this.context,
-                projectRoot = this.projectRoot,
-                parentHandlerMapping = this.handlerToEffectMapping,
-                parentVariableSlots = this.variableSlots.toMap()
-            )
-
             // The operation is a lambda like: { options } -> cont.fork { ... }
             // We need to detect that 'cont' is a free variable (not a parameter)
             val opExpr = op.implementation
@@ -299,81 +284,60 @@ class ASTToTruffleConverter(
             val allVars = collectVariableReferences(opExpr.body)
             val freeVars = allVars.filter { it !in opParamNames }.distinct()
 
-            // Pre-register operation parameters
+            // Create a converter for this operation
+            // Pass impl param slots as parent slots so closure vars can reference them
+            val opConverter = ASTToTruffleConverter(
+                context = this.context,
+                projectRoot = this.projectRoot,
+                parentHandlerMapping = this.handlerToEffectMapping,
+                parentVariableSlots = implParamSlots.toMap()
+            )
+
+            // Pre-register operation parameters (these get the first slots 0..n-1)
             opParamNames.forEach { opConverter.getOrCreateSlot(it) }
 
             // Pre-register free variables (impl parameters will be here)
+            // These are the closure variables that will be captured from the impl's frame
             freeVars.forEach { opConverter.getOrCreateSlot(it) }
 
             // Convert the operation body
             val bodyNode = opConverter.convertExpression(opExpr.body)
-            val frameDesc = opConverter.getFrameDescriptor()
+            val opFrameDesc = opConverter.getFrameDescriptor()
 
             // Create slots mapping for closure variables
+            // CRITICAL: closureVariableSlots maps variable names to their slots in the IMPL's frame
+            // (the frame that FunctionDefinitionNode.execute() receives).
+            // At runtime, ParameterizedImplRootNode.execute() binds impl params to implParamSlots,
+            // then calls operationFuncNodes[i].execute(frame) with that same frame.
+            // FunctionDefinitionNode.execute() reads closure values using closureVariableSlots.
+            // So closureVariableSlots must use implParamSlots, not opConverter slots.
             val closureSlots = freeVars.mapNotNull { varName ->
-                val slot = opConverter.variableSlots[varName]
-                if (slot != null) varName to slot else null
+                val implSlot = implParamSlots[varName]
+                if (implSlot != null) varName to implSlot else null
             }.toMap()
 
-            // Create the function definition node
-            val funcNode = FunctionDefinitionNode(
-                name = "${impl.performerName}_${op.name}",
-                parameterNames = opParamNames,
-                bodyNode = bodyNode,
-                frameDescriptor = frameDesc,
-                closureVariableNames = freeVars,
-                closureVariableSlots = closureSlots
-            )
-
-            operationNodes[op.name] = funcNode
-            operationConverters.add(op.name to opConverter)
+            // Collect operation data
+            operationNames.add(op.name)
+            operationBodyNodes.add(bodyNode)
+            operationParamNamesList.add(opParamNames)
+            operationFrameDescriptors.add(opFrameDesc)
+            operationClosureVarNames.add(freeVars)
+            operationClosureVarSlots.add(closureSlots)
         }
 
-        // Create a node that builds the handler record with operations bound to parameters
-        val wrapperNode = object : MezzeNode() {
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                // This creates a function that takes impl parameters and returns a handler record
-                return com.mezze.language.interpreter.NativeMezzeFunction("impl_${impl.performerName}") { args ->
-                    if (args.isEmpty() || args[0] !is MezzeRecord) {
-                        throw RuntimeException("Wrapper function expects a record parameter")
-                    }
-
-                    val paramsRecord = args[0] as MezzeRecord
-
-                    // Execute each operation function node to create MezzeTruffleFunction instances
-                    // with impl parameters captured as closure variables
-                    val operationFields = mutableMapOf<String, MezzeValue>()
-                    try {
-                        for ((opName, funcNode) in operationNodes) {
-                            // Create a frame with 2-element arguments array per Truffle convention
-                            val converter = operationConverters.find { it.first == opName }!!.second
-                            val frameDesc = converter.getFrameDescriptor()
-                            val args = arrayOf<Any?>(MezzeRecord(emptyMap()), emptyMap<String, MezzeValue>())
-                            val tempFrame = com.oracle.truffle.api.Truffle.getRuntime()
-                                .createMaterializedFrame(args, frameDesc)
-
-                            // Write impl parameters to the frame so they can be captured as closures
-                            for ((paramName, paramValue) in paramsRecord.fields) {
-                                val slot = converter.variableSlots[paramName]
-                                if (slot != null) {
-                                    tempFrame.setObject(slot, paramValue)
-                                }
-                            }
-
-                            // Execute the function definition to get a MezzeTruffleFunction
-                            // with parameters captured
-                            val opFunc = funcNode.execute(tempFrame)
-                            operationFields[opName] = opFunc
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        throw RuntimeException("Failed to create parameterized handler operations: ${e.message}", e)
-                    }
-
-                    MezzeRecord(operationFields)
-                }
-            }
-        }
+        // Create the ParameterizedImplDefinitionNode - this is Truffle-compliant
+        val implDefinitionNode = ParameterizedImplDefinitionNode(
+            implName = impl.performerName,
+            implParamNames = implParamNames,
+            implParamSlots = implParamSlots,
+            operationNames = operationNames,
+            operationBodyNodes = operationBodyNodes,
+            operationParamNames = operationParamNamesList,
+            operationFrameDescriptors = operationFrameDescriptors,
+            operationClosureVarNames = operationClosureVarNames,
+            operationClosureVarSlots = operationClosureVarSlots,
+            implFrameDescriptor = implFrameDescriptor
+        )
 
         // Store in frame slot and context by content hash (for cross-module lookups)
         val hashSlot = getOrCreateSlot(contentHash)
@@ -382,27 +346,16 @@ class ASTToTruffleConverter(
         // Also store by performer name for imports
         val performerSlot = getOrCreateSlot(impl.performerName)
 
-        return object : MezzeNode() {
-            @field:Child private var wrapperChild = wrapperNode
-
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                val value = wrapperChild.execute(frame)
-
-                // Store in frame slots
-                frame.setObject(hashSlot, value)
-                frame.setObject(performerSlot, value)
-
-                // Store in context by hash (for cross-module lookups) and by name (for imports)
-                val context = getContext()
-                context.defineGlobal(contentHash, value)
-                context.defineLocal(impl.performerName, value)
-
-                // Register the performer at runtime
-                context.effectHandler?.registerPerformer(impl.performerName, impl.effectName)
-
-                return value
-            }
-        }
+        // Use a proper named node class instead of anonymous class
+        // This properly handles context access via @TruffleBoundary
+        return com.mezze.language.interpreter.nodes.impl.ParameterizedImplStorageNode(
+            implDefChild = implDefinitionNode,
+            hashSlot = hashSlot,
+            performerSlot = performerSlot,
+            contentHash = contentHash,
+            performerName = impl.performerName,
+            effectName = impl.effectName
+        )
     }
 
     /**
@@ -431,25 +384,13 @@ class ASTToTruffleConverter(
         val hashSlot = getOrCreateSlot(contentHash)
         contentHashToSlot[contentHash] = hashSlot
 
-        // Create a node that stores in frame slot AND registers in context (for cross-module lookups)
-        // All ability impls are registered by content hash only - no mangled names needed
-        return object : MezzeNode() {
-            @field:Child private var recordChild = recordNode
-
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                val value = recordChild.execute(frame)
-
-                // Store in frame slot for local access
-                frame.setObject(hashSlot, value)
-
-                // Register in context by hash for cross-module lookups
-                val context = getContext()
-                context.defineGlobal(contentHash, value)
-                context.defineLocal(contentHash, value)
-
-                return value
-            }
-        }
+        // Use a proper named node class instead of anonymous class
+        // This properly handles context access via @TruffleBoundary
+        return com.mezze.language.interpreter.nodes.impl.AbilityImplStorageNode(
+            recordChild = recordNode,
+            hashSlot = hashSlot,
+            contentHash = contentHash
+        )
     }
 
     /**
@@ -493,50 +434,17 @@ class ASTToTruffleConverter(
 
         // CRITICAL: Pre-allocate frame slots for all variables BEFORE creating the node
         // This must happen at node construction time, not execution time
-        val slots = bindings.map { (_, varName) ->
-            varName to getOrCreateSlot(varName)
-        }.toMap()
+        // Extract data in the format expected by RecordPatternBindingNode
+        val varNames = bindings.map { it.second }.toTypedArray()
+        val slotIndices = bindings.map { (_, varName) -> getOrCreateSlot(varName) }.toIntArray()
+        val fieldPaths = bindings.map { it.first.toTypedArray() }.toTypedArray()
 
-        // Create a node that performs all the bindings
-        return object : MezzeNode() {
-            @field:Child private var valueChild = valueNode
-
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                val value = valueChild.execute(frame)
-
-                if (value !is MezzeRecord) {
-                    throw RuntimeException("Cannot destructure non-record value: ${value::class.simpleName}")
-                }
-
-                // Get context for defining local variables (needed for top-level bindings)
-                val context = com.mezze.language.interpreter.MezzeLanguage.getCurrentContext(this)
-
-                // Perform each binding
-                for ((fieldPath, varName) in bindings) {
-                    var currentValue: MezzeValue = value
-
-                    // Navigate the field path (for nested patterns)
-                    for (fieldName in fieldPath) {
-                        if (currentValue !is MezzeRecord) {
-                            throw RuntimeException("Cannot access field '$fieldName' on non-record value: ${currentValue::class.simpleName}")
-                        }
-                        currentValue = currentValue.fields[fieldName]
-                            ?: throw RuntimeException("Field '$fieldName' not found in record")
-                    }
-
-                    // Bind the value to the variable in both frame and context
-                    val slot = slots[varName]!!
-                    frame.setObject(slot, currentValue)
-
-                    // ALSO write to context.locals so module exports can be extracted
-                    // This is critical for top-level let bindings
-                    context.defineLocal(varName, currentValue)
-                }
-
-                // Return empty record (unit value)
-                return MezzeRecord(emptyMap())
-            }
-        }
+        return RecordPatternBindingNode(
+            valueNode = valueNode,
+            varNames = varNames,
+            slotIndices = slotIndices,
+            fieldPaths = fieldPaths
+        )
     }
 
     /**
@@ -624,7 +532,7 @@ class ASTToTruffleConverter(
             is VariantConstruction -> convertVariantConstruction(expr)
             is DoExpression -> convertDoExpression(expr)
             is PerformExpression -> convertPerformExpression(expr)
-            is StateMachineExpression -> StateMachineNode(expr, this)
+            is StateMachineExpression -> convertStateMachineExpression(expr)
             else -> throw RuntimeException("Unsupported expression: ${expr::class.simpleName}")
         }
     }
@@ -661,12 +569,10 @@ class ASTToTruffleConverter(
         val abilityNames = listOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord", "LogicalAnd", "LogicalOr", "LogicalNot")
         if (identifier.name in abilityNames) {
             // Return a node that throws a helpful error
-            return object : MezzeNode() {
-                override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                    throw RuntimeException("Undefined variable '${identifier.name}' at runtime. This should have been caught by the type checker. " +
-                        "Note: '${identifier.name}' is a builtin ability name and should be used with an operation like ${identifier.name}.add or ${identifier.name}.modulo")
-                }
-            }
+            return RuntimeErrorNode(
+                "Undefined variable '${identifier.name}' at runtime. This should have been caught by the type checker. " +
+                "Note: '${identifier.name}' is a builtin ability name and should be used with an operation like ${identifier.name}.add or ${identifier.name}.modulo"
+            )
         }
 
         // Otherwise, treat as a local variable
@@ -965,75 +871,11 @@ class ASTToTruffleConverter(
         argumentsExpr: Expression
     ): MezzeNode {
         val argumentsNode = convertExpression(argumentsExpr)
-
-        return object : MezzeNode() {
-            @field:Child private var argsChild = argumentsNode
-
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                val context = getContext()
-                val effectHandler = context.effectHandler
-
-
-                // Check if this is a declared effect
-                if (effectHandler.isEffectDeclared(receiverName)) {
-
-                    // This is an effect call - use the effect handler
-                    val arguments = argsChild.execute(frame)
-
-                    // Build a mutable context map for the effect handler
-                    val effectContext = mutableMapOf<String, MezzeValue>()
-                    effectContext.putAll(context.captureEnvironment())
-
-                    // Execute the effect call through the handler
-                    return effectHandler.executeEffectCall(
-                        effectName = receiverName,
-                        operationName = operationName,
-                        arguments = arguments,
-                        context = effectContext,
-                        interpreter = com.mezze.language.interpreter.MezzeInterpreter()
-                    )
-                } else {
-
-                    // Not an effect - treat as regular member access and function call
-                    // This is a fallback for non-effect member access like myRecord.myFunction
-                    val receiver = context.lookupGlobal(receiverName)
-
-                    if (receiver == null) {
-                        throw RuntimeException("Undefined variable: $receiverName")
-                    }
-
-                    if (receiver !is MezzeRecord) {
-                        throw RuntimeException("Cannot access member '$operationName' on non-record value: ${receiver::class.simpleName}")
-                    }
-
-                    val operation = receiver.fields[operationName]
-                        ?: throw RuntimeException("Field '$operationName' not found in record")
-
-                    // Handle both Truffle functions and native functions
-                    val arguments = argsChild.execute(frame)
-                    return when (operation) {
-                        is com.mezze.language.interpreter.MezzeTruffleFunction -> {
-                            // CRITICAL: MezzeFunctionRootNode expects 4 arguments:
-                            // [0] = args record, [1] = closure variables map (legacy),
-                            // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
-                            operation.callTarget.call(
-                                arguments,
-                                operation.closureVariables,
-                                operation.lexicalScope,
-                                operation.lexicalScopeSlotMap
-                            ) as MezzeValue
-                        }
-                        is com.mezze.language.interpreter.NativeMezzeFunction -> {
-                            // Native functions expect the record as the first element in a list
-                            operation.call(listOf(arguments))
-                        }
-                        else -> {
-                            throw RuntimeException("Field '$operationName' is not a function, got: ${operation::class.simpleName}")
-                        }
-                    }
-                }
-            }
-        }
+        return DynamicEffectOrFunctionCallNode(
+            argsChild = argumentsNode,
+            receiverName = receiverName,
+            operationName = operationName
+        )
     }
 
     /**
@@ -1145,60 +987,13 @@ class ASTToTruffleConverter(
                     // 1. Looks up the implementation record by hash
                     // 2. Accesses the operation field
                     // 3. Calls it with the arguments
-                    return object : MezzeNode() {
-                        @field:Child private var argumentsChild = argsNode
-
-                        override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                            // Try local slot first (same-frame), then context lookup (cross-module)
-                            val implRecord: MezzeValue = if (localSlot != null) {
-                                frame.getValue(localSlot) as? MezzeValue
-                                    ?: throw com.mezze.language.interpreter.MezzeException(
-                                        "Null value in implementation slot for hash: $implHashRequired"
-                                    )
-                            } else {
-                                // Cross-module: look up in context by hash
-                                val runtimeContext = com.mezze.language.interpreter.MezzeLanguage.getCurrentContext(this)
-                                runtimeContext.lookupGlobal(implHashRequired)
-                                    ?: throw com.mezze.language.interpreter.MezzeException(
-                                        "Cannot find ability implementation for hash: $implHashRequired (ability: ${resolvedAbility.abilityName})"
-                                    )
-                            }
-
-                            if (implRecord is com.mezze.language.interpreter.MezzeNull) {
-                                throw com.mezze.language.interpreter.MezzeException(
-                                    "Cannot find ability implementation for hash: $implHashRequired"
-                                )
-                            }
-
-                            if (implRecord !is MezzeRecord) {
-                                throw com.mezze.language.interpreter.MezzeException("Ability implementation must be a record, got: ${implRecord::class.simpleName}")
-                            }
-
-                            // Get the operation from the implementation record
-                            val operation = implRecord.fields[operationName]
-                            if (operation == null || operation is com.mezze.language.interpreter.MezzeNull) {
-                                throw com.mezze.language.interpreter.MezzeException(
-                                    "Cannot find operation '$operationName' in ability implementation (hash: $implHashRequired)"
-                                )
-                            }
-
-                            if (operation !is com.mezze.language.interpreter.MezzeTruffleFunction) {
-                                throw com.mezze.language.interpreter.MezzeException("Ability operation must be a function, got: ${operation::class.simpleName}")
-                            }
-
-                            // Call the operation with the arguments
-                            val args = argumentsChild.execute(frame)
-                            // CRITICAL: MezzeFunctionRootNode expects 4 arguments:
-                            // [0] = args record, [1] = closure variables map (legacy),
-                            // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
-                            return operation.callTarget.call(
-                                args,
-                                operation.closureVariables,
-                                operation.lexicalScope,
-                                operation.lexicalScopeSlotMap
-                            ) as MezzeValue
-                        }
-                    }
+                    return ResolvedAbilityCallNode(
+                        argsNode,
+                        localSlot,
+                        implHashRequired,
+                        operationName,
+                        resolvedAbility.abilityName
+                    )
                 } else {
                 }
             }
@@ -1211,274 +1006,21 @@ class ASTToTruffleConverter(
     }
 
     /**
-     * Create a builtin unary operation node that extracts n or val from a record argument
+     * Create a builtin unary operation node that extracts n or val from a record argument.
+     * Uses BuiltinUnaryOpNode which properly handles Map operations via @TruffleBoundary.
      * - NumSub.neg uses field name 'n' (from unary - operator)
      * - LogicalNot.not uses field name 'val' (from unary ! operator)
      */
     private fun createBuiltinUnaryOp(operation: String, argsNode: MezzeNode): MezzeNode {
-        // argsNode evaluates to a record {n = value} or {val = value}
-        // We need to extract the operand field and pass it to the unary op node
-        return object : MezzeNode() {
-            @field:Child private var argumentsChild = argsNode
-
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                val argsValue = argumentsChild.execute(frame)
-                if (argsValue !is MezzeRecord) {
-                    throw RuntimeException("Unary operation arguments must be a record, got: ${argsValue::class.simpleName}")
-                }
-
-                // Try 'n' first (for negate), then 'val' (for not)
-                val operand = argsValue.fields["n"] ?: argsValue.fields["val"]
-                    ?: throw RuntimeException("Missing 'n' or 'val' field in unary operation (available fields: ${argsValue.fields.keys})")
-
-                return when (operation) {
-                    "negate" -> {
-                        when (operand) {
-                            is MezzeInt -> MezzeInt(-operand.value)
-                            is MezzeFloat -> MezzeFloat(-operand.value)
-                            else -> throw RuntimeException("Cannot negate ${operand::class.simpleName}")
-                        }
-                    }
-                    "not" -> {
-                        when (operand) {
-                            is MezzeBool -> MezzeBool(!operand.value)
-                            else -> throw RuntimeException("Cannot apply logical not to ${operand::class.simpleName}")
-                        }
-                    }
-                    else -> throw RuntimeException("Unsupported unary operation: $operation")
-                }
-            }
-        }
+        return com.mezze.language.interpreter.nodes.arithmetic.BuiltinUnaryOpNode(argsNode, operation)
     }
 
     /**
-     * Create a builtin binary operation node that extracts l and r from a record argument
+     * Create a builtin binary operation node that extracts l and r from a record argument.
+     * Uses BuiltinBinaryOpNode which properly handles Map operations via @TruffleBoundary.
      */
     private fun createBuiltinBinaryOp(operation: String, argsNode: MezzeNode): MezzeNode {
-        // argsNode evaluates to a record {l = left, r = right}
-        // We need to extract l and r and pass them to the binary op node
-        return object : MezzeNode() {
-            @field:Child private var argumentsChild = argsNode
-
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                val argsValue = argumentsChild.execute(frame)
-                if (argsValue !is MezzeRecord) {
-                    throw RuntimeException("Binary operation arguments must be a record, got: ${argsValue::class.simpleName}")
-                }
-
-                // DEBUG: Print record fields
-
-
-                val left = argsValue.fields["l"] ?: throw RuntimeException("Missing 'l' field in binary operation (available fields: ${argsValue.fields.keys})")
-                val right = argsValue.fields["r"] ?: throw RuntimeException("Missing 'r' field in binary operation (available fields: ${argsValue.fields.keys})")
-
-                return when (operation) {
-                    // Arithmetic operations
-                    "add" -> {
-                        when {
-                            left is MezzeInt && right is MezzeInt -> MezzeInt(left.value + right.value)
-                            left is MezzeFloat && right is MezzeFloat -> MezzeFloat(left.value + right.value)
-                            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat ->
-                                com.mezze.language.interpreter.MezzeNat(left.value + right.value)
-                            left is com.mezze.language.interpreter.MezzeFrac && right is com.mezze.language.interpreter.MezzeFrac -> {
-                                val newNumerator = left.numerator * right.denominator + right.numerator * left.denominator
-                                val newDenominator = left.denominator * right.denominator
-                                com.mezze.language.interpreter.MezzeFrac(newNumerator, newDenominator).reduce()
-                            }
-                            else -> throw RuntimeException("Cannot add ${left::class.simpleName} and ${right::class.simpleName}")
-                        }
-                    }
-                    "subtract" -> {
-                        when {
-                            left is MezzeInt && right is MezzeInt -> MezzeInt(left.value - right.value)
-                            left is MezzeFloat && right is MezzeFloat -> MezzeFloat(left.value - right.value)
-                            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat ->
-                                MezzeInt(left.value - right.value) // Nat - Nat can be negative, so return Int
-                            left is com.mezze.language.interpreter.MezzeFrac && right is com.mezze.language.interpreter.MezzeFrac -> {
-                                val newNumerator = left.numerator * right.denominator - right.numerator * left.denominator
-                                val newDenominator = left.denominator * right.denominator
-                                com.mezze.language.interpreter.MezzeFrac(newNumerator, newDenominator).reduce()
-                            }
-                            else -> throw RuntimeException("Cannot subtract ${left::class.simpleName} and ${right::class.simpleName}")
-                        }
-                    }
-                    "multiply" -> {
-                        when {
-                            left is MezzeInt && right is MezzeInt -> MezzeInt(left.value * right.value)
-                            left is MezzeFloat && right is MezzeFloat -> MezzeFloat(left.value * right.value)
-                            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat ->
-                                com.mezze.language.interpreter.MezzeNat(left.value * right.value)
-                            left is com.mezze.language.interpreter.MezzeFrac && right is com.mezze.language.interpreter.MezzeFrac -> {
-                                val newNumerator = left.numerator * right.numerator
-                                val newDenominator = left.denominator * right.denominator
-                                com.mezze.language.interpreter.MezzeFrac(newNumerator, newDenominator).reduce()
-                            }
-                            else -> throw RuntimeException("Cannot multiply ${left::class.simpleName} and ${right::class.simpleName}")
-                        }
-                    }
-                    "divide" -> {
-                        when {
-                            left is MezzeInt && right is MezzeInt -> MezzeInt(left.value / right.value)
-                            left is MezzeFloat && right is MezzeFloat -> MezzeFloat(left.value / right.value)
-                            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat -> {
-                                if (right.value == 0L) throw ArithmeticException("Division by zero")
-                                com.mezze.language.interpreter.MezzeNat(left.value / right.value)
-                            }
-                            left is com.mezze.language.interpreter.MezzeFrac && right is com.mezze.language.interpreter.MezzeFrac -> {
-                                if (right.numerator == 0L) throw ArithmeticException("Division by zero")
-                                val newNumerator = left.numerator * right.denominator
-                                val newDenominator = left.denominator * right.numerator
-                                com.mezze.language.interpreter.MezzeFrac(newNumerator, newDenominator).reduce()
-                            }
-                            else -> throw RuntimeException("Cannot divide ${left::class.simpleName} and ${right::class.simpleName}")
-                        }
-                    }
-                    "modulo" -> {
-                        when {
-                            left is MezzeInt && right is MezzeInt -> {
-                                if (right.value == 0L) throw ArithmeticException("Modulo by zero")
-                                MezzeInt(left.value % right.value)
-                            }
-                            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat -> {
-                                if (right.value == 0L) throw ArithmeticException("Modulo by zero")
-                                com.mezze.language.interpreter.MezzeNat(left.value % right.value)
-                            }
-                            else -> throw RuntimeException("Cannot compute modulo for ${left::class.simpleName} and ${right::class.simpleName}")
-                        }
-                    }
-                    // Comparison operations
-                    "equal" -> {
-                        // Structural equality comparison - works for all value types
-                        MezzeBool(structuralEquals(left, right))
-                    }
-                    "notEqual" -> {
-                        // Structural not-equal comparison
-                        MezzeBool(!structuralEquals(left, right))
-                    }
-                    "lessThan" -> {
-                        when {
-                            left is MezzeInt && right is MezzeInt -> MezzeBool(left.value < right.value)
-                            left is MezzeFloat && right is MezzeFloat -> MezzeBool(left.value < right.value)
-                            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat ->
-                                MezzeBool(left.value < right.value)
-                            left is com.mezze.language.interpreter.MezzeFrac && right is com.mezze.language.interpreter.MezzeFrac ->
-                                MezzeBool(left.numerator * right.denominator < right.numerator * left.denominator)
-                            else -> throw RuntimeException("Cannot compare ${left::class.simpleName} < ${right::class.simpleName}")
-                        }
-                    }
-                    "greaterThan" -> {
-                        when {
-                            left is MezzeInt && right is MezzeInt -> MezzeBool(left.value > right.value)
-                            left is MezzeFloat && right is MezzeFloat -> MezzeBool(left.value > right.value)
-                            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat ->
-                                MezzeBool(left.value > right.value)
-                            left is com.mezze.language.interpreter.MezzeFrac && right is com.mezze.language.interpreter.MezzeFrac ->
-                                MezzeBool(left.numerator * right.denominator > right.numerator * left.denominator)
-                            else -> throw RuntimeException("Cannot compare ${left::class.simpleName} > ${right::class.simpleName}")
-                        }
-                    }
-                    "lessEqual" -> {
-                        when {
-                            left is MezzeInt && right is MezzeInt -> MezzeBool(left.value <= right.value)
-                            left is MezzeFloat && right is MezzeFloat -> MezzeBool(left.value <= right.value)
-                            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat ->
-                                MezzeBool(left.value <= right.value)
-                            left is com.mezze.language.interpreter.MezzeFrac && right is com.mezze.language.interpreter.MezzeFrac ->
-                                MezzeBool(left.numerator * right.denominator <= right.numerator * left.denominator)
-                            else -> throw RuntimeException("Cannot compare ${left::class.simpleName} <= ${right::class.simpleName}")
-                        }
-                    }
-                    "greaterEqual" -> {
-                        when {
-                            left is MezzeInt && right is MezzeInt -> MezzeBool(left.value >= right.value)
-                            left is MezzeFloat && right is MezzeFloat -> MezzeBool(left.value >= right.value)
-                            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat ->
-                                MezzeBool(left.value >= right.value)
-                            left is com.mezze.language.interpreter.MezzeFrac && right is com.mezze.language.interpreter.MezzeFrac ->
-                                MezzeBool(left.numerator * right.denominator >= right.numerator * left.denominator)
-                            else -> throw RuntimeException("Cannot compare ${left::class.simpleName} >= ${right::class.simpleName}")
-                        }
-                    }
-                    // Logical operations
-                    "and" -> {
-                        when {
-                            left is MezzeBool && right is MezzeBool -> MezzeBool(left.value && right.value)
-                            else -> throw RuntimeException("Cannot apply logical and to ${left::class.simpleName} and ${right::class.simpleName}")
-                        }
-                    }
-                    "or" -> {
-                        when {
-                            left is MezzeBool && right is MezzeBool -> MezzeBool(left.value || right.value)
-                            else -> throw RuntimeException("Cannot apply logical or to ${left::class.simpleName} and ${right::class.simpleName}")
-                        }
-                    }
-                    else -> throw RuntimeException("Unsupported binary operation: $operation")
-                }
-            }
-        }
-    }
-
-    /**
-     * Structural equality check for Mezze values
-     * Handles primitives, records, variants, lists, and nested structures
-     */
-    private fun structuralEquals(left: MezzeValue, right: MezzeValue): Boolean {
-        return when {
-            // Primitive types
-            left is MezzeInt && right is MezzeInt -> left.value == right.value
-            left is MezzeFloat && right is MezzeFloat -> left.value == right.value
-            left is MezzeString && right is MezzeString -> left.value == right.value
-            left is MezzeBool && right is MezzeBool -> left.value == right.value
-            left is com.mezze.language.interpreter.MezzeNat && right is com.mezze.language.interpreter.MezzeNat -> left.value == right.value
-
-            // Fractions - compare using cross multiplication: a/b == c/d iff a*d == b*c
-            left is com.mezze.language.interpreter.MezzeFrac && right is com.mezze.language.interpreter.MezzeFrac ->
-                left.numerator * right.denominator == right.numerator * left.denominator
-
-            // Lists - check length and all elements structurally
-            left is com.mezze.language.interpreter.MezzeList && right is com.mezze.language.interpreter.MezzeList -> {
-                val leftList = left.toKotlinList()
-                val rightList = right.toKotlinList()
-                if (leftList.size != rightList.size) {
-                    false // Different lengths
-                } else {
-                    // Check each element recursively
-                    leftList.zip(rightList).all { (leftElem: MezzeValue, rightElem: MezzeValue) ->
-                        structuralEquals(leftElem, rightElem)
-                    }
-                }
-            }
-
-            // Records - check all fields structurally
-            left is MezzeRecord && right is MezzeRecord -> {
-                if (left.fields.keys != right.fields.keys) {
-                    false // Different field sets
-                } else {
-                    // Check each field recursively
-                    left.fields.all { (key, leftValue) ->
-                        val rightValue = right.fields[key]
-                        rightValue != null && structuralEquals(leftValue, rightValue)
-                    }
-                }
-            }
-
-            // Variants - check constructor and data
-            left is com.mezze.language.interpreter.MezzeVariant && right is com.mezze.language.interpreter.MezzeVariant -> {
-                if (left.constructor != right.constructor) {
-                    false // Different constructors
-                } else {
-                    // Check data values recursively
-                    when {
-                        left.value == null && right.value == null -> true
-                        left.value != null && right.value != null -> structuralEquals(left.value, right.value)
-                        else -> false // One has data, other doesn't
-                    }
-                }
-            }
-
-            // Different types are never equal
-            else -> false
-        }
+        return com.mezze.language.interpreter.nodes.arithmetic.BuiltinBinaryOpNode(argsNode, operation)
     }
 
     /**
@@ -1817,32 +1359,9 @@ class ASTToTruffleConverter(
         spreadNodes: List<MezzeNode>,
         fieldNodes: Map<String, MezzeNode>
     ): MezzeNode {
-        return object : MezzeNode() {
-            @field:Children private val spreadChildren = spreadNodes.toTypedArray()
-            private val fieldChildren = fieldNodes.mapValues { (_, node) -> node }
-
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                // Start with an empty map
-                val mergedFields = mutableMapOf<String, MezzeValue>()
-
-                // Merge all spread records
-                for (spreadChild in spreadChildren) {
-                    val spreadValue = spreadChild.execute(frame)
-                    if (spreadValue !is MezzeRecord) {
-                        throw RuntimeException("Cannot spread non-record value: ${spreadValue::class.simpleName}")
-                    }
-                    // Add all fields from the spread record
-                    mergedFields.putAll(spreadValue.fields)
-                }
-
-                // Override/add explicit field values
-                for ((fieldName, fieldNode) in fieldChildren) {
-                    mergedFields[fieldName] = fieldNode.execute(frame)
-                }
-
-                return MezzeRecord(mergedFields)
-            }
-        }
+        val fieldNames = fieldNodes.keys.toList()
+        val fieldNodesList = fieldNodes.values.toList()
+        return RecordSpreadNode(spreadNodes, fieldNames, fieldNodesList)
     }
     
     /**
@@ -2070,228 +1589,46 @@ class ASTToTruffleConverter(
         val capturedHashSlots = contentHashToSlot.toMap()
 
         // CRITICAL: Pre-convert handler parameters at node construction time
-        // This maps handler name -> parameter node (or null if no parameters)
-        val handlerParamNodes = performExpr.handlers.associate { handler ->
-            handler.name to (handler.parameters?.let { convertExpression(it) })
+        // Build arrays for the DynamicPerformNode
+        val handlerNamesArray = performExpr.handlers.map { it.name }.toTypedArray()
+        val handlerParamNodeArray = performExpr.handlers.map { handler ->
+            handler.parameters?.let { convertExpression(it) }
+        }.toTypedArray()
+
+        // Build arrays for resolved handlers
+        val useResolvedHandlers = performExpr.resolvedHandlers.isNotEmpty()
+        val resolvedEffectNames: Array<String>
+        val resolvedPerformerNames: Array<String>
+        val resolvedImplHashes: Array<String>
+
+        if (useResolvedHandlers) {
+            val resolvedList = performExpr.resolvedHandlers.values.toList()
+            resolvedEffectNames = resolvedList.map { it.effectName }.toTypedArray()
+            resolvedPerformerNames = resolvedList.map { it.performerName }.toTypedArray()
+            resolvedImplHashes = resolvedList.map { it.implDeclarationHash
+                ?: throw RuntimeException(
+                    "Content hash required for effect handler: ${it.effectName}/${it.performerName}. " +
+                    "Ensure the TypeChecker computed hashes before interpretation."
+                )
+            }.toTypedArray()
+        } else {
+            resolvedEffectNames = emptyArray()
+            resolvedPerformerNames = emptyArray()
+            resolvedImplHashes = emptyArray()
         }
 
-        // For now, create a simplified PerformNode that looks up handlers at runtime
-        return object : com.mezze.language.interpreter.nodes.MezzeNode() {
-            @field:Child private var exprChild = expressionNode
-
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                // Build the handlers map by looking up each performer in the context
-                val runtimeHandlers = mutableMapOf<String, MezzeValue>()
-                val context = getContext()
-
-
-                // If resolvedHandlers is populated, use it with hash-based lookup
-                if (performExpr.resolvedHandlers.isNotEmpty()) {
-                    for (resolvedHandler in performExpr.resolvedHandlers.values) {
-                        val effectName = resolvedHandler.effectName
-                        val performerName = resolvedHandler.performerName
-                        val implHash = resolvedHandler.implDeclarationHash
-                            ?: throw RuntimeException(
-                                "Content hash required for effect handler: $effectName/$performerName. " +
-                                "Ensure the TypeChecker computed hashes before interpretation."
-                            )
-
-                        // Try local slot first, then context lookup (for cross-module)
-                        val hashSlot = capturedHashSlots[implHash]
-                        var performerValue: MezzeValue = if (hashSlot != null) {
-                            frame.getValue(hashSlot) as? MezzeValue
-                                ?: throw RuntimeException(
-                                    "Handler implementation not found for hash: $implHash (effect: $effectName)"
-                                )
-                        } else {
-                            // Cross-module: look up in context by hash
-                            context.lookupGlobal(implHash)
-                                ?: throw RuntimeException(
-                                    "Handler implementation not found for hash: $implHash (effect: $effectName, performer: $performerName)"
-                                )
-                        }
-
-                        // CRITICAL: Handle parameterized handlers (e.g., AllPaths {cont = ...})
-                        // Look up parameters by performer name from the original handlers list
-                        val paramsNode = handlerParamNodes[performerName]
-                        if (paramsNode != null) {
-                            // Evaluate the pre-converted parameter node
-                            val paramsValue = paramsNode.execute(frame)
-
-                            if (paramsValue !is MezzeRecord) {
-                                throw RuntimeException("Handler parameters must be a record, got: ${paramsValue::class.simpleName}")
-                            }
-
-                            // Check if the performer is a function (parameterized implementation)
-                            when (performerValue) {
-                                is com.mezze.language.interpreter.NativeMezzeFunction -> {
-                                    // Native wrapper function - call it with the parameters
-                                    performerValue = performerValue.call(listOf(paramsValue))
-                                }
-                                is com.mezze.language.interpreter.MezzeTruffleFunction -> {
-                                    // Truffle function - call via CallTarget
-                                    performerValue = performerValue.callTarget.call(
-                                        paramsValue,
-                                        performerValue.closureVariables,
-                                        performerValue.lexicalScope,
-                                        performerValue.lexicalScopeSlotMap
-                                    ) as MezzeValue
-                                }
-                                else -> {
-                                    // Fallback: Old behavior for non-parameterized handlers
-                                    for ((paramName, paramValue) in paramsValue.fields) {
-                                        context.defineLocal(paramName, paramValue)
-                                    }
-                                }
-                            }
-                        }
-
-                        runtimeHandlers[effectName] = performerValue
-                    }
-                } else {
-                    // Use the handlerToEffectMapping (contains content hashes)
-                    for (handler in performExpr.handlers) {
-                        val handlerName = handler.name
-
-                        // Look up the effect name and content hash from our mapping
-                        val mapping = capturedMapping[handlerName]
-                        if (mapping == null) {
-                            throw RuntimeException("Handler '$handlerName' not found in effect mapping. Available handlers: ${capturedMapping.keys}")
-                        }
-
-                        val (effectName, implHash) = mapping
-
-                        // Try local slot first, then context lookup (for cross-module)
-                        val hashSlot = capturedHashSlots[implHash]
-                        var performerValue: MezzeValue = if (hashSlot != null) {
-                            frame.getValue(hashSlot) as? MezzeValue
-                                ?: throw RuntimeException("Handler implementation not found for hash: $implHash (handler: $handlerName)")
-                        } else {
-                            // Cross-module: look up in context by hash
-                            context.lookupGlobal(implHash)
-                                ?: throw RuntimeException("Handler implementation not found for hash: $implHash (handler: $handlerName)")
-                        }
-
-                        // If the handler has parameters (e.g., AllPaths {cont = continuation::new {}}),
-                        // the performer is a FUNCTION that needs to be called with those parameters
-                        val paramsNode = handlerParamNodes[handlerName]
-                        if (paramsNode != null) {
-                            // Evaluate the pre-converted parameter node
-                            val paramsValue = paramsNode.execute(frame)
-
-                            if (paramsValue !is MezzeRecord) {
-                                throw RuntimeException("Handler parameters must be a record, got: ${paramsValue::class.simpleName}")
-                            }
-
-                            // Check if the performer is a function (parameterized implementation)
-                            when (performerValue) {
-                                is com.mezze.language.interpreter.NativeMezzeFunction -> {
-                                    // Native wrapper function - call it with the parameters
-                                    performerValue = performerValue.call(listOf(paramsValue))
-                                }
-                                is com.mezze.language.interpreter.MezzeTruffleFunction -> {
-                                    // Truffle function - call via CallTarget
-                                    // CRITICAL: MezzeFunctionRootNode expects 4 arguments:
-                                    // [0] = args record, [1] = closure variables map (legacy),
-                                    // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
-                                    performerValue = performerValue.callTarget.call(
-                                        paramsValue,
-                                        performerValue.closureVariables,
-                                        performerValue.lexicalScope,
-                                        performerValue.lexicalScopeSlotMap
-                                    ) as MezzeValue
-                                }
-                                else -> {
-                                    // Fallback: Old behavior for non-parameterized handlers
-                                    // Inject parameters into the context
-                                    for ((paramName, paramValue) in paramsValue.fields) {
-                                        context.defineLocal(paramName, paramValue)
-                                    }
-                                }
-                            }
-                        }
-
-                        // Store the handler under the effect name
-                        runtimeHandlers[effectName] = performerValue
-                    }
-                }
-
-                // Use the shared effect handler from context
-                val effectHandler = context.effectHandler
-
-                // CRITICAL: Merge with existing handlers from the stack
-                // This ensures nested perform expressions accumulate handlers
-                // Example: `perform Console in perform Delimited` should have BOTH handlers available
-                val existingHandlers = effectHandler.getCurrentHandlers()
-                val mergedHandlers = if (existingHandlers != null) {
-                    // Merge: new handlers override existing ones with same name
-                    existingHandlers.fields.toMutableMap().apply {
-                        putAll(runtimeHandlers)
-                    }
-                } else {
-                    runtimeHandlers
-                }
-
-                val handlersRecord = MezzeRecord(mergedHandlers)
-
-                // Push merged handlers onto stack
-                effectHandler.pushHandlers(handlersRecord)
-
-                try {
-                    val result = exprChild.execute(frame)
-
-                    // CRITICAL: Check if result is MezzeContinuationSuspended (for early return)
-                    // ONLY unwrap for WithReturn performer (Return effect), NOT for Delimited (generators)
-                    // - perform WithReturn: unwraps and returns suspended value (early return semantics)
-                    // - perform Delimited: returns MezzeContinuationSuspended as-is (generator semantics)
-                    if (result is com.mezze.language.interpreter.MezzeContinuationSuspended) {
-                        // Check if we're handling the Return effect (early return)
-                        if (runtimeHandlers.containsKey("Return")) {
-                            // WithReturn performer: extract the suspended value and return it immediately
-                            // This implements early return semantics
-                            return result.suspendedValue
-                        }
-
-                        // Check if we're handling the Exception effect with ToResult, ToOption, or Ignore
-                        // These performers suspend with Err/None/{}, so just return the suspended value
-                        if (runtimeHandlers.containsKey("Exception")) {
-                            return result.suspendedValue
-                        }
-
-                        // Otherwise (Delimited performer for generators): return the suspended continuation as-is
-                        // so callers can resume it with next(), to_list(), etc.
-                        return result
-                    }
-
-                    // LAZY EFFECTS MODEL: Check if result is MezzeSuspended
-                    // If all effects are now handled, execute the deferred computation
-                    if (result is com.mezze.language.interpreter.MezzeSuspended) {
-                        // Try to execute the suspended computation with available handlers
-                        return result.executeWith(runtimeHandlers, context, frame)
-                    }
-
-                    // EXCEPTION EFFECT: Wrap successful results in Ok for ToResult handler
-                    if (runtimeHandlers.containsKey("Exception")) {
-                        // If we reach here, no exception was thrown, so wrap the result in Ok
-                        return com.mezze.language.interpreter.MezzeVariant(
-                            "Ok",
-                            MezzeRecord(mapOf("val" to result))
-                        )
-                    }
-
-                    return result
-                } catch (e: com.mezze.language.interpreter.stdlib.effects.ForkedExecutionException) {
-                    // CRITICAL: Fork exception thrown from within the perform block
-                    // This means the continuation was forked with multiple values
-                    // Return the collected results as an array (this is the final result of the perform block)
-
-                    return com.mezze.language.interpreter.MezzeArrayList(e.values)
-                } finally {
-                    // Always pop handlers, even if exception occurs
-                    effectHandler.popHandlers()
-                }
-            }
-        }
+        // Use DynamicPerformNode which properly handles Map operations via @TruffleBoundary
+        return com.mezze.language.interpreter.nodes.effect.DynamicPerformNode(
+            exprChild = expressionNode,
+            handlerParamNodeArray = handlerParamNodeArray,
+            handlerNames = handlerNamesArray,
+            useResolvedHandlers = useResolvedHandlers,
+            resolvedEffectNames = resolvedEffectNames,
+            resolvedPerformerNames = resolvedPerformerNames,
+            resolvedImplHashes = resolvedImplHashes,
+            capturedMapping = capturedMapping,
+            capturedHashSlots = capturedHashSlots
+        )
     }
     
     /**
@@ -2367,34 +1704,11 @@ class ASTToTruffleConverter(
     }
     
     private fun createNegateNode(operand: MezzeNode): MezzeNode {
-        // Simple negation implementation
-        return object : MezzeNode() {
-            @field:Child private var operandChild = operand
-            
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                val value = operandChild.execute(frame)
-                return when (value) {
-                    is MezzeInt -> MezzeInt(-value.value)
-                    is MezzeFloat -> com.mezze.language.interpreter.MezzeFloat(-value.value)
-                    else -> throw RuntimeException("Cannot negate ${value::class.simpleName}")
-                }
-            }
-        }
+        return NegateNode(operand)
     }
-    
+
     private fun createNotNode(operand: MezzeNode): MezzeNode {
-        // Simple logical not implementation
-        return object : MezzeNode() {
-            @field:Child private var operandChild = operand
-            
-            override fun execute(frame: com.oracle.truffle.api.frame.VirtualFrame): MezzeValue {
-                val value = operandChild.execute(frame)
-                return when (value) {
-                    is MezzeBool -> MezzeBool(!value.value)
-                    else -> throw RuntimeException("Cannot apply logical not to ${value::class.simpleName}")
-                }
-            }
-        }
+        return LogicalNotNode(operand)
     }
     
     private fun createPatternMatchNode(valueNode: MezzeNode, caseNodes: Array<PatternCaseNode>): MezzeNode {
@@ -2412,5 +1726,82 @@ class ASTToTruffleConverter(
 
     private fun createFunctionCallNode(functionNode: MezzeNode, argumentsNode: MezzeNode): MezzeNode {
         return FunctionCallNode(functionNode, argumentsNode)
+    }
+
+    /**
+     * Convert a StateMachineExpression to a Truffle-compliant TruffleStateMachineNode.
+     *
+     * CRITICAL: All state expressions are converted at parse time, NOT at runtime.
+     * This fixes the fundamental Truffle violation in the old StateMachineNode which
+     * called converter.convertExpression() in execute().
+     *
+     * The frame descriptor is obtained AFTER all expressions are converted to ensure
+     * all variables are registered.
+     */
+    private fun convertStateMachineExpression(expr: StateMachineExpression): MezzeNode {
+        // Ensure __state_machine_input__ slot exists
+        val inputSlot = getOrCreateSlot("__state_machine_input__")
+
+        // Pre-convert all state expressions NOW (at parse time)
+        // Store converted nodes temporarily without frame descriptors
+        val convertedNodes = mutableListOf<MezzeNode>()
+        val stateTypes = mutableListOf<TruffleStateMachineNode.StateType>()
+        val nextStateIndices = mutableListOf<Int>()
+
+        for ((index, state) in expr.states.withIndex()) {
+            val nextState = if (index + 1 < expr.states.size) index + 1 else -1
+
+            when (state) {
+                is ComputeState -> {
+                    val bodyNode = convertExpression(state.computation)
+                    convertedNodes.add(bodyNode)
+                    stateTypes.add(TruffleStateMachineNode.StateType.COMPUTE)
+                    nextStateIndices.add(nextState)
+                }
+                is YieldState -> {
+                    val valueNode = convertExpression(state.valueExpression)
+                    convertedNodes.add(valueNode)
+                    stateTypes.add(TruffleStateMachineNode.StateType.YIELD)
+                    nextStateIndices.add(nextState)
+                }
+                is CompleteState -> {
+                    val resultNode = convertExpression(state.resultExpression)
+                    convertedNodes.add(resultNode)
+                    stateTypes.add(TruffleStateMachineNode.StateType.COMPLETE)
+                    nextStateIndices.add(-1) // Complete states are terminal
+                }
+            }
+        }
+
+        // Create slot for state index
+        val stateIndexSlot = getOrCreateSlot("__state_machine_index__")
+
+        // NOW get the frame descriptor AFTER all expressions are converted
+        // This ensures all variables are registered
+        val frameDesc = getFrameDescriptor()
+
+        // Create state body nodes with the SHARED frame descriptor
+        val stateNodes = convertedNodes.mapIndexed { index, node ->
+            when (stateTypes[index]) {
+                TruffleStateMachineNode.StateType.COMPUTE -> ComputeStateBodyNode(node, frameDesc)
+                TruffleStateMachineNode.StateType.YIELD -> YieldStateBodyNode(node, frameDesc)
+                TruffleStateMachineNode.StateType.COMPLETE -> CompleteStateBodyNode(node, frameDesc)
+            }
+        }.toTypedArray()
+
+        // CRITICAL: Capture ALL variables from variableSlots, not just expr.capturedVariables
+        // This matches the behavior of the old StateMachineNode which read all variables
+        // from the converter to ensure intermediate variables are preserved for multishot
+        val capturedVariableNames = variableSlots.keys.toTypedArray()
+
+        return TruffleStateMachineNode(
+            stateNodes = stateNodes,
+            stateTypes = stateTypes.toTypedArray(),
+            nextStateIndices = nextStateIndices.toIntArray(),
+            inputSlot = inputSlot,
+            stateIndexSlot = stateIndexSlot,
+            variableSlots = variableSlots.toMap(),
+            capturedVariableNames = capturedVariableNames
+        )
     }
 }

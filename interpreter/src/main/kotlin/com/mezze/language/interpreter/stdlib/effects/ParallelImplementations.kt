@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib.effects
 
 import com.mezze.language.interpreter.*
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
@@ -1590,7 +1591,9 @@ object ParallelImplementations {
 
     /**
      * Call a function with no arguments.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunction(fn: MezzeValue): MezzeValue {
         return when (fn) {
             is MezzeTruffleFunction -> {
@@ -1609,7 +1612,9 @@ object ParallelImplementations {
 
     /**
      * Call a function with a single argument wrapped in a record {x = arg}.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunctionWithArg(fn: MezzeValue, arg: MezzeValue): MezzeValue {
         val recordArg = MezzeRecord(mapOf("x" to arg))
         return when (fn) {

@@ -777,6 +777,9 @@ class SubstitutionApplier(
                 if (abilityDecl != null) {
                     val operation = abilityDecl.operations.find { it.name == methodName }
                     if (operation != null) {
+                        // Clear the type variable cache before converting method type
+                        // This ensures each method type conversion gets fresh but consistent type variables
+                        typeVarCache.clear()
                         // Convert the param and return type annotations to MezzeType and apply substitution
                         val paramType = typeAnnotationToMezzeType(operation.paramType)
                         val returnType = typeAnnotationToMezzeType(operation.returnType)
@@ -794,6 +797,10 @@ class SubstitutionApplier(
      * Convert a TypeAnnotation to MezzeType.
      * Used for looking up ability method types.
      */
+    // Track type variables created during typeAnnotationToMezzeType to ensure consistency
+    // within a single method type conversion
+    private val typeVarCache = mutableMapOf<String, TypeVar>()
+
     private fun typeAnnotationToMezzeType(annotation: TypeAnnotation): MezzeType {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
@@ -809,8 +816,14 @@ class SubstitutionApplier(
                     else -> {
                         // Could be a type variable or type alias
                         if (annotation.name.startsWith("'") || annotation.name.all { it.isLowerCase() }) {
-                            // Type variable - create a fresh one (will be unified later)
-                            MezzeType.VarType(TypeVar.fresh())
+                            // Type variable - reuse from cache or create a fresh one
+                            // This ensures the same type parameter name maps to the same type variable
+                            // within a single method type conversion
+                            val normalizedName = annotation.name.removePrefix("'")
+                            val typeVar = typeVarCache.getOrPut(normalizedName) {
+                                TypeVar.fresh()
+                            }
+                            MezzeType.VarType(typeVar)
                         } else {
                             // Named type - use TypeApplication
                             MezzeType.TypeApplication(annotation.name, emptyList())
@@ -1643,11 +1656,29 @@ class SubstitutionApplier(
         val updatedStatements = expr.statements.map { stmt ->
             when (stmt) {
                 is LetStatement -> {
-                    val updatedExpr = applyToExpression(stmt.expression)
+                    // CRITICAL FIX: If there's a type annotation, use it to set the expression type BEFORE applying
+                    // This ensures ability calls like Decode.decode get the correct type from the annotation
+                    val annotatedType = stmt.typeAnnotation?.let { annotation ->
+                        val contextBuilder = com.mezze.language.typechecker.context.ContextBuilder()
+                        contextBuilder.convertTypeAnnotation(annotation)
+                    }
+
+                    // Set inferredType on the expression before processing if we have an annotation
+                    val exprWithType = if (annotatedType != null) {
+                        when (val e = stmt.expression) {
+                            is FunctionCall -> e.copy(inferredType = annotatedType)
+                            else -> e
+                        }
+                    } else {
+                        stmt.expression
+                    }
+
+                    val updatedExpr = applyToExpression(exprWithType)
+
                     // Add the let binding(s) to context for subsequent statements
                     // For simple patterns (let x = ...), this is just x -> type
                     // For complex patterns (let {a, b} = ...), extract all bindings
-                    val exprType = updatedExpr.inferredType
+                    val exprType = annotatedType?.let { substitution.apply(it) } ?: updatedExpr.inferredType
                     if (exprType != null) {
                         // Extract all variable names from the pattern
                         val variableNames = stmt.pattern.extractBindings()

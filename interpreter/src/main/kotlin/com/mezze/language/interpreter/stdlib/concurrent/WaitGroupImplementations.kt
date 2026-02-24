@@ -185,7 +185,7 @@ class WaitGroupSync : AbstractQueuedSynchronizer() {
 data class MezzeWaitGroup(
     val sync: WaitGroupSync
 ) : MezzeValue() {
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         return "<waitgroup:${sync.count} pending>"
     }
 }

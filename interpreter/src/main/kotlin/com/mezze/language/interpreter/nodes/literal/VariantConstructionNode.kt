@@ -1,5 +1,6 @@
 package com.mezze.language.interpreter.nodes.literal
 
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.NodeInfo
 import com.mezze.language.interpreter.nodes.MezzeNode
@@ -45,19 +46,22 @@ class VariantConstructionNode(
 
             // List constructors -> MezzeCons/MezzeNil
             "Nil" -> MezzeNil
-            "Cons" -> {
-                val record = value as? MezzeRecord
-                    ?: throw RuntimeException("Cons constructor requires a record with 'head' and 'tail' fields")
-                val head = record.fields["head"]
-                    ?: throw RuntimeException("Cons constructor requires 'head' field")
-                val tail = record.fields["tail"] as? MezzeList
-                    ?: throw RuntimeException("Cons constructor requires 'tail' field of type List")
-                MezzeCons(head, tail)
-            }
+            "Cons" -> buildConsCell(value)
 
             // Default: standard variant
             else -> MezzeVariant(constructor, value)
         }
+    }
+
+    @TruffleBoundary
+    private fun buildConsCell(value: MezzeValue?): MezzeCons {
+        val record = value as? MezzeRecord
+            ?: throw RuntimeException("Cons constructor requires a record with 'head' and 'tail' fields")
+        val head = record.fields["head"]
+            ?: throw RuntimeException("Cons constructor requires 'head' field")
+        val tail = record.fields["tail"] as? MezzeList
+            ?: throw RuntimeException("Cons constructor requires 'tail' field of type List")
+        return MezzeCons(head, tail)
     }
 
     override fun toString(): String {

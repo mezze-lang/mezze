@@ -78,15 +78,19 @@ class EffectHandler {
     }
     
     /**
-     * Push handlers onto the stack when entering a perform expression
+     * Push handlers onto the stack when entering a perform expression.
+     * Marked @TruffleBoundary to exclude List operations from JIT compilation.
      */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun pushHandlers(handlers: MezzeRecord) {
         handlerStack.get().add(handlers)
     }
 
     /**
-     * Pop handlers from the stack when exiting a perform expression
+     * Pop handlers from the stack when exiting a perform expression.
+     * Marked @TruffleBoundary to exclude List operations from JIT compilation.
      */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun popHandlers() {
         val stack = handlerStack.get()
         if (stack.isNotEmpty()) {
@@ -95,8 +99,10 @@ class EffectHandler {
     }
 
     /**
-     * Get the current active handlers
+     * Get the current active handlers.
+     * Marked @TruffleBoundary to exclude List operations from JIT compilation.
      */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun getCurrentHandlers(): MezzeRecord? {
         return handlerStack.get().lastOrNull()
     }
@@ -118,8 +124,7 @@ class EffectHandler {
         effectName: String,
         operationName: String,
         arguments: MezzeValue,
-        context: MutableMap<String, MezzeValue>,
-        interpreter: MezzeInterpreter  // Kept for backward compatibility, but not used
+        context: MutableMap<String, MezzeValue>
     ): MezzeValue {
         // COMPREHENSIVE HANDLER RESOLUTION
         // CRITICAL FIX: Prioritize handler stack over context

@@ -82,31 +82,6 @@ object CoopTypes {
             MezzeType.BooleanType
         )
 
-        // Legacy functions for compatibility
-        // __native_coop_wrap_promise: { f: {} -> 'a } -> Promise 'a
-        context["__native_coop_wrap_promise"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                )
-            )),
-            promiseType
-        )
-
-        // __native_coop_unwrap_promise: { p: Promise 'a } -> { f: {} -> 'a }
-        context["__native_coop_unwrap_promise"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "p" to promiseType
-            )),
-            MezzeType.RecordType(mapOf(
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    MezzeType.VarType(TypeVar("a"))
-                )
-            ))
-        )
-
         // === Structured Concurrency ===
 
         // __native_coop_join: {left: {} -> 'a, right: {} -> 'b, cont: Continuation} -> {left: 'a, right: 'b}

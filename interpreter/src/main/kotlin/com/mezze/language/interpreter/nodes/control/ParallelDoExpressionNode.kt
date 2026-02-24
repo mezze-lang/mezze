@@ -184,37 +184,12 @@ class ParallelDoExpressionNode(
                 varName to converter.getOrCreateSlot(varName)
             }.toMap()
 
-            return object : MezzeNode() {
-                @field:Child private var valueChild = valueNode
+            // Pre-compute slot indices as arrays for efficient access
+            val varNames = bindings.map { it.second }.toTypedArray()
+            val slotIndices = varNames.map { slots[it]!! }.toIntArray()
+            val fieldPaths = bindings.map { it.first.toTypedArray() }.toTypedArray()
 
-                override fun execute(frame: VirtualFrame): MezzeValue {
-                    val value = valueChild.execute(frame)
-
-                    if (value !is com.mezze.language.interpreter.MezzeRecord) {
-                        throw RuntimeException("Cannot destructure non-record value: ${value::class.simpleName}")
-                    }
-
-                    val context = com.mezze.language.interpreter.MezzeLanguage.getCurrentContext(this)
-
-                    for ((fieldPath, varName) in bindings) {
-                        var currentValue: MezzeValue = value
-
-                        for (fieldName in fieldPath) {
-                            if (currentValue !is com.mezze.language.interpreter.MezzeRecord) {
-                                throw RuntimeException("Cannot access field '$fieldName' on non-record value: ${currentValue::class.simpleName}")
-                            }
-                            currentValue = currentValue.fields[fieldName]
-                                ?: throw RuntimeException("Field '$fieldName' not found in record")
-                        }
-
-                        val slot = slots[varName]!!
-                        frame.setObject(slot, currentValue)
-                        context.defineLocal(varName, currentValue)
-                    }
-
-                    return com.mezze.language.interpreter.MezzeRecord(emptyMap())
-                }
-            }
+            return RecordPatternBindingNode(valueNode, varNames, slotIndices, fieldPaths)
         }
 
         /**
@@ -306,13 +281,17 @@ class SimpleDoExpressionNode(
     @field:Children private val statementNodes: Array<MezzeNode>,
     @field:Child private var resultNode: MezzeNode
 ) : MezzeNode() {
-    
+
+    @com.oracle.truffle.api.CompilerDirectives.CompilationFinal
+    private val numStatements: Int = statementNodes.size
+
     override fun execute(frame: VirtualFrame): MezzeValue {
         var lastResult: MezzeValue = MezzeNull
 
         // Execute statements sequentially
-        for ((index, statementNode) in statementNodes.withIndex()) {
-            lastResult = statementNode.execute(frame)
+        var index = 0
+        while (index < numStatements) {
+            lastResult = statementNodes[index].execute(frame)
 
             // CRITICAL: Handle suspended continuations (early return, exceptions)
             if (lastResult is MezzeContinuationSuspended) {
@@ -321,68 +300,11 @@ class SimpleDoExpressionNode(
 
             // CRITICAL: Handle suspended effect computations with continuation composition
             if (lastResult is com.mezze.language.interpreter.MezzeSuspended) {
-                // Capture the suspended value for use in closures
-                val suspendedValue = lastResult
-
-                // Create a continuation that executes the remaining statements + result
-                val remainingStatements = statementNodes.sliceArray((index + 1) until statementNodes.size)
-
-                // Capture the context for use in closures
-                val context = com.mezze.language.interpreter.MezzeLanguage.getCurrentContext(this)
-
-                // Create a composed suspended computation
-                val composedFunc = com.mezze.language.interpreter.NativeMezzeFunction(
-                    "do-composition-${index}"
-                ) { args ->
-                    val effectHandler = context.effectHandler
-                    val currentHandlers = effectHandler.getCurrentHandlers()
-
-                    if (currentHandlers == null) {
-                        throw RuntimeException("No handlers available in composed do-continuation")
-                    }
-
-                    // Execute the original suspended effect
-                    val suspendedResult = when (val func = suspendedValue.computation.function) {
-                        is com.mezze.language.interpreter.NativeMezzeFunction -> {
-                            func.call(listOf(suspendedValue.computation.arguments))
-                        }
-                        is com.mezze.language.interpreter.MezzeTruffleFunction -> {
-                            func.callTarget.call(
-                                suspendedValue.computation.arguments,
-                                func.closureVariables,
-                                func.lexicalScope,
-                                func.lexicalScopeSlotMap
-                            ) as MezzeValue
-                        }
-                        else -> {
-                            throw RuntimeException("Cannot execute thunk with function type: ${func::class.simpleName}")
-                        }
-                    }
-
-                    // Execute remaining statements
-                    var result: MezzeValue = MezzeNull
-                    for (remaining in remainingStatements) {
-                        result = remaining.execute(frame)
-
-                        if (result is com.mezze.language.interpreter.MezzeSuspended || result is MezzeContinuationSuspended) {
-                            return@NativeMezzeFunction result
-                        }
-                    }
-
-                    // Execute the result expression
-                    resultNode.execute(frame)
-                }
-
-                // Return the composed MezzeSuspended
-                return com.mezze.language.interpreter.MezzeSuspended(
-                    computation = com.mezze.language.interpreter.MezzeThunk(
-                        function = composedFunc,
-                        arguments = com.mezze.language.interpreter.MezzeRecord(emptyMap())
-                    ),
-                    unhandledEffects = suspendedValue.unhandledEffects,
-                    capturedHandlers = suspendedValue.capturedHandlers
-                )
+                // Handle suspended effects in boundary method (complex closure creation)
+                // Materialize frame since @TruffleBoundary methods can't receive VirtualFrame
+                return handleSuspendedEffect(lastResult, index, frame.materialize())
             }
+            index++
         }
 
         // Execute and return result expression
@@ -394,6 +316,80 @@ class SimpleDoExpressionNode(
         }
 
         return result
+    }
+
+    /**
+     * Handle suspended effect computations with continuation composition.
+     * Marked @TruffleBoundary because this involves complex closure creation,
+     * sliceArray operations, and context access that trigger JIT blockers.
+     *
+     * NOTE: Uses MaterializedFrame instead of VirtualFrame because @TruffleBoundary
+     * methods cannot receive VirtualFrame as a parameter.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private fun handleSuspendedEffect(
+        suspendedValue: com.mezze.language.interpreter.MezzeSuspended,
+        index: Int,
+        materializedFrame: com.oracle.truffle.api.frame.MaterializedFrame
+    ): MezzeValue {
+        // Create a continuation that executes the remaining statements + result
+        val remainingStatements = statementNodes.sliceArray((index + 1) until statementNodes.size)
+
+        // Capture the context for use in closures
+        val context = com.mezze.language.interpreter.MezzeLanguage.getCurrentContext(this)
+
+        // Create a composed suspended computation
+        val composedFunc = com.mezze.language.interpreter.NativeMezzeFunction(
+            "do-composition-${index}"
+        ) { args ->
+            val effectHandler = context.effectHandler
+            val currentHandlers = effectHandler.getCurrentHandlers()
+
+            if (currentHandlers == null) {
+                throw RuntimeException("No handlers available in composed do-continuation")
+            }
+
+            // Execute the original suspended effect
+            val suspendedResult = when (val func = suspendedValue.computation.function) {
+                is com.mezze.language.interpreter.NativeMezzeFunction -> {
+                    func.call(listOf(suspendedValue.computation.arguments))
+                }
+                is com.mezze.language.interpreter.MezzeTruffleFunction -> {
+                    func.callTarget.call(
+                        suspendedValue.computation.arguments,
+                        func.closureVariables,
+                        func.lexicalScope,
+                        func.lexicalScopeSlotMap
+                    ) as MezzeValue
+                }
+                else -> {
+                    throw RuntimeException("Cannot execute thunk with function type: ${func::class.simpleName}")
+                }
+            }
+
+            // Execute remaining statements using the materialized frame
+            var result: MezzeValue = MezzeNull
+            for (remaining in remainingStatements) {
+                result = remaining.execute(materializedFrame)
+
+                if (result is com.mezze.language.interpreter.MezzeSuspended || result is MezzeContinuationSuspended) {
+                    return@NativeMezzeFunction result
+                }
+            }
+
+            // Execute the result expression
+            resultNode.execute(materializedFrame)
+        }
+
+        // Return the composed MezzeSuspended
+        return com.mezze.language.interpreter.MezzeSuspended(
+            computation = com.mezze.language.interpreter.MezzeThunk(
+                function = composedFunc,
+                arguments = com.mezze.language.interpreter.MezzeRecord(emptyMap())
+            ),
+            unhandledEffects = suspendedValue.unhandledEffects,
+            capturedHandlers = suspendedValue.capturedHandlers
+        )
     }
 }
 
@@ -566,3 +562,75 @@ private data class DoExpressionAnalysis(
     val shouldUseParallelism: Boolean,
     val isEffectHeavy: Boolean
 )
+
+/**
+ * Node for binding record pattern fields to frame slots.
+ * Uses pre-computed arrays for efficient access without Map lookups in the hot path.
+ */
+@NodeInfo(shortName = "record-pattern-binding")
+class RecordPatternBindingNode(
+    @field:Child private var valueNode: MezzeNode,
+    private val varNames: Array<String>,
+    private val slotIndices: IntArray,
+    private val fieldPaths: Array<Array<String>>
+) : MezzeNode() {
+
+    override fun execute(frame: VirtualFrame): MezzeValue {
+        val value = valueNode.execute(frame)
+
+        if (value !is com.mezze.language.interpreter.MezzeRecord) {
+            throwNotRecord(value)
+        }
+
+        // Extract values via TruffleBoundary (can't pass VirtualFrame to boundary methods)
+        val extractedValues = extractFieldValues(value)
+
+        // Bind to frame slots in the hot path
+        for (i in varNames.indices) {
+            frame.setObject(slotIndices[i], extractedValues[i])
+        }
+
+        // Define in context via TruffleBoundary
+        defineInContext(extractedValues)
+
+        return com.mezze.language.interpreter.MezzeRecord(emptyMap())
+    }
+
+    @TruffleBoundary
+    private fun throwNotRecord(value: MezzeValue): Nothing {
+        throw RuntimeException("Cannot destructure non-record value: ${value::class.simpleName}")
+    }
+
+    /**
+     * Extract values from nested record fields.
+     * Marked as @TruffleBoundary because MezzeRecord.fields is a Map.
+     */
+    @TruffleBoundary
+    private fun extractFieldValues(rootValue: com.mezze.language.interpreter.MezzeRecord): Array<MezzeValue> {
+        return Array(varNames.size) { i ->
+            var currentValue: MezzeValue = rootValue
+
+            for (fieldName in fieldPaths[i]) {
+                if (currentValue !is com.mezze.language.interpreter.MezzeRecord) {
+                    throw RuntimeException("Cannot access field '$fieldName' on non-record value: ${currentValue::class.simpleName}")
+                }
+                currentValue = currentValue.fields[fieldName]
+                    ?: throw RuntimeException("Field '$fieldName' not found in record")
+            }
+
+            currentValue
+        }
+    }
+
+    /**
+     * Define variables in context.
+     * Marked as @TruffleBoundary because context operations may use Maps.
+     */
+    @TruffleBoundary
+    private fun defineInContext(values: Array<MezzeValue>) {
+        val context = com.mezze.language.interpreter.MezzeLanguage.getCurrentContext(this)
+        for (i in varNames.indices) {
+            context.defineLocal(varNames[i], values[i])
+        }
+    }
+}

@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib.concurrent
 
 import com.mezze.language.interpreter.*
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -302,7 +303,9 @@ object AgentImplementations {
 
     /**
      * Helper to call a Mezze function with the current agent value.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunction(f: MezzeValue, arg: MezzeValue): MezzeValue {
         val argsRecord = MezzeRecord(mapOf("current" to arg))
         return when (f) {
@@ -361,7 +364,7 @@ data class MezzeAgent(
     val processing: AtomicBoolean,
     val errorHandler: AtomicReference<MezzeValue?>
 ) : MezzeValue() {
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         val errorMsg = error.get()?.let { " ERROR: ${it.message}" } ?: ""
         return "<agent:${state.get().getDisplayString()}$errorMsg>"
     }

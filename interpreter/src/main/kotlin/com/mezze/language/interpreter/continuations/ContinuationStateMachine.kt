@@ -36,7 +36,10 @@ data class ContinuationStateMachine(
      *
      * This method does NOT mutate the state machine - it's safe to call multiple times
      * for multishot continuations.
+     *
+     * Marked @TruffleBoundary because ThreadLocal operations trigger JIT blockers.
      */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     fun execute(input: MezzeValue): MezzeValue {
         if (currentState >= states.size) {
             return MezzeNull
@@ -72,7 +75,9 @@ data class ContinuationStateMachine(
         /**
          * Get the current execution context.
          * Returns null if not currently executing a state machine.
+         * Marked @TruffleBoundary because ThreadLocal operations trigger JIT blockers.
          */
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         fun getCurrentContext(): ContinuationExecutionContext? {
             return executionContext.get()
         }
@@ -80,7 +85,9 @@ data class ContinuationStateMachine(
         /**
          * Set the current execution context.
          * Used internally by state machine execution.
+         * Marked @TruffleBoundary because ThreadLocal operations trigger JIT blockers.
          */
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         internal fun setCurrentContext(context: ContinuationExecutionContext?) {
             executionContext.set(context)
         }
@@ -88,7 +95,9 @@ data class ContinuationStateMachine(
         /**
          * Set the updated locals for the current state execution.
          * Called by state lambdas after capturing variables.
+         * Marked @TruffleBoundary because ThreadLocal operations trigger JIT blockers.
          */
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         fun setUpdatedLocals(locals: Map<String, MezzeValue>) {
             updatedLocals.set(locals)
         }
@@ -96,7 +105,9 @@ data class ContinuationStateMachine(
         /**
          * Get and clear the updated locals.
          * Called by State.execute() to retrieve captured variables.
+         * Marked @TruffleBoundary because ThreadLocal operations trigger JIT blockers.
          */
+        @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         fun getAndClearUpdatedLocals(): Map<String, MezzeValue>? {
             val locals = updatedLocals.get()
             updatedLocals.remove()

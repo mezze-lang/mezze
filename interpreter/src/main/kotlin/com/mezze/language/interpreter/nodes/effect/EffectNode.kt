@@ -46,7 +46,7 @@ class AsyncEffectCallNode(
         val context = mutableMapOf<String, MezzeValue>()
         getContext().captureEnvironment().forEach { (k, v) -> context[k] = v }
         
-        return effectHandler.executeEffectCall(effectName, operationName, arguments, context, getInterpreter())
+        return effectHandler.executeEffectCall(effectName, operationName, arguments, context)
     }
     
     private fun executeAsync(frame: VirtualFrame, arguments: MezzeValue): MezzeValue {
@@ -71,7 +71,7 @@ class AsyncEffectCallNode(
         val context = mutableMapOf<String, MezzeValue>()
         getContext().captureEnvironment().forEach { (k, v) -> context[k] = v }
         
-        return effectHandler.executeEffectCall(effectName, operationName, arguments, context, getInterpreter())
+        return effectHandler.executeEffectCall(effectName, operationName, arguments, context)
     }
     
     private fun isAsyncEffect(effectName: String, operationName: String): Boolean {
@@ -92,9 +92,6 @@ class AsyncEffectCallNode(
         }
     }
     
-    private fun getInterpreter(): com.mezze.language.interpreter.MezzeInterpreter {
-        return com.mezze.language.interpreter.MezzeInterpreter()
-    }
 }
 
 /**
@@ -463,7 +460,7 @@ class StateMachineContext {
  * State transition result
  */
 class StateTransition(val nextState: Int, val value: MezzeValue) : MezzeValue() {
-    override fun getDisplayString(): String = "StateTransition(next=$nextState, value=${value.getDisplayString()})"
+    override fun computeDisplayString(): String = "StateTransition(next=$nextState, value=${value.getDisplayString()})"
 }
 
 /**
@@ -487,21 +484,21 @@ class AsyncStateTransition(
         }
     }
 
-    override fun getDisplayString(): String = "AsyncStateTransition(next=$nextState, pending=true)"
+    override fun computeDisplayString(): String = "AsyncStateTransition(next=$nextState, pending=true)"
 }
 
 /**
  * Final state machine result
  */
 class StateMachineResult(val value: MezzeValue) : MezzeValue() {
-    override fun getDisplayString(): String = "StateMachineResult(${value.getDisplayString()})"
+    override fun computeDisplayString(): String = "StateMachineResult(${value.getDisplayString()})"
 }
 
 /**
  * State machine error result
  */
 class StateMachineError(val error: String) : MezzeValue() {
-    override fun getDisplayString(): String = "StateMachineError($error)"
+    override fun computeDisplayString(): String = "StateMachineError($error)"
 }
 
 /**
@@ -544,9 +541,10 @@ object AsyncEffectCompiler {
         return AsyncStateMachineNode(states.toTypedArray())
     }
     
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     private fun containsAsyncEffects(node: MezzeNode): Boolean {
         // Simple heuristic - in practice this would be more sophisticated
-        return node.toString().contains("effect") || 
+        return node.toString().contains("effect") ||
                node.toString().contains("async") ||
                node.toString().contains("await")
     }

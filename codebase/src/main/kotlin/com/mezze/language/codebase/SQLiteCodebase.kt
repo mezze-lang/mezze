@@ -32,7 +32,7 @@ class SQLiteCodebase private constructor(
 ) : Codebase {
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2  // Added file_cache table
         const val PROJECT_DIR = ".mez"
         const val CODEBASE_FILE = "codebase.db"
 
@@ -293,6 +293,115 @@ class SQLiteCodebase private constructor(
             )
         """.trimIndent())
         stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_exports_hash ON exports(hash)")
+
+        // File cache table - stores parsed AST and type check results per file
+        stmt.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS file_cache (
+                file_path TEXT PRIMARY KEY,
+                source_hash TEXT NOT NULL,
+                ast_blob BLOB,
+                typecheck_blob BLOB,
+                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        """.trimIndent())
+        stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_file_cache_hash ON file_cache(source_hash)")
+    }
+
+    // ========================================================================
+    // FILE CACHE (for incremental compilation)
+    // ========================================================================
+
+    /**
+     * Check if a file's source hash matches the cached version.
+     * Returns true if the cache is valid (source hasn't changed).
+     */
+    fun isFileCacheValid(filePath: String, sourceHash: String): Boolean {
+        connection.prepareStatement("""
+            SELECT 1 FROM file_cache WHERE file_path = ? AND source_hash = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, filePath)
+            stmt.setString(2, sourceHash)
+            return stmt.executeQuery().next()
+        }
+    }
+
+    /**
+     * Get cached AST blob for a file if the source hash matches.
+     */
+    fun getCachedAst(filePath: String, sourceHash: String): ByteArray? {
+        connection.prepareStatement("""
+            SELECT ast_blob FROM file_cache WHERE file_path = ? AND source_hash = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, filePath)
+            stmt.setString(2, sourceHash)
+            return stmt.executeQuery().use { rs ->
+                if (rs.next()) rs.getBytes("ast_blob") else null
+            }
+        }
+    }
+
+    /**
+     * Get cached typecheck blob for a file if the source hash matches.
+     */
+    fun getCachedTypeCheck(filePath: String, sourceHash: String): ByteArray? {
+        connection.prepareStatement("""
+            SELECT typecheck_blob FROM file_cache WHERE file_path = ? AND source_hash = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, filePath)
+            stmt.setString(2, sourceHash)
+            return stmt.executeQuery().use { rs ->
+                if (rs.next()) rs.getBytes("typecheck_blob") else null
+            }
+        }
+    }
+
+    /**
+     * Store parsed AST in cache.
+     */
+    fun cacheAst(filePath: String, sourceHash: String, astBlob: ByteArray) {
+        connection.prepareStatement("""
+            INSERT OR REPLACE INTO file_cache (file_path, source_hash, ast_blob, updated_at)
+            VALUES (?, ?, ?, strftime('%s', 'now'))
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, filePath)
+            stmt.setString(2, sourceHash)
+            stmt.setBytes(3, astBlob)
+            stmt.executeUpdate()
+        }
+    }
+
+    /**
+     * Store typecheck result in cache (updates existing entry).
+     */
+    fun cacheTypeCheck(filePath: String, sourceHash: String, typecheckBlob: ByteArray) {
+        connection.prepareStatement("""
+            UPDATE file_cache SET typecheck_blob = ?, updated_at = strftime('%s', 'now')
+            WHERE file_path = ? AND source_hash = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setBytes(1, typecheckBlob)
+            stmt.setString(2, filePath)
+            stmt.setString(3, sourceHash)
+            stmt.executeUpdate()
+        }
+    }
+
+    /**
+     * Clear file cache for a specific file.
+     */
+    fun clearFileCache(filePath: String) {
+        connection.prepareStatement("DELETE FROM file_cache WHERE file_path = ?").use { stmt ->
+            stmt.setString(1, filePath)
+            stmt.executeUpdate()
+        }
+    }
+
+    /**
+     * Clear all file cache entries.
+     */
+    fun clearAllFileCache() {
+        connection.createStatement().use { stmt ->
+            stmt.executeUpdate("DELETE FROM file_cache")
+        }
     }
 
     // ========================================================================

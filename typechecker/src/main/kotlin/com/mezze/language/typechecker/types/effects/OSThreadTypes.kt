@@ -11,19 +11,6 @@ import com.mezze.language.ast.TypeVar
 object OSThreadTypes {
 
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        // __native_os_spawn: {f: {} -> 'a} -> Promise
-        val spawnPromise = MezzeType.VarType(TypeVar("Promise"))
-        val spawnResult = MezzeType.VarType(TypeVar("a"))
-        context["__native_os_spawn"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(emptyMap()),
-                    spawnResult
-                )
-            )),
-            spawnPromise
-        )
-
         // __native_os_spawn_cfg: {f: {} -> 'a, pool_size: Int} -> Promise
         context["__native_os_spawn_cfg"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
@@ -104,26 +91,6 @@ object OSThreadTypes {
         // __native_os_check: {} -> {}
         context["__native_os_check"] = MezzeType.FunctionType(
             MezzeType.RecordType(emptyMap()),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_os_current_thread: {} -> Thread
-        val threadType = MezzeType.VarType(TypeVar("Thread"))
-        context["__native_os_current_thread"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            threadType
-        )
-
-        // __native_os_park: {} -> {}
-        context["__native_os_park"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_os_unpark: {thread: Thread} -> {}
-        val unparkThread = MezzeType.VarType(TypeVar("Thread"))
-        context["__native_os_unpark"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("thread" to unparkThread)),
             MezzeType.RecordType(emptyMap())
         )
 

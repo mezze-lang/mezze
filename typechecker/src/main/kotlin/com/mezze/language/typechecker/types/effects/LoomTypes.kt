@@ -146,28 +146,6 @@ object LoomTypes {
             MezzeType.RecordType(emptyMap())
         )
 
-        // __native_loom_park: {} -> {}
-        context["__native_loom_park"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_loom_unpark: {thread: Thread} -> {}
-        val unparkThread = MezzeType.VarType(com.mezze.language.ast.TypeVar("Thread"))
-        context["__native_loom_unpark"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf(
-                "thread" to unparkThread
-            )),
-            MezzeType.RecordType(emptyMap())
-        )
-
-        // __native_loom_current_thread: {} -> Thread
-        val currentThread = MezzeType.VarType(com.mezze.language.ast.TypeVar("Thread"))
-        context["__native_loom_current_thread"] = MezzeType.FunctionType(
-            MezzeType.RecordType(emptyMap()),
-            currentThread
-        )
-
         // __native_promise_is_complete: {p: Promise} -> Bool
         context["__native_promise_is_complete"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(

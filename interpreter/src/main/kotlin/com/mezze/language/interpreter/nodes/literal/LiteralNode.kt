@@ -1,5 +1,13 @@
 package com.mezze.language.interpreter.nodes.literal
 
+// NOTE: Core literal nodes (IntLiteralNode, BooleanLiteralNode, StringLiteralNode, NullLiteralNode)
+// have been moved to Java for JIT compatibility. See:
+// - com.mezze.language.interpreter.nodes.literal.IntLiteralNode (Java)
+// - com.mezze.language.interpreter.nodes.literal.BooleanLiteralNode (Java)
+// - com.mezze.language.interpreter.nodes.literal.StringLiteralNode (Java)
+// - com.mezze.language.interpreter.nodes.literal.NullLiteralNode (Java)
+
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.frame.VirtualFrame
 import com.oracle.truffle.api.nodes.NodeInfo
 import com.oracle.truffle.api.nodes.Node.Children
@@ -17,28 +25,15 @@ import com.mezze.language.interpreter.MezzeNull
  * Base class for literal value nodes
  */
 abstract class LiteralNode : MezzeNode() {
-    
+
     /**
      * Literals don't need frame access - they return constant values
      */
     abstract fun getValue(): MezzeValue
-    
+
     override fun execute(frame: VirtualFrame): MezzeValue {
         return getValue()
     }
-}
-
-/**
- * Integer literal node
- */
-@NodeInfo(shortName = "int-literal")
-class IntLiteralNode(private val value: Long) : LiteralNode() {
-    
-    override fun getValue(): MezzeValue {
-        return MezzeInt(value)
-    }
-    
-    override fun toString(): String = "IntLiteral($value)"
 }
 
 /**
@@ -46,38 +41,12 @@ class IntLiteralNode(private val value: Long) : LiteralNode() {
  */
 @NodeInfo(shortName = "float-literal")
 class FloatLiteralNode(private val value: Double) : LiteralNode() {
-    
+
     override fun getValue(): MezzeValue {
         return MezzeFloat(value)
     }
-    
+
     override fun toString(): String = "FloatLiteral($value)"
-}
-
-/**
- * String literal node
- */
-@NodeInfo(shortName = "string-literal")
-class StringLiteralNode(private val value: String) : LiteralNode() {
-    
-    override fun getValue(): MezzeValue {
-        return MezzeString(value)
-    }
-    
-    override fun toString(): String = "StringLiteral(\"$value\")"
-}
-
-/**
- * Boolean literal node
- */
-@NodeInfo(shortName = "boolean-literal")
-class BooleanLiteralNode(private val value: Boolean) : LiteralNode() {
-
-    override fun getValue(): MezzeValue {
-        return MezzeBool(value)
-    }
-
-    override fun toString(): String = "BooleanLiteral($value)"
 }
 
 /**
@@ -107,19 +76,6 @@ class FractionLiteralNode(private val numerator: Long, private val denominator: 
 }
 
 /**
- * Null literal node
- */
-@NodeInfo(shortName = "null-literal")
-class NullLiteralNode : LiteralNode() {
-
-    override fun getValue(): MezzeValue {
-        return MezzeNull
-    }
-
-    override fun toString(): String = "NullLiteral"
-}
-
-/**
  * Interpolated string node - evaluates parts and concatenates them.
  * Parts can be either StringLiteralNodes or expression nodes.
  */
@@ -129,18 +85,21 @@ class InterpolatedStringNode(
 ) : MezzeNode() {
 
     override fun execute(frame: VirtualFrame): MezzeValue {
-        val builder = StringBuilder()
-        for (partNode in partNodes) {
-            val value = partNode.execute(frame)
-            builder.append(valueToStringForInterpolation(value))
+        // Collect string parts from child nodes
+        val stringParts = Array(partNodes.size) { index ->
+            val value = partNodes[index].execute(frame)
+            valueToStringForInterpolation(value)
         }
-        return MezzeString(builder.toString())
+        // Build final string via TruffleBoundary
+        return buildInterpolatedString(stringParts)
     }
 
     /**
      * Convert a MezzeValue to a string for interpolation.
      * Only MezzeString values are allowed - other types must be explicitly converted first.
+     * Marked as @TruffleBoundary because exception creation uses String operations.
      */
+    @TruffleBoundary
     private fun valueToStringForInterpolation(value: MezzeValue): String {
         return when (value) {
             is MezzeString -> value.value
@@ -149,6 +108,19 @@ class InterpolatedStringNode(
                 "Use to_str{val = ...} to convert other types to String first."
             )
         }
+    }
+
+    /**
+     * Build the final interpolated string.
+     * Marked as @TruffleBoundary because StringBuilder operations may trigger blocklisted paths.
+     */
+    @TruffleBoundary
+    private fun buildInterpolatedString(parts: Array<String>): MezzeString {
+        val builder = StringBuilder()
+        for (part in parts) {
+            builder.append(part)
+        }
+        return MezzeString(builder.toString())
     }
 
     override fun toString(): String = "InterpolatedString(${partNodes.size} parts)"

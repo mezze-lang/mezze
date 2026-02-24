@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib.concurrent
 
 import com.mezze.language.interpreter.*
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -289,7 +290,9 @@ object AtomImplementations {
     /**
      * Helper to call a Mezze function with the current atom value.
      * Wraps the value in a record {current: value} as expected by Mezze function syntax.
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunction(f: MezzeValue, arg: MezzeValue): MezzeValue {
         // Mezze functions take a single record argument
         val argsRecord = MezzeRecord(mapOf("current" to arg))
@@ -311,7 +314,9 @@ object AtomImplementations {
 
     /**
      * Helper to call a Mezze function with two arguments (as a record).
+     * Marked as @TruffleBoundary to prevent JIT compilation issues.
      */
+    @TruffleBoundary
     private fun callFunction2(f: MezzeValue, arg1: MezzeValue, arg2: MezzeValue): MezzeValue {
         // Mezze functions take a single record argument, so we wrap both args
         val argsRecord = MezzeRecord(mapOf("current" to arg1, "arg" to arg2))
@@ -495,5 +500,5 @@ data class MezzeAtom(
     val watches: java.util.concurrent.ConcurrentHashMap<String, MezzeValue> = java.util.concurrent.ConcurrentHashMap(),
     val validator: AtomicReference<MezzeValue?> = AtomicReference(null)
 ) : MezzeValue() {
-    override fun getDisplayString(): String = "<atom:${ref.get().getDisplayString()}>"
+    override fun computeDisplayString(): String = "<atom:${ref.get().getDisplayString()}>"
 }

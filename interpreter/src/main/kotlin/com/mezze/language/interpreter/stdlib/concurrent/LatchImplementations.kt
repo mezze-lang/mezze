@@ -120,7 +120,7 @@ object LatchImplementations {
 data class MezzeLatch(
     val latch: CountDownLatch
 ) : MezzeValue() {
-    override fun getDisplayString(): String {
+    override fun computeDisplayString(): String {
         return "<latch:${latch.count} remaining>"
     }
 }

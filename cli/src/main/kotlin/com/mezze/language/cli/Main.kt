@@ -550,12 +550,16 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
 
     val source = file.readText()
 
+    // Use cached parser if in project mode
+    val projectRoot = file.toPath().toAbsolutePath().parent?.toFile() ?: file.parentFile ?: File(".")
+
+    CachedParser(projectRoot).use { cachedParser ->
     try {
         val startTime = System.nanoTime()
 
-        val parser = MezzeParser()
-        val ast = parser.parse(source, file = file.name)
+        val ast = cachedParser.parseSource(source, filePath = file.absolutePath)
         val parseTime = (System.nanoTime() - startTime) / 1_000_000.0
+        val cacheInfo = if (cachedParser.cacheHits > 0) " (cached)" else ""
 
         // Check for bare top-level expressions (not allowed in CLI mode)
         val bareExpressions = ast.items.filterIsInstance<TopLevelExpression>()
@@ -612,7 +616,7 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
 
             printFileCheckSuccess(result, typeAliases)
             println()
-            println("Parse: ${String.format("%.2f", parseTime)}ms  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
+            println("Parse: ${String.format("%.2f", parseTime)}ms$cacheInfo  |  Type check: ${String.format("%.2f", typeCheckTime)}ms  |  Total: ${String.format("%.2f", totalTime)}ms")
         }
     } catch (e: TypeCheckError) {
         println(ErrorPrettyPrinter.prettyPrint(e, source, file.name))
@@ -741,6 +745,7 @@ private fun handleFileCheck(filePath: String, quietMode: Boolean) {
         println(e.message ?: "Unknown error")
         kotlin.system.exitProcess(1)
     }
+    } // cachedParser.use
 }
 
 private fun handlePackageCheck(quietMode: Boolean, appName: String? = null) {

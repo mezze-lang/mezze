@@ -1,6 +1,7 @@
 package com.mezze.language.interpreter.stdlib.effects
 
 import com.mezze.language.interpreter.*
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
 import com.oracle.truffle.api.TruffleContext
 import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.ForkJoinWorkerThread
@@ -111,6 +112,8 @@ object ForkJoinParallelImplementations {
 
     /**
      * Recursive task for parallel map with work-stealing.
+     * The compute() method is marked @TruffleBoundary to prevent JIT compilation issues
+     * with ForkJoin's internal task scheduling and JFR event registration.
      */
     private class MapTask(
         private val list: List<MezzeValue>,
@@ -120,6 +123,7 @@ object ForkJoinParallelImplementations {
         private val threshold: Int
     ) : RecursiveTask<List<MezzeValue>>() {
 
+        @TruffleBoundary
         override fun compute(): List<MezzeValue> {
             val size = end - start
 
@@ -145,6 +149,7 @@ object ForkJoinParallelImplementations {
 
     /**
      * Recursive task for parallel filter with work-stealing.
+     * The compute() method is marked @TruffleBoundary to prevent JIT compilation issues.
      */
     private class FilterTask(
         private val list: List<MezzeValue>,
@@ -154,6 +159,7 @@ object ForkJoinParallelImplementations {
         private val threshold: Int
     ) : RecursiveTask<List<MezzeValue>>() {
 
+        @TruffleBoundary
         override fun compute(): List<MezzeValue> {
             val size = end - start
 
@@ -179,6 +185,7 @@ object ForkJoinParallelImplementations {
 
     /**
      * Recursive task for parallel reduce with work-stealing.
+     * The compute() method is marked @TruffleBoundary to prevent JIT compilation issues.
      */
     private class ReduceTask(
         private val list: List<MezzeValue>,
@@ -188,6 +195,7 @@ object ForkJoinParallelImplementations {
         private val threshold: Int
     ) : RecursiveTask<MezzeValue>() {
 
+        @TruffleBoundary
         override fun compute(): MezzeValue {
             val size = end - start
 
@@ -215,6 +223,7 @@ object ForkJoinParallelImplementations {
 
     /**
      * Recursive task for parallel fold with work-stealing.
+     * The compute() method is marked @TruffleBoundary to prevent JIT compilation issues.
      */
     private class FoldTask(
         private val list: List<MezzeValue>,
@@ -226,6 +235,7 @@ object ForkJoinParallelImplementations {
         private val threshold: Int
     ) : RecursiveTask<MezzeValue>() {
 
+        @TruffleBoundary
         override fun compute(): MezzeValue {
             val size = end - start
 
@@ -252,6 +262,7 @@ object ForkJoinParallelImplementations {
 
     /**
      * Recursive task for parallel find with short-circuiting.
+     * The compute() method is marked @TruffleBoundary to prevent JIT compilation issues.
      */
     private class FindTask(
         private val list: List<MezzeValue>,
@@ -263,6 +274,7 @@ object ForkJoinParallelImplementations {
         private val result: AtomicReference<MezzeValue?>
     ) : RecursiveTask<Unit>() {
 
+        @TruffleBoundary
         override fun compute() {
             if (found.get()) return
 
@@ -295,6 +307,7 @@ object ForkJoinParallelImplementations {
 
     /**
      * Recursive task for parallel any with short-circuiting.
+     * The compute() method is marked @TruffleBoundary to prevent JIT compilation issues.
      */
     private class AnyTask(
         private val list: List<MezzeValue>,
@@ -305,6 +318,7 @@ object ForkJoinParallelImplementations {
         private val found: AtomicBoolean
     ) : RecursiveTask<Unit>() {
 
+        @TruffleBoundary
         override fun compute() {
             if (found.get()) return
 
@@ -335,6 +349,7 @@ object ForkJoinParallelImplementations {
 
     /**
      * Recursive task for parallel all with short-circuiting.
+     * The compute() method is marked @TruffleBoundary to prevent JIT compilation issues.
      */
     private class AllTask(
         private val list: List<MezzeValue>,
@@ -345,6 +360,7 @@ object ForkJoinParallelImplementations {
         private val failed: AtomicBoolean
     ) : RecursiveTask<Unit>() {
 
+        @TruffleBoundary
         override fun compute() {
             if (failed.get()) return
 
@@ -375,6 +391,7 @@ object ForkJoinParallelImplementations {
 
     /**
      * Recursive task for parallel partition.
+     * The compute() method is marked @TruffleBoundary to prevent JIT compilation issues.
      */
     private class PartitionTask(
         private val list: List<MezzeValue>,
@@ -384,6 +401,7 @@ object ForkJoinParallelImplementations {
         private val threshold: Int
     ) : RecursiveTask<Pair<List<MezzeValue>, List<MezzeValue>>>() {
 
+        @TruffleBoundary
         override fun compute(): Pair<List<MezzeValue>, List<MezzeValue>> {
             val size = end - start
 
@@ -419,6 +437,7 @@ object ForkJoinParallelImplementations {
 
     /**
      * Recursive task for parallel group_by.
+     * The compute() method is marked @TruffleBoundary to prevent JIT compilation issues.
      */
     private class GroupByTask(
         private val list: List<MezzeValue>,
@@ -428,6 +447,7 @@ object ForkJoinParallelImplementations {
         private val threshold: Int
     ) : RecursiveTask<List<Pair<MezzeValue, MezzeValue>>>() {
 
+        @TruffleBoundary
         override fun compute(): List<Pair<MezzeValue, MezzeValue>> {
             val size = end - start
 
@@ -870,6 +890,7 @@ object ForkJoinParallelImplementations {
     // Helper functions (same as ParallelImplementations)
     // =========================================================================
 
+    @TruffleBoundary
     private fun callFunction(fn: MezzeValue): MezzeValue {
         return when (fn) {
             is MezzeTruffleFunction -> {
@@ -886,6 +907,7 @@ object ForkJoinParallelImplementations {
         }
     }
 
+    @TruffleBoundary
     private fun callFunctionWithArg(fn: MezzeValue, arg: MezzeValue): MezzeValue {
         val recordArg = MezzeRecord(mapOf("x" to arg))
         return when (fn) {
