@@ -261,7 +261,7 @@ pub impl Async for OSThreadAsyncWith { pool_size: Int } where {
 # - Supports serialization/checkpointing via continuation
 #
 # Usage:
-#   perform CoopAsync {cont = continuation::new {}} in do
+#   perform iCoopAsync {cont = continuation::new {}} n do
 #       let p = Async.spawn {f = {} -> 42}
 #       Async.await {p = p}
 

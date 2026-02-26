@@ -687,6 +687,35 @@ class ExpressionConstraintGenerator {
                     }
                 }
             }
+
+            // CRITICAL FIX: If receiver name starts with uppercase but wasn't recognized as
+            // a built-in ability, user-defined ability, effect, or performer, it's an error.
+            // This catches undefined ability/effect usage like Show.show when Show is not defined.
+            if (receiverName.first().isUpperCase()) {
+                // Check if it's in the typing context (could be a type or variant constructor with methods)
+                val contextLookup = context.typingContext.lookup(receiverName)
+                if (contextLookup is TypingContext.LookupResult.NotFound) {
+                    // Not found anywhere - this is likely an undefined ability or effect
+                    // Check what it might be and give a helpful error
+                    val similarAbility = findClosestMatch(receiverName, context.abilityNames)
+                    val similarEffect = findClosestMatch(receiverName, context.effectNames)
+                    val builtInAbilities = BuiltInAbilities.getAllAbilityNames()
+                    val similarBuiltIn = findClosestMatch(receiverName, builtInAbilities)
+
+                    val suggestion = when {
+                        similarAbility != null -> " Did you mean ability '$similarAbility'?"
+                        similarEffect != null -> " Did you mean effect '$similarEffect'?"
+                        similarBuiltIn != null -> " Did you mean built-in ability '$similarBuiltIn'?"
+                        else -> ""
+                    }
+
+                    throw TypeCheckError(
+                        message = "'$receiverName' is not defined. Cannot access method '${expr.member}' on undefined ability or effect.$suggestion",
+                        expression = expr,
+                        errorType = ErrorType.UNDEFINED_VARIABLE
+                    )
+                }
+            }
         }
 
         // Normal case: receiver must be record with 'member' field
@@ -2534,11 +2563,13 @@ class ExpressionConstraintGenerator {
         // AND: Add effects that the handlers introduce! When a handler handles one effect,
         // it may add other effects. For example, FileLogger handles Log but adds FileSystem.
         // These added effects need to propagate so outer performs can handle them.
+        // BUT: If another handler in the same perform handles those added effects, they're discharged.
         val addedEffects = handlerEffects.flatMap { (handlerName, _) ->
             context.performerAddedEffects[handlerName] ?: emptySet()
         }.toSet()
 
-        val remainingEffects = (exprResult.effects - handledEffects) + addedEffects
+        // Remove both original effects and added effects that are handled by ANY handler in this perform
+        val remainingEffects = (exprResult.effects - handledEffects) + (addedEffects - handledEffects)
 
         DebugLogger.debugSection(Category.ExpressionConstraints, "generatePerform result") {
             listOf(

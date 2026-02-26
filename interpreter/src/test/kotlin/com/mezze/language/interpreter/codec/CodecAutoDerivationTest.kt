@@ -935,4 +935,32 @@ class CodecAutoDerivationTest {
         assertEquals("Alice", (result as MezzeString).value)
     }
 
+    // ========================================================================
+    // Bidirectional Type Inference Tests
+    // ========================================================================
+
+    @Test
+    @Disabled("Bidirectional inference for Decode without type annotation not yet implemented - needs typechecker changes")
+    fun `decode record with bidirectional inference - no type annotation`() {
+        // TODO: Currently requires type annotation. Bidirectional inference should allow
+        // the target type to be inferred from usage (e.g., result == "hello" implies String)
+        val source = """
+            use std::codec::json
+            use std::codec::json::{Json}
+            use std::codec::core::{Decode, default_config}
+
+            # Decode JString to String - type should be inferred from usage (result == "hello")
+            let json_val = JString {val = "hello"}
+            let decode_result = Decode.decode {val = json_val, config = default_config}
+            match decode_result is
+                Ok {val = result} ->
+                    if result == "hello" then "success" else "wrong value"
+                Err {error} -> "decode error"
+        """.trimIndent()
+
+        val result = MezzeTestHelper.run(source)
+        assertTrue(result is MezzeString, "Got: $result")
+        assertEquals("success", (result as MezzeString).value)
+    }
+
 }

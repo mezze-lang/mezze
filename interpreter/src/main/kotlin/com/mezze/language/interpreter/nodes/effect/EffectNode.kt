@@ -11,6 +11,7 @@ import com.mezze.language.interpreter.MezzeNull
 import com.mezze.language.interpreter.MezzeInt
 import com.mezze.language.interpreter.EffectHandler
 import com.mezze.language.interpreter.NativeMezzeFunction
+import com.mezze.language.interpreter.MezzeLanguage
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.ExecutorService
@@ -43,10 +44,10 @@ class AsyncEffectCallNode(
     
     private fun executeSync(frame: VirtualFrame, arguments: MezzeValue): MezzeValue {
         val effectHandler = getEffectHandler()
-        val context = mutableMapOf<String, MezzeValue>()
-        getContext().captureEnvironment().forEach { (k, v) -> context[k] = v }
-        
-        return effectHandler.executeEffectCall(effectName, operationName, arguments, context)
+        val ctx = mutableMapOf<String, MezzeValue>()
+        MezzeLanguage.getCurrentContext(this).captureEnvironment().forEach { (k, v) -> ctx[k] = v }
+
+        return effectHandler.executeEffectCall(effectName, operationName, arguments, ctx)
     }
     
     private fun executeAsync(frame: VirtualFrame, arguments: MezzeValue): MezzeValue {
@@ -68,10 +69,10 @@ class AsyncEffectCallNode(
     
     private fun executeEffectInVirtualThread(frame: VirtualFrame, arguments: MezzeValue): MezzeValue {
         val effectHandler = getEffectHandler()
-        val context = mutableMapOf<String, MezzeValue>()
-        getContext().captureEnvironment().forEach { (k, v) -> context[k] = v }
-        
-        return effectHandler.executeEffectCall(effectName, operationName, arguments, context)
+        val ctx = mutableMapOf<String, MezzeValue>()
+        MezzeLanguage.getCurrentContext(this).captureEnvironment().forEach { (k, v) -> ctx[k] = v }
+
+        return effectHandler.executeEffectCall(effectName, operationName, arguments, ctx)
     }
     
     private fun isAsyncEffect(effectName: String, operationName: String): Boolean {
@@ -87,9 +88,7 @@ class AsyncEffectCallNode(
     }
     
     private fun getEffectHandler(): EffectHandler {
-        return getContext().let { context ->
-            EffectHandler()
-        }
+        return MezzeLanguage.getCurrentContext(this).effectHandler
     }
     
 }
@@ -103,8 +102,14 @@ class PerformNode(
     @field:Child private var expressionNode: MezzeNode
 ) : MezzeNode() {
 
+    // Check if this perform block is for STM (OptimisticSTM, SequentialSTM, etc.)
+    private val isSTMPerform: Boolean = handlers.keys.any {
+        it.contains("STM") || it == "OptimisticSTM" || it == "SequentialSTM" || it == "OptimisticSTMWith"
+    }
+
     override fun execute(frame: VirtualFrame): MezzeValue {
-        val effectHandler = getContext().effectHandler
+        val context = MezzeLanguage.getCurrentContext(this)
+        val effectHandler = context.effectHandler
         val handlersRecord = MezzeRecord(handlers)
 
         // Push handlers onto stack
@@ -115,11 +120,15 @@ class PerformNode(
 
             // If the expression returned a suspended computation, execute it now with handlers available
             return if (result is com.mezze.language.interpreter.MezzeSuspended) {
-                result.executeWith(handlers, getContext(), frame)
+                result.executeWith(handlers, context, frame)
             } else {
                 result
             }
         } finally {
+            // Commit STM transaction when the perform block ends
+            if (isSTMPerform) {
+                com.mezze.language.interpreter.stdlib.concurrent.STMImplementations.commitAndClearTransaction()
+            }
             // Always pop handlers, even if exception occurs
             effectHandler.popHandlers()
         }

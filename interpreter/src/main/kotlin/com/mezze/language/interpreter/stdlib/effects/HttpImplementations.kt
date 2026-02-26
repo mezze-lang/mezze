@@ -3,6 +3,7 @@ package com.mezze.language.interpreter.stdlib.effects
 import com.mezze.language.interpreter.*
 import com.mezze.language.interpreter.stdlib.basic.StringImplementations
 import io.vertx.core.Vertx
+import io.vertx.core.VertxOptions
 import io.vertx.core.buffer.Buffer
 import io.vertx.core.http.HttpMethod
 import io.vertx.ext.web.client.WebClient
@@ -29,7 +30,11 @@ import javax.net.ssl.SSLException
 object HttpImplementations {
 
     // Shared Vert.x instance (lazily initialized, thread-safe)
-    private val vertx: Vertx by lazy { Vertx.vertx() }
+    // Use daemon threads so JVM can exit when main program completes
+    private val vertx: Vertx by lazy {
+        val options = VertxOptions().setUseDaemonThread(true)
+        Vertx.vertx(options)
+    }
 
     // Default WebClient with sensible defaults
     private val defaultClient: WebClient by lazy {

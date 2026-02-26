@@ -48,12 +48,16 @@ class ConstraintGenerator(
     private val effectGenerator: EffectConstraintGenerator,
     private val typeDeclarations: Map<String, TypeDeclaration> = emptyMap(),
     private val performerToEffect: Map<String, String> = emptyMap(),
-    private val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
+    initialPerformerAddedEffects: Map<String, Set<String>> = emptyMap(),
     private val abilityNames: Set<String> = emptySet(),
     private val effectNames: Set<String> = emptySet(),
     private val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),
     private val effectDeclarations: Map<String, EffectDeclaration> = emptyMap()
 ) {
+    // Mutable map for tracking effects that performers add
+    // This is populated initially from explicit effect annotations, and updated
+    // during constraint generation when we discover effects from impl bodies
+    private val performerAddedEffects: MutableMap<String, Set<String>> = initialPerformerAddedEffects.toMutableMap()
     // Cache for type variables within a single type annotation
     // Ensures all occurrences of 'a in an annotation refer to the same TypeVar instance
     // Matches old typechecker behavior
@@ -1250,6 +1254,17 @@ class ConstraintGenerator(
 
                 // Generate constraints for lambda body
                 val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
+
+                // CRITICAL: Track effects from the implementation body
+                // When an impl body uses effects (like FileSystem.write_file), those effects
+                // need to be propagated so that perform expressions know what additional
+                // effects are introduced by this performer.
+                // Exclude the effect being implemented (impl handles it, doesn't add it)
+                val bodyEffects = bodyResult.effects - impl.effectName
+                if (bodyEffects.isNotEmpty()) {
+                    val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
+                    performerAddedEffects[impl.performerName] = existingEffects + bodyEffects
+                }
 
                 // If there are undefined variables, skip detailed validation
                 // The body may reference external performers or functions not yet in context

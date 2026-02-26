@@ -253,8 +253,9 @@ class EffectPropagationTest {
             let queryWithLog : {sql: String} -> String <Database> = {sql} ->
               Database.query {sql = sql}
 
-            # Function that handles Database effect completely
-            let partiallyHandledQuery : {sql: String} -> String <> = {sql} ->
+            # Function that handles Database effect but TestDB adds Log effect
+            # So we still have Log effect after handling Database
+            let partiallyHandledQuery : {sql: String} -> String <Log> = {sql} ->
               perform TestDB in queryWithLog {sql = sql}
         """.trimIndent()
 
@@ -270,10 +271,11 @@ class EffectPropagationTest {
 
         val functionType = partiallyHandledDecl.inferredType as MezzeType.FunctionType
 
-        // After handling Database with TestDB, all effects should be removed
+        // After handling Database with TestDB, Database is removed but Log is added
+        // because TestDB's impl body uses Log.log
         val effects = functionType.effects?.effects ?: emptySet()
         assertFalse(effects.contains("Database"), "Database effect should be handled")
-        assertTrue(effects.isEmpty(), "All effects should be handled")
+        assertTrue(effects.contains("Log"), "Log effect should be propagated from TestDB impl body")
     }
 
     @Test

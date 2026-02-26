@@ -1070,7 +1070,6 @@ class SubstitutionApplier(
         // This matches OldTypeChecker.kt:16483-16581 (resolveAbilitiesForFunctionCall)
         var resolvedAbilities = resolveAbilitiesForCall(updatedFunction)
 
-        // DEBUG
         // Also check if this is a direct ability method call (e.g., Show.show {val = 42})
         // In this case, we need to resolve based on the argument types, not the function type constraints
         if (resolvedAbilities.isEmpty() && updatedFunction is MemberAccess) {

@@ -6,13 +6,14 @@
         </encoder>
     </appender>
 
-    <!-- Suppress Netty debug logs -->
-    <logger name="io.netty" level="WARN"/>
+    <!-- Suppress all Netty logs -->
+    <logger name="io.netty" level="ERROR"/>
+    <logger name="io.netty.util.internal" level="ERROR"/>
 
-    <!-- Suppress Vert.x debug logs -->
-    <logger name="io.vertx" level="WARN"/>
+    <!-- Suppress all Vert.x logs -->
+    <logger name="io.vertx" level="ERROR"/>
 
-    <root level="WARN">
+    <root level="ERROR">
         <appender-ref ref="STDOUT"/>
     </root>
 </configuration>

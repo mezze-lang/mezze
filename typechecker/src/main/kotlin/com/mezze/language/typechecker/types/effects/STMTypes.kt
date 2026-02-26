@@ -248,5 +248,26 @@ object STMTypes {
             )),
             MezzeType.RecordType(emptyMap())
         )
+
+        // __native_stm_atomic: {f: {} -> 'a <STM>} -> 'a <STM>
+        // Executes a function atomically with automatic retry on conflict
+        context["__native_stm_atomic"] = MezzeType.FunctionType(
+            paramType = MezzeType.RecordType(mapOf(
+                "f" to MezzeType.FunctionType(
+                    paramType = MezzeType.RecordType(emptyMap()),
+                    returnType = MezzeType.VarType(TypeVar("a")),
+                    effects = MezzeType.EffectRow(setOf("STM"))
+                )
+            )),
+            returnType = MezzeType.VarType(TypeVar("a")),
+            effects = MezzeType.EffectRow(setOf("STM"))
+        )
+
+        // __native_stm_commit: {} -> Bool
+        // Explicitly commit the current transaction
+        context["__native_stm_commit"] = MezzeType.FunctionType(
+            MezzeType.RecordType(emptyMap()),
+            MezzeType.BooleanType
+        )
     }
 }
