@@ -103,10 +103,7 @@ object STMImplementations {
             val txn = getOrCreateTransaction()
             txn.write(tvar, value)
 
-            // Auto-commit for simplified STM (each operation is its own transaction)
-            // This ensures writes are immediately visible after the operation
-            commitCurrentTransaction()
-
+            // Write is buffered - will be committed when the perform OptimisticSTM block ends
             MezzeRecord(emptyMap())
         }
 
@@ -260,7 +257,7 @@ object STMImplementations {
 
             val txn = getOrCreateTransaction()
             txn.write(tvar, value)
-            commitCurrentTransaction()
+            // Write is buffered - will be committed when the perform block ends
             MezzeRecord(emptyMap())
         }
 
@@ -329,6 +326,51 @@ object STMImplementations {
             commitCurrentTransaction()
             MezzeRecord(emptyMap())
         }
+
+        // __native_stm_atomic: {f: {} -> 'a} -> 'a
+        // Executes a function atomically with automatic retry on conflict
+        context["__native_stm_atomic"] = NativeMezzeFunction("__native_stm_atomic") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw MezzeException("__native_stm_atomic expects MezzeRecord")
+
+            val f = record.fields["f"]
+                ?: throw MezzeException("__native_stm_atomic expects 'f' field")
+
+            var retries = 0
+            while (retries < DEFAULT_MAX_RETRIES) {
+                // Start a fresh transaction for each attempt
+                clearCurrentTransaction()
+                val txn = getOrCreateTransaction()
+
+                try {
+                    // Execute the transaction body
+                    val result = callThunk(f)
+
+                    // Try to commit
+                    if (commitCurrentTransaction()) {
+                        return@NativeMezzeFunction result
+                    }
+                    // Commit failed due to conflict, retry
+                    retries++
+                } catch (e: RetryException) {
+                    // Explicit retry requested, block until a watched TVar changes
+                    txn.blockOnRetry()
+                    clearCurrentTransaction()
+                    retries++
+                } catch (e: Exception) {
+                    clearCurrentTransaction()
+                    throw e
+                }
+            }
+            throw MezzeException("STM atomic failed after $DEFAULT_MAX_RETRIES retries")
+        }
+
+        // __native_stm_commit: {} -> Bool
+        // Explicitly commit the current transaction, returns success
+        context["__native_stm_commit"] = NativeMezzeFunction("__native_stm_commit") { _ ->
+            val success = commitCurrentTransaction()
+            MezzeBool(success)
+        }
     }
 
     // =========================================================================
@@ -360,6 +402,29 @@ object STMImplementations {
     }
 
     private fun clearCurrentTransaction() {
+        currentTransaction.remove()
+    }
+
+    /**
+     * Commit the current transaction and clear it.
+     * Called when a perform OptimisticSTM block ends or when an async task completes.
+     * Public so PerformNode and LoomImplementations can call it.
+     *
+     * Note: If commit fails due to conflict, the transaction's writes are lost.
+     * For proper conflict handling with retry, use the atomic wrapper which
+     * re-executes the entire transaction body on conflict.
+     */
+    fun commitAndClearTransaction() {
+        val txn = currentTransaction.get() ?: return
+
+        // If there are uncommitted writes, commit them
+        if (!txn.isReadOnly()) {
+            // Try to commit. If it fails due to conflict, the writes are lost.
+            // This is a limitation of the simple effect-based STM model.
+            // For proper retry semantics, users should structure their code
+            // to handle conflicts, or use the atomic wrapper.
+            txn.commit(globalVersion)
+        }
         currentTransaction.remove()
     }
 
@@ -631,6 +696,11 @@ object STMImplementations {
             ensureSet.clear()
             readBloom.clear()
         }
+
+        /**
+         * Check if this transaction has no pending writes.
+         */
+        fun isReadOnly(): Boolean = writeSet.isEmpty()
     }
 
     /**

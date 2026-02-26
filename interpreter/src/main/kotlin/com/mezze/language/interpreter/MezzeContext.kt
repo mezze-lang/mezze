@@ -35,12 +35,14 @@ class MezzeContext(
      * Effect handler for managing effect handlers and effect calls
      */
     val effectHandler = EffectHandler()
-    
-    
+
+
     // Module runtime removed for simplified stub implementation
-    
-    
+
+
     init {
+        // Register effect handler globally so spawned threads can access it
+        TruffleContextHolder.setEffectHandler(effectHandler)
         initializeBuiltins()
     }
     

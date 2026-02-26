@@ -110,39 +110,58 @@ object LoomImplementations {
                     val env = TruffleContextHolder.getEnv()
                         ?: throw NativeFunctionException("__native_loom_spawn", "No Truffle environment available")
 
+                    // Capture parent's effect handlers to propagate to spawned thread
+                    val effectHandler = TruffleContextHolder.getEffectHandler()
+                    val parentHandlers = effectHandler?.getAllCurrentHandlers()
+
                     // CRITICAL: Use TruffleThreadBuilder to create threads properly
                     // This ensures the thread has proper access to the TruffleContext
                     // and avoids "Multi threaded access not allowed" errors
                     val thread = env.newTruffleThreadBuilder {
 
                         try {
-                            val result = when (computation) {
-                                is MezzeTruffleFunction -> {
-                                    // The TruffleThreadBuilder automatically enters the context
-                                    // so we can call CallTargets directly
-                                    val emptyArgs = MezzeRecord(emptyMap())
-                                    // CRITICAL: MezzeFunctionRootNode expects 4 arguments:
-                                    // [0] = args record, [1] = closure variables map (legacy),
-                                    // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
-
-                                    val value = computation.callTarget.call(
-                                        emptyArgs,
-                                        computation.closureVariables,
-                                        computation.lexicalScope,
-                                        computation.lexicalScopeSlotMap
-                                    ) as MezzeValue
-
-                                    value
-                                }
-                                is NativeMezzeFunction -> {
-                                    computation.call(emptyList())
-                                }
-                                else -> throw MezzeException("Unexpected function type: ${computation::class.simpleName}")
+                            // Push parent handlers onto this thread's stack
+                            if (parentHandlers != null && effectHandler != null) {
+                                effectHandler.pushHandlers(parentHandlers)
                             }
 
-                            future.complete(result)
-                        } catch (e: Exception) {
+                            try {
+                                val result = when (computation) {
+                                    is MezzeTruffleFunction -> {
+                                        // The TruffleThreadBuilder automatically enters the context
+                                        // so we can call CallTargets directly
+                                        val emptyArgs = MezzeRecord(emptyMap())
+                                        // CRITICAL: MezzeFunctionRootNode expects 4 arguments:
+                                        // [0] = args record, [1] = closure variables map (legacy),
+                                        // [2] = MaterializedFrame (lexical scope), [3] = slot mapping
 
+                                        val value = computation.callTarget.call(
+                                            emptyArgs,
+                                            computation.closureVariables,
+                                            computation.lexicalScope,
+                                            computation.lexicalScopeSlotMap
+                                        ) as MezzeValue
+
+                                        value
+                                    }
+                                    is NativeMezzeFunction -> {
+                                        computation.call(emptyList())
+                                    }
+                                    else -> throw MezzeException("Unexpected function type: ${computation::class.simpleName}")
+                                }
+
+                                // Commit any pending STM transactions for this thread
+                                com.mezze.language.interpreter.stdlib.concurrent.STMImplementations.commitAndClearTransaction()
+                                future.complete(result)
+                            } finally {
+                                // Pop handlers when thread completes
+                                if (parentHandlers != null && effectHandler != null) {
+                                    effectHandler.popHandlers()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Clear any pending STM transactions on error
+                            com.mezze.language.interpreter.stdlib.concurrent.STMImplementations.commitAndClearTransaction()
                             e.printStackTrace()
                             future.completeExceptionally(e)
                         }
@@ -191,32 +210,52 @@ object LoomImplementations {
                     val env = TruffleContextHolder.getEnv()
                         ?: throw NativeFunctionException("__native_loom_spawn_cfg", "No Truffle environment available")
 
+                    // Capture parent's effect handlers to propagate to spawned thread
+                    val effectHandler = TruffleContextHolder.getEffectHandler()
+                    val parentHandlers = effectHandler?.getAllCurrentHandlers()
+
                     val thread = env.newTruffleThreadBuilder {
                         try {
-                            // Acquire semaphore permit if bounded
-                            semaphore?.acquire()
+                            // Push parent handlers onto this thread's stack
+                            if (parentHandlers != null && effectHandler != null) {
+                                effectHandler.pushHandlers(parentHandlers)
+                            }
+
                             try {
-                                val result = when (computation) {
-                                    is MezzeTruffleFunction -> {
-                                        val emptyArgs = MezzeRecord(emptyMap())
-                                        computation.callTarget.call(
-                                            emptyArgs,
-                                            computation.closureVariables,
-                                            computation.lexicalScope,
-                                            computation.lexicalScopeSlotMap
-                                        ) as MezzeValue
+                                // Acquire semaphore permit if bounded
+                                semaphore?.acquire()
+                                try {
+                                    val result = when (computation) {
+                                        is MezzeTruffleFunction -> {
+                                            val emptyArgs = MezzeRecord(emptyMap())
+                                            computation.callTarget.call(
+                                                emptyArgs,
+                                                computation.closureVariables,
+                                                computation.lexicalScope,
+                                                computation.lexicalScopeSlotMap
+                                            ) as MezzeValue
+                                        }
+                                        is NativeMezzeFunction -> {
+                                            computation.call(emptyList())
+                                        }
+                                        else -> throw MezzeException("Unexpected function type")
                                     }
-                                    is NativeMezzeFunction -> {
-                                        computation.call(emptyList())
-                                    }
-                                    else -> throw MezzeException("Unexpected function type")
+                                    // Commit any pending STM transactions for this thread
+                                    com.mezze.language.interpreter.stdlib.concurrent.STMImplementations.commitAndClearTransaction()
+                                    future.complete(result)
+                                } finally {
+                                    // Release semaphore permit
+                                    semaphore?.release()
                                 }
-                                future.complete(result)
                             } finally {
-                                // Release semaphore permit
-                                semaphore?.release()
+                                // Pop handlers when thread completes
+                                if (parentHandlers != null && effectHandler != null) {
+                                    effectHandler.popHandlers()
+                                }
                             }
                         } catch (e: Exception) {
+                            // Clear any pending STM transactions on error
+                            com.mezze.language.interpreter.stdlib.concurrent.STMImplementations.commitAndClearTransaction()
                             semaphore?.release()
                             e.printStackTrace()
                             future.completeExceptionally(e)

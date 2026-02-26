@@ -1253,7 +1253,13 @@ class ASTToTruffleConverter(
                 }
                 is RecordLiteral -> {
                     e.getFieldEntries().forEach { entry ->
-                        entry.value?.let { visit(it) }
+                        if (entry.value != null) {
+                            visit(entry.value!!)
+                        } else {
+                            // Punned syntax: {path} means {path = path}
+                            // So the field name is also a variable reference
+                            variables.add(entry.name)
+                        }
                     }
                     Unit
                 }
@@ -1630,7 +1636,7 @@ class ASTToTruffleConverter(
             capturedHashSlots = capturedHashSlots
         )
     }
-    
+
     /**
      * Get or create a frame slot for a variable
      */

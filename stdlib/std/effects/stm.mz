@@ -193,13 +193,20 @@ pub impl STM for SequentialSTM where {
 # Helper Functions
 # =============================================================================
 
-# Run a transaction and return the result
-# Convenience wrapper that runs perform automatically
+# Run a transaction atomically with automatic retry on conflict
+# This is the primary way to execute STM transactions.
+# The transaction will be automatically retried if there's a conflict.
 #
 # Example:
 #   let balance = atomically {f = {} -> STM.read {var = account}}
+#
+#   atomically {f = {} -> do
+#       let balance = STM.read {var = account}
+#       STM.write {var = account, val = balance + 100}
+#   }
 pub let atomically: {f: {} -> 'a <STM>} -> 'a =
-    {f} -> perform OptimisticSTM in f {}
+    {f} -> perform OptimisticSTM in
+        __native_stm_atomic {f = f}
 
 # Transfer amount from one TVar to another
 # Returns True if successful, False if insufficient funds

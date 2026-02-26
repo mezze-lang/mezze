@@ -922,4 +922,195 @@ class STMEffectTest {
         val result = eval(code) as MezzeInt
         assertEquals(50L, result.value)
     }
+
+    // =============================================================================
+    // Transaction Boundary Tests - Ensure commits happen at perform block end
+    // =============================================================================
+
+    @Test
+    fun `test multiple writes in single perform block are atomic`() {
+        // All writes within a perform block should be committed together
+        val code = """
+            use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
+
+            let a = tvar {init = 100}
+            let b = tvar {init = 200}
+
+            perform OptimisticSTM in do
+                STM.write {var = a, val = 50}
+                STM.write {var = b, val = 150}
+
+            let va = deref {var = a}
+            let vb = deref {var = b}
+            va + vb
+        """
+        val result = eval(code) as MezzeInt
+        // Both writes should be committed: 50 + 150 = 200
+        assertEquals(200L, result.value)
+    }
+
+    @Test
+    fun `test atomically wrapper commits transaction`() {
+        // atomically should properly commit the transaction
+        val code = """
+            use std::effects::stm::{STM, tvar, deref, atomically}
+
+            let counter = tvar {init = 0}
+
+            let _ = atomically {f = {} -> do
+                let v = STM.read {var = counter}
+                STM.write {var = counter, val = v + 10}
+            }
+
+            deref {var = counter}
+        """
+        val result = eval(code) as MezzeInt
+        assertEquals(10L, result.value)
+    }
+
+    @Test
+    fun `test atomically with multiple operations`() {
+        // atomically should handle multiple reads and writes atomically
+        val code = """
+            use std::effects::stm::{STM, tvar, deref, atomically}
+
+            let alice = tvar {init = 1000}
+            let bob = tvar {init = 500}
+
+            # Transfer 100 from alice to bob
+            let _ = atomically {f = {} -> do
+                let a = STM.read {var = alice}
+                let b = STM.read {var = bob}
+                STM.write {var = alice, val = a - 100}
+                STM.write {var = bob, val = b + 100}
+            }
+
+            let final_alice = deref {var = alice}
+            let final_bob = deref {var = bob}
+            {alice = final_alice, bob = final_bob, total = final_alice + final_bob}
+        """
+        val result = eval(code) as MezzeRecord
+        assertEquals(900L, (result.fields["alice"] as MezzeInt).value)
+        assertEquals(600L, (result.fields["bob"] as MezzeInt).value)
+        assertEquals(1500L, (result.fields["total"] as MezzeInt).value)
+    }
+
+    // =============================================================================
+    // Async + STM Integration Tests
+    // =============================================================================
+
+    @Test
+    fun `test async spawn with atomically`() {
+        // Spawned tasks should be able to use atomically for STM operations
+        val code = """
+            use std::effects::stm::{STM, tvar, deref, atomically}
+            use std::effects::async::{Async, LoomAsync}
+
+            let counter = tvar {init = 0}
+
+            perform LoomAsync in do
+                let p = Async.spawn {f = {} -> atomically {f = {} ->
+                    STM.write {var = counter, val = 42}
+                }}
+                let _ = Async.await {p = p}
+                deref {var = counter}
+        """
+        val result = eval(code) as MezzeInt
+        assertEquals(42L, result.value)
+    }
+
+    @Test
+    fun `test async spawn inherits Log effect handler`() {
+        // Spawned tasks should have access to parent's effect handlers (like Log)
+        val code = """
+            use std::effects::log::{Log, Console, println}
+            use std::effects::async::{Async, LoomAsync}
+            use std::effects::stm::{STM, tvar, deref, atomically}
+
+            let result_var = tvar {init = 0}
+
+            perform Console in do
+                # Use Log effect at top level so typechecker sees it
+                println {msg = "Starting Log handler test"}
+                perform LoomAsync in do
+                    let p = Async.spawn {f = {} -> do
+                        # This uses Log effect - should work because handlers are propagated
+                        println {msg = "Hello from spawned task"}
+                        # Use atomically to update the tvar
+                        atomically {f = {} -> STM.write {var = result_var, val = 123}}
+                    }
+                    let _ = Async.await {p = p}
+                    deref {var = result_var}
+        """
+        val result = eval(code) as MezzeInt
+        assertEquals(123L, result.value)
+    }
+
+    @Test
+    fun `test concurrent STM writes with atomically`() {
+        // Concurrent tasks using atomically should both succeed
+        val code = """
+            use std::effects::stm::{STM, tvar, deref, atomically}
+            use std::effects::async::{Async, LoomAsync}
+
+            let counter = tvar {init = 0}
+
+            perform LoomAsync in do
+                let p1 = Async.spawn {f = {} -> atomically {f = {} -> do
+                    let v = STM.read {var = counter}
+                    STM.write {var = counter, val = v + 10}
+                }}
+                let p2 = Async.spawn {f = {} -> atomically {f = {} -> do
+                    let v = STM.read {var = counter}
+                    STM.write {var = counter, val = v + 5}
+                }}
+                let _ = Async.await {p = p1}
+                let _ = Async.await {p = p2}
+                deref {var = counter}
+        """
+        val result = eval(code) as MezzeInt
+        // Both increments should succeed (with retry if conflict): 0 + 10 + 5 = 15
+        assertEquals(15L, result.value)
+    }
+
+    @Test
+    fun `test bank transfer demo - concurrent transfers preserve total`() {
+        // This is the key demo - concurrent transfers should preserve total balance
+        val code = """
+            use std::effects::stm::{STM, tvar, deref, atomically}
+            use std::effects::async::{Async, LoomAsync}
+
+            let alice = tvar {init = 1000}
+            let bob = tvar {init = 500}
+            let charlie = tvar {init = 200}
+
+            perform LoomAsync in do
+                # Transfer 100 from alice to bob
+                let t1 = Async.spawn {f = {} -> atomically {f = {} -> do
+                    let a = STM.read {var = alice}
+                    let b = STM.read {var = bob}
+                    STM.write {var = alice, val = a - 100}
+                    STM.write {var = bob, val = b + 100}
+                }}
+
+                # Transfer 50 from bob to charlie
+                let t2 = Async.spawn {f = {} -> atomically {f = {} -> do
+                    let b = STM.read {var = bob}
+                    let c = STM.read {var = charlie}
+                    STM.write {var = bob, val = b - 50}
+                    STM.write {var = charlie, val = c + 50}
+                }}
+
+                let _ = Async.await {p = t1}
+                let _ = Async.await {p = t2}
+
+                let final_alice = deref {var = alice}
+                let final_bob = deref {var = bob}
+                let final_charlie = deref {var = charlie}
+                final_alice + final_bob + final_charlie
+        """
+        val result = eval(code) as MezzeInt
+        // Total should always be preserved: 1000 + 500 + 200 = 1700
+        assertEquals(1700L, result.value)
+    }
 }

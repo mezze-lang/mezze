@@ -106,6 +106,22 @@ class EffectHandler {
     fun getCurrentHandlers(): MezzeRecord? {
         return handlerStack.get().lastOrNull()
     }
+
+    /**
+     * Get all current handlers as a merged record.
+     * Used to capture handlers for spawned threads.
+     */
+    fun getAllCurrentHandlers(): MezzeRecord? {
+        val stack = handlerStack.get()
+        if (stack.isEmpty()) return null
+
+        // Merge all handlers from bottom to top (later handlers override earlier)
+        val merged = mutableMapOf<String, MezzeValue>()
+        for (handlers in stack) {
+            merged.putAll(handlers.fields)
+        }
+        return MezzeRecord(merged)
+    }
     
     /**
      * Execute an effect call by finding the appropriate handler.

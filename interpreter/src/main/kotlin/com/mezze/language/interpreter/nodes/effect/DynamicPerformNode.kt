@@ -40,6 +40,14 @@ class DynamicPerformNode(
     @CompilationFinal
     private val numHandlers: Int = handlerNames.size
 
+    // Pre-compute whether we have an STM handler for transaction commit
+    @CompilationFinal
+    private val hasSTMHandler: Boolean = if (useResolvedHandlers) {
+        resolvedEffectNames.any { it.contains("STM") }
+    } else {
+        handlerNames.any { it.contains("STM") }
+    }
+
     // Pre-compute arrays for hash slot lookups
     @CompilationFinal(dimensions = 1)
     private val resolvedHashSlots: IntArray = if (useResolvedHandlers) {
@@ -205,11 +213,16 @@ class DynamicPerformNode(
     }
 
     /**
-     * Pop handlers from the stack.
+     * Pop handlers from the stack and commit any pending STM transactions.
      * Marked @TruffleBoundary to exclude collection operations.
      */
     @TruffleBoundary
     private fun popHandlersBoundary(effectHandler: com.mezze.language.interpreter.EffectHandler) {
+        // Commit STM transaction when the perform block ends
+        // Check if any of the handlers are STM-related
+        if (hasSTMHandler) {
+            com.mezze.language.interpreter.stdlib.concurrent.STMImplementations.commitAndClearTransaction()
+        }
         effectHandler.popHandlers()
     }
 

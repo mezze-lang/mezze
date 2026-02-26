@@ -16,6 +16,9 @@ object TruffleContextHolder {
     private val envThreadLocal = ThreadLocal<TruffleLanguage.Env?>()
     private val polyglotContextThreadLocal = ThreadLocal<Context?>()
 
+    // Effect handler - shared across threads, but its handlerStack is thread-local
+    private var effectHandler: EffectHandler? = null
+
     /**
      * Set the current Truffle environment for this thread.
      * Called automatically during Truffle execution.
@@ -53,5 +56,21 @@ object TruffleContextHolder {
     fun clearEnv() {
         envThreadLocal.remove()
         polyglotContextThreadLocal.remove()
+    }
+
+    /**
+     * Set the effect handler.
+     * Called during MezzeContext initialization.
+     */
+    fun setEffectHandler(handler: EffectHandler) {
+        effectHandler = handler
+    }
+
+    /**
+     * Get the effect handler.
+     * Returns null if not initialized.
+     */
+    fun getEffectHandler(): EffectHandler? {
+        return effectHandler
     }
 }
