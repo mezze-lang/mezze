@@ -1,0 +1,50 @@
+plugins {
+    java
+}
+
+// Pure Java module for Truffle DSL nodes
+// The converter will be in a separate Kotlin module or in the interpreter module
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(24))
+    }
+}
+
+dependencies {
+    // Core project dependencies
+    implementation(project(":ast"))
+    implementation(project(":typechecker"))
+
+    // Truffle API - for language implementation
+    implementation("org.graalvm.truffle:truffle-api:24.2.2")
+
+    // Truffle DSL annotation processor - generates specialization code
+    annotationProcessor("org.graalvm.truffle:truffle-dsl-processor:24.2.2")
+
+    // GraalVM SDK - for polyglot interop
+    implementation("org.graalvm.sdk:graal-sdk:24.2.2")
+    implementation("org.graalvm.polyglot:polyglot:24.2.2")
+
+    // Test dependencies
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+}
+
+tasks.test {
+    useJUnitPlatform()
+
+    testLogging {
+        events("started", "passed", "skipped", "failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStandardStreams = true
+    }
+
+    maxParallelForks = 1
+
+    systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
+    systemProperty("junit.jupiter.execution.timeout.default", "120s")
+    systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
+
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+
+    maxHeapSize = "2g"
+}
