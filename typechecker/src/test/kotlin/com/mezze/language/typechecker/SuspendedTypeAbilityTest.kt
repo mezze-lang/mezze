@@ -389,11 +389,11 @@ class SuspendedTypeAbilityTest {
     fun `test suspended type with multiple effects still supports abilities`() {
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let getNumber: {} -> Int <FileSystem, Log> = {} -> do
-                Log.println { msg = "Getting number" }
+                println { msg = "Getting number" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 42
 

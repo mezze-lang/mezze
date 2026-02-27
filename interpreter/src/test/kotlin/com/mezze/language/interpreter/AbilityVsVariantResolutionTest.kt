@@ -205,12 +205,12 @@ class AbilityVsVariantResolutionTest {
     @Test
     fun `test effect member access works with handler from stdlib`() {
         val source = """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println, info, warn}
 
             let main = {} -> perform Console in do
-                Log.println {msg = "Hello from test"}
-                Log.info {msg = "Info message"}
-                Log.warn {msg = "Warning message"}
+                println {msg = "Hello from test"}
+                info {msg = "Info message"}
+                warn {msg = "Warning message"}
                 {}
         """.trimIndent()
 
@@ -222,7 +222,7 @@ class AbilityVsVariantResolutionTest {
     @Test
     fun `test ability and effect together with stdlib`() {
         val source = """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             type Tree 'a = | Leaf, Node { value: 'a, left: Tree 'a, right: Tree 'a } |
 
@@ -233,7 +233,7 @@ class AbilityVsVariantResolutionTest {
             }
 
             let main = {} -> perform Console in do
-                Log.println {msg = "Tree: $(Inspect.to_str {val = tree})"}
+                println {msg = "Tree: $(Inspect.to_str {val = tree})"}
                 {}
         """.trimIndent()
 

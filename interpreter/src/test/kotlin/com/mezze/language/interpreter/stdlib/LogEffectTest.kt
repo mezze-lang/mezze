@@ -37,10 +37,10 @@ class LogEffectTest {
     @Test
     fun `test log info with QuietConsole`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, info}
 
             perform QuietConsole in do
-                Log.info { msg = "Test info message" }
+                info { msg = "Test info message" }
                 42
         """)
         assertEquals(MezzeInt(42), result)
@@ -49,10 +49,10 @@ class LogEffectTest {
     @Test
     fun `test log warn with QuietConsole`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, warn}
 
             perform QuietConsole in do
-                Log.warn { msg = "Test warning" }
+                warn { msg = "Test warning" }
                 "done"
         """)
         assertEquals(MezzeString("done"), result)
@@ -61,10 +61,10 @@ class LogEffectTest {
     @Test
     fun `test log error with QuietConsole`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, error}
 
             perform QuietConsole in do
-                Log.error { msg = "Test error" }
+                error { msg = "Test error" }
                 True
         """)
         assertEquals(MezzeBool(true), result)
@@ -73,10 +73,10 @@ class LogEffectTest {
     @Test
     fun `test log debug with QuietConsole`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, debug}
 
             perform QuietConsole in do
-                Log.debug { msg = "Debug info" }
+                debug { msg = "Debug info" }
                 100
         """)
         assertEquals(MezzeInt(100), result)
@@ -85,10 +85,10 @@ class LogEffectTest {
     @Test
     fun `test log trace with QuietConsole`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, trace}
 
             perform QuietConsole in do
-                Log.trace { msg = "Trace message" }
+                trace { msg = "Trace message" }
                 "traced"
         """)
         assertEquals(MezzeString("traced"), result)
@@ -97,10 +97,10 @@ class LogEffectTest {
     @Test
     fun `test log print with QuietConsole`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, print}
 
             perform QuietConsole in do
-                Log.print { msg = "Print without newline" }
+                print { msg = "Print without newline" }
                 1
         """)
         assertEquals(MezzeInt(1), result)
@@ -109,10 +109,10 @@ class LogEffectTest {
     @Test
     fun `test log println with QuietConsole`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, println}
 
             perform QuietConsole in do
-                Log.println { msg = "Print with newline" }
+                println { msg = "Print with newline" }
                 2
         """)
         assertEquals(MezzeInt(2), result)
@@ -123,13 +123,13 @@ class LogEffectTest {
     @Test
     fun `test multiple log calls in sequence`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, info, debug, warn, error}
 
             perform QuietConsole in do
-                Log.info { msg = "Step 1" }
-                Log.debug { msg = "Step 2" }
-                Log.warn { msg = "Step 3" }
-                Log.error { msg = "Step 4" }
+                info { msg = "Step 1" }
+                debug { msg = "Step 2" }
+                warn { msg = "Step 3" }
+                error { msg = "Step 4" }
                 "completed"
         """)
         assertEquals(MezzeString("completed"), result)
@@ -166,12 +166,12 @@ class LogEffectTest {
     @Test
     fun `test logging with computation`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, info, debug}
 
             let compute = { x, y } -> perform QuietConsole in do
-                Log.info { msg = "Computing..." }
+                info { msg = "Computing..." }
                 let result = x + y
-                Log.debug { msg = "Done" }
+                debug { msg = "Done" }
                 result
 
             compute { x = 10, y = 20 }
@@ -182,14 +182,14 @@ class LogEffectTest {
     @Test
     fun `test logging in conditional`() {
         val result = eval("""
-            use std::effects::log::{Log, QuietConsole}
+            use std::effects::log::{QuietConsole, info, warn}
 
             let check = { value } -> perform QuietConsole in do
                 if value > 0 then do
-                    Log.info { msg = "Positive" }
+                    info { msg = "Positive" }
                     "positive"
                 else do
-                    Log.warn { msg = "Non-positive" }
+                    warn { msg = "Non-positive" }
                     "non-positive"
 
             check { value = 5 }
@@ -203,12 +203,41 @@ class LogEffectTest {
     fun `test Console handler executes without error`() {
         // This test verifies Console works but produces actual output
         val result = eval("""
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, debug}
 
             perform Console in do
-                Log.debug { msg = "Test from LogEffectTest" }
+                debug { msg = "Test from LogEffectTest" }
                 "success"
         """)
         assertEquals(MezzeString("success"), result)
+    }
+
+    // === Direct Log.log usage ===
+
+    @Test
+    fun `test direct Log log with level`() {
+        val result = eval("""
+            use std::effects::log::{Log, QuietConsole}
+
+            perform QuietConsole in do
+                Log.log { level = Info, msg = "Info via Log.log" }
+                Log.log { level = Debug, msg = "Debug via Log.log" }
+                "direct"
+        """)
+        assertEquals(MezzeString("direct"), result)
+    }
+
+    // === Custom log level ===
+
+    @Test
+    fun `test custom log level`() {
+        val result = eval("""
+            use std::effects::log::{Log, QuietConsole}
+
+            perform QuietConsole in do
+                Log.log { level = MyCustomLevel, msg = "Custom level message" }
+                "custom"
+        """)
+        assertEquals(MezzeString("custom"), result)
     }
 }

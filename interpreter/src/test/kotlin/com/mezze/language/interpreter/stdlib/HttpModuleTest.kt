@@ -55,7 +55,7 @@ class HttpModuleTest {
         // This test verifies that Decode.decode works INSIDE a perform block
         // WITHOUT type annotation - type inferred from field access
         val result = MezzeTestHelper.run("""
-            use std::effects::log::{Log, Console, println}
+            use std::effects::log::{Console, println}
             use std::codec::json
             use std::codec::json::{Json}
             use std::codec::core::{Decode, DecodeError, default_config}

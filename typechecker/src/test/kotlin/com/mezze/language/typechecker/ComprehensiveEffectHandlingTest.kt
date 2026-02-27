@@ -80,10 +80,10 @@ class ComprehensiveEffectHandlingTest {
     fun `test 1a - perform on uncalled function with single effect removes effect from function type`() {
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let myFunc: {} -> String <Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 "Done"
 
             let handled = perform Console in myFunc
@@ -102,11 +102,11 @@ class ComprehensiveEffectHandlingTest {
         // <*> marks that some effects were already performed
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -122,11 +122,11 @@ class ComprehensiveEffectHandlingTest {
     fun `test 1c - sequential perform on uncalled function removes effects one by one`() {
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -143,10 +143,10 @@ class ComprehensiveEffectHandlingTest {
     fun `test 1d - perform on uncalled function does not mutate original function`() {
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let myFunc: {} -> String <Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 "Done"
 
             let handled = perform Console in myFunc
@@ -166,10 +166,10 @@ class ComprehensiveEffectHandlingTest {
         // The function returns String <*> because calling handled {} executes performed effects
         assertFunctionReturnTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let myFunc: {} -> String <Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 "Done"
 
             let getResult = {} -> do
@@ -187,11 +187,11 @@ class ComprehensiveEffectHandlingTest {
         // This is rejected at top level because * means effects were executed
         assertTypeCheckFails(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -208,11 +208,11 @@ class ComprehensiveEffectHandlingTest {
         // The function returns String <*> because calling step2 {} executes performed effects
         assertFunctionReturnTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -233,11 +233,11 @@ class ComprehensiveEffectHandlingTest {
         // The function returns String <*> because calling step2 {} executes performed effects
         assertFunctionReturnTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -260,11 +260,11 @@ class ComprehensiveEffectHandlingTest {
         // CRITICAL: This verifies function calls with effects produce SuspendedType
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -282,10 +282,10 @@ class ComprehensiveEffectHandlingTest {
         // Use nested expression instead of do block to avoid variable reference issues
         assertFunctionReturnTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let myFunc: {} -> String <Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 "Done"
 
             let getHandled = {} -> perform Console in myFunc {}
@@ -302,11 +302,11 @@ class ComprehensiveEffectHandlingTest {
         // But this is rejected at top level because * means effects were executed
         assertTypeCheckFails(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -322,11 +322,11 @@ class ComprehensiveEffectHandlingTest {
         // Intermediate values with <*> are rejected at top level
         assertTypeCheckFails(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -343,11 +343,11 @@ class ComprehensiveEffectHandlingTest {
         // Intermediate values with <*> are rejected at top level
         assertTypeCheckFails(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -365,11 +365,11 @@ class ComprehensiveEffectHandlingTest {
         // This verifies the behavior without triggering top-level value restrictions
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -388,11 +388,11 @@ class ComprehensiveEffectHandlingTest {
         // Wrap in function to avoid top-level <*> restriction
         assertFunctionReturnTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -408,14 +408,14 @@ class ComprehensiveEffectHandlingTest {
         // Wrap in function to avoid top-level <*> restriction
         assertFunctionReturnTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let func1: {} -> String <Log> = {} -> do
-                Log.println { msg = "Func1" }
+                println { msg = "Func1" }
                 "Result1"
 
             let func2: {} -> String <Log> = {} -> do
-                Log.println { msg = "Func2" }
+                println { msg = "Func2" }
                 "Result2"
 
             let getResults = {} -> do
@@ -434,14 +434,14 @@ class ComprehensiveEffectHandlingTest {
         // Use nested expression instead of do block to avoid variable reference issues
         assertFunctionReturnTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let func1: {} -> Int <Log> = {} -> do
-                Log.println { msg = "Func1" }
+                println { msg = "Func1" }
                 42
 
             let func2: { val: Int } -> String <Log> = {val} -> do
-                Log.println { msg = "Func2" }
+                println { msg = "Func2" }
                 "Result"
 
             let getHandled = {} -> perform Console in func2 { val = func1 {} }
@@ -456,11 +456,11 @@ class ComprehensiveEffectHandlingTest {
         // Intermediate values with <*> are rejected at top level
         assertTypeCheckFails(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
             use std::effects::filesystem::{FileSystem, LocalDisk}
 
             let myFunc: {} -> String <FileSystem, Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 FileSystem.write_file { path = "/tmp/test.txt", content = "data" }
                 "Done"
 
@@ -475,10 +475,10 @@ class ComprehensiveEffectHandlingTest {
     fun `test 4f - handle effect on bound function value`() {
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let myFunc: {} -> String <Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 "Done"
 
             let bound = myFunc
@@ -496,14 +496,14 @@ class ComprehensiveEffectHandlingTest {
         // Wrap in function to avoid top-level <*> restriction
         assertFunctionReturnTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let func1: {} -> Int <Log> = {} -> do
-                Log.println { msg = "Func1" }
+                println { msg = "Func1" }
                 42
 
             let func2: { val: Int } -> String <Log> = {val} -> do
-                Log.println { msg = "Func2" }
+                println { msg = "Func2" }
                 "Result"
 
             let getResult2 = {} -> do
@@ -522,10 +522,10 @@ class ComprehensiveEffectHandlingTest {
         // This should typecheck - suspended values are valid
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let myFunc: {} -> String <Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 "Done"
 
             let result = myFunc {}
@@ -540,10 +540,10 @@ class ComprehensiveEffectHandlingTest {
     fun `test 5b - suspended value can be bound and returned`() {
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let myFunc: {} -> String <Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 "Done"
 
             let wrapSuspended = {val} -> val
@@ -561,10 +561,10 @@ class ComprehensiveEffectHandlingTest {
     fun `test 5c - bind effectful computation to variable preserves effects`() {
         assertTypeChecks(
             """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let myFunc: {} -> String <Log> = {} -> do
-                Log.println { msg = "Hello" }
+                println { msg = "Hello" }
                 "Done"
 
             let suspended1 = myFunc {}

@@ -98,11 +98,11 @@ class ImportedPerformerTest {
 
     @Test
     fun `imported performer should work when effect is also imported`() {
-        // Importing both the effect (Log) and performer (Console)
+        // Importing both the effect (Log) and performer (Console) and helper
         val source = """
-            use std::effects::log::{Log, println, Console}
+            use std::effects::log::{Log, info, Console}
 
-            let logSomething = { msg } -> Log.println { msg = msg }
+            let logSomething = { msg } -> info { msg = msg }
 
             let main = {} -> perform Console in do
                 logSomething { msg = "Hello!" }
@@ -562,11 +562,11 @@ class ImportedPerformerTest {
 
     @Test
     fun `error message should suggest effect qualifier for imported effect operation`() {
-        // User wrote "println" instead of "Log.println" with imported Log effect
+        // User wrote "log" instead of "Log.log" with imported Log effect
         val source = """
             use std::effects::log::{Log, Console}
 
-            let main = {} -> perform Console in println { msg = "hello" }
+            let main = {} -> perform Console in log { level = Info, msg = "hello" }
         """.trimIndent()
 
         val program = parser.parse(source)
@@ -577,8 +577,8 @@ class ImportedPerformerTest {
         val errorMessage = error.message ?: ""
 
         assertTrue(
-            errorMessage.contains("Log.println"),
-            "Error message should suggest 'Log.println', but got: $errorMessage"
+            errorMessage.contains("Log.log"),
+            "Error message should suggest 'Log.log', but got: $errorMessage"
         )
         assertTrue(
             errorMessage.contains("effect operation"),

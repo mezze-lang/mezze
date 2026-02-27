@@ -84,15 +84,15 @@ class ContinuationEffectTest {
     fun testContinuationWithLogEffect() {
         val source = """
             use std::control::continuation
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let test = {} -> perform Console in do
-                Log.println { msg = "Before capture" }
+                println { msg = "Before capture" }
                 let x = 100
                 let cont = continuation::new {}
-                Log.println { msg = "After capture" }
+                println { msg = "After capture" }
                 let y = 200
-                Log.println { msg = "Returning result" }
+                println { msg = "Returning result" }
                 x + y
 
             test {}
@@ -106,16 +106,16 @@ class ContinuationEffectTest {
     @Test
     fun testNestedPerforms() {
         val source = """
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let inner = {} -> perform Console in do
-                Log.println { msg = "Inner" }
+                println { msg = "Inner" }
                 42
 
             let outer = {} -> perform Console in do
-                Log.println { msg = "Outer start" }
+                println { msg = "Outer start" }
                 let result = inner {}
-                Log.println { msg = "Outer end" }
+                println { msg = "Outer end" }
                 result
 
             outer {}
@@ -403,13 +403,13 @@ class ContinuationEffectTest {
         // Verify that statements after abort don't execute
         val source = """
             use std::control::continuation
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let test = {} -> perform Console in do
-                Log.println { msg = "Before abort" }
+                println { msg = "Before abort" }
                 let cont_ctx = continuation::new {}
                 cont_ctx.abort {}
-                Log.println { msg = "After abort" }
+                println { msg = "After abort" }
                 42
 
             test {}
@@ -549,14 +549,14 @@ class ContinuationEffectTest {
         // Test continuation works correctly with multiple effects
         val source = """
             use std::control::continuation
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let test = {} -> perform Console in do
-                Log.println { msg = "Start" }
+                println { msg = "Start" }
                 let cont = continuation::new {}
-                Log.println { msg = "Middle" }
+                println { msg = "Middle" }
                 let x = 100
-                Log.println { msg = "End" }
+                println { msg = "End" }
                 x
 
             test {}

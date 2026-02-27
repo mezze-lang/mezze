@@ -52,7 +52,7 @@ class AsyncEffectHandlerPropagationTest {
     fun `test spawned task can use Log effect from parent`() {
         // The spawned task should have access to the Console handler from the parent
         val code = """
-            use std::effects::log::{Log, Console, println}
+            use std::effects::log::{Console, println}
             use std::effects::async::{Async, LoomAsync}
             use std::effects::stm::{STM, tvar, deref, atomically}
 
@@ -156,7 +156,7 @@ class AsyncEffectHandlerPropagationTest {
     @Test
     fun `test spawned task with multiple effect handlers`() {
         val code = """
-            use std::effects::log::{Log, Console, println}
+            use std::effects::log::{Console, println}
             use std::effects::stm::{STM, tvar, deref, atomically}
             use std::effects::async::{Async, LoomAsync}
 

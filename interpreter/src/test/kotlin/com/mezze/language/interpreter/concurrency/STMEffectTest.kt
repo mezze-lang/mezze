@@ -1039,7 +1039,7 @@ class STMEffectTest {
     fun `test async spawn inherits Log effect handler`() {
         // Spawned tasks should have access to parent's effect handlers (like Log)
         val code = """
-            use std::effects::log::{Log, Console, println}
+            use std::effects::log::{Console, println}
             use std::effects::async::{Async, LoomAsync}
             use std::effects::stm::{STM, tvar, deref, atomically}
 

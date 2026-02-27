@@ -182,10 +182,10 @@ class GeneratorEffectTest {
         // Test generator works correctly with other effects (Log)
         val source = """
             use std::effects::generator::{yield}
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let test = {} -> perform Console in do
-                Log.println { msg = "Before yield" }
+                println { msg = "Before yield" }
                 yield { value =100 }
 
             test {}
@@ -681,10 +681,10 @@ class GeneratorEffectTest {
         val source = """
             use std::effects::generator::{yield}
             use std::effects::generator::{yield, to_list}
-            use std::effects::log::{Log, Console}
+            use std::effects::log::{Console, println}
 
             let loggingGen = { msg: String, value: Int } -> perform Console in do
-                Log.println { msg = msg }
+                println { msg = msg }
                 yield { value = value }
 
             let runTest = {} -> do
