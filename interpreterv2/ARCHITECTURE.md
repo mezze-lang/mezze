@@ -839,3 +839,477 @@ v2 leverages these fully with:
 4. **Optimistic mutation** → Less allocation where safe
 
 The result: **Near-native speed for all Mezze code**, not just simple benchmarks.
+
+---
+
+## Part 16: Polyglot Interop Architecture
+
+### 16.1 Execution Models
+
+Mezze supports two execution modes with different capabilities:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  EXECUTION MODEL 1: Native Binary (mez)                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+$ mez exec app.mz
+$ mez dev
+$ mez build
+$ mez lsp
+
+Capabilities:
+├── Full Mezze language support
+├── Truffle JIT compilation
+├── Fast startup (~20ms)
+├── Self-contained binary
+└── NO polyglot interop (languages not embedded)
+
+Use for:
+├── Pure Mezze development
+├── CLI tools and scripts
+├── LSP / IDE integration
+└── Building/compiling projects
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  EXECUTION MODEL 2: JVM Mode (for polyglot)                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+$ java -cp mez.jar:graalpy.jar:graaljs.jar \
+    com.mezze.language.cli.MainKt exec app.mz
+
+Or with helper script:
+$ mez-polyglot exec app.mz
+
+Capabilities:
+├── Full Mezze language support
+├── Truffle JIT compilation
+├── FULL polyglot interop (Python, JS, Ruby, etc.)
+├── Slower startup (~500ms)
+└── Requires GraalVM + language JARs
+
+Use for:
+├── Development with Python/JS/Ruby libraries
+├── Data science (NumPy, Pandas, etc.)
+├── Web scraping, ML, etc.
+└── Any code using std::interop::*
+```
+
+### 16.2 Polyglot Language Installation
+
+Users install polyglot languages via Maven dependencies or GraalVM Updater:
+
+```bash
+# Option 1: GraalVM Updater (installs to $GRAALVM_HOME)
+gu install python
+gu install js
+gu install ruby
+
+# Option 2: Maven/Gradle dependencies (for project-specific)
+# build.gradle.kts
+dependencies {
+    implementation("org.graalvm.polyglot:python:24.2.2")
+    implementation("org.graalvm.polyglot:js:24.2.2")
+}
+```
+
+### 16.3 Userland Interop Libraries
+
+Polyglot is exposed through **userland Mezze libraries**, not language primitives:
+
+```mezze
+// std/interop/python.mz
+module std::interop::python
+
+effect Python {
+    import: {module: String} -> PolyglotObject
+    eval: {code: String} -> PolyglotObject
+}
+
+// std/interop/javascript.mz
+module std::interop::javascript
+
+effect JavaScript {
+    import: {module: String} -> PolyglotObject
+    eval: {code: String} -> PolyglotObject
+}
+```
+
+User code:
+
+```mezze
+use std::interop::python
+
+let main = {} -> {
+    let np = Python.import { module = "numpy" }
+    let arr = np.array { data = [1, 2, 3, 4, 5] }
+    let mean = np.mean { a = arr }
+    print { value = mean }
+}
+```
+
+### 16.4 Interpreter Polyglot Nodes
+
+The interpreter needs nodes for polyglot operations:
+
+```java
+/**
+ * Import a module from another polyglot language.
+ * Uses GraalVM's polyglot Context to access guest languages.
+ */
+@NodeInfo(shortName = "polyglot-import")
+public abstract class PolyglotImportNode extends MezzeNode {
+
+    private final String languageId;  // "python", "js", "ruby"
+
+    @Child private MezzeNode moduleNameNode;
+
+    @Specialization
+    @TruffleBoundary
+    protected Object doImport(VirtualFrame frame, String moduleName) {
+        Context context = getPolyglotContext();
+
+        // Check if language is available
+        if (!context.getEngine().getLanguages().containsKey(languageId)) {
+            throw new MezzeRuntimeException(
+                "Language '" + languageId + "' not available. " +
+                "Run with JVM mode: java -cp mez.jar:" + languageId + ".jar ..."
+            );
+        }
+
+        // Import the module
+        Value bindings = context.getBindings(languageId);
+        return context.eval(languageId, "import " + moduleName);
+    }
+}
+
+/**
+ * Call a method on a polyglot object.
+ */
+@NodeInfo(shortName = "polyglot-invoke")
+public abstract class PolyglotInvokeNode extends MezzeNode {
+
+    @Child private MezzeNode receiverNode;
+    @Child private MezzeNode argsNode;
+
+    private final String methodName;
+
+    @Specialization
+    @TruffleBoundary
+    protected Object doInvoke(Object receiver, Object args) {
+        if (receiver instanceof Value polyglotValue) {
+            // Convert Mezze args to polyglot
+            Object[] convertedArgs = convertArgs(args);
+            return polyglotValue.invokeMember(methodName, convertedArgs);
+        }
+        throw new MezzeRuntimeException("Cannot invoke on non-polyglot value");
+    }
+}
+
+/**
+ * Read a member from a polyglot object.
+ */
+@NodeInfo(shortName = "polyglot-read-member")
+public abstract class PolyglotReadMemberNode extends MezzeNode {
+
+    private final String memberName;
+
+    @Specialization
+    @TruffleBoundary
+    protected Object doRead(Object receiver) {
+        if (receiver instanceof Value polyglotValue) {
+            return polyglotValue.getMember(memberName);
+        }
+        throw new MezzeRuntimeException("Cannot read member from non-polyglot value");
+    }
+}
+```
+
+### 16.5 Type Mapping Between Languages
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  TYPE MAPPING: Mezze ↔ Polyglot Languages                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Mezze Type      │ Java/Truffle    │ Python         │ JavaScript
+────────────────┼─────────────────┼────────────────┼────────────────
+Int             │ long            │ int            │ number
+Float           │ double          │ float          │ number
+Bool            │ boolean         │ bool           │ boolean
+String          │ String          │ str            │ string
+Array<T>        │ Object[]        │ list           │ Array
+Record          │ MezzeRecord     │ dict           │ Object
+Option<T>       │ MezzeVariant    │ T | None       │ T | null
+Function        │ MezzeFunction   │ callable       │ function
+PolyglotObject  │ Value           │ (any)          │ (any)
+
+Auto-Conversion:
+────────────────
+• Mezze primitives → polyglot: automatic (Truffle handles)
+• Polyglot → Mezze primitives: automatic
+• Mezze Record → Python dict: explicit via interop helper
+• Mezze Function → Python callable: wrapped automatically
+• Python object → Mezze: stays as PolyglotObject (opaque)
+```
+
+### 16.6 Polyglot Context Management
+
+```java
+/**
+ * Manages the polyglot context for the Mezze runtime.
+ * Context is created lazily when first polyglot operation is requested.
+ */
+public class MezzePolyglotSupport {
+
+    private volatile Context polyglotContext;
+
+    @TruffleBoundary
+    public Context getOrCreateContext() {
+        if (polyglotContext == null) {
+            synchronized (this) {
+                if (polyglotContext == null) {
+                    polyglotContext = Context.newBuilder()
+                        .allowAllAccess(true)
+                        .option("engine.WarnInterpreterOnly", "false")
+                        .build();
+                }
+            }
+        }
+        return polyglotContext;
+    }
+
+    /**
+     * Check which languages are available in the current runtime.
+     */
+    @TruffleBoundary
+    public Set<String> getAvailableLanguages() {
+        return getOrCreateContext().getEngine().getLanguages().keySet();
+    }
+
+    /**
+     * Called when Mezze program exits.
+     */
+    public void close() {
+        if (polyglotContext != null) {
+            polyglotContext.close();
+        }
+    }
+}
+```
+
+### 16.7 Compiled JAR with Polyglot
+
+When `mez compile` produces a JAR, it tracks polyglot dependencies:
+
+```
+app.jar
+├── META-INF/
+│   └── MANIFEST.MF
+├── codebase.db              # Serialized typed AST
+├── mezze-manifest.json      # Build manifest
+│   {
+│     "main": "app::main",
+│     "mezzeVersion": "0.1.0",
+│     "polyglotLanguages": ["python"],    ← Detected during typecheck
+│     "contentHashes": ["#a7f9e2...", ...]
+│   }
+└── com/mezze/...            # Runtime classes
+```
+
+Running the compiled JAR:
+
+```bash
+# Pure Mezze app (no polyglot)
+java -jar app.jar
+
+# App with Python
+java -cp app.jar:graalpy.jar MainKt
+
+# Compile to native with Python embedded
+native-image --language:python -jar app.jar -o app
+./app  # Self-contained binary with Python
+```
+
+### 16.8 Native Binary Detection
+
+The `mez` native binary should detect polyglot usage and give helpful errors:
+
+```java
+/**
+ * Check if program uses polyglot features before execution.
+ * Called during type checking phase (before execution).
+ */
+public class PolyglotUsageDetector {
+
+    public Set<String> detectPolyglotLanguages(Program program) {
+        Set<String> languages = new HashSet<>();
+
+        for (Import imp : program.getImports()) {
+            if (imp.getModule().startsWith("std::interop::")) {
+                String lang = imp.getModule().replace("std::interop::", "");
+                languages.add(lang);
+            }
+        }
+
+        return languages;
+    }
+}
+
+// In mez exec command:
+Set<String> polyglotLangs = detector.detectPolyglotLanguages(program);
+
+if (!polyglotLangs.isEmpty() && isNativeBinary()) {
+    System.err.println("Error: This program uses polyglot features: " + polyglotLangs);
+    System.err.println();
+    System.err.println("The native `mez` binary doesn't include polyglot languages.");
+    System.err.println("Run with JVM mode instead:");
+    System.err.println();
+    System.err.println("  java -cp mez.jar:" +
+        polyglotLangs.stream().map(l -> l + ".jar").collect(joining(":")) +
+        " com.mezze.language.cli.MainKt exec " + filename);
+    System.exit(1);
+}
+```
+
+---
+
+## Part 17: Complete Execution Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    COMPLETE MEZZE EXECUTION FLOW                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+                              USER CODE
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  mez check / mez build                                                       │
+│  (Works in native binary - no execution needed)                              │
+│                                                                              │
+│  1. Parse source files                                                       │
+│  2. Type check (detects polyglot imports)                                    │
+│  3. Generate content hashes                                                  │
+│  4. Output: Typed AST + manifest                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                 │
+             ┌───────────────────┴───────────────────┐
+             │                                       │
+      Pure Mezze?                             Uses Polyglot?
+             │                                       │
+             ▼                                       ▼
+┌─────────────────────────┐           ┌─────────────────────────────────────┐
+│  mez exec (native)      │           │  JVM Mode Required                   │
+│                         │           │                                      │
+│  • Fast startup         │           │  java -cp mez.jar:graalpy.jar ...    │
+│  • Full JIT             │           │                                      │
+│  • No polyglot          │           │  • Slower startup                    │
+└─────────────────────────┘           │  • Full JIT                          │
+             │                         │  • Full polyglot                     │
+             │                         └─────────────────────────────────────┘
+             │                                       │
+             └───────────────────┬───────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  INTERPRETER V2                                                              │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │ AST → Truffle Nodes                                                     │ │
+│  │                                                                         │ │
+│  │ • Typed frame slots (Long, Double, Boolean, Object)                    │ │
+│  │ • Type-guided specialization selection                                  │ │
+│  │ • DirectCallNode for functions/abilities                                │ │
+│  │ • PolyglotImportNode, PolyglotInvokeNode (when in JVM mode)            │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │ Truffle/Graal JIT                                                       │ │
+│  │                                                                         │ │
+│  │ • Partial evaluation                                                    │ │
+│  │ • Inlining across language boundaries (polyglot!)                       │ │
+│  │ • Native machine code                                                   │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+                              OUTPUT
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  PRODUCTION DEPLOYMENT                                                       │
+│                                                                              │
+│  Option A: JAR (needs JVM)                                                  │
+│  ─────────────────────────                                                  │
+│  mez build → app.jar                                                        │
+│  java -cp app.jar:graalpy.jar MainKt                                        │
+│                                                                              │
+│  Option B: Native Binary (self-contained)                                   │
+│  ─────────────────────────────────────────                                  │
+│  mez build → app.jar                                                        │
+│  native-image --language:python -jar app.jar -o app                         │
+│  ./app   ← Single binary, ~150MB with Python embedded                       │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Part 18: Polyglot Performance Considerations
+
+### 18.1 Cross-Language Call Overhead
+
+GraalVM's Truffle framework enables **zero-overhead polyglot** after JIT warmup:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  POLYGLOT CALL OVERHEAD                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Before JIT (interpreted):
+  Mezze → Python call: ~1-10μs (micros)
+
+After JIT warmup:
+  Mezze → Python call: ~10-100ns (nanos) - INLINED!
+
+This is because Graal:
+1. Sees both Mezze and Python ASTs
+2. Performs partial evaluation across both
+3. Inlines the cross-language call
+4. Generates single native code path
+```
+
+### 18.2 Data Sharing
+
+```java
+// FAST: Primitives and strings share directly
+long mezzeInt = 42;
+// Python sees: 42 (no copy)
+
+// MEDIUM: Arrays may need conversion
+long[] mezzeArray = new long[] {1, 2, 3};
+// Python numpy can wrap without copy (if compatible layout)
+
+// SLOW: Complex objects need marshalling
+MezzeRecord mezzeRecord = ...;
+// Python dict needs field-by-field conversion
+```
+
+### 18.3 Best Practices for Polyglot Code
+
+```mezze
+// GOOD: Batch operations in guest language
+let result = Python.eval { code = """
+    import numpy as np
+    arr = np.array([1, 2, 3, 4, 5])
+    np.mean(arr) * np.std(arr)  # All computation in Python
+""" }
+
+// BAD: Many small cross-language calls
+let np = Python.import { module = "numpy" }
+let arr = np.array { data = [1, 2, 3, 4, 5] }
+let mean = np.mean { a = arr }      // Cross-language call
+let std = np.std { a = arr }        // Cross-language call
+let result = mean * std             // Back in Mezze
+```

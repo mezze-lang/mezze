@@ -13,8 +13,11 @@ Interpreter v2 is a complete rewrite designed for **near-native performance** by
 
 | Document | Description |
 |----------|-------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Complete technical architecture |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Complete technical architecture + polyglot interop |
 | [DISTRIBUTED-EXECUTION.md](./DISTRIBUTED-EXECUTION.md) | Hot-loading and distributed computing via hashes |
+| [DEPLOYMENT-MODELS.md](./DEPLOYMENT-MODELS.md) | What gets deployed where (workers, JARs, etc.) |
+| [POLYGLOT-INTEROP.md](./POLYGLOT-INTEROP.md) | GraalVM language interop (Python, JS, Ruby) |
+| [COMPLETE-ARCHITECTURE.md](./COMPLETE-ARCHITECTURE.md) | Full system diagrams and flows |
 
 ## Why v2?
 
@@ -171,6 +174,45 @@ Source → Parser → TypeChecker → [inferredType, contentHash, ...]
 | 8 | Optimistic mutation | Not started |
 | 9 | Persistent compilation cache | Not started |
 | 10 | Distributed execution | Not started |
+| 11 | Polyglot interop nodes | Not started |
+
+## Execution Models
+
+### Pure Mezze (Native Binary)
+
+```bash
+# Fast startup, full JIT, no polyglot
+mez exec app.mz
+mez dev
+mez build
+```
+
+### Polyglot (JVM Mode)
+
+```bash
+# Requires language JARs on classpath
+java -cp mez.jar:graalpy.jar com.mezze.language.cli.MainKt exec app.mz
+
+# Or install languages via GraalVM Updater
+gu install python
+gu install js
+```
+
+### Production Deployment
+
+```bash
+# Build JAR
+mez build -o app.jar
+
+# Run on JVM (with polyglot if needed)
+java -cp app.jar:graalpy.jar MainKt
+
+# Or compile to native binary (embeds polyglot languages)
+native-image --language:python -jar app.jar -o app
+./app  # Self-contained
+```
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md#part-16-polyglot-interop-architecture) for details.
 
 ## Getting Started
 
