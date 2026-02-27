@@ -115,7 +115,9 @@ class STMEffectTest {
             let counter = tvar {init = 0}
 
             perform OptimisticSTM in do
-                STM.write {var = counter, val = 42}
+                STM.atomically {f = {} ->
+                    STM.write {var = counter, val = 42}
+                }
 
             deref {var = counter}
         """
@@ -162,9 +164,11 @@ class STMEffectTest {
             let counter = tvar {init = 0}
 
             perform OptimisticSTM in do
-                STM.write {var = counter, val = 1}
-                STM.write {var = counter, val = 2}
-                STM.write {var = counter, val = 3}
+                STM.atomically {f = {} -> do
+                    STM.write {var = counter, val = 1}
+                    STM.write {var = counter, val = 2}
+                    STM.write {var = counter, val = 3}
+                }
 
             deref {var = counter}
         """
@@ -287,10 +291,12 @@ class STMEffectTest {
             let c = tvar {init = 30}
 
             perform OptimisticSTM in do
-                let va = STM.read {var = a}
-                let vb = STM.read {var = b}
-                let vc = STM.read {var = c}
-                STM.write {var = a, val = va + vb + vc}
+                STM.atomically {f = {} -> do
+                    let va = STM.read {var = a}
+                    let vb = STM.read {var = b}
+                    let vc = STM.read {var = c}
+                    STM.write {var = a, val = va + vb + vc}
+                }
 
             deref {var = a}
         """
@@ -307,10 +313,12 @@ class STMEffectTest {
             let bob = tvar {init = 500}
 
             perform OptimisticSTM in do
-                let alice_balance = STM.read {var = alice}
-                let bob_balance = STM.read {var = bob}
-                STM.write {var = alice, val = alice_balance - 200}
-                STM.write {var = bob, val = bob_balance + 200}
+                STM.atomically {f = {} -> do
+                    let alice_balance = STM.read {var = alice}
+                    let bob_balance = STM.read {var = bob}
+                    STM.write {var = alice, val = alice_balance - 200}
+                    STM.write {var = bob, val = bob_balance + 200}
+                }
 
             let alice_final = deref {var = alice}
             let bob_final = deref {var = bob}
@@ -389,7 +397,9 @@ class STMEffectTest {
 
             let getResult = {} -> do
                 let success = perform OptimisticSTM in do
-                    transfer {from = from, to = to, amount = 200}
+                    STM.atomically {f = {} ->
+                        transfer {from = from, to = to, amount = 200}
+                    }
                 let from_balance = deref {var = from}
                 let to_balance = deref {var = to}
                 {success = success, from = from_balance, to = to_balance}
@@ -412,7 +422,9 @@ class STMEffectTest {
 
             let getResult = {} -> do
                 let success = perform OptimisticSTM in do
-                    transfer {from = from, to = to, amount = 200}
+                    STM.atomically {f = {} ->
+                        transfer {from = from, to = to, amount = 200}
+                    }
                 let from_balance = deref {var = from}
                 let to_balance = deref {var = to}
                 {success = success, from = from_balance, to = to_balance}
@@ -502,16 +514,18 @@ class STMEffectTest {
 
             let getResult = {} -> do
                 let sum = perform OptimisticSTM in do
-                    let v1 = STM.read {var = t1}
-                    let v2 = STM.read {var = t2}
-                    let v3 = STM.read {var = t3}
+                    STM.atomically {f = {} -> do
+                        let v1 = STM.read {var = t1}
+                        let v2 = STM.read {var = t2}
+                        let v3 = STM.read {var = t3}
 
-                    # Increment all
-                    STM.write {var = t1, val = v1 + 1}
-                    STM.write {var = t2, val = v2 + 1}
-                    STM.write {var = t3, val = v3 + 1}
+                        # Increment all
+                        STM.write {var = t1, val = v1 + 1}
+                        STM.write {var = t2, val = v2 + 1}
+                        STM.write {var = t3, val = v3 + 1}
 
-                    v1 + v2 + v3
+                        v1 + v2 + v3
+                    }
 
                 let new_sum = deref {var = t1} + deref {var = t2} + deref {var = t3}
                 {old_sum = sum, new_sum = new_sum}
@@ -929,7 +943,7 @@ class STMEffectTest {
 
     @Test
     fun `test multiple writes in single perform block are atomic`() {
-        // All writes within a perform block should be committed together
+        // All writes within an atomically block should be committed together
         val code = """
             use std::effects::stm::{STM, OptimisticSTM, tvar, deref}
 
@@ -937,8 +951,10 @@ class STMEffectTest {
             let b = tvar {init = 200}
 
             perform OptimisticSTM in do
-                STM.write {var = a, val = 50}
-                STM.write {var = b, val = 150}
+                STM.atomically {f = {} -> do
+                    STM.write {var = a, val = 50}
+                    STM.write {var = b, val = 150}
+                }
 
             let va = deref {var = a}
             let vb = deref {var = b}

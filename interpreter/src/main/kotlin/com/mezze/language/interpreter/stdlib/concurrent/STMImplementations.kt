@@ -33,6 +33,11 @@ object STMImplementations {
     // Global version counter for MVCC
     private val globalVersion = AtomicLong(0L)
 
+    // Global commit lock to ensure atomic validate-and-write
+    // This prevents the TOCTOU race where multiple transactions validate successfully
+    // but then overwrite each other's writes
+    private val commitLock = java.util.concurrent.locks.ReentrantLock()
+
     // Thread-local transaction context
     // Each thread gets its own transaction when inside a perform STM block
     private val currentTransaction = ThreadLocal<Transaction?>()
@@ -272,14 +277,62 @@ object STMImplementations {
     // =========================================================================
     // Sequential STM Operations (SequentialSTM handler)
     // =========================================================================
+    //
+    // SequentialSTM writes directly to TVars without transaction buffering.
+    // This is useful for testing and single-threaded scenarios.
 
     private fun registerSequentialSTMOperations(context: MutableMap<String, MezzeValue>) {
-        // Sequential versions - same implementation, just aliases
-        context["__native_stm_seq_read"] = context["__native_stm_read"]!!
-        context["__native_stm_seq_write"] = context["__native_stm_write"]!!
-        context["__native_stm_seq_modify"] = context["__native_stm_modify"]!!
-        context["__native_stm_seq_swap"] = context["__native_stm_swap"]!!
-        context["__native_stm_seq_ensure"] = context["__native_stm_ensure"]!!
+        // __native_stm_seq_read: Read directly from TVar (no transaction)
+        context["__native_stm_seq_read"] = NativeMezzeFunction("__native_stm_seq_read") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw MezzeException("__native_stm_seq_read expects MezzeRecord")
+            val tvar = unwrapTVar(record.fields["var"])
+            tvar.read()
+        }
+
+        // __native_stm_seq_write: Write directly to TVar (no transaction)
+        context["__native_stm_seq_write"] = NativeMezzeFunction("__native_stm_seq_write") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw MezzeException("__native_stm_seq_write expects MezzeRecord")
+            val tvar = unwrapTVar(record.fields["var"])
+            val value = record.fields["val"]
+                ?: throw MezzeException("__native_stm_seq_write expects 'val' field")
+            val newVersion = globalVersion.incrementAndGet()
+            tvar.forceWrite(newVersion, value)
+            MezzeRecord(emptyMap())
+        }
+
+        // __native_stm_seq_modify: Read, apply function, write directly
+        context["__native_stm_seq_modify"] = NativeMezzeFunction("__native_stm_seq_modify") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw MezzeException("__native_stm_seq_modify expects MezzeRecord")
+            val tvar = unwrapTVar(record.fields["var"])
+            val f = record.fields["f"]
+                ?: throw MezzeException("__native_stm_seq_modify expects 'f' field")
+            val currentValue = tvar.read()
+            val newValue = callFunctionWithVal(f, currentValue)
+            val newVersion = globalVersion.incrementAndGet()
+            tvar.forceWrite(newVersion, newValue)
+            MezzeRecord(emptyMap())
+        }
+
+        // __native_stm_seq_swap: Write new value, return old value directly
+        context["__native_stm_seq_swap"] = NativeMezzeFunction("__native_stm_seq_swap") { args ->
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw MezzeException("__native_stm_seq_swap expects MezzeRecord")
+            val tvar = unwrapTVar(record.fields["var"])
+            val newValue = record.fields["val"]
+                ?: throw MezzeException("__native_stm_seq_swap expects 'val' field")
+            val oldValue = tvar.read()
+            val newVersion = globalVersion.incrementAndGet()
+            tvar.forceWrite(newVersion, newValue)
+            oldValue
+        }
+
+        // __native_stm_seq_ensure: Just read (no conflict tracking in sequential mode)
+        context["__native_stm_seq_ensure"] = context["__native_stm_seq_read"]!!
+
+        // retry and or_else don't make sense in sequential mode, but we keep them for API compatibility
         context["__native_stm_seq_retry"] = context["__native_stm_retry"]!!
         context["__native_stm_seq_or_else"] = context["__native_stm_or_else"]!!
         context["__native_stm_seq_check"] = context["__native_stm_check"]!!
@@ -633,6 +686,10 @@ object STMImplementations {
         /**
          * Commit the transaction.
          * Returns true if successful, false if validation failed.
+         *
+         * Uses a global commit lock to ensure atomic validate-and-write.
+         * This prevents the TOCTOU race condition where multiple transactions
+         * could validate successfully but then overwrite each other's writes.
          */
         fun commit(globalVersion: AtomicLong): Boolean {
             if (writeSet.isEmpty()) {
@@ -640,22 +697,26 @@ object STMImplementations {
                 return validate()
             }
 
-            // Get new version for writes
-            val newVersion = globalVersion.incrementAndGet()
+            // Acquire commit lock to make validate-and-write atomic
+            commitLock.lock()
+            try {
+                // Validate read set while holding lock
+                if (!validate()) {
+                    return false
+                }
 
-            // Validate read set
-            if (!validate()) {
-                return false
+                // Get new version for writes
+                val newVersion = globalVersion.incrementAndGet()
+
+                // Apply writes atomically - safe because we hold the commit lock
+                for ((_, entry) in writeSet) {
+                    entry.tvar.forceWrite(newVersion, entry.value)
+                }
+
+                return true
+            } finally {
+                commitLock.unlock()
             }
-
-            // Apply writes atomically
-            // Note: In a full implementation, we'd lock the TVars here
-            // For simplicity, we just write them (works for most single-threaded cases)
-            for ((_, entry) in writeSet) {
-                entry.tvar.forceWrite(newVersion, entry.value)
-            }
-
-            return true
         }
 
         /**
