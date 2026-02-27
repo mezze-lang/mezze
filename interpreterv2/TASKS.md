@@ -362,14 +362,14 @@ This document tracks the implementation of interpreter v2, designed for near-nat
 
 | Phase | Description | Status | Notes |
 |-------|-------------|--------|-------|
-| 1 | Project Setup | **In Progress** | Core infrastructure done |
-| 2 | Typed Frame Slots | **In Progress** | Read/Write nodes done |
+| 1 | Project Setup | **Done** | Core infrastructure complete |
+| 2 | Typed Frame Slots | **Done** | Read/Write nodes with typed access |
 | 3 | Primitive Arithmetic | **Done** | All arithmetic nodes with DSL |
-| 4 | Literals & Values | **In Progress** | Literals done, values done |
-| 5 | Records | Not Started | |
-| 6 | Variants | Not Started | |
-| 7 | Functions & Closures | Not Started | |
-| 8 | Control Flow | Not Started | |
+| 4 | Literals & Values | **Done** | All literals and value classes |
+| 5 | Records | **Done** | Typed field arrays, field access |
+| 6 | Variants | **Done** | Integer tags, pattern matching |
+| 7 | Functions & Closures | **Done** | Definition, invocation with caching |
+| 8 | Control Flow | **Done** | If, Block, And, Or, Not |
 | 9 | Abilities | Not Started | |
 | 10 | Effects | Not Started | |
 | 11 | AST Converter | Not Started | |
