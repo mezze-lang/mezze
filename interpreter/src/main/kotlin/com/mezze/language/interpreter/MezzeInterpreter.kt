@@ -94,34 +94,167 @@ class MezzeInterpreter {
 
     /**
      * Execute a program using 100% Truffle via the polyglot API.
-     * This delegates to MezzeLanguage which converts to Truffle nodes.
+     * This delegates to V2 MezzeLanguage which converts to Truffle nodes.
      */
     private fun executeViaTruffle(program: Program, projectRoot: Path?, monomorphicInstances: Map<String, LetBinding> = emptyMap()): MezzeValue {
         // CRITICAL: Use direct AST execution to preserve type information and resolved abilities!
         // Converting AST -> source -> re-parse loses all type metadata
         val root = projectRoot ?: Paths.get(".")
 
-        // Store the program for direct execution (preserves all type information and resolved abilities)
-        MezzeLanguage.setProgramForDirectExecution(program, root)
+        // Store the program for direct execution via V2 interpreter
+        com.mezze.interpreter.v2.runtime.MezzeLanguage.setProgramForDirectExecution(program, root)
 
-        // CRITICAL: Store monomorphic instances for MezzeLanguage to register
+        // CRITICAL: Store monomorphic instances for V2 MezzeLanguage to register
         // These are compiler-generated specializations (e.g., "add$Int") that
         // must be available at runtime WITHOUT going through the parser
         if (monomorphicInstances.isNotEmpty()) {
-            MezzeLanguage.setMonomorphicInstances(monomorphicInstances)
+            com.mezze.interpreter.v2.runtime.MezzeLanguage.setMonomorphicInstances(monomorphicInstances)
         }
 
-        // Create a dummy source to trigger MezzeLanguage.parse()
-        // MezzeLanguage will use the pre-parsed program instead of parsing this source
+        // Create a dummy source to trigger V2 MezzeLanguage.parse()
+        // V2 MezzeLanguage will use the pre-parsed program instead of parsing this source
         val source = Source.newBuilder("mezze", "# Direct AST execution", "__direct_execution__.mz")
             .buildLiteral()
 
-        // Execute via polyglot API - MezzeLanguage will use the pre-parsed program
+        // Execute via polyglot API - V2 MezzeLanguage will use the pre-parsed program
         polyglotContext.eval(source)
 
-        // Retrieve the result from MezzeLanguage's storage
-        // MezzeLanguage stores results via MezzeLanguage.storeLastExecutionResult()
-        return MezzeLanguage.getLastExecutionResult() ?: MezzeNull
+        // Retrieve the V2 result and convert to V1 MezzeValue
+        val v2Result = com.mezze.interpreter.v2.runtime.MezzeLanguage.getLastExecutionResult()
+        return convertV2ToV1(v2Result)
+    }
+
+    /**
+     * Convert V2 raw values to V1 MezzeValue types.
+     * This mirrors the conversion in MezzeTestHelper.
+     */
+    private fun convertV2ToV1(v2Value: Any?): MezzeValue {
+        return when (v2Value) {
+            null -> MezzeNull
+            is Long -> MezzeInt(v2Value)
+            is Double -> MezzeFloat(v2Value)
+            is String -> MezzeString(v2Value)
+            is Boolean -> MezzeBool(v2Value)
+            is com.mezze.interpreter.v2.values.MezzeUnit -> MezzeUnit
+            is com.mezze.interpreter.v2.values.MezzeRecord -> convertV2Record(v2Value)
+            is com.mezze.interpreter.v2.values.MezzeVariant -> convertV2Variant(v2Value)
+            is com.mezze.interpreter.v2.values.MezzeList -> convertV2List(v2Value)
+            is com.mezze.interpreter.v2.values.MezzeFunction -> NativeMezzeFunction("<v2-function>") { MezzeNull }
+            // V2 uses Object[] for mutable arrays (ArrayList)
+            is Array<*> -> MezzeArrayList(v2Value.map { convertV2ToV1(it) })
+            // V2 collection types
+            is com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.MezzeMap -> convertV2Map(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.SetNatives.MezzeSet -> convertV2Set(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.DequeNatives.MezzeDeque -> convertV2Deque(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.NonEmptyListNatives.MezzeNonEmptyList -> convertV2NonEmptyList(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.MezzeSortedMap -> convertV2SortedMap(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.SortedSetNatives.MezzeSortedSet -> convertV2SortedSet(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.io.BytesNatives.MezzeBytes -> convertV2Bytes(v2Value)
+            else -> {
+                throw IllegalArgumentException("Cannot convert V2 value to V1: ${v2Value::class.simpleName}")
+            }
+        }
+    }
+
+    private fun convertV2Record(v2Record: com.mezze.interpreter.v2.values.MezzeRecord): MezzeRecord {
+        val fields = mutableMapOf<String, MezzeValue>()
+        val shape = v2Record.shape
+        val fieldCount = shape.fieldCount
+        for (i in 0 until fieldCount) {
+            val name = shape.getFieldName(i)
+            val value = v2Record.getField(i)
+            fields[name] = convertV2ToV1(value)
+        }
+        return MezzeRecord(fields)
+    }
+
+    private fun convertV2Variant(v2Variant: com.mezze.interpreter.v2.values.MezzeVariant): MezzeVariant {
+        val constructorName = v2Variant.constructorName
+        val payload = if (v2Variant.hasPayload()) {
+            val payloadValue = v2Variant.payloadValue
+            if (payloadValue is com.mezze.interpreter.v2.values.MezzeRecord) {
+                convertV2Record(payloadValue)
+            } else {
+                MezzeRecord(mapOf("val" to convertV2ToV1(payloadValue)))
+            }
+        } else {
+            null
+        }
+        return MezzeVariant(constructorName, payload)
+    }
+
+    private fun convertV2List(v2List: com.mezze.interpreter.v2.values.MezzeList): MezzeList {
+        val elements = mutableListOf<MezzeValue>()
+        for (i in 0 until v2List.size()) {
+            elements.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeList.fromKotlinList(elements)
+    }
+
+    private fun convertV2Map(v2Map: com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.MezzeMap): MezzeMap {
+        val keys = com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.keys(v2Map)
+        val entries = mutableMapOf<MezzeValue, MezzeValue>()
+        for (key in keys) {
+            val v2Result = com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.get(v2Map, key)
+            if (v2Result is com.mezze.interpreter.v2.values.MezzeVariant && v2Result.isSome) {
+                val payload = v2Result.payloadValue as com.mezze.interpreter.v2.values.MezzeRecord
+                entries[convertV2ToV1(key)] = convertV2ToV1(payload.getField(0))
+            }
+        }
+        return MezzeMap(entries)
+    }
+
+    private fun convertV2Set(v2Set: com.mezze.interpreter.v2.nodes.builtin.collections.SetNatives.MezzeSet): MezzeSet {
+        val v2List = com.mezze.interpreter.v2.nodes.builtin.collections.SetNatives.toList(v2Set)
+        val elements = mutableSetOf<MezzeValue>()
+        for (i in 0 until v2List.size()) {
+            elements.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeSet(elements)
+    }
+
+    private fun convertV2Deque(v2Deque: com.mezze.interpreter.v2.nodes.builtin.collections.DequeNatives.MezzeDeque): MezzeDeque {
+        val v2List = com.mezze.interpreter.v2.nodes.builtin.collections.DequeNatives.toList(v2Deque)
+        val elements = mutableListOf<MezzeValue>()
+        for (i in 0 until v2List.size()) {
+            elements.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeDeque(elements, emptyList())
+    }
+
+    private fun convertV2NonEmptyList(v2Nel: com.mezze.interpreter.v2.nodes.builtin.collections.NonEmptyListNatives.MezzeNonEmptyList): MezzeNonEmptyList {
+        val v2List = com.mezze.interpreter.v2.nodes.builtin.collections.NonEmptyListNatives.toList(v2Nel)
+        val elements = mutableListOf<MezzeValue>()
+        for (i in 0 until v2List.size()) {
+            elements.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeNonEmptyList(elements)
+    }
+
+    private fun convertV2SortedMap(v2SortedMap: com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.MezzeSortedMap): MezzeSortedMap {
+        val keys = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.keys(v2SortedMap)
+        var treeMap = io.vavr.collection.TreeMap.empty<MezzeValue, MezzeValue>(MezzeValueComparator())
+        for (key in keys) {
+            val v2Result = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.get(v2SortedMap, key)
+            if (v2Result is com.mezze.interpreter.v2.values.MezzeVariant && v2Result.isSome) {
+                val payload = v2Result.payloadValue as com.mezze.interpreter.v2.values.MezzeRecord
+                treeMap = treeMap.put(convertV2ToV1(key), convertV2ToV1(payload.getField(0)))
+            }
+        }
+        return MezzeSortedMap(treeMap)
+    }
+
+    private fun convertV2SortedSet(v2SortedSet: com.mezze.interpreter.v2.nodes.builtin.collections.SortedSetNatives.MezzeSortedSet): MezzeSortedSet {
+        val v2List = com.mezze.interpreter.v2.nodes.builtin.collections.SortedSetNatives.toList(v2SortedSet)
+        var treeSet = io.vavr.collection.TreeSet.empty<MezzeValue>(MezzeValueComparator())
+        for (i in 0 until v2List.size()) {
+            treeSet = treeSet.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeSortedSet(treeSet)
+    }
+
+    private fun convertV2Bytes(v2Bytes: com.mezze.interpreter.v2.nodes.builtin.io.BytesNatives.MezzeBytes): MezzeBytes {
+        return MezzeBytes(v2Bytes.data)
     }
 
     /**

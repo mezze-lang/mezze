@@ -17,6 +17,9 @@ dependencies {
     implementation(project(":typechecker"))
     implementation(project(":stdlib"))
 
+    // V2 interpreter - optimized Truffle nodes (can be enabled with -Dmezze.use.v2=true)
+    implementation(project(":interpreterv2"))
+
     // Truffle API (Language, Node, etc.) - guest language API - match native-image version
     implementation("org.graalvm.truffle:truffle-api:24.2.2")
     kapt("org.graalvm.truffle:truffle-dsl-processor:24.2.2")
@@ -56,6 +59,11 @@ tasks.test {
 
     // Set mezze.project.root so tests can access stdlib modules
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
+
+    // Pass mezze.use.v2 system property if set (to enable V2 interpreter)
+    System.getProperty("mezze.use.v2")?.let {
+        systemProperty("mezze.use.v2", it)
+    }
 
     // Increase timeout for Truffle initialization
     systemProperty("junit.jupiter.execution.timeout.default", "120s")

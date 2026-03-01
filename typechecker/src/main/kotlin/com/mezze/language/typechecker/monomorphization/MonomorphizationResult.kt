@@ -1,6 +1,8 @@
 package com.mezze.language.typechecker.monomorphization
 
 import com.mezze.language.ast.*
+import com.mezze.language.typechecker.hashing.ContentHashComputer
+import java.security.MessageDigest
 
 /**
  * Result of monomorphization.
@@ -44,7 +46,8 @@ data class MonomorphizationError(
 data class InstanceRequest(
     val originalName: String,          // e.g., "map"
     val typeArgs: Map<String, MezzeType>,  // e.g., {"'a" -> IntType}
-    val sourceLocation: SourceLocation? = null
+    val sourceLocation: SourceLocation? = null,
+    val originalContentHash: String? = null  // Content hash of original function (if available)
 ) {
     /**
      * Generate the monomorphic name for this instance.
@@ -57,36 +60,34 @@ data class InstanceRequest(
 
         val typeArgString = typeArgs.entries
             .sortedBy { it.key }
-            .joinToString("$") { (_, type) -> formatTypeForName(type) }
+            .joinToString("$") { (_, type) -> ContentHashComputer.mezzeTypeToString(type) }
 
         return "${originalName}\$$typeArgString"
     }
 
     /**
-     * Format a type for use in a monomorphic name.
+     * Generate a content hash for this monomorphic instance.
      *
-     * Keeps names readable: List Int becomes ListInt, not List_Int
+     * Combines the original function's content hash with the type arguments
+     * to produce a unique, deterministic hash for this specialization.
+     *
+     * Returns null if original content hash is not available.
      */
-    private fun formatTypeForName(type: MezzeType): String {
-        return when (type) {
-            is MezzeType.IntType -> "Int"
-            is MezzeType.FloatType -> "Float"
-            is MezzeType.StringType -> "String"
-            is MezzeType.BooleanType -> "Bool"
-            is MezzeType.NatType -> "Nat"
-            is MezzeType.FracType -> "Frac"
-            is MezzeType.ListType -> "List${formatTypeForName(type.elementType)}"
-            is MezzeType.ArrayType -> "Array${formatTypeForName(type.elementType)}"
-            is MezzeType.SetType -> "Set${formatTypeForName(type.elementType)}"
-            is MezzeType.SortedMapType -> "SortedMap${formatTypeForName(type.keyType)}${formatTypeForName(type.valueType)}"
-            is MezzeType.SortedSetType -> "SortedSet${formatTypeForName(type.elementType)}"
-            is MezzeType.MapType -> "Map${formatTypeForName(type.keyType)}${formatTypeForName(type.valueType)}"
-            is MezzeType.TypeApplication -> "${type.constructor}${type.args.joinToString("") { formatTypeForName(it) }}"
-            is MezzeType.RecordType -> "Record" // Simplified for now
-            is MezzeType.VariantType -> type.constructors.keys.first() // Use first constructor name
-            is MezzeType.VarType -> type.variable.name.replace("'", "") // Remove quote from 'a
-            else -> "Unknown"
-        }
+    fun generateContentHash(): String? {
+        if (originalContentHash == null) return null
+        if (typeArgs.isEmpty()) return originalContentHash
+
+        // Build a canonical string representation
+        val typeArgString = typeArgs.entries
+            .sortedBy { it.key }
+            .joinToString("|") { (name, type) -> "$name=${ContentHashComputer.mezzeTypeToString(type)}" }
+
+        val combined = "$originalContentHash:$typeArgString"
+
+        // Hash the combined string
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashBytes = digest.digest(combined.toByteArray())
+        return hashBytes.take(16).joinToString("") { "%02x".format(it) }
     }
 }
 
@@ -99,5 +100,6 @@ data class MonomorphicInstance(
     val originalName: String,              // Original polymorphic function name
     val monomorphicName: String,           // Generated name (e.g., "map$Int")
     val typeArguments: Map<String, MezzeType>, // Type arguments used for specialization
-    val specializedBinding: LetBinding     // The specialized function binding
+    val specializedBinding: LetBinding,    // The specialized function binding
+    val contentHash: String? = null        // Content hash for this specialization
 )

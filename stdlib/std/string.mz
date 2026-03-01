@@ -169,5 +169,5 @@ pub let pad_right = { s: String, len: Int, c: Char } ->
 #   glob_match { pattern = "[abc].txt", text = "a.txt" }               -> True
 #   glob_match { pattern = "[!abc].txt", text = "d.txt" }              -> True
 #
-pub let glob_match = { pattern: String, text: String } ->
-    __native_string_glob_match { pattern = pattern, text = text }
+pub let glob_match = { pattern: String, s: String } ->
+    __native_string_glob_match { pattern = pattern, s = s }

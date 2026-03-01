@@ -70,4 +70,48 @@ public abstract class RecordFieldAccessNode extends MezzeNode {
     public static RecordFieldAccessNode createObject(MezzeNode recordNode, int fieldIndex, int locationIndex) {
         return create(recordNode, fieldIndex, STORAGE_OBJECT, locationIndex);
     }
+
+    /**
+     * Create a cached field access node by name (for cases where field index isn't known).
+     * Uses POLYMORPHIC INLINE CACHE for fast repeated access.
+     */
+    public static MezzeNode createByName(MezzeNode recordNode, String fieldName) {
+        return CachedFieldAccessNode.create(recordNode, fieldName);
+    }
+}
+
+/**
+ * Dynamic field access by name - slower path.
+ */
+@NodeInfo(shortName = "dynamic-field")
+final class DynamicFieldAccessNode extends MezzeNode {
+
+    @Child
+    private MezzeNode recordNode;
+
+    @CompilationFinal
+    private final String fieldName;
+
+    DynamicFieldAccessNode(MezzeNode recordNode, String fieldName) {
+        this.recordNode = recordNode;
+        this.fieldName = fieldName;
+    }
+
+    @Override
+    public Object execute(com.oracle.truffle.api.frame.VirtualFrame frame) {
+        Object recordObj = recordNode.execute(frame);
+        return accessField(recordObj);
+    }
+
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private Object accessField(Object recordObj) {
+        if (recordObj instanceof MezzeRecord record) {
+            Object value = record.getField(fieldName);
+            if (value == null) {
+                throw new RuntimeException("Field not found: " + fieldName);
+            }
+            return value;
+        }
+        throw new RuntimeException("Expected record, got: " + recordObj.getClass().getSimpleName());
+    }
 }

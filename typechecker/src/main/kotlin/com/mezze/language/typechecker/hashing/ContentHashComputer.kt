@@ -37,6 +37,38 @@ object ContentHashComputer {
         val hashMap: Map<String, MezzeHash>  // name -> hash for looking up
     )
 
+    // ========================================================================
+    // TYPE STRING CACHING
+    // ========================================================================
+
+    /**
+     * LRU cache for MezzeType to string conversions.
+     * Keyed by type identity hash to avoid expensive equals() on complex types.
+     * Max 1000 entries to bound memory usage.
+     */
+    private val typeStringCache = object : LinkedHashMap<Int, String>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, String>?): Boolean {
+            return size > 1000
+        }
+    }
+
+    /**
+     * LRU cache for TypeAnnotation to string conversions.
+     */
+    private val annotationStringCache = object : LinkedHashMap<Int, String>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, String>?): Boolean {
+            return size > 1000
+        }
+    }
+
+    /**
+     * Clear caches (useful for testing or memory pressure).
+     */
+    fun clearCaches() {
+        typeStringCache.clear()
+        annotationStringCache.clear()
+    }
+
     /**
      * Compute content hashes for all declarations in a program.
      *
@@ -81,9 +113,8 @@ object ContentHashComputer {
 
                 is ImplAbilityDeclaration -> {
                     val hash = ASTHasher.hashImplAbilityDeclaration(item)
-                    // Create a key that identifies the impl
-                    val key = createAbilityImplKey(item)
-                    hashMap[key] = hash
+                    // Use content hash as key - uniquely identifies the impl
+                    hashMap[hash.toFullHexString()] = hash
                     item.copy(contentHash = hash.toFullHexString())
                 }
 
@@ -100,32 +131,29 @@ object ContentHashComputer {
     }
 
     /**
-     * Create a lookup key for an ability implementation.
-     * This mirrors the string-based approach but is only used for indexing.
-     */
-    private fun createAbilityImplKey(impl: ImplAbilityDeclaration): String {
-        val targetTypesStr = impl.targetTypes.joinToString("$") { typeAnnotationToString(it) }
-        return "${impl.qualifiedAbilityName}\$$targetTypesStr"
-    }
-
-    /**
-     * Convert type annotation to string for key generation.
-     * This is used for creating implementation reference keys that match
-     * between SubstitutionApplier and ContentHashComputer.
-     *
-     * IMPORTANT: For Record and Variant types, we include structural information
-     * (sorted field names for records, sorted constructor names for variants)
-     * to distinguish between different record/variant structures.
-     * This is critical for Encode/Decode ability resolution.
+     * Convert type annotation to string with caching for complex types.
      */
     fun typeAnnotationToString(annotation: TypeAnnotation): String {
-        return when (annotation) {
-            is IdentifierTypeAnnotation -> annotation.name
+        // Fast path for simple identifiers
+        if (annotation is IdentifierTypeAnnotation) {
+            return annotation.name
+        }
+        if (annotation is FunctionTypeAnnotation) {
+            return "Function"
+        }
+        if (annotation is EffectRowAnnotation) {
+            return "EffectRow"
+        }
+
+        // Complex types - use cache
+        val key = System.identityHashCode(annotation)
+        annotationStringCache[key]?.let { return it }
+
+        val result = when (annotation) {
             is TypeApplicationAnnotation -> {
                 val args = annotation.args.joinToString("_") { typeAnnotationToString(it) }
                 if (args.isEmpty()) annotation.constructor else "${annotation.constructor}_$args"
             }
-            is FunctionTypeAnnotation -> "Function"
             is RecordTypeAnnotation -> {
                 // Include sorted field names to distinguish different record structures
                 val fieldNames = annotation.entries.map { it.name }.sorted().joinToString("_")
@@ -137,13 +165,81 @@ object ContentHashComputer {
                 if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
             }
             is ArrayTypeAnnotation -> "Array_${typeAnnotationToString(annotation.elementType)}"
-            is EffectRowAnnotation -> "EffectRow"
             is QualifiedTypeAnnotation -> {
                 val modulePart = annotation.modulePath.joinToString("_")
                 val args = annotation.args.joinToString("_") { typeAnnotationToString(it) }
                 if (args.isEmpty()) "${modulePart}_${annotation.typeName}" else "${modulePart}_${annotation.typeName}_$args"
             }
+            else -> annotation.toString()
         }
+
+        annotationStringCache[key] = result
+        return result
+    }
+
+    /**
+     * Convert a MezzeType to a canonical string for ability impl lookup keys.
+     *
+     * This is the MezzeType equivalent of typeAnnotationToString.
+     * Used during ability resolution when we have inferred types, not annotations.
+     *
+     * IMPORTANT: Must produce consistent keys that match typeAnnotationToString
+     * for the same underlying type structure.
+     *
+     * Uses LRU caching for complex types to avoid repeated computation.
+     */
+    fun mezzeTypeToString(type: MezzeType): String {
+        // Fast path for primitive types (no caching needed)
+        return when (type) {
+            is MezzeType.IntType -> "Int"
+            is MezzeType.FloatType -> "Float"
+            is MezzeType.StringType -> "String"
+            is MezzeType.BooleanType -> "Bool"
+            is MezzeType.NatType -> "Nat"
+            is MezzeType.FracType -> "Frac"
+            is MezzeType.CharType -> "Char"
+            is MezzeType.OrderingType -> "Ordering"
+            is MezzeType.BytesType -> "Bytes"
+            is MezzeType.ByteBufferType -> "ByteBuffer"
+            is MezzeType.VarType -> type.variable.name  // Keep 'a format for type variables
+            is MezzeType.FunctionType -> "Function"
+            // Complex types - use cache
+            else -> mezzeTypeToStringCached(type)
+        }
+    }
+
+    /**
+     * Cached implementation for complex types.
+     */
+    private fun mezzeTypeToStringCached(type: MezzeType): String {
+        val key = System.identityHashCode(type)
+        typeStringCache[key]?.let { return it }
+
+        val result = when (type) {
+            is MezzeType.TypeApplication -> {
+                val args = type.args.joinToString("_") { mezzeTypeToString(it) }
+                if (args.isEmpty()) type.constructor else "${type.constructor}_$args"
+            }
+            is MezzeType.RecordType -> {
+                val fieldNames = type.fields.keys.sorted().joinToString("_")
+                if (fieldNames.isEmpty()) "Record" else "Record_$fieldNames"
+            }
+            is MezzeType.VariantType -> {
+                val constructorNames = type.constructors.keys.sorted().joinToString("_")
+                if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
+            }
+            is MezzeType.ArrayType -> "Array_${mezzeTypeToString(type.elementType)}"
+            is MezzeType.ListType -> "List_${mezzeTypeToString(type.elementType)}"
+            is MezzeType.SetType -> "Set_${mezzeTypeToString(type.elementType)}"
+            is MezzeType.MapType -> "Map_${mezzeTypeToString(type.keyType)}_${mezzeTypeToString(type.valueType)}"
+            is MezzeType.SortedMapType -> "SortedMap_${mezzeTypeToString(type.keyType)}_${mezzeTypeToString(type.valueType)}"
+            is MezzeType.SortedSetType -> "SortedSet_${mezzeTypeToString(type.elementType)}"
+            is MezzeType.SuspendedType -> mezzeTypeToString(type.valueType)
+            else -> type.toString()
+        }
+
+        typeStringCache[key] = result
+        return result
     }
 
     /**

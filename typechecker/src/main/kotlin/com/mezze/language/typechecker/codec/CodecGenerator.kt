@@ -290,7 +290,7 @@ class CodecGenerator {
 
     /** Create an identifier expression */
     private fun id(name: String): Identifier {
-        return Identifier(name = name)
+        return Identifier(localName = name)
     }
 
     /** Create a string literal */

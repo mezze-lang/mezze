@@ -5,6 +5,7 @@ import com.mezze.language.typechecker.NativeFunctionTypes
 import com.mezze.language.typechecker.application.SubstitutionApplier
 import com.mezze.language.typechecker.constraints.Constraint
 import com.mezze.language.typechecker.constraints.ConstraintGenerator
+import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.context.ContextBuilder
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.TypeScheme
@@ -20,6 +21,7 @@ import com.mezze.language.typechecker.validation.TypeValidator
 import com.mezze.language.typechecker.validation.ValidationResult
 import com.mezze.language.typechecker.printing.ErrorFormatter
 import com.mezze.language.typechecker.continuation.ContinuationTransformer
+import com.mezze.language.typechecker.cache.TypeCheckCache
 import com.mezze.language.typechecker.hashing.ContentHashComputer
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -179,6 +181,12 @@ class TypeChecker(
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
 
+        // Initialize TypeCheckCache in memory mode if not already initialized with SQLite
+        // (SQLite persistence is initialized from CLI/CodebaseHelper when in project mode)
+        if (!TypeCheckCache.hasPersistence()) {
+            TypeCheckCache.initializeInMemory()
+        }
+
         // PHASE 0: Module Resolution (if imports are present)
         var importContext: ModuleImportContext? = null
         var loadedModules: Map<String, TypedModule> = emptyMap()
@@ -334,7 +342,7 @@ class TypeChecker(
                     "Did you mean to call an effect operation? Use: $effectName.${undefinedVar.name}"
                 } else {
                     // Check if this is a qualified name (module::function) referring to a private item
-                    val privateItemMessage = checkIfPrivateQualifiedItem(undefinedVar.name, loadedModules, importContext)
+                    val privateItemMessage = checkIfPrivateQualifiedItem(undefinedVar, loadedModules, importContext)
 
                     if (privateItemMessage != null) {
                         privateItemMessage
@@ -384,7 +392,7 @@ class TypeChecker(
             TypeCheckWarning(message = warningMsg, sourceLocation = null)
         }
 
-        // Collect all constraints from all bindings (including ability constraints)
+        // Collect all constraints from all bindings (including ability constraints and associated type constraints)
         // IMPORTANT: Filter out HasConstructor and HasField constraints!
         // These structural constraints are already solved during per-binding constraint solving
         // in ConstraintGenerator (Algorithm W). Re-solving them globally causes issues:
@@ -394,7 +402,8 @@ class TypeChecker(
         val allConstraints = constraintResults.values.flatMap { it.constraints }
             .filter { constraint ->
                 constraint !is Constraint.HasConstructor && constraint !is Constraint.HasField
-            } + constraintResults.values.flatMap { it.abilityConstraints }
+            } + constraintResults.values.flatMap { it.abilityConstraints } +
+              constraintResults.values.flatMap { it.associatedTypeConstraints }
 
 
         // PHASE 3: Solve Constraints
@@ -499,7 +508,8 @@ class TypeChecker(
                     allEffectDeclarations,  // For resolving effect references
                     allTypeDeclarations,  // For resolving variant constructors
                     tailCallLocations,  // TCO: Locations of self-recursive tail calls
-                    buildResult.implDeclarations  // For populating resolvedHandlers with content hashes
+                    buildResult.implDeclarations,  // For populating resolvedHandlers with content hashes
+                    context.getContentHashes()  // Content hashes for identifier resolution
                 )
                 // Add generated codec implementations to the program BEFORE applying substitution
                 // This ensures they go through the same processing as user-defined impls
@@ -623,6 +633,11 @@ class TypeChecker(
     fun checkProgramWithRecovery(program: Program, currentPath: Path = Paths.get(".")): TypeCheckResultWithRecovery {
         // Clear caches for fresh type checking
         com.mezze.language.typechecker.solving.clearUnificationCache()
+
+        // Initialize TypeCheckCache in memory mode if not already initialized with SQLite
+        if (!TypeCheckCache.hasPersistence()) {
+            TypeCheckCache.initializeInMemory()
+        }
 
         val allErrors = mutableListOf<TypeCheckError>()
         val allWarnings = mutableListOf<TypeCheckWarning>()
@@ -769,7 +784,7 @@ class TypeChecker(
                 "Did you mean to call an effect operation? Use: $effectName.${undefinedVar.name}"
             } else {
                 // Check if this is a qualified name (module::function) referring to a private item
-                val privateItemMessage = checkIfPrivateQualifiedItem(undefinedVar.name, loadedModules, importContext)
+                val privateItemMessage = checkIfPrivateQualifiedItem(undefinedVar, loadedModules, importContext)
 
                 if (privateItemMessage != null) {
                     privateItemMessage
@@ -815,11 +830,12 @@ class TypeChecker(
             allWarnings.add(TypeCheckWarning(message = msg, sourceLocation = null))
         }
 
-        // Collect all constraints (filter structural constraints)
+        // Collect all constraints (filter structural constraints, include associated type constraints)
         val allConstraints = constraintResults.values.flatMap { it.constraints }
             .filter { constraint ->
                 constraint !is Constraint.HasConstructor && constraint !is Constraint.HasField
-            } + constraintResults.values.flatMap { it.abilityConstraints }
+            } + constraintResults.values.flatMap { it.abilityConstraints } +
+              constraintResults.values.flatMap { it.associatedTypeConstraints }
 
         // PHASE 3: Solve Constraints
         val solver = ConstraintSolver(context, allTypeDeclarations, buildResult.abilityDeclarations)
@@ -898,7 +914,8 @@ class TypeChecker(
             allEffectDeclarations,
             allTypeDeclarations,
             tailCallLocations,
-            buildResult.implDeclarations
+            buildResult.implDeclarations,
+            context.getContentHashes()  // Content hashes for identifier resolution
         )
         val programWithCodecImpls = if (generatedCodecImpls.isNotEmpty()) {
             Program(items = generatedCodecImpls.values.toList() + hashedProgram.items)
@@ -1115,21 +1132,15 @@ class TypeChecker(
      * @return An error message if the item exists but isn't public, null otherwise.
      */
     private fun checkIfPrivateQualifiedItem(
-        name: String,
+        undefinedVar: ConstraintResult.UndefinedVariable,
         loadedModules: Map<String, TypedModule>,
         importContext: ModuleImportContext?
     ): String? {
-        // Only check qualified names (containing ::)
-        if (!name.contains("::")) return null
+        // Only check qualified names - now using structured qualifier from AST
+        if (!undefinedVar.isQualified) return null
 
-        // Parse the qualified name into module qualifier and item name
-        // Examples: "int::to_string" -> qualifier="int", itemName="to_string"
-        //           "std::int::to_string" -> qualifier="std::int", itemName="to_string"
-        val lastDoubleColon = name.lastIndexOf("::")
-        if (lastDoubleColon == -1) return null
-
-        val qualifier = name.substring(0, lastDoubleColon)
-        val itemName = name.substring(lastDoubleColon + 2)
+        val qualifier = undefinedVar.qualifier?.fullPath ?: return null
+        val itemName = undefinedVar.name.substringAfterLast("::")
 
         // Find which module this qualifier refers to
         // The qualifier could be:
@@ -1216,7 +1227,7 @@ class TypeChecker(
             val freeVars = collectFreeTypeVars(binding.type)
             if (freeVars.isEmpty()) {
                 // Monomorphic type - use directly
-                context = context.extendMono(name, binding.type, binding.modulePath)
+                context = context.extendMono(name, binding.type, binding.modulePath, binding.contentHash)
             } else {
                 // Polymorphic type - wrap in TypeScheme for fresh instantiation
                 val scheme = TypeScheme(
@@ -1224,7 +1235,7 @@ class TypeChecker(
                     constraints = emptyList(),
                     type = binding.type
                 )
-                context = context.extendPoly(name, scheme, binding.modulePath)
+                context = context.extendPoly(name, scheme, binding.modulePath, binding.contentHash)
             }
         }
 
@@ -1262,6 +1273,8 @@ class TypeChecker(
             val implInfo = TypingContext.AbilityImplInfo(
                 abilityName = implDecl.abilityName,
                 targetTypes = implDecl.targetTypes.map { typeAnnotationToString(it) },
+                targetTypeAnnotations = implDecl.targetTypes,  // Store original annotations for structural matching
+                associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings
                 sourceModule = null,  // TODO: Track source module
                 contentHash = implDecl.contentHash  // Propagate content hash from type-checked module
             )
@@ -1339,14 +1352,10 @@ class TypeChecker(
 
     /**
      * Convert a TypeAnnotation to a string for ability impl key.
+     * Delegates to ContentHashComputer for consistency with ability lookup keys.
      */
     private fun typeAnnotationToString(typeAnnotation: TypeAnnotation): String {
-        return when (typeAnnotation) {
-            is IdentifierTypeAnnotation -> typeAnnotation.name
-            is TypeApplicationAnnotation -> typeAnnotation.constructor
-            is QualifiedTypeAnnotation -> typeAnnotation.typeName
-            else -> typeAnnotation.toString()
-        }
+        return ContentHashComputer.typeAnnotationToString(typeAnnotation)
     }
 
     // ========================================================================
@@ -1635,6 +1644,8 @@ class TypeChecker(
         fun clearCache() {
             // Clear the ModuleResolver's cache
             ModuleResolver.clearCache()
+            // Clear the TypeCheckCache (constraint, monomorphization, ability impl caches)
+            TypeCheckCache.clearAll()
         }
 
         /**

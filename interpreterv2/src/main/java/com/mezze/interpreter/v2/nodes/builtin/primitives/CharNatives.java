@@ -1,0 +1,127 @@
+package com.mezze.interpreter.v2.nodes.builtin.primitives;
+
+import com.mezze.interpreter.v2.values.*;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+
+/**
+ * Native Char operations - ULTRA PERFORMANT.
+ *
+ * Char in V2 is represented as a single-character String.
+ * All operations are designed for JIT compilation.
+ */
+public final class CharNatives {
+
+    private CharNatives() {}
+
+    // ==================== Conversion ====================
+
+    @TruffleBoundary
+    public static MezzeVariant fromString(String s) {
+        if (s == null || s.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        return MezzeVariant.some(s.substring(0, 1));
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant fromInt(long codePoint) {
+        if (codePoint < 0 || codePoint > Character.MAX_CODE_POINT) {
+            return MezzeVariant.none();
+        }
+        return MezzeVariant.some(String.valueOf((char) codePoint));
+    }
+
+    @TruffleBoundary
+    public static long toInt(String c) {
+        if (c == null || c.isEmpty()) {
+            return 0;
+        }
+        return c.charAt(0);
+    }
+
+    @TruffleBoundary
+    public static String toString(String c) {
+        return c;
+    }
+
+    // ==================== Character Classification ====================
+
+    @TruffleBoundary
+    public static boolean isLetter(String c) {
+        if (c == null || c.isEmpty()) return false;
+        return Character.isLetter(c.charAt(0));
+    }
+
+    @TruffleBoundary
+    public static boolean isDigit(String c) {
+        if (c == null || c.isEmpty()) return false;
+        return Character.isDigit(c.charAt(0));
+    }
+
+    @TruffleBoundary
+    public static boolean isAlphaNumeric(String c) {
+        if (c == null || c.isEmpty()) return false;
+        return Character.isLetterOrDigit(c.charAt(0));
+    }
+
+    @TruffleBoundary
+    public static boolean isWhitespace(String c) {
+        if (c == null || c.isEmpty()) return false;
+        return Character.isWhitespace(c.charAt(0));
+    }
+
+    @TruffleBoundary
+    public static boolean isUpper(String c) {
+        if (c == null || c.isEmpty()) return false;
+        return Character.isUpperCase(c.charAt(0));
+    }
+
+    @TruffleBoundary
+    public static boolean isLower(String c) {
+        if (c == null || c.isEmpty()) return false;
+        return Character.isLowerCase(c.charAt(0));
+    }
+
+    // ==================== Case Conversion ====================
+
+    @TruffleBoundary
+    public static String toUpper(String c) {
+        if (c == null || c.isEmpty()) return c;
+        return c.toUpperCase();
+    }
+
+    @TruffleBoundary
+    public static String toLower(String c) {
+        if (c == null || c.isEmpty()) return c;
+        return c.toLowerCase();
+    }
+
+    // ==================== Digit Conversion ====================
+
+    @TruffleBoundary
+    public static MezzeVariant digitToInt(String c) {
+        if (c == null || c.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        char ch = c.charAt(0);
+        if (ch >= '0' && ch <= '9') {
+            return MezzeVariant.some((long) (ch - '0'));
+        }
+        return MezzeVariant.none();
+    }
+
+    // ==================== Comparison ====================
+
+    @TruffleBoundary
+    public static boolean eq(String c1, String c2) {
+        if (c1 == null || c2 == null) return c1 == c2;
+        return c1.equals(c2);
+    }
+
+    @TruffleBoundary
+    public static long compare(String c1, String c2) {
+        if (c1 == null || c1.isEmpty()) return c2 == null || c2.isEmpty() ? 0 : -1;
+        if (c2 == null || c2.isEmpty()) return 1;
+        return Long.signum(c1.charAt(0) - c2.charAt(0));
+    }
+}

@@ -1,7 +1,9 @@
 package com.mezze.interpreter.v2.nodes.arithmetic;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Fallback;
+import com.oracle.truffle.api.dsl.Idempotent;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.nodes.NodeInfo;
@@ -47,25 +49,30 @@ public abstract class AddNode extends MezzeNode {
     }
 
     /**
-     * String concatenation.
+     * String concatenation - uses invokedynamic for efficient StringBuilder.
      */
     @Specialization
+    @TruffleBoundary
     protected String addStrings(String left, String right) {
         return left + right;
     }
 
     /**
      * Mixed: String + anything = String concatenation.
+     * TruffleBoundary allows JVM to optimize the string operations.
      */
     @Specialization(guards = "!isString(right)")
+    @TruffleBoundary
     protected String addStringLeft(String left, Object right) {
         return left + right.toString();
     }
 
     /**
      * Mixed: anything + String = String concatenation.
+     * TruffleBoundary allows JVM to optimize the string operations.
      */
     @Specialization(guards = "!isString(left)")
+    @TruffleBoundary
     protected String addStringRight(Object left, String right) {
         return left.toString() + right;
     }
@@ -81,6 +88,7 @@ public abstract class AddNode extends MezzeNode {
         );
     }
 
+    @Idempotent
     protected static boolean isString(Object value) {
         return value instanceof String;
     }

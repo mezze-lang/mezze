@@ -52,7 +52,8 @@ class InstanceTracker private constructor(
     fun trackFromCall(
         functionName: String,
         typeSubstitution: Map<String, MezzeType>,
-        sourceLocation: SourceLocation? = null
+        sourceLocation: SourceLocation? = null,
+        originalContentHash: String? = null
     ): InstanceTracker {
         // Only track if there are actual type substitutions
         if (typeSubstitution.isEmpty()) {
@@ -62,7 +63,8 @@ class InstanceTracker private constructor(
         val request = InstanceRequest(
             originalName = functionName,
             typeArgs = typeSubstitution,
-            sourceLocation = sourceLocation
+            sourceLocation = sourceLocation,
+            originalContentHash = originalContentHash
         )
 
         return track(request)
@@ -141,8 +143,13 @@ fun analyzeExpression(expr: Expression, tracker: InstanceTracker): InstanceTrack
             var currentTracker = tracker
 
             // Track this call if it has type substitutions
-            val functionName = when (val func = expr.function) {
+            val func = expr.function
+            val functionName = when (func) {
                 is Identifier -> func.name
+                else -> null
+            }
+            val contentHash = when (func) {
+                is Identifier -> func.resolvedContentHash
                 else -> null
             }
 
@@ -150,7 +157,8 @@ fun analyzeExpression(expr: Expression, tracker: InstanceTracker): InstanceTrack
                 currentTracker = currentTracker.trackFromCall(
                     functionName,
                     expr.typeSubstitution,
-                    expr.sourceLocation
+                    expr.sourceLocation,
+                    contentHash
                 )
             }
 

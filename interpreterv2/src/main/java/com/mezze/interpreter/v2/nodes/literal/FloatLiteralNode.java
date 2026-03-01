@@ -1,16 +1,21 @@
 package com.mezze.interpreter.v2.nodes.literal;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
- * Float literal node.
+ * Float literal node - ZERO OVERHEAD.
+ *
+ * The value is @CompilationFinal so the JIT will inline
+ * this node as a constant load, eliminating all dispatch.
  * Returns primitive double (unboxed) for maximum performance.
  */
 @NodeInfo(shortName = "float")
 public final class FloatLiteralNode extends MezzeNode {
 
+    @CompilationFinal
     private final double value;
 
     public FloatLiteralNode(double value) {

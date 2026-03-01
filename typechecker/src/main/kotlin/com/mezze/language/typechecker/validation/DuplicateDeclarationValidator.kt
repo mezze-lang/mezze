@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.validation
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
+import com.mezze.language.typechecker.hashing.ContentHashComputer
 
 /**
  * Validates that declarations are not duplicated within a program.
@@ -469,25 +470,9 @@ object DuplicateDeclarationValidator {
 
     /**
      * Convert type annotation to string for duplicate checking.
-     * This doesn't need to be perfect, just unique enough to distinguish types.
+     * Delegates to ContentHashComputer for consistency with ability lookup keys.
      */
     private fun typeAnnotationToString(annotation: TypeAnnotation): String {
-        return when (annotation) {
-            is IdentifierTypeAnnotation -> annotation.name.removePrefix("'")
-            is TypeApplicationAnnotation -> {
-                val args = annotation.args.joinToString("_") { typeAnnotationToString(it) }
-                if (args.isEmpty()) annotation.constructor else "${annotation.constructor}_$args"
-            }
-            is FunctionTypeAnnotation -> "Function"
-            is RecordTypeAnnotation -> "Record"
-            is VariantTypeAnnotation -> "Variant"
-            is ArrayTypeAnnotation -> "Array_${typeAnnotationToString(annotation.elementType)}"
-            is EffectRowAnnotation -> "EffectRow"
-            is QualifiedTypeAnnotation -> {
-                val modulePart = annotation.modulePath.joinToString("_")
-                val args = annotation.args.joinToString("_") { typeAnnotationToString(it) }
-                if (args.isEmpty()) "${modulePart}_${annotation.typeName}" else "${modulePart}_${annotation.typeName}_$args"
-            }
-        }
+        return ContentHashComputer.typeAnnotationToString(annotation)
     }
 }

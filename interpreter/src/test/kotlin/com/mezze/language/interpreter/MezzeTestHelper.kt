@@ -12,20 +12,31 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
- * Test helper to execute Mezze programs using 100% Truffle (no MezzeInterpreter).
+ * Test helper to execute Mezze programs using the V2 optimized interpreter.
  *
- * This replaces MezzeInterpreter for tests, executing programs directly via
- * the GraalVM polyglot API and MezzeLanguage.
+ * This uses the V2 interpreter (language ID "mezze") and converts results
+ * back to V1 MezzeValue types for compatibility with existing tests.
  *
- * IMPORTANT: Tests that use virtual threads (LoomConcurrencyTest, StructuredConcurrencyTest)
- * should use @Execution(ExecutionMode.SAME_THREAD) to prevent scheduler saturation.
+ * V2 returns raw JVM types:
+ * - Long for Int
+ * - Double for Float
+ * - String for String
+ * - Boolean for Bool
+ * - MezzeRecord (V2) for records
+ * - MezzeVariant (V2) for variants
+ * - MezzeList (V2) for lists
+ * - MezzeUnit.INSTANCE for Unit
+ *
+ * This helper converts them back to V1 MezzeValue types.
  */
 object MezzeTestHelper {
     private val parser = MezzeParser()
     private val typeChecker = TypeChecker()
 
+    // Use V2's language ID
+    private const val LANGUAGE_ID = "mezze"
+
     // Shared engine for all test executions to avoid sharing layer violations
-    // This engine is reused across all test contexts to ensure CallTargets can be shared
     private val sharedEngine = org.graalvm.polyglot.Engine.newBuilder()
         .option("engine.WarnInterpreterOnly", "false")
         .build()
@@ -39,23 +50,23 @@ object MezzeTestHelper {
 
         // Clear module cache to ensure clean state for each test execution
         com.mezze.language.typechecker.ModuleResolver.clearCache()
+        com.mezze.interpreter.v2.runtime.MezzeLanguage.clearLastResult()
 
         // Create polyglot context with multi-threading enabled for Loom concurrency
-        // Use the shared engine to avoid sharing layer violations
-        Context.newBuilder("mezze")
+        Context.newBuilder(LANGUAGE_ID)
             .engine(sharedEngine)
             .allowAllAccess(true)
-            .allowCreateThread(true)  // Allow spawning threads
+            .allowCreateThread(true)
             .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
             .build().use { context ->
-                // Create source and execute via MezzeLanguage
-                val source = Source.newBuilder("mezze", sourceCode, sourcePath)
+                val source = Source.newBuilder(LANGUAGE_ID, sourceCode, sourcePath)
                     .buildLiteral()
 
                 context.eval(source)
 
-                // Retrieve result from MezzeLanguage storage
-                return MezzeLanguage.getLastExecutionResult() ?: MezzeNull
+                // Get V2 result and convert to V1 MezzeValue
+                val v2Result = com.mezze.interpreter.v2.runtime.MezzeLanguage.getLastExecutionResult()
+                return convertV2ToV1(v2Result)
             }
     }
 
@@ -72,68 +83,34 @@ object MezzeTestHelper {
     fun execute(program: Program, monomorphicInstances: Map<String, com.mezze.language.ast.LetBinding>, projectRoot: Path? = null): MezzeValue {
         val root = projectRoot ?: Paths.get(System.getProperty("mezze.project.root", "."))
 
-        // Ensure the program has content hashes computed
-        // This handles cases where tests pass raw parsed ASTs instead of type-checked programs
         val programWithHashes = ensureContentHashes(program)
 
-        // NOTE: Do NOT clear module cache here!
-        // The type-checker has already populated the cache with typed modules during type-checking.
-        // Clearing it would break module imports since the interpreter expects modules to be in the typed cache.
+        com.mezze.interpreter.v2.runtime.MezzeLanguage.clearLastResult()
 
-        // Create polyglot context with multi-threading enabled for Loom concurrency
-        // Use the shared engine to avoid sharing layer violations
-        val context = Context.newBuilder("mezze")
+        val context = Context.newBuilder(LANGUAGE_ID)
             .engine(sharedEngine)
             .allowAllAccess(true)
-            .allowCreateThread(true)  // Allow spawning threads
+            .allowCreateThread(true)
             .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
             .build()
 
         try {
-            // Set the polyglot context in ThreadLocal for cross-thread Truffle execution
-            TruffleContextHolder.setPolyglotContext(context)
+            // Set the program for direct execution via V2
+            com.mezze.interpreter.v2.runtime.MezzeLanguage.setProgramForDirectExecution(programWithHashes, root)
+            // Set monomorphic instances if provided
+            if (monomorphicInstances.isNotEmpty()) {
+                com.mezze.interpreter.v2.runtime.MezzeLanguage.setMonomorphicInstances(monomorphicInstances)
+            }
 
-            // Execute the program directly by converting typed AST to Truffle nodes
-            // This preserves all type information, monomorphization, etc.
-            executeProgramDirectly(programWithHashes, monomorphicInstances, context, root)
+            val source = Source.newBuilder(LANGUAGE_ID, "# DIRECT_AST_EXECUTION", "__direct_execution__.mz")
+                .buildLiteral()
+            context.eval(source)
 
-            // Retrieve result from MezzeLanguage storage
-            return MezzeLanguage.getLastExecutionResult() ?: MezzeNull
+            val v2Result = com.mezze.interpreter.v2.runtime.MezzeLanguage.getLastExecutionResult()
+            return convertV2ToV1(v2Result)
         } finally {
-            // Clear the context from ThreadLocal
-            TruffleContextHolder.clearEnv()
-
-            // Close context with cancelIfExecuting=true to properly terminate any lingering virtual threads
-            // This prevents "The language did not complete all polyglot threads" errors
             context.close(true)
         }
-    }
-
-    /**
-     * Execute a typed program directly without re-parsing
-     */
-    private fun executeProgramDirectly(program: Program, monomorphicInstances: Map<String, com.mezze.language.ast.LetBinding>, context: Context, projectRoot: Path) {
-        // We need to invoke the Truffle language to execute the AST
-        // The trick is to eval a minimal source that will trigger language initialization,
-        // then we can access the context and execute our AST
-
-        // Actually, the cleaner approach is to use a dummy source that MezzeLanguage.parse()
-        // can intercept and replace with our pre-parsed AST
-
-        // For now, let's use a workaround: store the program in a ThreadLocal and
-        // have MezzeLanguage.parse() check for it
-
-        // Better approach: Just create a minimal Truffle program that evaluates our AST
-        // We'll use the existing mechanism but with a special marker
-
-        // Store the program and monomorphic instances for MezzeLanguage to use
-        MezzeLanguage.setProgramForDirectExecution(program, projectRoot)
-        MezzeLanguage.setMonomorphicInstances(monomorphicInstances)
-
-        // Trigger execution with a special marker source
-        val source = org.graalvm.polyglot.Source.newBuilder("mezze", "# DIRECT_AST_EXECUTION", "__direct_execution__.mz")
-            .buildLiteral()
-        context.eval(source)
     }
 
     /**
@@ -148,20 +125,35 @@ object MezzeTestHelper {
      */
     fun executeWithContext(program: Program, monomorphicInstances: Map<String, com.mezze.language.ast.LetBinding>, projectRoot: Path? = null): Pair<MezzeValue, Map<String, MezzeValue>> {
         val result = execute(program, monomorphicInstances, projectRoot)
-        val context = MezzeLanguage.getLastExecutionContextGlobals()
-        return Pair(result, context)
+        // Get V2's captured context and convert to V1 MezzeValue types
+        val v2Context = com.mezze.interpreter.v2.runtime.MezzeLanguage.getLastExecutionContext()
+        val v1Context = v2Context.mapValues { (_, v2Value) ->
+            try {
+                convertV2ToV1(v2Value)
+            } catch (e: Exception) {
+                // If conversion fails (e.g., for function values), use a placeholder
+                MezzeNull
+            }
+        }
+        return Pair(result, v1Context)
     }
 
     /**
      * Get the last execution context (for backward compatibility)
      */
     fun getLastExecutionContext(): Map<String, MezzeValue> {
-        return MezzeLanguage.getLastExecutionContextGlobals()
+        val v2Context = com.mezze.interpreter.v2.runtime.MezzeLanguage.getLastExecutionContext()
+        return v2Context.mapValues { (_, v2Value) ->
+            try {
+                convertV2ToV1(v2Value)
+            } catch (e: Exception) {
+                MezzeNull
+            }
+        }
     }
 
     /**
      * Execute a program and then call a specific function within the same context
-     * This avoids Truffle context sharing violations by adding the function call to the program AST
      */
     fun executeAndCallFunction(
         program: Program,
@@ -170,12 +162,8 @@ object MezzeTestHelper {
         monomorphicInstances: Map<String, com.mezze.language.ast.LetBinding> = emptyMap(),
         projectRoot: Path? = null
     ): MezzeValue {
-        // Create a modified program that includes calling the function
-        // This way the function call happens within the same execution context as the function definition
         val modifiedItems = program.items.toMutableList()
 
-        // Add a function call expression at the end
-        // Convert arguments record to AST RecordLiteral
         val argumentsLiteral = com.mezze.language.ast.RecordLiteral(
             entries = arguments.fields.map { (name, value) ->
                 com.mezze.language.ast.RecordFieldEntry(
@@ -190,37 +178,190 @@ object MezzeTestHelper {
             }
         )
 
-        // Create a function call: functionName(arguments)
         val functionCall = com.mezze.language.ast.FunctionCall(
             function = com.mezze.language.ast.Identifier(functionName),
             arguments = argumentsLiteral
         )
 
-        // Add the call as a top-level expression
         modifiedItems.add(com.mezze.language.ast.TopLevelExpression(functionCall))
 
-        // Execute the modified program
         val modifiedProgram = com.mezze.language.ast.Program(modifiedItems)
         return execute(modifiedProgram, monomorphicInstances, projectRoot)
     }
 
-    // NOTE: programToSource() and related methods removed
-    // We now execute typed ASTs directly without converting back to source
-    // This preserves all type information, monomorphization, and optimizations
-    //
-    // The old approach of converting AST → source → re-parse was fundamentally flawed
-    // because it lost all type information, monomorphization, and ability resolution.
-    // Now we execute typed ASTs directly via MezzeLanguage.setProgramForDirectExecution()
+    /**
+     * Convert V2 raw values to V1 MezzeValue types
+     */
+    private fun convertV2ToV1(v2Value: Any?): MezzeValue {
+        return when (v2Value) {
+            null -> MezzeNull
+            is Long -> MezzeInt(v2Value)
+            is Double -> MezzeFloat(v2Value)
+            is String -> MezzeString(v2Value)
+            is Boolean -> MezzeBool(v2Value)
+            is com.mezze.interpreter.v2.values.MezzeUnit -> MezzeUnit
+            is com.mezze.interpreter.v2.values.MezzeRecord -> convertV2Record(v2Value)
+            is com.mezze.interpreter.v2.values.MezzeVariant -> convertV2Variant(v2Value)
+            is com.mezze.interpreter.v2.values.MezzeList -> convertV2List(v2Value)
+            is com.mezze.interpreter.v2.values.MezzeFunction -> NativeMezzeFunction("<v2-function>") { MezzeNull }
+            // V2 uses Object[] for mutable arrays (ArrayList)
+            is Array<*> -> MezzeArrayList(v2Value.map { convertV2ToV1(it) })
+            // V2 collection types
+            is com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.MezzeMap -> convertV2Map(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.SetNatives.MezzeSet -> convertV2Set(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.DequeNatives.MezzeDeque -> convertV2Deque(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.NonEmptyListNatives.MezzeNonEmptyList -> convertV2NonEmptyList(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.MezzeSortedMap -> convertV2SortedMap(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.collections.SortedSetNatives.MezzeSortedSet -> convertV2SortedSet(v2Value)
+            is com.mezze.interpreter.v2.nodes.builtin.io.BytesNatives.MezzeBytes -> convertV2Bytes(v2Value)
+            else -> {
+                // Fallback: try to convert unknown types
+                throw IllegalArgumentException("Cannot convert V2 value to V1: ${v2Value::class.simpleName}")
+            }
+        }
+    }
 
     /**
-     * Ensure the program has content hashes computed for all declarations
-     * AND that resolved abilities/handlers have implementation hashes.
-     *
-     * For programs from the TypeChecker, hashes are already computed and consistent.
-     * For raw parsed programs (backward compatibility), we compute them fresh.
+     * Convert V2 MezzeRecord to V1 MezzeRecord
+     */
+    private fun convertV2Record(v2Record: com.mezze.interpreter.v2.values.MezzeRecord): MezzeRecord {
+        val fields = mutableMapOf<String, MezzeValue>()
+        val shape = v2Record.shape
+        val fieldCount = shape.fieldCount
+        for (i in 0 until fieldCount) {
+            val name = shape.getFieldName(i)
+            val value = v2Record.getField(i)
+            fields[name] = convertV2ToV1(value)
+        }
+        return MezzeRecord(fields)
+    }
+
+    /**
+     * Convert V2 MezzeVariant to V1 MezzeVariant
+     */
+    private fun convertV2Variant(v2Variant: com.mezze.interpreter.v2.values.MezzeVariant): MezzeVariant {
+        val constructorName = v2Variant.constructorName
+        val payload = if (v2Variant.hasPayload()) {
+            val payloadValue = v2Variant.payloadValue
+            if (payloadValue is com.mezze.interpreter.v2.values.MezzeRecord) {
+                convertV2Record(payloadValue)
+            } else {
+                // Single value payload - wrap in record with "val" field
+                MezzeRecord(mapOf("val" to convertV2ToV1(payloadValue)))
+            }
+        } else {
+            null
+        }
+        return MezzeVariant(constructorName, payload)
+    }
+
+    /**
+     * Convert V2 MezzeList to V1 MezzeList
+     */
+    private fun convertV2List(v2List: com.mezze.interpreter.v2.values.MezzeList): MezzeList {
+        val elements = mutableListOf<MezzeValue>()
+        for (i in 0 until v2List.size()) {
+            elements.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeList.fromKotlinList(elements)
+    }
+
+    /**
+     * Convert V2 MezzeMap to V1 MezzeMap
+     */
+    private fun convertV2Map(v2Map: com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.MezzeMap): MezzeMap {
+        val keys = com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.keys(v2Map)
+        val entries = mutableMapOf<MezzeValue, MezzeValue>()
+        for (key in keys) {
+            val v2Result = com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.get(v2Map, key)
+            // get returns Option variant, extract value if Some
+            if (v2Result is com.mezze.interpreter.v2.values.MezzeVariant && v2Result.isSome) {
+                val payload = v2Result.payloadValue as com.mezze.interpreter.v2.values.MezzeRecord
+                entries[convertV2ToV1(key)] = convertV2ToV1(payload.getField(0))
+            }
+        }
+        return MezzeMap(entries)
+    }
+
+    /**
+     * Convert V2 MezzeSet to V1 MezzeSet
+     */
+    private fun convertV2Set(v2Set: com.mezze.interpreter.v2.nodes.builtin.collections.SetNatives.MezzeSet): MezzeSet {
+        val v2List = com.mezze.interpreter.v2.nodes.builtin.collections.SetNatives.toList(v2Set)
+        val elements = mutableSetOf<MezzeValue>()
+        for (i in 0 until v2List.size()) {
+            elements.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeSet(elements)
+    }
+
+    /**
+     * Convert V2 MezzeDeque to V1 MezzeDeque
+     * V1 MezzeDeque uses two Lists (front/back), so we put all elements in front
+     */
+    private fun convertV2Deque(v2Deque: com.mezze.interpreter.v2.nodes.builtin.collections.DequeNatives.MezzeDeque): MezzeDeque {
+        val v2List = com.mezze.interpreter.v2.nodes.builtin.collections.DequeNatives.toList(v2Deque)
+        val elements = mutableListOf<MezzeValue>()
+        for (i in 0 until v2List.size()) {
+            elements.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeDeque(elements, emptyList())
+    }
+
+    /**
+     * Convert V2 MezzeNonEmptyList to V1 MezzeNonEmptyList
+     * V1 takes a single List<MezzeValue> that must be non-empty
+     */
+    private fun convertV2NonEmptyList(v2Nel: com.mezze.interpreter.v2.nodes.builtin.collections.NonEmptyListNatives.MezzeNonEmptyList): MezzeNonEmptyList {
+        val v2List = com.mezze.interpreter.v2.nodes.builtin.collections.NonEmptyListNatives.toList(v2Nel)
+        val elements = mutableListOf<MezzeValue>()
+        for (i in 0 until v2List.size()) {
+            elements.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeNonEmptyList(elements)
+    }
+
+    /**
+     * Convert V2 MezzeSortedMap to V1 MezzeSortedMap
+     * V1 uses io.vavr.collection.TreeMap
+     */
+    private fun convertV2SortedMap(v2SortedMap: com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.MezzeSortedMap): MezzeSortedMap {
+        val keys = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.keys(v2SortedMap)
+        var treeMap = io.vavr.collection.TreeMap.empty<MezzeValue, MezzeValue>(MezzeValueComparator())
+        for (key in keys) {
+            val v2Result = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.get(v2SortedMap, key)
+            if (v2Result is com.mezze.interpreter.v2.values.MezzeVariant && v2Result.isSome) {
+                val payload = v2Result.payloadValue as com.mezze.interpreter.v2.values.MezzeRecord
+                treeMap = treeMap.put(convertV2ToV1(key), convertV2ToV1(payload.getField(0)))
+            }
+        }
+        return MezzeSortedMap(treeMap)
+    }
+
+    /**
+     * Convert V2 MezzeSortedSet to V1 MezzeSortedSet
+     * V1 uses io.vavr.collection.TreeSet
+     */
+    private fun convertV2SortedSet(v2SortedSet: com.mezze.interpreter.v2.nodes.builtin.collections.SortedSetNatives.MezzeSortedSet): MezzeSortedSet {
+        val v2List = com.mezze.interpreter.v2.nodes.builtin.collections.SortedSetNatives.toList(v2SortedSet)
+        var treeSet = io.vavr.collection.TreeSet.empty<MezzeValue>(MezzeValueComparator())
+        for (i in 0 until v2List.size()) {
+            treeSet = treeSet.add(convertV2ToV1(v2List.get(i)))
+        }
+        return MezzeSortedSet(treeSet)
+    }
+
+    /**
+     * Convert V2 MezzeBytes to V1 MezzeBytes
+     */
+    private fun convertV2Bytes(v2Bytes: com.mezze.interpreter.v2.nodes.builtin.io.BytesNatives.MezzeBytes): MezzeBytes {
+        return MezzeBytes(v2Bytes.data)
+    }
+
+    /**
+     * Ensure the program has content hashes computed
      */
     private fun ensureContentHashes(program: Program): Program {
-        // Check if any effect handler or ability impl is missing a content hash
         val needsHashing = program.items.any { item ->
             when (item) {
                 is ImplDeclaration -> item.contentHash == null
@@ -230,12 +371,8 @@ object MezzeTestHelper {
         }
 
         return if (needsHashing) {
-            // Raw parsed program - compute hashes for all declarations
-            // ResolvedAbility.implementationHash is now set directly by SubstitutionApplier,
-            // so we only need to compute declaration hashes here
             ContentHashComputer.computeHashes(program).program
         } else {
-            // Program from TypeChecker - hashes are already computed
             program
         }
     }

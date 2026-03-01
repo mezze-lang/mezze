@@ -13,6 +13,7 @@ java {
 dependencies {
     // Core project dependencies
     implementation(project(":ast"))
+    implementation(project(":parser"))
     implementation(project(":typechecker"))
 
     // Truffle API - for language implementation
@@ -44,7 +45,11 @@ tasks.test {
     systemProperty("junit.jupiter.execution.timeout.default", "120s")
     systemProperty("polyglot.engine.WarnInterpreterOnly", "false")
 
-    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    jvmArgs(
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/sun.misc=ALL-UNNAMED"
+    )
 
     maxHeapSize = "2g"
 }

@@ -620,4 +620,178 @@ class AbilityAssociatedTypesTest {
         val impl3 = typedProgram.items[3] as ImplAbilityDeclaration
         assertNotNull(impl3.inferredType)
     }
+
+    // ===== Tests for Associated Type RESOLUTION =====
+    // These tests verify that when calling ability methods, the associated types
+    // are correctly resolved to their concrete bindings from the impl.
+
+    @Test
+    fun `test associated type resolves to concrete type in method return`() {
+        val source = """
+            ability Container 'c having 'item where {
+                get: {container: 'c, index: Int} -> (Option 'item),
+            }
+
+            impl Container [Int] having 'item = Int where {
+                get = {container, index} -> Some { val = 0 },
+            }
+
+            let arr: [Int] = [1, 2, 3]
+            let result = Container.get {container = arr, index = 0}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        // Find the 'result' binding
+        val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "result" }
+        assertNotNull(resultBinding)
+
+        // The type should be Option Int, not Option 'a
+        val resultType = resultBinding!!.inferredType
+        assertNotNull(resultType)
+        assertTrue(resultType is MezzeType.TypeApplication, "Expected TypeApplication but got $resultType")
+        val typeApp = resultType as MezzeType.TypeApplication
+        assertEquals("Option", typeApp.constructor)
+        assertEquals(1, typeApp.args.size)
+        assertEquals(MezzeType.IntType, typeApp.args[0], "Expected Option Int but got Option ${typeApp.args[0]}")
+    }
+
+    @Test
+    fun `test associated type resolves to concrete type in method parameter`() {
+        val source = """
+            ability Container 'c having 'item where {
+                add: {container: 'c, element: 'item} -> 'c,
+            }
+
+            impl Container [Int] having 'item = Int where {
+                add = {container, element} -> container,
+            }
+
+            let arr: [Int] = [1, 2, 3]
+            let result = Container.add {container = arr, element = 42}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        // Should type check without errors - element = 42 should unify with Int (the bound 'item)
+        assertDoesNotThrow {
+            typeChecker.typeCheck(program).program
+        }
+    }
+
+    @Test
+    fun `test associated type resolution with multiple associated types`() {
+        val source = """
+            ability BiContainer 'c having 'key, 'value where {
+                getKey: {container: 'c} -> 'key,
+                getValue: {container: 'c} -> 'value,
+            }
+
+            impl BiContainer {k: Int, v: String} having 'key = Int, 'value = String where {
+                getKey = {container} -> container.k,
+                getValue = {container} -> container.v,
+            }
+
+            let container: {k: Int, v: String} = {k = 42, v = "hello"}
+            let key = BiContainer.getKey {container = container}
+            let value = BiContainer.getValue {container = container}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        // Find the 'key' binding - should be Int
+        val keyBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "key" }
+        assertNotNull(keyBinding)
+        assertEquals(MezzeType.IntType, keyBinding!!.inferredType, "Expected key to be Int")
+
+        // Find the 'value' binding - should be String
+        val valueBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "value" }
+        assertNotNull(valueBinding)
+        assertEquals(MezzeType.StringType, valueBinding!!.inferredType, "Expected value to be String")
+    }
+
+    @Test
+    fun `test associated type resolution with array return type`() {
+        val source = """
+            ability Container 'c having 'item where {
+                toArray: {container: 'c} -> ['item],
+            }
+
+            impl Container [Int] having 'item = Int where {
+                toArray = {container} -> container,
+            }
+
+            let arr: [Int] = [1, 2, 3]
+            let result = Container.toArray {container = arr}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        // Find the 'result' binding - should be [Int]
+        val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "result" }
+        assertNotNull(resultBinding)
+        val resultType = resultBinding!!.inferredType
+        assertTrue(resultType is MezzeType.ArrayType, "Expected ArrayType but got $resultType")
+        assertEquals(MezzeType.IntType, (resultType as MezzeType.ArrayType).elementType)
+    }
+
+    @Test
+    fun `test associated type resolution with nested type constructors`() {
+        val source = """
+            ability Container 'c having 'item where {
+                nested: {container: 'c} -> (Option ['item]),
+            }
+
+            impl Container [Int] having 'item = Int where {
+                nested = {container} -> Some { val = container },
+            }
+
+            let arr: [Int] = [1, 2, 3]
+            let result = Container.nested {container = arr}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        // Find the 'result' binding - should be Option [Int]
+        val resultBinding = typedProgram.items.filterIsInstance<LetBinding>()
+            .find { it.variableName == "result" }
+        assertNotNull(resultBinding)
+        val resultType = resultBinding!!.inferredType
+        assertTrue(resultType is MezzeType.TypeApplication, "Expected TypeApplication but got $resultType")
+        val typeApp = resultType as MezzeType.TypeApplication
+        assertEquals("Option", typeApp.constructor)
+        assertTrue(typeApp.args[0] is MezzeType.ArrayType)
+        assertEquals(MezzeType.IntType, (typeApp.args[0] as MezzeType.ArrayType).elementType)
+    }
+
+    @Test
+    fun `test associated type resolution error when wrong type passed`() {
+        val source = """
+            ability Container 'c having 'item where {
+                add: {container: 'c, element: 'item} -> 'c,
+            }
+
+            impl Container [Int] having 'item = Int where {
+                add = {container, element} -> container,
+            }
+
+            let arr: [Int] = [1, 2, 3]
+            let result = Container.add {container = arr, element = "wrong"}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        // Should fail because "wrong" is String but 'item = Int
+        assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(program).program
+        }
+    }
 }

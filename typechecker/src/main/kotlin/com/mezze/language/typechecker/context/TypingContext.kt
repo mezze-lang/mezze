@@ -45,7 +45,8 @@ data class TypingContext(
          */
         data class Monomorphic(
             val type: MezzeType,
-            val sourceModule: String? = null
+            val sourceModule: String? = null,
+            val contentHash: String? = null
         ) : Binding()
 
         /**
@@ -53,7 +54,8 @@ data class TypingContext(
          */
         data class Polymorphic(
             val scheme: TypeScheme,
-            val sourceModule: String? = null
+            val sourceModule: String? = null,
+            val contentHash: String? = null
         ) : Binding()
     }
 
@@ -65,7 +67,9 @@ data class TypingContext(
      */
     data class AbilityImplInfo(
         val abilityName: String,
-        val targetTypes: List<String>,  // Type names, e.g., ["String"], ["Int", "String"]
+        val targetTypes: List<String>,  // Type names for string-based matching, e.g., ["String"], ["Maybe_Int"]
+        val targetTypeAnnotations: List<TypeAnnotation>? = null,  // Original annotations for structural matching
+        val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap(),  // Associated type bindings like 'item = Int
         val sourceModule: String? = null,
         val contentHash: String? = null  // Content hash (same as the map key)
     )
@@ -111,15 +115,15 @@ data class TypingContext(
     /**
      * Extend context with a monomorphic binding (common case)
      */
-    fun extendMono(name: String, type: MezzeType, sourceModule: String? = null): TypingContext {
-        return extend(name, Binding.Monomorphic(type, sourceModule))
+    fun extendMono(name: String, type: MezzeType, sourceModule: String? = null, contentHash: String? = null): TypingContext {
+        return extend(name, Binding.Monomorphic(type, sourceModule, contentHash))
     }
 
     /**
      * Extend context with a polymorphic binding
      */
-    fun extendPoly(name: String, scheme: TypeScheme, sourceModule: String? = null): TypingContext {
-        return extend(name, Binding.Polymorphic(scheme, sourceModule))
+    fun extendPoly(name: String, scheme: TypeScheme, sourceModule: String? = null, contentHash: String? = null): TypingContext {
+        return extend(name, Binding.Polymorphic(scheme, sourceModule, contentHash))
     }
 
     /**
@@ -309,6 +313,24 @@ data class TypingContext(
     fun getAllBindings(): Map<String, Binding> {
         val parentBindings = parent?.getAllBindings() ?: emptyMap()
         return parentBindings + bindings  // Local bindings override parent bindings
+    }
+
+    /**
+     * Get content hashes for all bindings (for identifier resolution).
+     * Returns a map of binding name to content hash (only for bindings that have hashes).
+     */
+    fun getContentHashes(): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        for ((name, binding) in getAllBindings()) {
+            val hash = when (binding) {
+                is Binding.Monomorphic -> binding.contentHash
+                is Binding.Polymorphic -> binding.contentHash
+            }
+            if (hash != null) {
+                result[name] = hash
+            }
+        }
+        return result
     }
 
     companion object {

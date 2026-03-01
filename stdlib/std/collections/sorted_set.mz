@@ -21,8 +21,8 @@ pub let singleton = { x } ->
     __native_sorted_set_singleton { x = x }
 
 # Create a sorted set from a list
-pub let from_list = { list } ->
-    __native_sorted_set_from_list { list = list }
+pub let from_list = { xs } ->
+    __native_sorted_set_from_list { xs = xs }
 
 # === Basic Operations ===
 

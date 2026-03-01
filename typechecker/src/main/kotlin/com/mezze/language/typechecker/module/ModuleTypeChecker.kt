@@ -138,7 +138,7 @@ class ModuleTypeChecker(
             val freeVars = collectFreeTypeVars(binding.type)
             if (freeVars.isEmpty()) {
                 // Monomorphic type - use directly
-                context = context.extendMono(name, binding.type, binding.modulePath)
+                context = context.extendMono(name, binding.type, binding.modulePath, binding.contentHash)
             } else {
                 // Polymorphic type - wrap in TypeScheme for fresh instantiation
                 val scheme = TypeScheme(
@@ -146,7 +146,7 @@ class ModuleTypeChecker(
                     constraints = emptyList(),
                     type = binding.type
                 )
-                context = context.extendPoly(name, scheme, binding.modulePath)
+                context = context.extendPoly(name, scheme, binding.modulePath, binding.contentHash)
             }
         }
 
@@ -196,7 +196,7 @@ class ModuleTypeChecker(
     }
 
     /**
-     * Update module exports with inferred types.
+     * Update module exports with inferred types and content hashes.
      *
      * After type-checking, we update the export types with
      * the actual inferred types from the typed program.
@@ -207,14 +207,18 @@ class ModuleTypeChecker(
     ): Map<String, ExportedItem> {
         val updatedExports = mutableMapOf<String, ExportedItem>()
 
-        // Build a map of names to inferred types from the program
+        // Build maps of names to inferred types and content hashes from the program
         val inferredTypes = mutableMapOf<String, MezzeType>()
+        val contentHashes = mutableMapOf<String, String>()
 
         for (item in typedProgram.items) {
             when (item) {
                 is LetBinding -> {
                     item.inferredType?.let { type ->
                         inferredTypes[item.variableName] = type
+                    }
+                    item.contentHash?.let { hash ->
+                        contentHashes[item.variableName] = hash
                     }
                 }
                 is TypeDeclaration -> {
@@ -231,6 +235,9 @@ class ModuleTypeChecker(
                     item.inferredType?.let { type ->
                         inferredTypes[item.performerName] = type
                     }
+                    item.contentHash?.let { hash ->
+                        contentHashes[item.performerName] = hash
+                    }
                 }
                 else -> {
                     // Other items don't contribute to exports
@@ -238,14 +245,14 @@ class ModuleTypeChecker(
             }
         }
 
-        // Update exports with inferred types
+        // Update exports with inferred types and content hashes
         for ((name, export) in exports) {
             val inferredType = inferredTypes[export.originalName]
-            updatedExports[name] = if (inferredType != null) {
-                export.copy(mezzeType = inferredType)
-            } else {
-                export
-            }
+            val contentHash = contentHashes[export.originalName]
+            updatedExports[name] = export.copy(
+                mezzeType = inferredType ?: export.mezzeType,
+                contentHash = contentHash ?: export.contentHash
+            )
         }
 
         return updatedExports

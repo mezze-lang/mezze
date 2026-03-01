@@ -37,7 +37,7 @@ class GlobMatchTest {
     private fun globMatch(pattern: String, text: String): Boolean {
         val source = """
             use std::string
-            let result = string::glob_match { pattern = "$pattern", text = "$text" }
+            let result = string::glob_match { pattern = "$pattern", s = "$text" }
         """.trimIndent()
 
         val program = parser.parse(source)

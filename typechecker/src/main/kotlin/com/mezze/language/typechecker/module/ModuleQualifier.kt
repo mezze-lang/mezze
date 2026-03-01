@@ -140,8 +140,10 @@ class ModuleQualifier {
         return when (expr) {
             // Identifier - qualify if it references a module-defined name
             is Identifier -> {
-                if (expr.name in moduleNames) {
-                    expr.copy(name = prefix + expr.name)
+                if (expr.localName in moduleNames && expr.qualifier == null) {
+                    // Convert prefix like "module__" to ModulePath
+                    val qualifierSegments = prefix.trimEnd('_').split("__")
+                    expr.copy(qualifier = ModulePath(qualifierSegments))
                 } else {
                     expr // Leave external references unchanged
                 }

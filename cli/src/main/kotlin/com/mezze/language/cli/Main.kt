@@ -1098,9 +1098,6 @@ private fun handleExecCommand(args: List<String>) {
         // Suppress verbose Truffle logging (JIT compilation is enabled via truffle-runtime)
         System.setProperty("polyglot.log.level", "OFF")
 
-        // Execute using the interpreter directly with the already type-checked AST
-        val interpreter = com.mezze.language.interpreter.MezzeInterpreter(skipParserSetup = false)
-
         // Use the source file's directory for module resolution
         // This allows the interpreter to find modules relative to the source file
         val projectRootPath = if (filePath != null) {
@@ -1109,7 +1106,18 @@ private fun handleExecCommand(args: List<String>) {
             java.nio.file.Paths.get(".").toAbsolutePath()
         }
 
-        val result = interpreter.execute(programToExecute, projectRootPath, successResult.monomorphicInstances)
+        // Use V2 interpreter (optimized Truffle implementation)
+        // Default to V1 until V2 supports all features (effects, MezzeUnit, etc.)
+        val useV2 = System.getProperty("mezze.interpreter.v2", "false").toBoolean()
+
+        if (useV2) {
+            // Execute using V2 interpreter (optimized)
+            executeWithV2Interpreter(programToExecute, projectRootPath, successResult.monomorphicInstances)
+        } else {
+            // Execute using V1 interpreter (fallback)
+            val interpreter = com.mezze.language.interpreter.MezzeInterpreter(skipParserSetup = false)
+            interpreter.execute(programToExecute, projectRootPath, successResult.monomorphicInstances)
+        }
 
         // Program should return {}, so we don't print the result
         // Execution completed silently
@@ -1132,6 +1140,45 @@ private fun handleExecCommand(args: List<String>) {
         println("❌ Error:")
         println(e.message ?: "Unknown error")
         kotlin.system.exitProcess(1)
+    }
+}
+
+/**
+ * Execute a program using the V2 interpreter (optimized Truffle implementation).
+ * V2 uses shape-cached record access, typed frame slots, and jump table dispatch.
+ */
+private fun executeWithV2Interpreter(
+    program: Program,
+    projectRoot: java.nio.file.Path,
+    monomorphicInstances: Map<String, LetBinding> = emptyMap()
+) {
+    // Set up V2 context
+    val context = org.graalvm.polyglot.Context.newBuilder(com.mezze.interpreter.v2.runtime.MezzeLanguage.ID)
+        .allowAllAccess(true)
+        .build()
+
+    try {
+        // Store the program for direct execution (bypasses parsing)
+        com.mezze.interpreter.v2.runtime.MezzeLanguage.setProgramForDirectExecution(program, projectRoot)
+
+        // Store monomorphic instances (compiler-generated specializations)
+        if (monomorphicInstances.isNotEmpty()) {
+            com.mezze.interpreter.v2.runtime.MezzeLanguage.setMonomorphicInstances(monomorphicInstances)
+        }
+
+        // Create a dummy source to trigger MezzeLanguage.parse()
+        val source = org.graalvm.polyglot.Source.newBuilder(
+            com.mezze.interpreter.v2.runtime.MezzeLanguage.ID,
+            "# Direct AST execution",
+            "__direct_execution__.mz"
+        ).buildLiteral()
+
+        // Execute via polyglot API
+        context.eval(source)
+
+        // Result is stored in MezzeLanguage.getLastExecutionResult() if needed
+    } finally {
+        context.close()
     }
 }
 
@@ -1969,6 +2016,51 @@ private fun prettyPrintResult(result: com.mezze.language.interpreter.MezzeValue)
                 result.getDisplayString()
             }
         }
+    }
+}
+
+/**
+ * Pretty print a V2 interpreter result.
+ * V2 returns native Java types (Long, Double, Boolean, String) and V2-specific value types.
+ */
+private fun prettyPrintV2Result(result: Any?): String {
+    return when (result) {
+        null -> "null"
+        is com.mezze.interpreter.v2.values.MezzeUnit -> "()"
+        is Long -> result.toString()
+        is Double -> result.toString()
+        is Boolean -> result.toString()
+        is String -> "\"$result\""
+        is com.mezze.interpreter.v2.values.MezzeVariant -> {
+            val constructorName = result.constructorName
+            if (result.hasPayload()) {
+                val payloadValue = result.payloadValue
+                if (payloadValue is com.mezze.interpreter.v2.values.MezzeRecord) {
+                    "$constructorName ${prettyPrintV2Result(payloadValue)}"
+                } else {
+                    "$constructorName(${prettyPrintV2Result(payloadValue)})"
+                }
+            } else {
+                constructorName
+            }
+        }
+        is com.mezze.interpreter.v2.values.MezzeRecord -> {
+            val shape = result.shape
+            val fields = (0 until shape.fieldCount).map { i ->
+                val fieldName = shape.getFieldName(i)
+                val fieldValue = result.getField(i)
+                "$fieldName = ${prettyPrintV2Result(fieldValue)}"
+            }
+            "{ ${fields.joinToString(", ")} }"
+        }
+        is com.mezze.interpreter.v2.values.MezzeList -> {
+            val elements = (0 until result.size()).map { i ->
+                prettyPrintV2Result(result.get(i))
+            }
+            "[${elements.joinToString(", ")}]"
+        }
+        is com.mezze.interpreter.v2.values.MezzeFunction -> "<function:${result.name}>"
+        else -> result.toString()
     }
 }
 

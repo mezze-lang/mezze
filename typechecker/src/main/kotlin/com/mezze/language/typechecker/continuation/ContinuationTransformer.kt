@@ -333,7 +333,7 @@ class ContinuationTransformer {
     private fun createBindExpression(pattern: Pattern, valueType: MezzeType?): Expression {
         // Create a placeholder identifier for the input value
         // The runtime will need to handle this specially
-        val inputIdentifier = Identifier("__state_machine_input__", inferredType = valueType)
+        val inputIdentifier = Identifier(localName = "__state_machine_input__", inferredType = valueType)
 
         // Create a let statement that binds the pattern to the input
         val letStmt = LetStatement(

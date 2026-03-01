@@ -8,6 +8,9 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
  * Unary negation node.
+ *
+ * Static methods are used for specializations to enable
+ * better inlining by the JIT compiler.
  */
 @NodeChild("operand")
 @NodeInfo(shortName = "-")
@@ -17,7 +20,7 @@ public abstract class NegateNode extends MezzeNode {
      * Negate Int (unboxed long).
      */
     @Specialization(rewriteOn = ArithmeticException.class)
-    protected long negateLong(long value) {
+    protected static long negateLong(long value) {
         return Math.negateExact(value);
     }
 
@@ -25,7 +28,7 @@ public abstract class NegateNode extends MezzeNode {
      * Overflow fallback for Long.MIN_VALUE.
      */
     @Specialization(replaces = "negateLong")
-    protected double negateLongOverflow(long value) {
+    protected static double negateLongOverflow(long value) {
         return -(double) value;
     }
 
@@ -33,7 +36,7 @@ public abstract class NegateNode extends MezzeNode {
      * Negate Float (unboxed double).
      */
     @Specialization
-    protected double negateDouble(double value) {
+    protected static double negateDouble(double value) {
         return -value;
     }
 
@@ -41,7 +44,7 @@ public abstract class NegateNode extends MezzeNode {
      * Fallback: Type error.
      */
     @Fallback
-    protected Object typeError(Object value) {
+    protected static Object typeError(Object value) {
         throw new MezzeArithmeticException(
             "Cannot negate " + value.getClass().getSimpleName()
         );

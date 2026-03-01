@@ -25,6 +25,8 @@ class FileSystemEffectTest {
         com.mezze.language.typechecker.TypeChecker.clearCache()
         // Reset in-memory filesystem before each test for isolation
         FilesystemImplementations.clearMemoryFs()
+        // Also clear V2's in-memory filesystem
+        com.mezze.interpreter.v2.nodes.builtin.effects.MemoryFilesystemNatives.clear()
     }
 
     private fun eval(source: String): MezzeValue {

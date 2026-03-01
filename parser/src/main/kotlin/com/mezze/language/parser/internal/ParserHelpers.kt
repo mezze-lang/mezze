@@ -145,7 +145,7 @@ internal fun desugarBinaryOperator(
 
     val desugared = FunctionCall(
         function = MemberAccess(
-            receiver = Identifier(abilityName, sourceLocation = location),
+            receiver = Identifier(localName = abilityName, sourceLocation = location),
             member = operationName,
             sourceLocation = location
         ),
@@ -182,7 +182,7 @@ internal fun desugarUnaryOperator(
 
     val desugared = FunctionCall(
         function = MemberAccess(
-            receiver = Identifier(abilityName, sourceLocation = location),
+            receiver = Identifier(localName = abilityName, sourceLocation = location),
             member = operationName,
             sourceLocation = location
         ),

@@ -10,15 +10,23 @@ import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.profiles.InlinedBranchProfile;
 
 /**
- * Record literal node.
+ * Record literal node - OPTIMIZED.
  *
- * Creates a record with typed field arrays based on the field types
- * determined at compile time from inferredType.
+ * Key optimizations:
+ * 1. Pre-allocated empty arrays shared across all executions
+ * 2. @ExplodeLoop for loop unrolling
+ * 3. Direct typed array access
  */
 @NodeInfo(shortName = "record")
 public final class RecordLiteralNode extends MezzeNode {
+
+    // Shared empty arrays - avoid allocation when count is 0
+    private static final long[] EMPTY_LONGS = new long[0];
+    private static final double[] EMPTY_DOUBLES = new double[0];
+    private static final Object[] EMPTY_OBJECTS = new Object[0];
 
     @CompilationFinal
     private final Shape shape;
@@ -36,6 +44,16 @@ public final class RecordLiteralNode extends MezzeNode {
     @CompilationFinal
     private final int objectFieldCount;
 
+    // Pre-computed storage types for each field (avoids method call in loop)
+    @CompilationFinal(dimensions = 1)
+    private final int[] fieldStorageTypes; // 0=LONG, 1=DOUBLE, 2=OBJECT
+
+    @CompilationFinal(dimensions = 1)
+    private final int[] fieldStorageIndices;
+
+    // Error branch profile - tell JIT this path is cold
+    private final InlinedBranchProfile typeErrorProfile = InlinedBranchProfile.getUncached();
+
     public RecordLiteralNode(Shape shape, MezzeNode[] fieldValueNodes,
                              int longFieldCount, int doubleFieldCount, int objectFieldCount) {
         this.shape = shape;
@@ -43,6 +61,15 @@ public final class RecordLiteralNode extends MezzeNode {
         this.longFieldCount = longFieldCount;
         this.doubleFieldCount = doubleFieldCount;
         this.objectFieldCount = objectFieldCount;
+
+        // Pre-compute field locations for faster access
+        this.fieldStorageTypes = new int[fieldValueNodes.length];
+        this.fieldStorageIndices = new int[fieldValueNodes.length];
+        for (int i = 0; i < fieldValueNodes.length; i++) {
+            FieldLocation loc = shape.getFieldLocation(i);
+            this.fieldStorageTypes[i] = loc.storageType.ordinal();
+            this.fieldStorageIndices[i] = loc.index;
+        }
     }
 
     /**
@@ -60,36 +87,41 @@ public final class RecordLiteralNode extends MezzeNode {
     @Override
     @ExplodeLoop
     public Object execute(VirtualFrame frame) {
-        // Allocate typed arrays
-        long[] longFields = longFieldCount > 0 ? new long[longFieldCount] : new long[0];
-        double[] doubleFields = doubleFieldCount > 0 ? new double[doubleFieldCount] : new double[0];
-        Object[] objectFields = objectFieldCount > 0 ? new Object[objectFieldCount] : new Object[0];
+        // Allocate arrays - use shared empty arrays when possible
+        final long[] longFields = longFieldCount > 0 ? new long[longFieldCount] : EMPTY_LONGS;
+        final double[] doubleFields = doubleFieldCount > 0 ? new double[doubleFieldCount] : EMPTY_DOUBLES;
+        final Object[] objectFields = objectFieldCount > 0 ? new Object[objectFieldCount] : EMPTY_OBJECTS;
 
         // Evaluate each field and store in the appropriate array
+        // @ExplodeLoop unrolls this, and fieldStorageTypes is @CompilationFinal
         for (int i = 0; i < fieldValueNodes.length; i++) {
             Object value = fieldValueNodes[i].execute(frame);
-            FieldLocation loc = shape.getFieldLocation(i);
+            int storageType = fieldStorageTypes[i];
+            int storageIndex = fieldStorageIndices[i];
 
-            switch (loc.storageType) {
-                case LONG -> {
+            // Switch on compile-time constant - JIT eliminates branches
+            switch (storageType) {
+                case 0 -> { // LONG
                     if (value instanceof Long l) {
-                        longFields[loc.index] = l;
+                        longFields[storageIndex] = l;
                     } else {
+                        typeErrorProfile.enter(this);
                         CompilerDirectives.transferToInterpreterAndInvalidate();
-                        throw new RuntimeException("Expected Long for field " + shape.getFieldName(i));
+                        throw new RuntimeException("Expected Long for field, got: " + value.getClass());
                     }
                 }
-                case DOUBLE -> {
+                case 1 -> { // DOUBLE
                     if (value instanceof Double d) {
-                        doubleFields[loc.index] = d;
+                        doubleFields[storageIndex] = d;
                     } else if (value instanceof Long l) {
-                        doubleFields[loc.index] = l.doubleValue();
+                        doubleFields[storageIndex] = l.doubleValue();
                     } else {
+                        typeErrorProfile.enter(this);
                         CompilerDirectives.transferToInterpreterAndInvalidate();
-                        throw new RuntimeException("Expected Double for field " + shape.getFieldName(i));
+                        throw new RuntimeException("Expected Double for field, got: " + value.getClass());
                     }
                 }
-                case OBJECT -> objectFields[loc.index] = value;
+                default -> objectFields[storageIndex] = value; // OBJECT
             }
         }
 

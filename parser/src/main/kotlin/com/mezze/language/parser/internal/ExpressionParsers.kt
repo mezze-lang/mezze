@@ -2045,7 +2045,7 @@ internal val MezzeParser.atPlaceholderExpression: Parser<Expression>
         val token = tok(TokenType.AT)(stream)
         when (token) {
             is ParseResult.Success -> ParseResult.Success(
-                Identifier("@", sourceLocation = location),  // Parse @ as identifier for now, desugar later
+                Identifier(localName = "@", sourceLocation = location),  // Parse @ as identifier for now, desugar later
                 token.remaining
             )
             is ParseResult.Failure -> token
@@ -2055,22 +2055,23 @@ internal val MezzeParser.atPlaceholderExpression: Parser<Expression>
 internal val MezzeParser.identifierExpression: Parser<Expression>
     get() = { stream ->
         // Parse qualified names: module::function or just function
+        // Builds structured Identifier with qualifier and localName
         val first = identifierParser(stream)
         when (first) {
             is ParseResult.Success -> {
-                val startLocation = tokenLocation(first.value, currentFile)  // Capture location of first token
-                var name = first.value.text
+                val startLocation = tokenLocation(first.value, currentFile)
+                val segments = mutableListOf(first.value.text)
                 var currentStream = first.remaining
                 var failed: ParseResult.Failure? = null
 
-                // Check for :: to build qualified name
+                // Check for :: to build qualified name segments
                 while (failed == null) {
                     val doubleColon = tok(TokenType.DOUBLE_COLON)(currentStream)
                     if (doubleColon is ParseResult.Success) {
                         val next = identifierParser(doubleColon.remaining)
                         when (next) {
                             is ParseResult.Success -> {
-                                name += "::" + next.value.text
+                                segments.add(next.value.text)
                                 currentStream = next.remaining
                             }
                             is ParseResult.Failure -> failed = next
@@ -2083,17 +2084,28 @@ internal val MezzeParser.identifierExpression: Parser<Expression>
                 if (failed != null) {
                     failed
                 } else {
+                    val localName = segments.last()
+                    val isQualified = segments.size > 1
+
                     // Check if this is an uppercase identifier (variant constructor without payload)
                     // Only for simple names (not qualified names with ::)
-                    if (!name.contains("::") && name.firstOrNull()?.isUpperCase() == true) {
+                    if (!isQualified && localName.firstOrNull()?.isUpperCase() == true) {
                         // This is a variant construction without payload: None, True, False, etc.
                         ParseResult.Success(
-                            VariantConstruction(constructor = name, value = null, sourceLocation = startLocation),
+                            VariantConstruction(constructor = localName, value = null, sourceLocation = startLocation),
                             currentStream
                         )
                     } else {
-                        // Regular identifier
-                        ParseResult.Success(Identifier(name, sourceLocation = startLocation), currentStream)
+                        // Regular identifier - structured with qualifier
+                        val qualifier = if (isQualified) {
+                            ModulePath(segments.dropLast(1))
+                        } else {
+                            null
+                        }
+                        ParseResult.Success(
+                            Identifier(localName = localName, qualifier = qualifier, sourceLocation = startLocation),
+                            currentStream
+                        )
                     }
                 }
             }

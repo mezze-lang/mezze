@@ -234,9 +234,34 @@ sealed interface UsePath
 /**
  * Module path for simple imports.
  * Example: math::geometry
+ *
+ * Used throughout the system for structured module path representation.
+ * Eliminates need for string parsing like `path.split("::")`.
  */
 @Serializable
-data class ModulePath(val segments: List<String>) : UsePath
+data class ModulePath(val segments: List<String>) : UsePath {
+    /** Full qualified path string (e.g., "std::collections::array") */
+    val fullPath: String get() = segments.joinToString("::")
+
+    /** Short name - last segment (e.g., "array" from "std::collections::array") */
+    val shortName: String get() = segments.lastOrNull() ?: ""
+
+    /** Check if this is a qualified (multi-segment) path */
+    val isQualified: Boolean get() = segments.size > 1
+
+    /** Parent module path (e.g., "std::collections" from "std::collections::array") */
+    val parent: ModulePath? get() = if (segments.size > 1) {
+        ModulePath(segments.dropLast(1))
+    } else null
+
+    companion object {
+        /** Parse a path string into ModulePath */
+        fun parse(path: String): ModulePath = ModulePath(path.split("::"))
+
+        /** Empty module path */
+        val EMPTY = ModulePath(emptyList())
+    }
+}
 
 /**
  * Selective path for importing specific items from a module.

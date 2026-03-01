@@ -1,77 +1,108 @@
 package com.mezze.interpreter.v2.nodes.variable;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
-import com.oracle.truffle.api.dsl.NodeField;
-import com.oracle.truffle.api.dsl.Specialization;
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
 /**
- * Read a local variable from the frame.
+ * Read a local variable from the frame - FULLY JIT-COMPILABLE.
  *
  * Uses typed frame slot access based on the expected type.
+ * The slot index and kind are @CompilationFinal, so after JIT:
+ * - No dispatch overhead
+ * - Direct typed access (getLong/getDouble/etc.)
+ * - Primitives stay unboxed
+ *
  * Kind constants:
  * - 0 = Long (Int)
  * - 1 = Double (Float)
  * - 2 = Boolean (Bool)
  * - 3 = Object (everything else)
  */
-@NodeField(name = "slot", type = int.class)
-@NodeField(name = "kind", type = int.class)
 @NodeInfo(shortName = "read")
-public abstract class ReadLocalNode extends MezzeNode {
+public final class ReadLocalNode extends MezzeNode {
 
     public static final int KIND_LONG = 0;
     public static final int KIND_DOUBLE = 1;
     public static final int KIND_BOOLEAN = 2;
     public static final int KIND_OBJECT = 3;
 
-    protected abstract int getSlot();
-    protected abstract int getKind();
+    @CompilationFinal
+    private final int slot;
 
-    /**
-     * Fast path: Read Long (Int type).
-     */
-    @Specialization(guards = "kind == 0")
-    protected long readLong(VirtualFrame frame) {
-        return frame.getLong(getSlot());
+    @CompilationFinal
+    private final int kind;
+
+    public ReadLocalNode(int slot, int kind) {
+        this.slot = slot;
+        this.kind = kind;
+    }
+
+    @Override
+    public Object execute(VirtualFrame frame) {
+        // The switch on kind is @CompilationFinal, so JIT will eliminate it
+        return switch (kind) {
+            case KIND_LONG -> frame.getLong(slot);
+            case KIND_DOUBLE -> frame.getDouble(slot);
+            case KIND_BOOLEAN -> frame.getBoolean(slot);
+            default -> frame.getObject(slot);
+        };
+    }
+
+    @Override
+    public long executeLong(VirtualFrame frame) throws UnexpectedResultException {
+        if (kind == KIND_LONG) {
+            return frame.getLong(slot);
+        }
+        throw new UnexpectedResultException(execute(frame));
+    }
+
+    @Override
+    public double executeDouble(VirtualFrame frame) throws UnexpectedResultException {
+        if (kind == KIND_DOUBLE) {
+            return frame.getDouble(slot);
+        }
+        if (kind == KIND_LONG) {
+            return frame.getLong(slot);
+        }
+        throw new UnexpectedResultException(execute(frame));
+    }
+
+    @Override
+    public boolean executeBoolean(VirtualFrame frame) throws UnexpectedResultException {
+        if (kind == KIND_BOOLEAN) {
+            return frame.getBoolean(slot);
+        }
+        throw new UnexpectedResultException(execute(frame));
     }
 
     /**
-     * Fast path: Read Double (Float type).
+     * Create a read node for Long (Int) slot.
      */
-    @Specialization(guards = "kind == 1")
-    protected double readDouble(VirtualFrame frame) {
-        return frame.getDouble(getSlot());
+    public static ReadLocalNode createLong(int slot) {
+        return new ReadLocalNode(slot, KIND_LONG);
     }
 
     /**
-     * Fast path: Read Boolean (Bool type).
+     * Create a read node for Double (Float) slot.
      */
-    @Specialization(guards = "kind == 2")
-    protected boolean readBoolean(VirtualFrame frame) {
-        return frame.getBoolean(getSlot());
+    public static ReadLocalNode createDouble(int slot) {
+        return new ReadLocalNode(slot, KIND_DOUBLE);
     }
 
     /**
-     * General path: Read Object (any other type).
+     * Create a read node for Boolean (Bool) slot.
      */
-    @Specialization(guards = "kind == 3")
-    protected Object readObject(VirtualFrame frame) {
-        return frame.getObject(getSlot());
+    public static ReadLocalNode createBoolean(int slot) {
+        return new ReadLocalNode(slot, KIND_BOOLEAN);
     }
 
     /**
-     * Create a read node with the appropriate kind.
-     */
-    public static ReadLocalNode create(int slot, int kind) {
-        return ReadLocalNodeGen.create(slot, kind);
-    }
-
-    /**
-     * Create a read node for Object slot (default).
+     * Create a read node for Object slot.
      */
     public static ReadLocalNode createObject(int slot) {
-        return create(slot, KIND_OBJECT);
+        return new ReadLocalNode(slot, KIND_OBJECT);
     }
 }

@@ -122,7 +122,8 @@ data class ExportedItem(
     val type: ExportedItemType,
     val mezzeType: MezzeType,
     val originalName: String,
-    val visibility: Visibility = Visibility.PUBLIC
+    val visibility: Visibility = Visibility.PUBLIC,
+    val contentHash: String? = null  // Content hash hex string for content-addressed lookup
 )
 
 /**
@@ -692,7 +693,8 @@ class ModuleResolver(
                             name = item.variableName,
                             type = ExportedItemType.FUNCTION,
                             mezzeType = mezzeType,
-                            originalName = item.variableName
+                            originalName = item.variableName,
+                            contentHash = item.contentHash
                         )
                     }
                 }
@@ -703,7 +705,8 @@ class ModuleResolver(
                             name = item.name,
                             type = ExportedItemType.TYPE,
                             mezzeType = item.inferredType ?: MezzeType.VarType(TypeVar.fresh()),
-                            originalName = item.name
+                            originalName = item.name,
+                            contentHash = item.contentHash
                         )
                     }
                 }
@@ -719,7 +722,8 @@ class ModuleResolver(
                         name = item.name,
                         type = ExportedItemType.EFFECT,
                         mezzeType = mezzeType,
-                        originalName = item.name
+                        originalName = item.name,
+                        contentHash = item.contentHash
                     )
                 }
                 is ImplDeclaration -> {
@@ -737,7 +741,8 @@ class ModuleResolver(
                         name = performerName,
                         type = ExportedItemType.FUNCTION, // Handlers are treated as values
                         mezzeType = mezzeType,
-                        originalName = performerName
+                        originalName = performerName,
+                        contentHash = item.contentHash
                     )
                 }
                 is AbilityDeclaration -> {
@@ -752,7 +757,8 @@ class ModuleResolver(
                         name = item.name,
                         type = ExportedItemType.ABILITY,
                         mezzeType = mezzeType,
-                        originalName = item.name
+                        originalName = item.name,
+                        contentHash = item.contentHash
                     )
                 }
                 else -> {
@@ -1042,8 +1048,12 @@ class ModuleResolver(
         return when (expr) {
             is Identifier -> {
                 // If this identifier refers to a module-defined function, qualify it
-                if (expr.name in moduleNames) {
-                    expr.copy(name = prefix + expr.name)
+                if (expr.localName in moduleNames && expr.qualifier == null) {
+                    // Convert prefix like "module__" to ModulePath
+                    val qualifierSegments = prefix.trimEnd('_').split("__")
+                    expr.copy(
+                        qualifier = ModulePath(qualifierSegments)
+                    )
                 } else {
                     expr // Leave external references unchanged
                 }

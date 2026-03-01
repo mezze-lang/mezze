@@ -88,7 +88,7 @@ class InternalBindingRenamer {
         is Identifier -> {
             val renamed = env[expr.name]
             if (renamed != null) {
-                expr.copy(name = renamed)
+                expr.copy(localName = renamed, qualifier = null)  // Renamed binding is now unqualified
             } else {
                 expr  // External reference or parameter - keep as-is
             }

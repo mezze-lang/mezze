@@ -355,7 +355,8 @@ class ImportResolver(
                         originalName = export.originalName,
                         modulePath = modulePath,
                         type = export.mezzeType,
-                        isQualified = isQualified
+                        isQualified = isQualified,
+                        contentHash = export.contentHash
                     )
                 }
                 ExportedItemType.TYPE -> {
@@ -375,7 +376,8 @@ class ImportResolver(
                         originalName = export.originalName,
                         modulePath = modulePath,
                         type = export.mezzeType,
-                        isQualified = isQualified
+                        isQualified = isQualified,
+                        contentHash = export.contentHash
                     )
                 }
                 ExportedItemType.CONSTRUCTOR -> {
@@ -384,7 +386,8 @@ class ImportResolver(
                         originalName = export.originalName,
                         modulePath = modulePath,
                         type = export.mezzeType,
-                        isQualified = isQualified
+                        isQualified = isQualified,
+                        contentHash = export.contentHash
                     )
                 }
                 ExportedItemType.ABILITY -> {
@@ -404,7 +407,8 @@ class ImportResolver(
                         originalName = export.originalName,
                         modulePath = modulePath,
                         type = export.mezzeType,
-                        isQualified = isQualified
+                        isQualified = isQualified,
+                        contentHash = export.contentHash
                     )
                 }
                 ExportedItemType.EFFECT -> {
@@ -424,7 +428,8 @@ class ImportResolver(
                         originalName = export.originalName,
                         modulePath = modulePath,
                         type = export.mezzeType,
-                        isQualified = isQualified
+                        isQualified = isQualified,
+                        contentHash = export.contentHash
                     )
                 }
             }
@@ -485,7 +490,8 @@ class ImportResolver(
                         originalName = export.originalName,
                         modulePath = modulePath,
                         type = export.mezzeType,
-                        isQualified = false  // Selective imports are unqualified
+                        isQualified = false,  // Selective imports are unqualified
+                        contentHash = export.contentHash
                     )
                 }
                 ExportedItemType.TYPE -> {

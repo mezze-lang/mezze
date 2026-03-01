@@ -213,12 +213,58 @@ data class ArrayAccess(
 // VARIABLES
 // ============================================================================
 
+/**
+ * Identifier expression - references a variable, function, or qualified module member.
+ *
+ * Examples:
+ * - Simple: `x`, `foo`
+ * - Qualified: `bytes::from_string`, `std::math::pi`
+ *
+ * For qualified identifiers (e.g., `bytes::from_string`):
+ * - `localName` = "from_string"
+ * - `qualifier` = ModulePath(["bytes"])
+ * - `name` = "bytes::from_string" (computed, for backwards compatibility)
+ *
+ * The `resolvedContentHash` is populated during type-checking and provides
+ * content-addressed lookup for cross-module references.
+ */
 @Serializable
 data class Identifier(
-    val name: String,
+    /** The local name of the identifier (e.g., "from_string" in "bytes::from_string") */
+    val localName: String,
+    /** Module qualifier if this is a qualified reference (e.g., ModulePath(["bytes"])) */
+    val qualifier: ModulePath? = null,
+    /** Content hash of the referenced definition (populated by typechecker) */
+    val resolvedContentHash: String? = null,
     override val inferredType: MezzeType? = null,
     override val sourceLocation: SourceLocation? = null
-) : Expression
+) : Expression {
+    /** Full name including qualifier (for backwards compatibility) */
+    val name: String get() = if (qualifier != null && qualifier.segments.isNotEmpty()) {
+        "${qualifier.fullPath}::$localName"
+    } else {
+        localName
+    }
+
+    /** Whether this is a qualified reference (e.g., bytes::from_string) */
+    val isQualified: Boolean get() = qualifier != null && qualifier.segments.isNotEmpty()
+
+    companion object {
+        /** Create an Identifier from a full name string (for backwards compatibility) */
+        fun fromName(name: String, sourceLocation: SourceLocation? = null): Identifier {
+            return if (name.contains("::")) {
+                val parts = name.split("::")
+                Identifier(
+                    localName = parts.last(),
+                    qualifier = ModulePath(parts.dropLast(1)),
+                    sourceLocation = sourceLocation
+                )
+            } else {
+                Identifier(localName = name, sourceLocation = sourceLocation)
+            }
+        }
+    }
+}
 
 // Temporary placeholder for pipe operator desugaring - should never appear in final AST
 @Serializable
@@ -329,7 +375,9 @@ data class MemberAccess(
     val receiver: Expression,
     val member: String,
     override val inferredType: MezzeType? = null,
-    override val sourceLocation: SourceLocation? = null
+    override val sourceLocation: SourceLocation? = null,
+    // For module-qualified access (e.g., bytes::from_string), the content hash of the resolved function
+    val resolvedContentHash: String? = null
 ) : Expression
 
 @Serializable
@@ -455,7 +503,10 @@ data class FunctionCall(
 
     // TCO: True when this call is a self-recursive tail call
     // Set by the typechecker when the call is in tail position and calls the enclosing function
-    val isTailCall: Boolean = false
+    val isTailCall: Boolean = false,
+
+    // Content hash for monomorphic dispatch - allows direct lookup without string parsing
+    val resolvedFunctionContentHash: String? = null
 ) : Expression {
     override fun toString(): String = RecordLiteral.safeToString(
         "FunctionCall",

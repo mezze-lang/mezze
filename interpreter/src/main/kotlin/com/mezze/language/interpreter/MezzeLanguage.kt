@@ -20,8 +20,8 @@ import com.mezze.language.interpreter.nodes.MezzeNode
  */
 @Registration(
     id = MezzeLanguage.ID,
-    name = "Mezze",
-    implementationName = "Mezze",
+    name = "Mezze V1",
+    implementationName = "Mezze V1",
     version = "1.0.0",
     defaultMimeType = MezzeLanguage.MIME_TYPE,
     characterMimeTypes = [MezzeLanguage.MIME_TYPE],
@@ -30,10 +30,18 @@ import com.mezze.language.interpreter.nodes.MezzeNode
     internal = false
 )
 class MezzeLanguage : TruffleLanguage<MezzeContext>() {
-    
+
     companion object {
-        const val ID = "mezze"
+        const val ID = "mezze-v1"
         const val MIME_TYPE = "application/x-mezze"
+
+        /**
+         * Flag to enable interpreterv2's optimized execution.
+         * Set via system property: -Dmezze.use.v2=true
+         * Default: false (use v1 for backward compatibility)
+         */
+        @JvmStatic
+        val USE_V2: Boolean = System.getProperty("mezze.use.v2", "false").toBoolean()
 
         // Store the last execution context for test access
         @Volatile
@@ -205,6 +213,9 @@ class MezzeLanguage : TruffleLanguage<MezzeContext>() {
                 }
 
                 // Convert main program with accumulated handler mappings
+                // NOTE: USE_V2 integration is disabled for now.
+                // V2 converter requires its own MezzeContext and runtime, not just an adapter.
+                // To enable V2: implement proper V2 language context initialization.
                 val converter = ASTToTruffleConverter(parentHandlerMapping = accumulatedHandlerMapping)
                 val truffleNode = converter.convertProgram(programWithMonomorphicInstances)
                 val frameDescriptor = converter.getFrameDescriptor()
@@ -277,6 +288,8 @@ class MezzeLanguage : TruffleLanguage<MezzeContext>() {
             }
 
             // Convert main program with accumulated handler mappings
+            // NOTE: USE_V2 integration is disabled for now.
+            // V2 converter requires its own MezzeContext and runtime, not just an adapter.
             val converter = ASTToTruffleConverter(parentHandlerMapping = accumulatedHandlerMapping)
             val truffleNode = converter.convertProgram(typedProgram)
             val frameDescriptor = converter.getFrameDescriptor()

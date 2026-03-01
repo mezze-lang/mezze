@@ -1,17 +1,22 @@
 package com.mezze.interpreter.v2.nodes.literal;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
 
 /**
- * Integer literal node.
+ * Integer literal node - ZERO OVERHEAD.
+ *
+ * The value is @CompilationFinal so the JIT will inline
+ * this node as a constant load, eliminating all dispatch.
  * Returns primitive long (unboxed) for maximum performance.
  */
 @NodeInfo(shortName = "int")
 public final class IntLiteralNode extends MezzeNode {
 
+    @CompilationFinal
     private final long value;
 
     public IntLiteralNode(long value) {

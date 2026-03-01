@@ -7,13 +7,16 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
  * Logical NOT node.
+ *
+ * Static method is used for specialization to enable
+ * better inlining by the JIT compiler.
  */
 @NodeChild("operand")
 @NodeInfo(shortName = "not")
 public abstract class NotNode extends MezzeNode {
 
     @Specialization
-    protected boolean not(boolean value) {
+    protected static boolean not(boolean value) {
         return !value;
     }
 }

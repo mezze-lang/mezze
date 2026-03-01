@@ -1,56 +1,66 @@
 package com.mezze.interpreter.v2.nodes.control;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.oracle.truffle.api.CompilerDirectives;
+import com.oracle.truffle.api.dsl.Cached;
+import com.oracle.truffle.api.dsl.Cached.Exclusive;
+import com.oracle.truffle.api.dsl.NodeChild;
+import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.nodes.UnexpectedResultException;
-import com.oracle.truffle.api.profiles.CountingConditionProfile;
+import com.oracle.truffle.api.profiles.InlinedBranchProfile;
+import com.oracle.truffle.api.profiles.InlinedConditionProfile;
 
 /**
- * Short-circuit OR node.
+ * Short-circuit OR node with INLINED profiling.
  *
  * Evaluates left first, only evaluates right if left is false.
+ * Uses InlinedConditionProfile for optimal short-circuit prediction.
  */
+@NodeChild(value = "leftNode", type = MezzeNode.class)
 @NodeInfo(shortName = "or")
-public final class OrNode extends MezzeNode {
+public abstract class OrNode extends MezzeNode {
 
-    @Child private MezzeNode leftNode;
     @Child private MezzeNode rightNode;
 
-    private final CountingConditionProfile profile = CountingConditionProfile.create();
-
-    public OrNode(MezzeNode leftNode, MezzeNode rightNode) {
-        this.leftNode = leftNode;
+    protected OrNode(MezzeNode rightNode) {
         this.rightNode = rightNode;
     }
 
-    @Override
-    public Object execute(VirtualFrame frame) {
-        boolean left;
-        try {
-            left = leftNode.executeBoolean(frame);
-        } catch (UnexpectedResultException e) {
-            throw new RuntimeException("OR left operand must be boolean, got: " + e.getResult());
-        }
-
+    /**
+     * Boolean OR with short-circuit evaluation.
+     */
+    @Specialization
+    protected boolean doOr(VirtualFrame frame, boolean left,
+            @Cached @Exclusive InlinedConditionProfile shortCircuitProfile,
+            @Cached @Exclusive InlinedBranchProfile errorProfile) {
         // Short-circuit: if left is true, don't evaluate right
-        if (profile.profile(left)) {
+        if (shortCircuitProfile.profile(this, left)) {
             return true;
         }
-
         try {
             return rightNode.executeBoolean(frame);
         } catch (UnexpectedResultException e) {
+            errorProfile.enter(this);
+            CompilerDirectives.transferToInterpreterAndInvalidate();
             throw new RuntimeException("OR right operand must be boolean, got: " + e.getResult());
         }
     }
 
     @Override
     public boolean executeBoolean(VirtualFrame frame) throws UnexpectedResultException {
-        boolean left = leftNode.executeBoolean(frame);
-        if (profile.profile(left)) {
-            return true;
+        Object result = execute(frame);
+        if (result instanceof Boolean b) {
+            return b;
         }
-        return rightNode.executeBoolean(frame);
+        throw new UnexpectedResultException(result);
+    }
+
+    /**
+     * Create an OR node.
+     */
+    public static OrNode create(MezzeNode leftNode, MezzeNode rightNode) {
+        return OrNodeGen.create(rightNode, leftNode);
     }
 }

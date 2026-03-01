@@ -10,6 +10,13 @@ plugins {
 application {
     mainClass.set("com.mezze.language.cli.MainKt")
     applicationName = "mez"
+    // Suppress Truffle/GraalVM warnings on JDK 21+
+    applicationDefaultJvmArgs = listOf(
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+    )
 }
 
 kotlin {
@@ -21,6 +28,7 @@ dependencies {
     implementation(project(":parser"))
     implementation(project(":typechecker"))
     implementation(project(":interpreter"))
+    implementation(project(":interpreterv2"))
     implementation(project(":lsp"))
 
     // Polyglot API (Context, Value, Source) - host API - match native-image version

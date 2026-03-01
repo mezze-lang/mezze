@@ -70,7 +70,7 @@ data class ExportedItem(
     val mezzeType: MezzeType,          // Type of the item
     val originalName: String,          // Original name in module (before aliasing)
     val visibility: Visibility = Visibility.PUBLIC,
-    val contentHash: MezzeHash? = null // Content hash for content-addressed lookup
+    val contentHash: String? = null    // Content hash hex string for content-addressed lookup
 )
 
 /**
@@ -278,7 +278,7 @@ data class ImportedBinding(
     val type: MezzeType,               // Type of the binding
     val isQualified: Boolean = false,  // true for qualified imports (module::name)
     val sourceLocation: SourceLocation? = null,
-    val contentHash: MezzeHash? = null // Content hash for content-addressed lookup
+    val contentHash: String? = null    // Content hash hex string for content-addressed lookup
 )
 
 // ============================================================================

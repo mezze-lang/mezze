@@ -705,7 +705,7 @@ object BasicTypes {
 
         // Glob pattern matching
         context["__native_string_glob_match"] = MezzeType.FunctionType(
-            MezzeType.RecordType(mapOf("pattern" to MezzeType.StringType, "text" to MezzeType.StringType)),
+            MezzeType.RecordType(mapOf("pattern" to MezzeType.StringType, "s" to MezzeType.StringType)),
             MezzeType.BooleanType
         )
     }

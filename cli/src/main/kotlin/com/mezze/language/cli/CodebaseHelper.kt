@@ -3,6 +3,7 @@ package com.mezze.language.cli
 import com.mezze.language.ast.TypeCheckResult
 import com.mezze.language.codebase.CodebaseManager
 import com.mezze.language.codebase.CodebasePopulator
+import com.mezze.language.typechecker.cache.TypeCheckCache
 import java.io.File
 import java.nio.file.Path
 
@@ -38,6 +39,9 @@ object CodebaseHelper {
 
         val codebase = CodebaseManager.forProjectRoot(projectFile)
         try {
+            // Initialize TypeCheckCache with SQLite codebase for L2 persistence
+            TypeCheckCache.initialize(codebase)
+
             // Note: We only store the main program for now
             // Module programs are stored separately when they are type-checked
             CodebasePopulator.populate(

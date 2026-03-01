@@ -121,6 +121,7 @@ class ExpressionConstraintGenerator {
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val effects = mutableSetOf<String>()
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val usedVars = mutableSetOf<String>()
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
 
@@ -137,6 +138,7 @@ class ExpressionConstraintGenerator {
                     // Propagate effects and ability constraints from interpolated expressions
                     effects.addAll(exprResult.effects)
                     abilityConstraints.addAll(exprResult.abilityConstraints)
+                    associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
                     // Track used variables from interpolated expressions
                     usedVars.addAll(exprResult.usedVariables)
                     referencedBindings.addAll(exprResult.referencedBindings)
@@ -157,6 +159,7 @@ class ExpressionConstraintGenerator {
             constraints = constraints,
             effects = effects,
             abilityConstraints = abilityConstraints,
+            associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = undefinedVars,
             usedVariables = usedVars,
             referencedBindings = referencedBindings
@@ -176,6 +179,7 @@ class ExpressionConstraintGenerator {
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val effects = mutableSetOf<String>()
 
         for (element in expr.elements) {
@@ -185,6 +189,7 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(result.constraints)
                     undefinedVars.addAll(result.undefinedVariables)
                     abilityConstraints.addAll(result.abilityConstraints)
+                    associatedTypeConstraints.addAll(result.associatedTypeConstraints)
                     effects.addAll(result.effects)
                     // Regular element must match element type
                     constraints.add(
@@ -201,6 +206,7 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(result.constraints)
                     undefinedVars.addAll(result.undefinedVariables)
                     abilityConstraints.addAll(result.abilityConstraints)
+                    associatedTypeConstraints.addAll(result.associatedTypeConstraints)
                     effects.addAll(result.effects)
                     // Spread element must be an array with matching element type
                     constraints.add(
@@ -220,6 +226,7 @@ class ExpressionConstraintGenerator {
             constraints = constraints,
             effects = effects,
             abilityConstraints = abilityConstraints,
+            associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = undefinedVars
         )
     }
@@ -333,14 +340,16 @@ class ExpressionConstraintGenerator {
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
                                 name = expr.name,
-                                sourceLocation = expr.sourceLocation
+                                sourceLocation = expr.sourceLocation,
+                                qualifier = expr.qualifier,
+                                isQualified = expr.isQualified
                             )
                         )
                     )
                 }
 
                 // Check if it's a variant constructor (uppercase) or undefined variable (lowercase)
-                if (expr.name.first().isUpperCase()) {
+                if (expr.localName.first().isUpperCase()) {
                     // Uppercase names are treated as variant constructors
                     // CRITICAL: Don't create a concrete variant type here!
                     // Instead, create a fresh type variable with a HasConstructor constraint.
@@ -349,9 +358,9 @@ class ExpressionConstraintGenerator {
                     val constraints = listOf(
                         Constraint.HasConstructor(
                             variantType = resultType,
-                            constructorName = expr.name,
+                            constructorName = expr.localName,
                             payloadType = null,
-                            context = "Variant constructor ${expr.name}"
+                            context = "Variant constructor ${expr.localName}"
                         )
                     )
                     ConstraintResult(
@@ -368,7 +377,9 @@ class ExpressionConstraintGenerator {
                         undefinedVariables = listOf(
                             ConstraintResult.UndefinedVariable(
                                 name = expr.name,
-                                sourceLocation = expr.sourceLocation
+                                sourceLocation = expr.sourceLocation,
+                                qualifier = expr.qualifier,
+                                isQualified = expr.isQualified
                             )
                         )
                     )
@@ -440,6 +451,7 @@ class ExpressionConstraintGenerator {
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val usedVars = mutableSetOf<String>()
 
         // Pre-pass: collect ALL explicit field names upfront
@@ -462,13 +474,14 @@ class ExpressionConstraintGenerator {
         for (entry in expr.entries) {
             when (entry) {
                 is RecordFieldEntry -> {
-                    val fieldValue = entry.value ?: Identifier(entry.name)
+                    val fieldValue = entry.value ?: Identifier(localName = entry.name)
                     val fieldResult = generate(fieldValue, fieldContext)
 
                     explicitFieldTypes[entry.name] = fieldResult.type
                     constraints.addAll(fieldResult.constraints)
                     undefinedVars.addAll(fieldResult.undefinedVariables)
                     abilityConstraints.addAll(fieldResult.abilityConstraints)
+                    associatedTypeConstraints.addAll(fieldResult.associatedTypeConstraints)
                     usedVars.addAll(fieldResult.usedVariables)
                 }
                 is RecordSpreadEntry -> {
@@ -478,6 +491,7 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(spreadResult.constraints)
                     undefinedVars.addAll(spreadResult.undefinedVariables)
                     abilityConstraints.addAll(spreadResult.abilityConstraints)
+                    associatedTypeConstraints.addAll(spreadResult.associatedTypeConstraints)
                     usedVars.addAll(spreadResult.usedVariables)
 
                     // Extract fields from the spread type and merge into our record
@@ -595,6 +609,7 @@ class ExpressionConstraintGenerator {
             constraints = constraints,
             undefinedVariables = undefinedVars,
             abilityConstraints = abilityConstraints,
+            associatedTypeConstraints = associatedTypeConstraints,
             usedVariables = usedVars
         )
     }
@@ -865,9 +880,14 @@ class ExpressionConstraintGenerator {
             )
         }
 
+        // Get ability declaration to check for associated types
+        val abilityDecl = context.abilityDeclarations[abilityName]
+        val associatedTypeNames = abilityDecl?.associatedTypes ?: emptyList()
+
         // Instantiate method type with fresh type variables
         // This prevents type variable pollution across different method calls
-        val instantiatedMethodType = instantiateTypeWithFreshVars(methodType)
+        // BUT: We need to preserve associated type variable names so we can match them later
+        val instantiatedMethodType = instantiateTypeWithFreshVarsPreservingAssociated(methodType, associatedTypeNames)
 
         // Add ability constraint to the function type
         if (instantiatedMethodType is MezzeType.FunctionType) {
@@ -880,24 +900,63 @@ class ExpressionConstraintGenerator {
                 return ConstraintResult.simple(instantiatedMethodType)
             }
 
+            // Separate type params from associated types
+            // Type params are declared in ability declaration typeParams (e.g., 'c for Container 'c)
+            // Associated types are declared in associatedTypes (e.g., 'item for Container 'c having 'item)
+            val typeParamNames = abilityDecl?.typeParams?.map { it.removePrefix("'") }?.toSet() ?: emptySet()
+            val associatedTypeNamesNormalized = associatedTypeNames.map { it.removePrefix("'") }.toSet()
+
+            // Find the type variables that correspond to associated types
+            val associatedTypeVarsMap = mutableMapOf<String, TypeVar>()
+            val regularTypeVars = mutableListOf<TypeVar>()
+
+            for (typeVar in typeVars) {
+                val varName = typeVar.name.removePrefix("'")
+                if (associatedTypeNamesNormalized.contains(varName)) {
+                    associatedTypeVarsMap[varName] = typeVar
+                } else {
+                    regularTypeVars.add(typeVar)
+                }
+            }
+
+            // Build constraints
+            val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+            val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
+
             // Create ability constraint for the primary type variable
             // Convert type variables to type arguments (wrapped in VarType)
             // For single-parameter abilities (like Identity 'a), typeArgs will be empty
             // For multi-parameter abilities (like Convert 'a 'b), typeArgs will be ['b]
-            val typeArgs = typeVars.drop(1).map { MezzeType.VarType(it) }
+            if (regularTypeVars.isNotEmpty()) {
+                val typeArgs = regularTypeVars.drop(1).map { MezzeType.VarType(it) }
 
-            val abilityConstraint = Constraint.AbilityRequired(
-                typeVar = typeVars.first(),
-                abilityName = abilityName,
-                typeArgs = typeArgs,  // Additional type arguments if multi-parameter ability
-                context = "Ability method call: $abilityName.$methodName",
-                sourceLocation = expr.sourceLocation
-            )
+                val abilityConstraint = Constraint.AbilityRequired(
+                    typeVar = regularTypeVars.first(),
+                    abilityName = abilityName,
+                    typeArgs = typeArgs,  // Additional type arguments if multi-parameter ability
+                    context = "Ability method call: $abilityName.$methodName",
+                    sourceLocation = expr.sourceLocation
+                )
+                abilityConstraints.add(abilityConstraint)
+
+                // If there are associated types, add AssociatedTypeResolution constraint
+                if (associatedTypeVarsMap.isNotEmpty()) {
+                    val associatedTypeConstraint = Constraint.AssociatedTypeResolution(
+                        abilityName = abilityName,
+                        primaryTypeVar = regularTypeVars.first(),
+                        associatedTypeVars = associatedTypeVarsMap,
+                        context = "Associated type resolution for $abilityName.$methodName",
+                        sourceLocation = expr.sourceLocation
+                    )
+                    associatedTypeConstraints.add(associatedTypeConstraint)
+                }
+            }
 
             return ConstraintResult(
                 type = instantiatedMethodType,
                 constraints = emptyList(),
-                abilityConstraints = listOf(abilityConstraint)
+                abilityConstraints = abilityConstraints,
+                associatedTypeConstraints = associatedTypeConstraints
             )
         }
 
@@ -1188,6 +1247,38 @@ class ExpressionConstraintGenerator {
     }
 
     /**
+     * Instantiate a type with fresh type variables, but preserve the names of associated types.
+     * @param type The type to instantiate
+     * @param associatedTypeNames List of associated type names (with or without ' prefix, e.g., ["'item"] or ["item"])
+     */
+    private fun instantiateTypeWithFreshVarsPreservingAssociated(
+        type: MezzeType,
+        associatedTypeNames: List<String>
+    ): MezzeType {
+        val freeVars = getFreeTypeVariables(type)
+        if (freeVars.isEmpty()) {
+            return type
+        }
+
+        // Normalize associated type names (remove ' prefix if present)
+        val normalizedAssociatedNames = associatedTypeNames.map { it.removePrefix("'") }.toSet()
+
+        // Create substitution: fresh vars for type params, preserve names for associated types
+        val substitution = freeVars.associateWith { oldVar ->
+            val normalizedName = oldVar.name.removePrefix("'")
+            if (normalizedAssociatedNames.contains(normalizedName)) {
+                // Associated type variable - preserve the name but create new instance
+                // Use the original name to ensure matching later
+                TypeVar(oldVar.name)
+            } else {
+                // Regular type variable - create fresh one
+                TypeVar.fresh()
+            }
+        }
+        return applyTypeVarSubstitution(type, substitution)
+    }
+
+    /**
      * Get all free type variables in a type.
      */
     private fun getFreeTypeVariables(type: MezzeType): Set<TypeVar> {
@@ -1400,7 +1491,7 @@ class ExpressionConstraintGenerator {
         undefinedVars.addAll(baseResult.undefinedVariables)
 
         for (update in expr.updates) {
-            val updateResult = generate(update.value ?: Identifier(update.name), context)
+            val updateResult = generate(update.value ?: Identifier(localName = update.name), context)
             constraints.addAll(updateResult.constraints)
             undefinedVars.addAll(updateResult.undefinedVariables)
 
@@ -1944,6 +2035,8 @@ class ExpressionConstraintGenerator {
 
         // CRITICAL: Propagate ability constraints from function and arguments
         val collectedAbilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints
+        // CRITICAL: Propagate associated type constraints from function and arguments
+        val collectedAssociatedTypeConstraints = functionResult.associatedTypeConstraints + argumentResult.associatedTypeConstraints
 
         // TCO: Include tail call if detected
         val baseTailCalls = functionResult.tailCalls + argumentResult.tailCalls
@@ -1955,6 +2048,7 @@ class ExpressionConstraintGenerator {
             effects = collectedEffects,  // Propagate effects from function and arguments
             performed = collectedPerformed,  // Propagate performed flag
             abilityConstraints = collectedAbilityConstraints,  // Propagate ability constraints
+            associatedTypeConstraints = collectedAssociatedTypeConstraints,  // Propagate associated type constraints
             undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
             usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
             tailCalls = tailCalls,
@@ -2008,6 +2102,7 @@ class ExpressionConstraintGenerator {
         val effects = conditionResult.effects + thenResult.effects + elseResult.effects
         val performed = conditionResult.performed || thenResult.performed || elseResult.performed
         val abilityConstraints = conditionResult.abilityConstraints + thenResult.abilityConstraints + elseResult.abilityConstraints
+        val associatedTypeConstraints = conditionResult.associatedTypeConstraints + thenResult.associatedTypeConstraints + elseResult.associatedTypeConstraints
 
         // TCO: Propagate tail calls from branches
         val tailCalls = conditionResult.tailCalls + thenResult.tailCalls + elseResult.tailCalls
@@ -2018,6 +2113,7 @@ class ExpressionConstraintGenerator {
             effects = effects,
             performed = performed,
             abilityConstraints = abilityConstraints,
+            associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = conditionResult.undefinedVariables + thenResult.undefinedVariables + elseResult.undefinedVariables,
             tailCalls = tailCalls,
             usedVariables = conditionResult.usedVariables + thenResult.usedVariables + elseResult.usedVariables,
@@ -2038,6 +2134,8 @@ class ExpressionConstraintGenerator {
         undefinedVars.addAll(scrutineeResult.undefinedVariables)
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         abilityConstraints.addAll(scrutineeResult.abilityConstraints)
+        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
+        associatedTypeConstraints.addAll(scrutineeResult.associatedTypeConstraints)
         val effects = mutableSetOf<String>()
         effects.addAll(scrutineeResult.effects)
         var performed = scrutineeResult.performed  // Track performed flag
@@ -2111,6 +2209,7 @@ class ExpressionConstraintGenerator {
                 constraints.addAll(guardResult.constraints)
                 undefinedVars.addAll(guardResult.undefinedVariables)
                 abilityConstraints.addAll(guardResult.abilityConstraints)
+                associatedTypeConstraints.addAll(guardResult.associatedTypeConstraints)
                 effects.addAll(guardResult.effects)
                 performed = performed || guardResult.performed  // Propagate performed
                 duplicateBindings.addAll(guardResult.duplicateBindings)
@@ -2138,6 +2237,7 @@ class ExpressionConstraintGenerator {
                 constraints.addAll(bindingExprResult.constraints)
                 undefinedVars.addAll(bindingExprResult.undefinedVariables)
                 abilityConstraints.addAll(bindingExprResult.abilityConstraints)
+                associatedTypeConstraints.addAll(bindingExprResult.associatedTypeConstraints)
                 effects.addAll(bindingExprResult.effects)
                 performed = performed || bindingExprResult.performed
                 duplicateBindings.addAll(bindingExprResult.duplicateBindings)
@@ -2164,6 +2264,7 @@ class ExpressionConstraintGenerator {
             constraints.addAll(caseBodyResult.constraints)
             undefinedVars.addAll(caseBodyResult.undefinedVariables)
             abilityConstraints.addAll(caseBodyResult.abilityConstraints)
+            associatedTypeConstraints.addAll(caseBodyResult.associatedTypeConstraints)
             effects.addAll(caseBodyResult.effects)
             performed = performed || caseBodyResult.performed  // Propagate performed
             duplicateBindings.addAll(caseBodyResult.duplicateBindings)
@@ -2215,6 +2316,7 @@ class ExpressionConstraintGenerator {
             effects = effects,
             performed = performed,  // Include performed flag
             abilityConstraints = abilityConstraints,
+            associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = undefinedVars,
             duplicateBindings = duplicateBindings,
             tailCalls = tailCalls,
@@ -2242,6 +2344,7 @@ class ExpressionConstraintGenerator {
         val effects = mutableSetOf<String>()
         var performed = false  // Track performed flag
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
+        val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         // TCO: Track tail calls from result expression (statements are not in tail position)
         val tailCalls = mutableSetOf<SourceLocation>()
         // Track referenced bindings for dependency graph
@@ -2276,6 +2379,7 @@ class ExpressionConstraintGenerator {
                     effects.addAll(exprResult.effects)
                     performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
+                    associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
                     referencedBindings.addAll(exprResult.referencedBindings)
                     usedVars.addAll(exprResult.usedVariables)
 
@@ -2338,6 +2442,7 @@ class ExpressionConstraintGenerator {
                     effects.addAll(exprResult.effects)
                     performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
+                    associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
                     referencedBindings.addAll(exprResult.referencedBindings)
                     usedVars.addAll(exprResult.usedVariables)
                 }
@@ -2358,6 +2463,7 @@ class ExpressionConstraintGenerator {
         effects.addAll(resultResult.effects)
         performed = performed || resultResult.performed  // Propagate performed
         abilityConstraints.addAll(resultResult.abilityConstraints)
+        associatedTypeConstraints.addAll(resultResult.associatedTypeConstraints)
         // TCO: Only the result expression can have tail calls
         tailCalls.addAll(resultResult.tailCalls)
         referencedBindings.addAll(resultResult.referencedBindings)
@@ -2389,6 +2495,7 @@ class ExpressionConstraintGenerator {
             effects = effects,  // Still track effects for propagation
             performed = performed,  // Include performed flag
             abilityConstraints = abilityConstraints,
+            associatedTypeConstraints = associatedTypeConstraints,
             undefinedVariables = undefinedVars,
             tailCalls = tailCalls,
             usedVariables = usedVars,

@@ -32,7 +32,7 @@ class SQLiteCodebase private constructor(
 ) : Codebase {
 
     companion object {
-        const val SCHEMA_VERSION = 2  // Added file_cache table
+        const val SCHEMA_VERSION = 3  // Added typecheck cache tables
         const val PROJECT_DIR = ".mez"
         const val CODEBASE_FILE = "codebase.db"
 
@@ -305,6 +305,38 @@ class SQLiteCodebase private constructor(
             )
         """.trimIndent())
         stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_file_cache_hash ON file_cache(source_hash)")
+
+        // Constraint cache table - stores ConstraintResult per binding content hash
+        stmt.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS constraint_cache (
+                binding_hash TEXT NOT NULL,
+                context_hash TEXT NOT NULL,
+                result_blob BLOB NOT NULL,
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (binding_hash, context_hash)
+            )
+        """.trimIndent())
+
+        // Monomorphization cache table - stores specialized function instances
+        stmt.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS monomorphic_cache (
+                original_hash TEXT NOT NULL,
+                type_args_hash TEXT NOT NULL,
+                binding_blob BLOB NOT NULL,
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                PRIMARY KEY (original_hash, type_args_hash)
+            )
+        """.trimIndent())
+
+        // Ability implementation cache table - stores ability impl lookups
+        stmt.executeUpdate("""
+            CREATE TABLE IF NOT EXISTS ability_impl_cache (
+                ability_key TEXT PRIMARY KEY,
+                impl_hash TEXT NOT NULL,
+                module_path TEXT,
+                updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        """.trimIndent())
     }
 
     // ========================================================================
@@ -401,6 +433,159 @@ class SQLiteCodebase private constructor(
     fun clearAllFileCache() {
         connection.createStatement().use { stmt ->
             stmt.executeUpdate("DELETE FROM file_cache")
+        }
+    }
+
+    // ========================================================================
+    // CONSTRAINT CACHE (for incremental type checking)
+    // ========================================================================
+
+    /**
+     * Get cached constraint result for a binding.
+     */
+    fun getCachedConstraintResult(bindingHash: String, contextHash: String): ByteArray? {
+        connection.prepareStatement("""
+            SELECT result_blob FROM constraint_cache
+            WHERE binding_hash = ? AND context_hash = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, bindingHash)
+            stmt.setString(2, contextHash)
+            return stmt.executeQuery().use { rs ->
+                if (rs.next()) rs.getBytes("result_blob") else null
+            }
+        }
+    }
+
+    /**
+     * Store constraint result in cache.
+     */
+    fun cacheConstraintResult(bindingHash: String, contextHash: String, resultBlob: ByteArray) {
+        connection.prepareStatement("""
+            INSERT OR REPLACE INTO constraint_cache (binding_hash, context_hash, result_blob, updated_at)
+            VALUES (?, ?, ?, strftime('%s', 'now'))
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, bindingHash)
+            stmt.setString(2, contextHash)
+            stmt.setBytes(3, resultBlob)
+            stmt.executeUpdate()
+        }
+    }
+
+    /**
+     * Clear constraint cache for a specific binding.
+     */
+    fun clearConstraintCache(bindingHash: String) {
+        connection.prepareStatement("DELETE FROM constraint_cache WHERE binding_hash = ?").use { stmt ->
+            stmt.setString(1, bindingHash)
+            stmt.executeUpdate()
+        }
+    }
+
+    /**
+     * Clear all constraint cache entries.
+     */
+    fun clearAllConstraintCache() {
+        connection.createStatement().use { stmt ->
+            stmt.executeUpdate("DELETE FROM constraint_cache")
+        }
+    }
+
+    // ========================================================================
+    // MONOMORPHIZATION CACHE
+    // ========================================================================
+
+    /**
+     * Get cached monomorphic instance.
+     */
+    fun getCachedMonomorphicInstance(originalHash: String, typeArgsHash: String): ByteArray? {
+        connection.prepareStatement("""
+            SELECT binding_blob FROM monomorphic_cache
+            WHERE original_hash = ? AND type_args_hash = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, originalHash)
+            stmt.setString(2, typeArgsHash)
+            return stmt.executeQuery().use { rs ->
+                if (rs.next()) rs.getBytes("binding_blob") else null
+            }
+        }
+    }
+
+    /**
+     * Store monomorphic instance in cache.
+     */
+    fun cacheMonomorphicInstance(originalHash: String, typeArgsHash: String, bindingBlob: ByteArray) {
+        connection.prepareStatement("""
+            INSERT OR REPLACE INTO monomorphic_cache (original_hash, type_args_hash, binding_blob, updated_at)
+            VALUES (?, ?, ?, strftime('%s', 'now'))
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, originalHash)
+            stmt.setString(2, typeArgsHash)
+            stmt.setBytes(3, bindingBlob)
+            stmt.executeUpdate()
+        }
+    }
+
+    /**
+     * Clear all monomorphization cache entries.
+     */
+    fun clearAllMonomorphicCache() {
+        connection.createStatement().use { stmt ->
+            stmt.executeUpdate("DELETE FROM monomorphic_cache")
+        }
+    }
+
+    // ========================================================================
+    // ABILITY IMPLEMENTATION CACHE
+    // ========================================================================
+
+    /**
+     * Get cached ability implementation lookup.
+     */
+    fun getCachedAbilityImpl(abilityKey: String): Pair<String, String?>? {
+        connection.prepareStatement("""
+            SELECT impl_hash, module_path FROM ability_impl_cache WHERE ability_key = ?
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, abilityKey)
+            return stmt.executeQuery().use { rs ->
+                if (rs.next()) {
+                    Pair(rs.getString("impl_hash"), rs.getString("module_path"))
+                } else null
+            }
+        }
+    }
+
+    /**
+     * Store ability implementation lookup in cache.
+     */
+    fun cacheAbilityImpl(abilityKey: String, implHash: String, modulePath: String?) {
+        connection.prepareStatement("""
+            INSERT OR REPLACE INTO ability_impl_cache (ability_key, impl_hash, module_path, updated_at)
+            VALUES (?, ?, ?, strftime('%s', 'now'))
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, abilityKey)
+            stmt.setString(2, implHash)
+            stmt.setString(3, modulePath)
+            stmt.executeUpdate()
+        }
+    }
+
+    /**
+     * Clear all ability implementation cache entries.
+     */
+    fun clearAllAbilityImplCache() {
+        connection.createStatement().use { stmt ->
+            stmt.executeUpdate("DELETE FROM ability_impl_cache")
+        }
+    }
+
+    /**
+     * Clear all typecheck-related caches (constraint, monomorphic, ability impl).
+     */
+    fun clearAllTypecheckCaches() {
+        connection.createStatement().use { stmt ->
+            stmt.executeUpdate("DELETE FROM constraint_cache")
+            stmt.executeUpdate("DELETE FROM monomorphic_cache")
+            stmt.executeUpdate("DELETE FROM ability_impl_cache")
         }
     }
 

@@ -41,7 +41,9 @@ class SubstitutionApplier(
     // TCO: Source locations of self-recursive tail calls
     private val tailCallLocations: Set<SourceLocation> = emptySet(),
     // ImplDeclarations for populating resolvedHandlers with content hashes
-    private val implDeclarations: Map<String, ImplDeclaration> = emptyMap()
+    private val implDeclarations: Map<String, ImplDeclaration> = emptyMap(),
+    // Content hashes for identifier resolution
+    private val identifierContentHashes: Map<String, String> = emptyMap()
 ) {
     // Compute variants that must stay open by resolving type vars with substitution
     // This handles the case where per-binding solving created different row vars than global solving
@@ -123,6 +125,8 @@ class SubstitutionApplier(
         mutableAbilityImpls[contentHashKey] = com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo(
             abilityName = abilityName,
             targetTypes = targetTypes,
+            targetTypeAnnotations = impl.targetTypes,  // Store original annotations for structural matching
+            associatedTypeBindings = impl.associatedTypeBindings,  // Store associated type bindings
             sourceModule = null,
             contentHash = contentHashKey
         )
@@ -690,7 +694,12 @@ class SubstitutionApplier(
         } else {
             expr.inferredType?.let { substitution.apply(it) }
         }
-        return expr.copy(inferredType = updatedType)
+        // Look up content hash for identifier (from imports or local declarations)
+        val contentHash = identifierContentHashes[expr.name]
+        return expr.copy(
+            inferredType = updatedType,
+            resolvedContentHash = contentHash
+        )
     }
 
     private fun applyToPlaceholder(expr: PlaceholderExpression): PlaceholderExpression {
@@ -1079,12 +1088,20 @@ class SubstitutionApplier(
         // TCO: Check if this call is a self-recursive tail call
         val isTailCall = expr.sourceLocation != null && tailCallLocations.contains(expr.sourceLocation)
 
+        // Get content hash for cross-module function references
+        // This allows the interpreter to lookup by hash instead of string
+        val functionContentHash = when (val func = expr.function) {
+            is Identifier -> identifierContentHashes[func.name]
+            else -> null
+        }
+
         return expr.copy(
             function = updatedFunction,
             arguments = updatedArguments,
             inferredType = updatedType,
             resolvedAbilities = resolvedAbilities,
-            isTailCall = isTailCall
+            isTailCall = isTailCall,
+            resolvedFunctionContentHash = functionContentHash
         )
     }
 
@@ -1419,35 +1436,10 @@ class SubstitutionApplier(
 
     /**
      * Get a type name for ability resolution.
-     *
-     * IMPORTANT: For Record and Variant types, we include structural information
-     * (sorted field names for records, sorted constructor names for variants)
-     * to distinguish between different record/variant structures.
-     * This must match ContentHashComputer.typeAnnotationToString format.
+     * Delegates to ContentHashComputer for consistency with content hash keys.
      */
     private fun getTypeNameForAbility(type: MezzeType): String {
-        return when (type) {
-            is MezzeType.IntType -> "Int"
-            is MezzeType.FloatType -> "Float"
-            is MezzeType.StringType -> "String"
-            is MezzeType.BooleanType -> "Bool"
-            is MezzeType.NatType -> "Nat"
-            is MezzeType.FracType -> "Frac"
-            is MezzeType.TypeApplication -> type.constructor
-            is MezzeType.ListType -> "List"
-            is MezzeType.ArrayType -> "Array"
-            is MezzeType.RecordType -> {
-                // Include sorted field names to distinguish different record structures
-                val fieldNames = type.fields.keys.sorted().joinToString("_")
-                if (fieldNames.isEmpty()) "Record" else "Record_$fieldNames"
-            }
-            is MezzeType.VariantType -> {
-                // Include sorted constructor names to distinguish different variant structures
-                val constructorNames = type.constructors.keys.sorted().joinToString("_")
-                if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
-            }
-            else -> type.toString()
-        }
+        return ContentHashComputer.mezzeTypeToString(type)
     }
 
     /**

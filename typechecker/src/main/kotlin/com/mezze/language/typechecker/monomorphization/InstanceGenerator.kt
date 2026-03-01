@@ -1,8 +1,10 @@
 package com.mezze.language.typechecker.monomorphization
 
 import com.mezze.language.ast.*
+import com.mezze.language.typechecker.cache.TypeCheckCache
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.ProgramIndex
 
 /**
  * Instance generator - creates specialized versions of polymorphic functions.
@@ -15,9 +17,11 @@ import com.mezze.language.typechecker.debug.DebugLogger.Category
  * - Handles TypeVar instances correctly (not just names)
  * - Applies substitution to entire expression AST
  * - Returns sealed Result type (Success or Failure)
+ * - Uses ProgramIndex for O(1) binding lookup
  */
 class InstanceGenerator(
-    private val program: Program
+    private val program: Program,
+    private val index: ProgramIndex = ProgramIndex.build(program)
 ) {
     /**
      * Generate a monomorphic instance for a request.
@@ -41,6 +45,27 @@ class InstanceGenerator(
             )
         }
 
+        // Check L1/L2 cache for previously generated instance (fast path)
+        // Use original binding's content hash + type args hash as cache key
+        val originalHash = originalBinding.contentHash
+        if (originalHash != null) {
+            val typeArgsHash = TypeCheckCache.hashTypeArgs(request.typeArgs)
+            TypeCheckCache.getMonomorphicInstance(originalHash, typeArgsHash)?.let { cachedBinding ->
+                // Cache hit - return the cached monomorphic instance
+                val monomorphicName = request.generateMonomorphicName()
+                val contentHash = request.generateContentHash()
+                return GenerationResult.Success(
+                    instance = MonomorphicInstance(
+                        originalName = request.originalName,
+                        monomorphicName = monomorphicName,
+                        typeArguments = request.typeArgs,
+                        specializedBinding = cachedBinding,
+                        contentHash = contentHash
+                    )
+                )
+            }
+        }
+
         // Get the original expression (should be a lambda for functions)
         val originalExpr = originalBinding.expression
 
@@ -57,10 +82,11 @@ class InstanceGenerator(
         val substitutor = TypeSubstitutor(substitutionMap)
         val specializedExpr = substitutor.apply(originalExpr)
 
-        // Generate the monomorphic name
+        // Generate the monomorphic name and content hash
         val monomorphicName = request.generateMonomorphicName()
+        val contentHash = request.generateContentHash()
 
-        // Create the specialized binding
+        // Create the specialized binding with content hash
         val specializedBinding = originalBinding.copy(
             pattern = VariablePattern(monomorphicName),
             expression = specializedExpr,
@@ -68,15 +94,23 @@ class InstanceGenerator(
             inferredType = specializedExpr.inferredType,
             isMonomorphicInstance = true,
             originalFunctionName = request.originalName,
-            monomorphicTypeArgs = request.typeArgs
+            monomorphicTypeArgs = request.typeArgs,
+            contentHash = contentHash  // Propagate content hash to binding
         )
+
+        // Cache the generated instance for future lookups
+        if (originalHash != null) {
+            val typeArgsHash = TypeCheckCache.hashTypeArgs(request.typeArgs)
+            TypeCheckCache.putMonomorphicInstance(originalHash, typeArgsHash, specializedBinding)
+        }
 
         return GenerationResult.Success(
             instance = MonomorphicInstance(
                 originalName = request.originalName,
                 monomorphicName = monomorphicName,
                 typeArguments = request.typeArgs,
-                specializedBinding = specializedBinding
+                specializedBinding = specializedBinding,
+                contentHash = contentHash
             )
         )
     }
@@ -116,11 +150,10 @@ class InstanceGenerator(
 
     /**
      * Find a binding by name in the program.
+     * Uses pre-built index for O(1) lookup.
      */
     private fun findBinding(name: String): LetBinding? {
-        return program.items
-            .filterIsInstance<LetBinding>()
-            .find { (it.pattern as? VariablePattern)?.name == name }
+        return index.letBindings[name]
     }
 
     /**

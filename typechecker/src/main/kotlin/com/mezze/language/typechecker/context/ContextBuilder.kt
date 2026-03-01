@@ -434,6 +434,8 @@ class ContextBuilder {
         val implInfo = TypingContext.AbilityImplInfo(
             abilityName = implDecl.abilityName,
             targetTypes = targetTypeNames,
+            targetTypeAnnotations = implDecl.targetTypes,  // Store original annotations for structural matching
+            associatedTypeBindings = implDecl.associatedTypeBindings,  // Store associated type bindings like 'item = Int
             sourceModule = null,  // TODO: Track source module if needed
             contentHash = implKey  // Same as the key
         )

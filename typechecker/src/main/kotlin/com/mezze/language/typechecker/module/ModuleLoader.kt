@@ -220,7 +220,8 @@ class ModuleLoader(
                     type = convertExportType(exportedItem.type),
                     mezzeType = exportedItem.mezzeType,
                     originalName = exportedItem.originalName,
-                    visibility = exportedItem.visibility
+                    visibility = exportedItem.visibility,
+                    contentHash = exportedItem.contentHash
                 )
             },
             dependencies = resolverModule.dependencies.map { it.modulePath },

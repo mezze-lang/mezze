@@ -67,6 +67,27 @@ sealed interface Constraint {
     ) : Constraint
 
     /**
+     * Associated type resolution constraint for abilities.
+     *
+     * When an ability has associated types (e.g., `Container 'c having 'item`),
+     * this constraint ensures that the associated type variables are unified
+     * with their concrete bindings from the matching impl.
+     *
+     * Example: For `Container.get {container = intArray}` where `intArray: [Int]`
+     * and `impl Container [Int] having 'item = Int`:
+     * - primaryTypeVar is resolved to [Int]
+     * - associatedTypeVars = {'item -> TypeVar}
+     * - Once [Int] is known, we look up the impl and unify 'item with Int
+     */
+    data class AssociatedTypeResolution(
+        val abilityName: String,
+        val primaryTypeVar: TypeVar,
+        val associatedTypeVars: Map<String, TypeVar>,  // Associated type name -> type variable to unify
+        val context: String? = null,
+        override val sourceLocation: SourceLocation? = null
+    ) : Constraint
+
+    /**
      * Effect constraint: expression uses an effect
      *
      * Generated from:
@@ -173,6 +194,7 @@ data class ConstraintResult(
     val effects: Set<String> = emptySet(),  // Effects used in this expression
     val performed: Boolean = false,  // True if effects were performed via 'perform' expression
     val abilityConstraints: List<Constraint.AbilityRequired> = emptyList(),  // Ability requirements
+    val associatedTypeConstraints: List<Constraint.AssociatedTypeResolution> = emptyList(),  // Associated type resolution constraints
     val undefinedVariables: List<UndefinedVariable> = emptyList(),  // Undefined variables found during constraint generation
     val duplicateBindings: List<DuplicateBinding> = emptyList(),  // Duplicate bindings found during constraint generation
     val tailCalls: Set<SourceLocation> = emptySet(),  // TCO: Source locations of self-recursive tail calls
@@ -186,7 +208,9 @@ data class ConstraintResult(
      */
     data class UndefinedVariable(
         val name: String,
-        val sourceLocation: SourceLocation?
+        val sourceLocation: SourceLocation?,
+        val qualifier: ModulePath? = null,  // Structured module qualifier (if any)
+        val isQualified: Boolean = false    // True if this was a qualified reference like module::name
     )
 
     /**
@@ -224,6 +248,7 @@ data class ConstraintResult(
                 constraints = results.flatMap { it.constraints },
                 effects = results.flatMap { it.effects }.toSet(),
                 abilityConstraints = results.flatMap { it.abilityConstraints },
+                associatedTypeConstraints = results.flatMap { it.associatedTypeConstraints },
                 undefinedVariables = results.flatMap { it.undefinedVariables },
                 duplicateBindings = results.flatMap { it.duplicateBindings },
                 tailCalls = results.flatMap { it.tailCalls }.toSet(),
