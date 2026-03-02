@@ -912,7 +912,10 @@ class ConstraintGenerator(
                 val abilityConstraints = annotation.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { convertTypeAnnotationInternal(it) }
+                        typeArgs = constraint.typeArgs.map { convertTypeAnnotationInternal(it) },
+                        associatedTypeBindings = constraint.associatedTypeBindings.mapValues { (_, typeAnnotation) ->
+                            convertTypeAnnotationInternal(typeAnnotation)
+                        }
                     )
                 }
 
@@ -922,7 +925,23 @@ class ConstraintGenerator(
                     effects = annotation.effects?.let { effectRow ->
                         // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                         val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
-                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
+
+                        // Convert effect annotations with associated types to EffectInstance objects
+                        val effectInstances = effectRow.effectAnnotations.map { effectAnnotation ->
+                            MezzeType.EffectInstance(
+                                name = effectAnnotation.name,
+                                associatedTypes = effectAnnotation.associatedTypes.mapValues { (_, typeAnnotation) ->
+                                    convertTypeAnnotationInternal(typeAnnotation)
+                                }
+                            )
+                        }.toSet()
+
+                        MezzeType.EffectRow(
+                            effects = effectRow.effects.toSet(),
+                            effectInstances = effectInstances,
+                            rowVar = rowVar,
+                            performed = effectRow.isPerformed
+                        )
                     },
                     abilityConstraints = abilityConstraints
                 )

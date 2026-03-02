@@ -415,12 +415,29 @@ class TypeSubstitutor(
                 paramType = convertMezzeTypeToAnnotation(type.paramType),
                 returnType = convertMezzeTypeToAnnotation(type.returnType),
                 effects = type.effects?.let { row ->
-                    EffectRowAnnotation(row.effects.toList(), row.isOpen)
+                    // Convert effect instances to effect annotations
+                    val effectAnnotations = row.effectInstances.map { instance ->
+                        EffectAnnotation(
+                            name = instance.name,
+                            associatedTypes = instance.associatedTypes.mapValues { (_, mezzeType) ->
+                                convertMezzeTypeToAnnotation(mezzeType)
+                            }
+                        )
+                    }
+                    EffectRowAnnotation(
+                        effects = row.effects.toList(),
+                        effectAnnotations = effectAnnotations,
+                        isPolymorphic = row.isOpen,
+                        isPerformed = row.performed
+                    )
                 },
                 abilityConstraints = type.abilityConstraints.map { constraint ->
                     FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,
-                        typeArgs = constraint.typeArgs.map { convertMezzeTypeToAnnotation(it) }
+                        typeArgs = constraint.typeArgs.map { convertMezzeTypeToAnnotation(it) },
+                        associatedTypeBindings = constraint.associatedTypeBindings.mapValues { (_, mezzeType) ->
+                            convertMezzeTypeToAnnotation(mezzeType)
+                        }
                     )
                 }
             )

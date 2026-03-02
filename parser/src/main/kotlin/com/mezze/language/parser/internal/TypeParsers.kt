@@ -26,6 +26,7 @@ import com.mezze.language.parser.internal.lib.*
 // Helper data class for effect row parsing result
 private data class EffectRowParseResult(
     val effects: List<String>,
+    val effectAnnotations: List<EffectAnnotation>,
     val isPolymorphic: Boolean,
     val isPerformed: Boolean,
     val stream: TokenStream
@@ -95,6 +96,7 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
                 var abilityStream = skipNewlines(streamBeforeWith.advance())
 
                 // Parse ability constraints: AbilityName TypeArg1 TypeArg2... or module::AbilityName TypeArg1...
+                // Also supports: AbilityName TypeArg having 'item = Int, 'elem = String
                 while (true) {
                     // Parse qualified ability name (e.g., module::MyAbility or just MyAbility)
                     val abilityNameResult = parseQualifiedName(abilityStream)
@@ -114,11 +116,12 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
                                 typeArgs.add(typeResult.value)
                                 abilityStream = skipNewlines(typeResult.remaining)
 
-                                // Stop if we see ARROW, comma, or WITH
+                                // Stop if we see ARROW, comma, WITH, or HAVING
                                 val nextToken = abilityStream.current()
                                 if (nextToken?.type == TokenType.ARROW ||
                                     nextToken?.type == TokenType.COMMA ||
                                     nextToken?.type == TokenType.WITH ||
+                                    nextToken?.type == TokenType.HAVING ||
                                     nextToken == null) {
                                     break
                                 }
@@ -127,7 +130,52 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
                         }
                     }
 
-                    abilityConstraints.add(FunctionAbilityConstraint(abilityName, typeArgs))
+                    // Check for 'having' keyword (associated types)
+                    val associatedTypeBindings = mutableMapOf<String, TypeAnnotation>()
+                    if (abilityStream.current()?.type == TokenType.HAVING) {
+                        abilityStream = skipNewlines(abilityStream.advance())
+
+                        // Parse associated type bindings: 'typeVar = Type
+                        while (true) {
+                            val typeVarResult = identifierParser(abilityStream)
+                            if (typeVarResult !is ParseResult.Success) break
+                            val typeVarName = typeVarResult.value.text
+                            if (!typeVarName.startsWith("'")) break  // Not a type variable
+                            abilityStream = skipNewlines(typeVarResult.remaining)
+
+                            // Expect '='
+                            if (abilityStream.current()?.type != TokenType.ASSIGN) break
+                            abilityStream = skipNewlines(abilityStream.advance())
+
+                            // Parse the type annotation (atomic to avoid consuming too much)
+                            val typeResult = atomicTypeAnnotation(abilityStream)
+                            if (typeResult !is ParseResult.Success) break
+                            associatedTypeBindings[typeVarName] = typeResult.value
+                            abilityStream = skipNewlines(typeResult.remaining)
+
+                            // Check for comma
+                            if (abilityStream.current()?.type == TokenType.COMMA) {
+                                val afterComma = skipNewlines(abilityStream.advance())
+                                val nextToken = afterComma.current()
+
+                                // Lookahead disambiguation:
+                                // If next token is an identifier starting with ', it's another binding
+                                // If next token is uppercase identifier, it's a new ability
+                                if (nextToken?.type == TokenType.IDENTIFIER && nextToken.text.startsWith("'")) {
+                                    // Another type variable binding
+                                    abilityStream = afterComma
+                                    continue
+                                } else {
+                                    // New ability - don't consume comma here
+                                    break
+                                }
+                            } else {
+                                break
+                            }
+                        }
+                    }
+
+                    abilityConstraints.add(FunctionAbilityConstraint(abilityName, typeArgs, associatedTypeBindings))
 
                     // Check for comma (more constraints)
                     if (abilityStream.current()?.type == TokenType.COMMA) {
@@ -159,7 +207,7 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
 
                             if (gtToken?.type == TokenType.GT) {
                                 // Empty effect row <>
-                                EffectRowParseResult(emptyList(), false, false, afterLt.advance())
+                                EffectRowParseResult(emptyList(), emptyList(), false, false, afterLt.advance())
                             } else {
                                 // Check for purely polymorphic <...>
                                 val firstToken = skipNewlines(afterLt).current()
@@ -167,34 +215,87 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
                                     val afterEllipsis = skipNewlines(afterLt.advance())
                                     if (afterEllipsis.current()?.type == TokenType.GT) {
                                         // Polymorphic effect row <...>
-                                        EffectRowParseResult(emptyList(), true, false, afterEllipsis.advance())
+                                        EffectRowParseResult(emptyList(), emptyList(), true, false, afterEllipsis.advance())
                                     } else {
-                                        EffectRowParseResult(emptyList(), false, false, returnType.remaining)  // Invalid, keep original
+                                        EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)  // Invalid, keep original
                                     }
                                 } else if (firstToken?.type == TokenType.STAR) {
                                     // Performed marker only <*>
                                     val afterStar = skipNewlines(afterLt.advance())
                                     if (afterStar.current()?.type == TokenType.GT) {
-                                        EffectRowParseResult(emptyList(), false, true, afterStar.advance())
+                                        EffectRowParseResult(emptyList(), emptyList(), false, true, afterStar.advance())
                                     } else {
-                                        EffectRowParseResult(emptyList(), false, false, returnType.remaining)  // Invalid, keep original
+                                        EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)  // Invalid, keep original
                                     }
                                 } else {
                                     // Has effect names <Effect1, Effect2> or <module::Effect1, ...> or <Effect1, *>
-                                    val effectNames = mutableListOf<String>()
+                                    // Also supports: <Effect1 having 'a = Int, Effect2>
+                                    val simpleEffectNames = mutableListOf<String>()
+                                    val effectAnnotations = mutableListOf<EffectAnnotation>()
                                     var current = skipNewlines(afterLt)
                                     var foundEllipsis = false
                                     var foundPerformed = false
 
-                                    // Parse comma-separated effect names (potentially qualified)
+                                    // Parse comma-separated effects (potentially with 'having' clauses)
                                     while (true) {
                                         // Parse qualified effect name (e.g., module::Log or just Log)
                                         val effectNameResult = parseQualifiedName(current)
                                         if (effectNameResult !is ParseResult.Success) break
-                                        effectNames.add(effectNameResult.value)
+                                        val effectName = effectNameResult.value
                                         current = skipNewlines(effectNameResult.remaining)
 
-                                        // Check for comma
+                                        // Check for 'having' keyword (associated types)
+                                        if (current.current()?.type == TokenType.HAVING) {
+                                            current = skipNewlines(current.advance())
+                                            val associatedTypes = mutableMapOf<String, TypeAnnotation>()
+
+                                            // Parse associated type bindings: 'typeVar = Type
+                                            while (true) {
+                                                val typeVarResult = identifierParser(current)
+                                                if (typeVarResult !is ParseResult.Success) break
+                                                val typeVarName = typeVarResult.value.text
+                                                if (!typeVarName.startsWith("'")) break  // Not a type variable
+                                                current = skipNewlines(typeVarResult.remaining)
+
+                                                // Expect '='
+                                                if (current.current()?.type != TokenType.ASSIGN) break
+                                                current = skipNewlines(current.advance())
+
+                                                // Parse the type annotation (atomic to avoid consuming too much)
+                                                val typeResult = atomicTypeAnnotation(current)
+                                                if (typeResult !is ParseResult.Success) break
+                                                associatedTypes[typeVarName] = typeResult.value
+                                                current = skipNewlines(typeResult.remaining)
+
+                                                // Check for comma
+                                                if (current.current()?.type == TokenType.COMMA) {
+                                                    val afterComma = skipNewlines(current.advance())
+                                                    val nextToken = afterComma.current()
+
+                                                    // Lookahead disambiguation:
+                                                    // If next token is an identifier starting with ', it's another binding
+                                                    // If next token is uppercase identifier, it's a new effect
+                                                    // If next token is ... or *, it's a row extension/performed marker
+                                                    if (nextToken?.type == TokenType.IDENTIFIER && nextToken.text.startsWith("'")) {
+                                                        // Another type variable binding
+                                                        current = afterComma
+                                                        continue
+                                                    } else {
+                                                        // New effect or special marker - don't consume comma here
+                                                        break
+                                                    }
+                                                } else {
+                                                    break
+                                                }
+                                            }
+
+                                            effectAnnotations.add(EffectAnnotation(effectName, associatedTypes))
+                                        } else {
+                                            // Simple effect without associated types
+                                            simpleEffectNames.add(effectName)
+                                        }
+
+                                        // Check for comma (next effect)
                                         if (current.current()?.type == TokenType.COMMA) {
                                             current = skipNewlines(current.advance())
 
@@ -217,18 +318,19 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
 
                                     // Expect closing >
                                     if (current.current()?.type == TokenType.GT) {
-                                        EffectRowParseResult(effectNames, foundEllipsis, foundPerformed, current.advance())
+                                        EffectRowParseResult(simpleEffectNames, effectAnnotations, foundEllipsis, foundPerformed, current.advance())
                                     } else {
-                                        EffectRowParseResult(emptyList(), false, false, returnType.remaining)  // No closing >, keep original
+                                        EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)  // No closing >, keep original
                                     }
                                 }
                             }
                         } else {
-                            EffectRowParseResult(emptyList(), false, false, returnType.remaining)
+                            EffectRowParseResult(emptyList(), emptyList(), false, false, returnType.remaining)
                         }
 
                         // Also check for 'with' keyword AFTER the return type (for backward compatibility)
                         // Ability constraints can appear either before or after the arrow
+                        // Also supports: AbilityName TypeArg having 'item = Int, 'elem = String
                         var streamAfterWith = effectRowResult.stream
                         val streamBeforeWithAfter = skipNewlines(effectRowResult.stream)
                         if (streamBeforeWithAfter.current()?.type == TokenType.WITH) {
@@ -254,11 +356,12 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
                                             typeArgs.add(typeResult.value)
                                             abilityStreamAfter = skipNewlines(typeResult.remaining)
 
-                                            // Stop if we see =, comma, or WITH (another constraint)
+                                            // Stop if we see =, comma, WITH, or HAVING (another constraint)
                                             val nextToken = abilityStreamAfter.current()
                                             if (nextToken?.type == TokenType.ASSIGN ||
                                                 nextToken?.type == TokenType.COMMA ||
                                                 nextToken?.type == TokenType.WITH ||
+                                                nextToken?.type == TokenType.HAVING ||
                                                 nextToken == null) {
                                                 break
                                             }
@@ -267,7 +370,52 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
                                     }
                                 }
 
-                                abilityConstraints.add(FunctionAbilityConstraint(abilityName, typeArgs))
+                                // Check for 'having' keyword (associated types)
+                                val associatedTypeBindingsAfter = mutableMapOf<String, TypeAnnotation>()
+                                if (abilityStreamAfter.current()?.type == TokenType.HAVING) {
+                                    abilityStreamAfter = skipNewlines(abilityStreamAfter.advance())
+
+                                    // Parse associated type bindings: 'typeVar = Type
+                                    while (true) {
+                                        val typeVarResult = identifierParser(abilityStreamAfter)
+                                        if (typeVarResult !is ParseResult.Success) break
+                                        val typeVarName = typeVarResult.value.text
+                                        if (!typeVarName.startsWith("'")) break  // Not a type variable
+                                        abilityStreamAfter = skipNewlines(typeVarResult.remaining)
+
+                                        // Expect '='
+                                        if (abilityStreamAfter.current()?.type != TokenType.ASSIGN) break
+                                        abilityStreamAfter = skipNewlines(abilityStreamAfter.advance())
+
+                                        // Parse the type annotation (atomic to avoid consuming too much)
+                                        val typeResult = atomicTypeAnnotation(abilityStreamAfter)
+                                        if (typeResult !is ParseResult.Success) break
+                                        associatedTypeBindingsAfter[typeVarName] = typeResult.value
+                                        abilityStreamAfter = skipNewlines(typeResult.remaining)
+
+                                        // Check for comma
+                                        if (abilityStreamAfter.current()?.type == TokenType.COMMA) {
+                                            val afterComma = skipNewlines(abilityStreamAfter.advance())
+                                            val nextToken = afterComma.current()
+
+                                            // Lookahead disambiguation:
+                                            // If next token is an identifier starting with ', it's another binding
+                                            // If next token is uppercase identifier, it's a new ability
+                                            if (nextToken?.type == TokenType.IDENTIFIER && nextToken.text.startsWith("'")) {
+                                                // Another type variable binding
+                                                abilityStreamAfter = afterComma
+                                                continue
+                                            } else {
+                                                // New ability - don't consume comma here
+                                                break
+                                            }
+                                        } else {
+                                            break
+                                        }
+                                    }
+                                }
+
+                                abilityConstraints.add(FunctionAbilityConstraint(abilityName, typeArgs, associatedTypeBindingsAfter))
 
                                 // Check for comma (more constraints)
                                 if (abilityStreamAfter.current()?.type == TokenType.COMMA) {
@@ -284,8 +432,13 @@ internal val MezzeParser.functionTypeAnnotation: Parser<TypeAnnotation>
                             FunctionTypeAnnotation(
                                 result.value,
                                 returnType.value,
-                                if (effectRowResult.effects.isNotEmpty() || effectRowResult.isPolymorphic || effectRowResult.isPerformed) {
-                                    EffectRowAnnotation(effectRowResult.effects, effectRowResult.isPolymorphic, effectRowResult.isPerformed)
+                                if (effectRowResult.effects.isNotEmpty() || effectRowResult.effectAnnotations.isNotEmpty() || effectRowResult.isPolymorphic || effectRowResult.isPerformed) {
+                                    EffectRowAnnotation(
+                                        effects = effectRowResult.effects,
+                                        effectAnnotations = effectRowResult.effectAnnotations,
+                                        isPolymorphic = effectRowResult.isPolymorphic,
+                                        isPerformed = effectRowResult.isPerformed
+                                    )
                                 } else null,
                                 abilityConstraints
                             ),

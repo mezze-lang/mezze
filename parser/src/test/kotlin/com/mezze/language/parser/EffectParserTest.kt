@@ -442,4 +442,517 @@ class EffectParserTest {
         assertFalse(effectRow.isPolymorphic)
         assertTrue(effectRow.isPerformed)
     }
+
+    // ========================================================================
+    // EFFECT ASSOCIATED TYPE ANNOTATION TESTS
+    // ========================================================================
+
+    @Test
+    fun testEffectWithSingleAssociatedType() {
+        val source = """
+            let f: {} -> Int <Exception having 'error = String> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        assertNotNull(letBinding.typeAnnotation)
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        assertNotNull(typeAnnotation.effects)
+        val effectRow = typeAnnotation.effects!!
+
+        // Should have no simple effects, one effect annotation
+        assertTrue(effectRow.effects.isEmpty())
+        assertEquals(1, effectRow.effectAnnotations.size)
+
+        val exceptionEffect = effectRow.effectAnnotations[0]
+        assertEquals("Exception", exceptionEffect.name)
+        assertEquals(1, exceptionEffect.associatedTypes.size)
+        assertTrue(exceptionEffect.associatedTypes.containsKey("'error"))
+        assertEquals("String", (exceptionEffect.associatedTypes["'error"] as IdentifierTypeAnnotation).name)
+    }
+
+    @Test
+    fun testEffectWithMultipleAssociatedTypes() {
+        val source = """
+            let f: {} -> Int <Generator having 'item = Int, 'result = String> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        val genEffect = effectRow.effectAnnotations[0]
+        assertEquals("Generator", genEffect.name)
+        assertEquals(2, genEffect.associatedTypes.size)
+        assertTrue(genEffect.associatedTypes.containsKey("'item"))
+        assertTrue(genEffect.associatedTypes.containsKey("'result"))
+        assertEquals("Int", (genEffect.associatedTypes["'item"] as IdentifierTypeAnnotation).name)
+        assertEquals("String", (genEffect.associatedTypes["'result"] as IdentifierTypeAnnotation).name)
+    }
+
+    @Test
+    fun testMixedSimpleAndAnnotatedEffects() {
+        val source = """
+            let f: {} -> Int <Log, Exception having 'error = String> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        // Log is a simple effect
+        assertEquals(listOf("Log"), effectRow.effects)
+
+        // Exception is an annotated effect
+        assertEquals(1, effectRow.effectAnnotations.size)
+        assertEquals("Exception", effectRow.effectAnnotations[0].name)
+        assertEquals(1, effectRow.effectAnnotations[0].associatedTypes.size)
+    }
+
+    @Test
+    fun testMultipleAnnotatedEffects() {
+        val source = """
+            let f: {} -> Int <Exception having 'error = String, State having 'state = Int> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertTrue(effectRow.effects.isEmpty())
+        assertEquals(2, effectRow.effectAnnotations.size)
+
+        val exceptionEffect = effectRow.effectAnnotations[0]
+        assertEquals("Exception", exceptionEffect.name)
+        assertEquals(1, exceptionEffect.associatedTypes.size)
+        assertEquals("String", (exceptionEffect.associatedTypes["'error"] as IdentifierTypeAnnotation).name)
+
+        val stateEffect = effectRow.effectAnnotations[1]
+        assertEquals("State", stateEffect.name)
+        assertEquals(1, stateEffect.associatedTypes.size)
+        assertEquals("Int", (stateEffect.associatedTypes["'state"] as IdentifierTypeAnnotation).name)
+    }
+
+    @Test
+    fun testAnnotatedEffectWithPolymorphicRow() {
+        val source = """
+            let f: {} -> Int <Exception having 'error = String, ...> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        assertTrue(effectRow.isPolymorphic)
+        assertFalse(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testAnnotatedEffectWithPerformedMarker() {
+        val source = """
+            let f: {} -> Int <Exception having 'error = String, *> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        assertFalse(effectRow.isPolymorphic)
+        assertTrue(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testComplexMixedEffectRow() {
+        val source = """
+            let f: {} -> Int <Log, Exception having 'error = String, State having 'state = Int, FileSystem, ...> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        // Simple effects
+        assertEquals(listOf("Log", "FileSystem"), effectRow.effects)
+
+        // Annotated effects
+        assertEquals(2, effectRow.effectAnnotations.size)
+        assertEquals("Exception", effectRow.effectAnnotations[0].name)
+        assertEquals("State", effectRow.effectAnnotations[1].name)
+
+        assertTrue(effectRow.isPolymorphic)
+        assertFalse(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testEffectWithComplexAssociatedType() {
+        val source = """
+            let f: {} -> Int <State having 'state = (List String)> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        val stateEffect = effectRow.effectAnnotations[0]
+        val stateType = stateEffect.associatedTypes["'state"]
+        assertTrue(stateType is TypeApplicationAnnotation)
+        assertEquals("List", (stateType as TypeApplicationAnnotation).constructor)
+    }
+
+    @Test
+    fun testEffectWithRecordAssociatedType() {
+        val source = """
+            let f: {} -> Int <State having 'state = {x: Int, y: Int}> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        val stateEffect = effectRow.effectAnnotations[0]
+        val stateType = stateEffect.associatedTypes["'state"]
+        assertTrue(stateType is RecordTypeAnnotation)
+        assertEquals(2, (stateType as RecordTypeAnnotation).entries.size)
+    }
+
+    @Test
+    fun testQualifiedEffectWithAssociatedType() {
+        val source = """
+            let f: {} -> Int <std::exception::Exception having 'error = String> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        assertEquals("std::exception::Exception", effectRow.effectAnnotations[0].name)
+        assertEquals(1, effectRow.effectAnnotations[0].associatedTypes.size)
+    }
+
+    // ========================================================================
+    // LOOKAHEAD DISAMBIGUATION TESTS
+    // ========================================================================
+
+    @Test
+    fun testDisambiguateAssociatedTypeFromNextEffect() {
+        // This tests that the parser correctly distinguishes between:
+        // - "State having 'state = Int, OtherEffect" (two effects)
+        // - "State having 'state = Int, 'other = String" (one effect with two associated types)
+        val source = """
+            let f: {} -> Int <State having 'state = Int, OtherEffect> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        // Should have one annotated effect (State) and one simple effect (OtherEffect)
+        assertEquals(1, effectRow.effectAnnotations.size)
+        assertEquals("State", effectRow.effectAnnotations[0].name)
+        assertEquals(1, effectRow.effectAnnotations[0].associatedTypes.size)
+        assertEquals(listOf("OtherEffect"), effectRow.effects)
+    }
+
+    @Test
+    fun testMultipleAssociatedTypesInSingleEffect() {
+        // This tests that multiple associated types are correctly parsed as part of one effect
+        val source = """
+            let f: {} -> Int <State having 'state = Int, 'result = String> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        // Should have one annotated effect with two associated types
+        assertEquals(1, effectRow.effectAnnotations.size)
+        assertEquals("State", effectRow.effectAnnotations[0].name)
+        assertEquals(2, effectRow.effectAnnotations[0].associatedTypes.size)
+        assertTrue(effectRow.effectAnnotations[0].associatedTypes.containsKey("'state"))
+        assertTrue(effectRow.effectAnnotations[0].associatedTypes.containsKey("'result"))
+        assertTrue(effectRow.effects.isEmpty())
+    }
+
+    @Test
+    fun testDisambiguateAssociatedTypeWithPolymorphicMarker() {
+        // After associated types, "..." should be polymorphic marker, not an effect
+        val source = """
+            let f: {} -> Int <State having 'state = Int, ...> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        assertEquals("State", effectRow.effectAnnotations[0].name)
+        assertEquals(1, effectRow.effectAnnotations[0].associatedTypes.size)
+        assertTrue(effectRow.isPolymorphic)
+        assertFalse(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testDisambiguateAssociatedTypeWithPerformedMarker() {
+        // After associated types, "*" should be performed marker, not an effect
+        val source = """
+            let f: {} -> Int <State having 'state = Int, *> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        assertEquals("State", effectRow.effectAnnotations[0].name)
+        assertEquals(1, effectRow.effectAnnotations[0].associatedTypes.size)
+        assertFalse(effectRow.isPolymorphic)
+        assertTrue(effectRow.isPerformed)
+    }
+
+    @Test
+    fun testDisambiguateMultipleEffectsWithMixedAnnotations() {
+        // Complex test: Effect1 with 'a = X, Effect2 (simple), Effect3 with 'b = Y
+        val source = """
+            let f: {} -> Int <Exception having 'error = String, Log, State having 'state = Int> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        // Should have two annotated effects and one simple effect
+        assertEquals(2, effectRow.effectAnnotations.size)
+        assertEquals("Exception", effectRow.effectAnnotations[0].name)
+        assertEquals("State", effectRow.effectAnnotations[1].name)
+        assertEquals(listOf("Log"), effectRow.effects)
+    }
+
+    // ========================================================================
+    // COMPLEX TYPE ARGUMENT TESTS
+    // ========================================================================
+
+    @Test
+    fun testNestedOptionArrayType() {
+        val source = """
+            let f: {} -> Int <State having 'state = (Option [Int])> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        val stateType = effectRow.effectAnnotations[0].associatedTypes["'state"]
+        assertTrue(stateType is TypeApplicationAnnotation)
+        val optionType = stateType as TypeApplicationAnnotation
+        assertEquals("Option", optionType.constructor)
+        assertEquals(1, optionType.args.size)
+        assertTrue(optionType.args[0] is ArrayTypeAnnotation)
+    }
+
+    @Test
+    fun testDeeplyNestedGenericType() {
+        val source = """
+            let f: {} -> Int <State having 'state = (Result (Option String) Int)> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        val stateType = effectRow.effectAnnotations[0].associatedTypes["'state"]
+        assertTrue(stateType is TypeApplicationAnnotation)
+        val resultType = stateType as TypeApplicationAnnotation
+        assertEquals("Result", resultType.constructor)
+        assertEquals(2, resultType.args.size)
+        assertTrue(resultType.args[0] is TypeApplicationAnnotation)
+        assertEquals("Option", (resultType.args[0] as TypeApplicationAnnotation).constructor)
+    }
+
+    @Test
+    fun testFunctionTypeAsAssociatedType() {
+        val source = """
+            let f: {} -> Int <State having 'state = ({x: Int} -> String)> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        val stateType = effectRow.effectAnnotations[0].associatedTypes["'state"]
+        assertTrue(stateType is FunctionTypeAnnotation)
+        val funcType = stateType as FunctionTypeAnnotation
+        assertTrue(funcType.paramType is RecordTypeAnnotation)
+        assertTrue(funcType.returnType is IdentifierTypeAnnotation)
+    }
+
+    @Test
+    fun testArrayOfRecordsAsAssociatedType() {
+        val source = """
+            let f: {} -> Int <State having 'state = [{id: Int, name: String}]> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        val stateType = effectRow.effectAnnotations[0].associatedTypes["'state"]
+        assertTrue(stateType is ArrayTypeAnnotation)
+        val arrayType = stateType as ArrayTypeAnnotation
+        assertTrue(arrayType.elementType is RecordTypeAnnotation)
+        assertEquals(2, (arrayType.elementType as RecordTypeAnnotation).entries.size)
+    }
+
+    @Test
+    fun testMultipleComplexAssociatedTypes() {
+        val source = """
+            let f: {} -> Int <Generator having 'item = (Option String), 'result = (Result Int String)> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(1, effectRow.effectAnnotations.size)
+        val genEffect = effectRow.effectAnnotations[0]
+        assertEquals("Generator", genEffect.name)
+        assertEquals(2, genEffect.associatedTypes.size)
+
+        val itemType = genEffect.associatedTypes["'item"]
+        assertTrue(itemType is TypeApplicationAnnotation)
+        assertEquals("Option", (itemType as TypeApplicationAnnotation).constructor)
+
+        val resultType = genEffect.associatedTypes["'result"]
+        assertTrue(resultType is TypeApplicationAnnotation)
+        assertEquals("Result", (resultType as TypeApplicationAnnotation).constructor)
+    }
+
+    // ========================================================================
+    // PARTIAL ASSOCIATED TYPE ANNOTATION TESTS
+    // ========================================================================
+
+    @Test
+    fun testEffectWithoutHavingClause() {
+        // Effect with associated types declared but used without `having` annotation
+        val source = """
+            let f: {} -> Int <State> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        // Should be parsed as a simple effect (not annotated)
+        assertEquals(listOf("State"), effectRow.effects)
+        assertTrue(effectRow.effectAnnotations.isEmpty())
+    }
+
+    @Test
+    fun testMixedAnnotatedAndUnannotatedEffects() {
+        // One effect with having, one without (partial annotation)
+        val source = """
+            let f: {} -> Int <State, Exception having 'error = String> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        // State is simple, Exception is annotated
+        assertEquals(listOf("State"), effectRow.effects)
+        assertEquals(1, effectRow.effectAnnotations.size)
+        assertEquals("Exception", effectRow.effectAnnotations[0].name)
+    }
+
+    @Test
+    fun testPartialAnnotationInMiddle() {
+        // Effects: annotated, simple, annotated
+        val source = """
+            let f: {} -> Int <Exception having 'error = String, Log, State having 'state = Int> = {} -> 42
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        assertEquals(1, program.items.size)
+
+        val letBinding = program.items[0] as LetBinding
+        val typeAnnotation = letBinding.typeAnnotation as FunctionTypeAnnotation
+        val effectRow = typeAnnotation.effects!!
+
+        assertEquals(listOf("Log"), effectRow.effects)
+        assertEquals(2, effectRow.effectAnnotations.size)
+    }
 }

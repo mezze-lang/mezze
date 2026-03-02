@@ -71,12 +71,61 @@ data class ArrayTypeAnnotation(
     val elementType: TypeAnnotation
 ) : TypeAnnotation
 
+/**
+ * An effect annotation with optional associated type bindings.
+ *
+ * Examples:
+ * - Simple effect: EffectAnnotation("Exception")
+ * - With bindings: EffectAnnotation("Exception", {'error -> IdentifierTypeAnnotation("String")})
+ * - Multiple bindings: EffectAnnotation("Generator", {'item -> ..., 'result -> ...})
+ */
+@Serializable
+data class EffectAnnotation(
+    val name: String,
+    val associatedTypes: Map<String, TypeAnnotation> = emptyMap()
+) {
+    /** True if this effect has any associated type bindings specified */
+    val hasAssociatedTypes: Boolean get() = associatedTypes.isNotEmpty()
+}
+
+/**
+ * Effect row annotation for function types.
+ *
+ * Supports both simple effect names (backward compatible) and effect annotations
+ * with associated type bindings.
+ *
+ * Examples:
+ * - `<Log, FileSystem>` - simple effects only
+ * - `<Exception having 'error = String>` - effect with associated type
+ * - `<Log, Exception having 'error = String, Generator having 'item = Int>` - mixed
+ */
 @Serializable
 data class EffectRowAnnotation(
-    val effects: List<String>,
+    val effects: List<String>,  // Simple effect names (backward compatible)
+    val effectAnnotations: List<EffectAnnotation> = emptyList(),  // Effects with associated types
     val isPolymorphic: Boolean = false,  // true when <...> or <Effect1, ...> is used
     val isPerformed: Boolean = false     // true when <*> or <Effect1, *> is used
-) : TypeAnnotation
+) : TypeAnnotation {
+    /** Get all effect names (from both simple effects and effect annotations) */
+    val allEffectNames: Set<String> get() = effects.toSet() + effectAnnotations.map { it.name }.toSet()
+
+    /** Get associated types for an effect by name, if any were annotated */
+    fun getAssociatedTypes(effectName: String): Map<String, TypeAnnotation>? {
+        return effectAnnotations.find { it.name == effectName }?.associatedTypes
+    }
+
+    companion object {
+        /** Create a simple effect row with just effect names (backward compatible) */
+        fun simple(effects: List<String>, isPolymorphic: Boolean = false, isPerformed: Boolean = false): EffectRowAnnotation {
+            return EffectRowAnnotation(effects, emptyList(), isPolymorphic, isPerformed)
+        }
+
+        /** Create an effect row with a single effect annotation */
+        fun withAnnotation(annotation: EffectAnnotation, isPolymorphic: Boolean = false, isPerformed: Boolean = false): EffectRowAnnotation {
+            return EffectRowAnnotation(emptyList(), listOf(annotation), isPolymorphic, isPerformed)
+        }
+    }
+}
 
 @Serializable
 data class RecordTypeEntry(
@@ -126,19 +175,34 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
             // Convert effect annotations (including polymorphic and performed flags)
             val effects = annotation.effects?.let { effectRow ->
                 val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
+
+                // Convert effect annotations with associated types to EffectInstance objects
+                val effectInstances = effectRow.effectAnnotations.map { effectAnnotation ->
+                    MezzeType.EffectInstance(
+                        name = effectAnnotation.name,
+                        associatedTypes = effectAnnotation.associatedTypes.mapValues { (_, typeAnnotation) ->
+                            convertTypeAnnotation(typeAnnotation)
+                        }
+                    )
+                }.toSet()
+
+                // Simple effect names go into effects set, annotated effects go into effectInstances
                 MezzeType.EffectRow(
                     effects = effectRow.effects.toSet(),
-                    effectInstances = emptySet(),
+                    effectInstances = effectInstances,
                     rowVar = rowVar,
                     performed = effectRow.isPerformed
                 )
             }
 
-            // Convert ability constraints
+            // Convert ability constraints (including associated type bindings)
             val abilityConstraints = annotation.abilityConstraints.map { constraint ->
                 MezzeType.FunctionAbilityConstraint(
                     constraint.abilityName,
-                    constraint.typeArgs.map { convertTypeAnnotation(it) }
+                    constraint.typeArgs.map { convertTypeAnnotation(it) },
+                    constraint.associatedTypeBindings.mapValues { (_, typeAnnotation) ->
+                        convertTypeAnnotation(typeAnnotation)
+                    }
                 )
             }
 

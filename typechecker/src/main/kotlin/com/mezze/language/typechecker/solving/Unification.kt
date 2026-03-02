@@ -521,12 +521,15 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
     // The ONLY error case: concrete effects on one side, pure (closed empty) on the other
     // Because a pure function cannot handle effects that the effectful function produces
 
-    val isPure1 = effects1 == null || (effects1.effects.isEmpty() && effects1.rowVar == null)
-    val isPure2 = effects2 == null || (effects2.effects.isEmpty() && effects2.rowVar == null)
-    val isPolymorphic1 = effects1 != null && effects1.effects.isEmpty() && effects1.rowVar != null
-    val isPolymorphic2 = effects2 != null && effects2.effects.isEmpty() && effects2.rowVar != null
-    val hasConcrete1 = effects1 != null && effects1.effects.isNotEmpty()
-    val hasConcrete2 = effects2 != null && effects2.effects.isNotEmpty()
+    // Check for pure effects (no simple effects AND no effect instances)
+    val isPure1 = effects1 == null || (effects1.effects.isEmpty() && effects1.effectInstances.isEmpty() && effects1.rowVar == null)
+    val isPure2 = effects2 == null || (effects2.effects.isEmpty() && effects2.effectInstances.isEmpty() && effects2.rowVar == null)
+    // Check for polymorphic (empty effects but has row var)
+    val isPolymorphic1 = effects1 != null && effects1.effects.isEmpty() && effects1.effectInstances.isEmpty() && effects1.rowVar != null
+    val isPolymorphic2 = effects2 != null && effects2.effects.isEmpty() && effects2.effectInstances.isEmpty() && effects2.rowVar != null
+    // Check for concrete effects (has simple effects OR effect instances)
+    val hasConcrete1 = effects1 != null && (effects1.effects.isNotEmpty() || effects1.effectInstances.isNotEmpty())
+    val hasConcrete2 = effects2 != null && (effects2.effects.isNotEmpty() || effects2.effectInstances.isNotEmpty())
 
     val effectSubst = when {
         // Both pure - OK
@@ -549,8 +552,9 @@ private fun unifyFunctions(fn1: MezzeType.FunctionType, fn2: MezzeType.FunctionT
         isPure1 && hasConcrete2 -> Substitution.empty  // Pure actual, effectful expected - OK
         hasConcrete1 && isPure2 -> {
             // Effectful actual, pure expected - ERROR
+            val allEffects = effects1!!.effects + effects1.effectInstances.map { it.name }
             return UnificationResult.Failure(
-                message = "Cannot use effectful function <${effects1!!.effects.joinToString()}> where pure function is expected",
+                message = "Cannot use effectful function <${allEffects.joinToString()}> where pure function is expected",
                 type1 = fn1,
                 type2 = fn2
             )
@@ -944,9 +948,51 @@ private fun unifySuspended(susp1: MezzeType.SuspendedType, susp2: MezzeType.Susp
  * effects to be unified.
  */
 private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow): UnificationResult {
-    // Effect rows unify successfully - the union semantics is handled at a higher
-    // level where effects are accumulated from all branches
-    return UnificationResult.Success(Substitution.empty)
+    // Effect rows use UNION semantics for effect names, but when the same effect
+    // appears in both rows with associated types, those associated types must unify.
+
+    // Build maps from effect name to associated types for quick lookup
+    val instances1 = eff1.effectInstances.associateBy { it.name }
+    val instances2 = eff2.effectInstances.associateBy { it.name }
+
+    // Find effects that appear in both rows with associated types
+    val commonEffects = instances1.keys.intersect(instances2.keys)
+
+    // For common effects, unify their associated types
+    var composedSubst = Substitution.empty
+    for (effectName in commonEffects) {
+        val inst1 = instances1[effectName]!!
+        val inst2 = instances2[effectName]!!
+
+        // Both instances should have the same associated type keys (from the effect declaration)
+        // Unify each associated type
+        val allKeys = inst1.associatedTypes.keys + inst2.associatedTypes.keys
+        for (key in allKeys) {
+            val type1 = inst1.associatedTypes[key]
+            val type2 = inst2.associatedTypes[key]
+
+            if (type1 != null && type2 != null) {
+                // Both have this associated type - unify them
+                val result = unify(composedSubst.apply(type1), composedSubst.apply(type2))
+                when (result) {
+                    is UnificationResult.Success -> {
+                        composedSubst = composedSubst.compose(result.substitution)
+                    }
+                    is UnificationResult.Failure -> {
+                        return UnificationResult.Failure(
+                            message = "Effect '$effectName' has incompatible associated type '$key': " +
+                                "expected ${formatType(type2)} but got ${formatType(type1)}",
+                            type1 = eff1,
+                            type2 = eff2
+                        )
+                    }
+                }
+            }
+            // If only one has the type, that's OK - the other will be inferred
+        }
+    }
+
+    return UnificationResult.Success(composedSubst)
 }
 
 /**

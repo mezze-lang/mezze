@@ -724,4 +724,232 @@ class EffectAssociatedTypesTest {
         val funcType = binding.inferredType as MezzeType.FunctionType
         assertTrue(funcType.returnType is MezzeType.IntType)
     }
+
+    // ========================================================================
+    // INTEGRATION TESTS FOR POLYMORPHIC HANDLERS (ToResult, ToOption)
+    // ========================================================================
+
+    @Test
+    fun `test ToResult handler propagates error type to Result`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            impl Exception for ToResult {} having 'error = String where {
+                throw = {error} -> Err { error = error }
+            }
+
+            let mayFail: {} -> (Result Int String) = {} ->
+                perform ToResult in do
+                    Exception.throw { error = "something went wrong" }
+                    Ok { val = 42 }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+
+        val binding = program.items.filterIsInstance<LetBinding>().first { it.variableName == "mayFail" }
+        val funcType = binding.inferredType as MezzeType.FunctionType
+        assertTrue(funcType.returnType is MezzeType.TypeApplication || funcType.returnType is MezzeType.VariantType)
+    }
+
+    @Test
+    fun `test ToResult handler with Int error type`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            impl Exception for ToIntResult {} having 'error = Int where {
+                throw = {error} -> Err { error = error }
+            }
+
+            let mayFailWithCode: {} -> (Result String Int) = {} ->
+                perform ToIntResult in do
+                    Exception.throw { error = 404 }
+                    Ok { val = "success" }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test ToResult handler with record error type`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            impl Exception for ToRecordResult {} having 'error = {code: Int, message: String} where {
+                throw = {error} -> Err { error = error }
+            }
+
+            let mayFailWithDetails: {} -> (Result Int {code: Int, message: String}) = {} ->
+                perform ToRecordResult in do
+                    Exception.throw { error = {code = 500, message = "Internal error"} }
+                    Ok { val = 42 }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test ToOption handler discards error type`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            impl Exception for ToOption {} having 'error = String where {
+                throw = {error} -> None
+            }
+
+            let maybeValue: {} -> (Option Int) = {} ->
+                perform ToOption in do
+                    Exception.throw { error = "ignored" }
+                    Some { val = 42 }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test nested handlers with different error types`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            impl Exception for ToStringResult {} having 'error = String where {
+                throw = {error} -> Err { error = error }
+            }
+
+            impl Exception for ToIntResult {} having 'error = Int where {
+                throw = {error} -> Err { error = error }
+            }
+
+            let nested: {} -> (Result (Result Int Int) String) = {} ->
+                perform ToStringResult in do
+                    Exception.throw { error = "outer error" }
+                    let inner = perform ToIntResult in do
+                        Exception.throw { error = 42 }
+                        Ok { val = 100 }
+                    Ok { val = inner }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test polymorphic function with Exception effect`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            let throwIfZero: {n: Int} -> Int <Exception having 'error = String> = {n} ->
+                match n == 0 is
+                    True -> Exception.throw { error = "cannot be zero" }
+                    False -> n
+
+            impl Exception for ToResult {} having 'error = String where {
+                throw = {error} -> Err { error = error }
+            }
+
+            let safeDiv: {a: Int, b: Int} -> (Result Int String) = {a, b} ->
+                perform ToResult in do
+                    Exception.throw { error = "test" }
+                    Ok { val = a / b }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test effect annotation validates against throw sites`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            let stringError: {} -> Int <Exception having 'error = String> = {} ->
+                do
+                    Exception.throw { error = "error message" }
+                    42
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test mismatch between annotated error type and throw site fails`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            let wrongErrorType: {} -> Int <Exception having 'error = String> = {} ->
+                do
+                    Exception.throw { error = 42 }
+                    0
+        """.trimIndent()
+
+        val program = parser.parse(code)
+        assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(program).program
+        }
+    }
+
+    @Test
+    fun `test multiple throws with same error type in handler`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            impl Exception for ToResult {} having 'error = String where {
+                throw = {error} -> Err { error = error }
+            }
+
+            let multipleThrows: {} -> (Result Int String) = {} ->
+                perform ToResult in do
+                    Exception.throw { error = "first error" }
+                    Exception.throw { error = "second error" }
+                    Ok { val = 42 }
+        """.trimIndent()
+
+        val program = typeCheck(code)
+        assertNotNull(program)
+    }
+
+    @Test
+    fun `test multiple throws with different error types fails`() {
+        val code = """
+            effect Exception having 'error where {
+                throw: {error: 'error} -> 'a <Exception>
+            }
+
+            impl Exception for ToResult {} having 'error = String where {
+                throw = {error} -> Err { error = error }
+            }
+
+            let inconsistentThrows: {} -> (Result Int String) = {} ->
+                perform ToResult in do
+                    Exception.throw { error = "string error" }
+                    Exception.throw { error = 42 }
+                    Ok { val = 0 }
+        """.trimIndent()
+
+        val program = parser.parse(code)
+        assertThrows<TypeCheckError> {
+            typeChecker.typeCheck(program).program
+        }
+    }
 }

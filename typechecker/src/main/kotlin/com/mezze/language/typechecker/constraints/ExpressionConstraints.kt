@@ -2131,6 +2131,39 @@ class ExpressionConstraintGenerator {
             null
         }
 
+        // CRITICAL: Generate constraints for effect associated types from annotation
+        // When the annotation specifies effect associated types (e.g., <State having 'state = Int>),
+        // we need to add equality constraints to unify the annotated types with the inferred ones.
+        val effectAssociatedTypeConstraints = mutableListOf<Constraint>()
+        val expectedEffects = expectedFunctionType?.effects
+        if (expectedEffects != null && expectedEffects.effectInstances.isNotEmpty()) {
+            // For each effect instance in the annotation with associated types,
+            // find the matching effect instance from the body and constrain their associated types
+            val bodyInstances = bodyResult.effectInstances.associateBy { it.name }
+            for (annotationInstance in expectedEffects.effectInstances) {
+                val bodyInstance = bodyInstances[annotationInstance.name]
+                if (bodyInstance != null) {
+                    // Unify each associated type from annotation with the corresponding one from body
+                    // NOTE: Annotation keys have apostrophe prefix ('state), body keys don't (state)
+                    for ((assocName, annotationType) in annotationInstance.associatedTypes) {
+                        // Try both with and without apostrophe prefix
+                        val normalizedName = assocName.removePrefix("'")
+                        val bodyType = bodyInstance.associatedTypes[normalizedName]
+                            ?: bodyInstance.associatedTypes[assocName]
+                        if (bodyType != null) {
+                            effectAssociatedTypeConstraints.add(
+                                Constraint.Equality(
+                                    left = annotationType,
+                                    right = bodyType,
+                                    context = "Effect associated type '$assocName' in ${annotationInstance.name}"
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // CRITICAL: Unwrap SuspendedType from body result - effects are already in effectRow
         // This prevents double-wrapping: FunctionType already has effects in its `effects` field,
         // so the return type should be the plain value type, not SuspendedType(value, effects)
@@ -2160,6 +2193,40 @@ class ExpressionConstraintGenerator {
             else -> emptyList()
         }
 
+        // CRITICAL: Generate constraints for ability associated types from annotation
+        // When the annotation specifies ability associated types (e.g., with Container 'c having 'item = Int),
+        // we need to add equality constraints to unify the annotated types with the inferred ones.
+        val abilityAssociatedTypeConstraints = mutableListOf<Constraint>()
+        val expectedAbilityConstraints = expectedFunctionType?.abilityConstraints ?: emptyList()
+        for (annotationConstraint in expectedAbilityConstraints) {
+            if (annotationConstraint.associatedTypeBindings.isNotEmpty()) {
+                // Find matching AssociatedTypeResolution constraints from the body
+                val matchingBodyConstraints = bodyResult.associatedTypeConstraints.filter {
+                    it.abilityName == annotationConstraint.abilityName
+                }
+
+                for (bodyConstraint in matchingBodyConstraints) {
+                    // For each associated type binding in the annotation,
+                    // find the corresponding type variable from the body constraint
+                    for ((assocName, annotationType) in annotationConstraint.associatedTypeBindings) {
+                        val normalizedName = assocName.removePrefix("'")
+                        val bodyTypeVar = bodyConstraint.associatedTypeVars[normalizedName]
+                            ?: bodyConstraint.associatedTypeVars[assocName]
+
+                        if (bodyTypeVar != null) {
+                            abilityAssociatedTypeConstraints.add(
+                                Constraint.Equality(
+                                    left = annotationType,
+                                    right = MezzeType.VarType(bodyTypeVar),
+                                    context = "Ability associated type '$assocName' in ${annotationConstraint.abilityName}"
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         val functionType = MezzeType.FunctionType(
             paramType = paramType,
             returnType = returnType,
@@ -2173,7 +2240,7 @@ class ExpressionConstraintGenerator {
         // WARNINGS: Propagate pattern warnings and unused variables from body
         return ConstraintResult(
             type = functionType,
-            constraints = bodyResult.constraints,
+            constraints = bodyResult.constraints + effectAssociatedTypeConstraints + abilityAssociatedTypeConstraints,
             abilityConstraints = bodyResult.abilityConstraints,
             undefinedVariables = bodyResult.undefinedVariables,
             tailCalls = bodyResult.tailCalls,

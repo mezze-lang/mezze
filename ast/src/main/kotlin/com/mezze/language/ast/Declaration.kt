@@ -291,11 +291,23 @@ data class AbilityConstraint(
     val typeParam: String
 )
 
+/**
+ * Ability constraint in function type signatures.
+ *
+ * Examples:
+ * - Simple: `with Eq 'a` → FunctionAbilityConstraint("Eq", [IdentifierTypeAnnotation("'a")])
+ * - With associated types: `with Container 'c having 'item = Int`
+ *   → FunctionAbilityConstraint("Container", [...], {'item -> IdentifierTypeAnnotation("Int")})
+ */
 @Serializable
 data class FunctionAbilityConstraint(
     val abilityName: String,
-    val typeArgs: List<TypeAnnotation> = emptyList()  // Type arguments for the ability
-)
+    val typeArgs: List<TypeAnnotation> = emptyList(),  // Type arguments for the ability
+    val associatedTypeBindings: Map<String, TypeAnnotation> = emptyMap()  // Associated type bindings from 'having' clause
+) {
+    /** True if this constraint has any associated type bindings specified */
+    val hasAssociatedTypes: Boolean get() = associatedTypeBindings.isNotEmpty()
+}
 
 /**
  * Display constraint for debugging and testing purposes

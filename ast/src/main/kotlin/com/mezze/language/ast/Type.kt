@@ -307,8 +307,12 @@ sealed interface MezzeType {
     @Serializable
     data class FunctionAbilityConstraint(
         val abilityName: String,
-        val typeArgs: List<MezzeType> = emptyList()  // Type arguments for the ability
-    )
+        val typeArgs: List<MezzeType> = emptyList(),  // Type arguments for the ability
+        val associatedTypeBindings: Map<String, MezzeType> = emptyMap()  // Associated type bindings (e.g., 'item = Int)
+    ) {
+        /** True if this constraint has any associated type bindings specified */
+        val hasAssociatedTypes: Boolean get() = associatedTypeBindings.isNotEmpty()
+    }
 
 }
 
