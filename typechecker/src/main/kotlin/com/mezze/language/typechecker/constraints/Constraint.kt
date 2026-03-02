@@ -47,7 +47,9 @@ sealed interface Constraint {
         val left: MezzeType,
         val right: MezzeType,
         val context: String? = null,  // For error messages
-        override val sourceLocation: SourceLocation? = null
+        override val sourceLocation: SourceLocation? = null,
+        /** True if this constraint was generated from a match case (allows variant merging) */
+        val isMatchCaseContext: Boolean = false
     ) : Constraint
 
     /**
@@ -191,7 +193,8 @@ sealed interface Constraint {
 data class ConstraintResult(
     val type: MezzeType,
     val constraints: List<Constraint>,
-    val effects: Set<String> = emptySet(),  // Effects used in this expression
+    val effects: Set<String> = emptySet(),  // Effects used in this expression (simple names without associated types)
+    val effectInstances: Set<MezzeType.EffectInstance> = emptySet(),  // Effects with associated type bindings
     val performed: Boolean = false,  // True if effects were performed via 'perform' expression
     val abilityConstraints: List<Constraint.AbilityRequired> = emptyList(),  // Ability requirements
     val associatedTypeConstraints: List<Constraint.AssociatedTypeResolution> = emptyList(),  // Associated type resolution constraints
@@ -237,16 +240,21 @@ data class ConstraintResult(
         }
 
         /**
-         * Combine multiple constraint results
+         * Combine multiple constraint results.
+         * OPTIMIZATION: Short-circuit empty collections to avoid unnecessary allocations.
          */
         fun combine(
             type: MezzeType,
             results: List<ConstraintResult>
         ): ConstraintResult {
+            // OPTIMIZATION: Check if any result has effectInstances before collecting
+            val hasEffectInstances = results.any { it.effectInstances.isNotEmpty() }
+
             return ConstraintResult(
                 type = type,
                 constraints = results.flatMap { it.constraints },
                 effects = results.flatMap { it.effects }.toSet(),
+                effectInstances = if (hasEffectInstances) results.flatMap { it.effectInstances }.toSet() else emptySet(),
                 abilityConstraints = results.flatMap { it.abilityConstraints },
                 associatedTypeConstraints = results.flatMap { it.associatedTypeConstraints },
                 undefinedVariables = results.flatMap { it.undefinedVariables },
@@ -275,6 +283,17 @@ data class ConstraintResult(
             newEffects: Set<String>
         ): ConstraintResult {
             return copy(effects = effects + newEffects)
+        }
+
+        /**
+         * Add effect instances to a result.
+         * OPTIMIZATION: Short-circuit if new instances are empty.
+         */
+        fun ConstraintResult.withEffectInstances(
+            newEffectInstances: Set<MezzeType.EffectInstance>
+        ): ConstraintResult {
+            return if (newEffectInstances.isEmpty()) this
+                   else copy(effectInstances = effectInstances + newEffectInstances)
         }
 
         /**
@@ -314,6 +333,7 @@ data class ConstraintContext(
     val performerAddedEffects: Map<String, Set<String>> = emptyMap(),  // Maps handler names to effects they ADD (e.g., FileLogger -> {FileSystem})
     val abilityNames: Set<String> = emptySet(),  // Set of all ability names (e.g., Show, Eq)
     val effectNames: Set<String> = emptySet(),  // Set of all effect names (e.g., Log, FileSystem)
+    val effectDeclarations: Map<String, EffectDeclaration> = emptyMap(),  // Effect declarations (for associated type lookup)
     val performContext: PerformExpression? = null,  // Current perform context for effect associated type substitution
     val abilityDeclarations: Map<String, AbilityDeclaration> = emptyMap(),  // All ability declarations for method type lookup
     val recordLiteralBindings: Set<String> = emptySet(),  // Variables bound to explicit record literals (for field access validation)

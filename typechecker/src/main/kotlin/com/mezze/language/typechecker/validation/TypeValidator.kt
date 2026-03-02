@@ -412,28 +412,33 @@ class TypeValidator(
                 continue
             }
 
-            // Check for exact match by searching impls for this ability and matching types
-            // Context is now keyed by content hash, so we search by ability name
-            val hasExactMatch = context.getAbilityImpls(abilityName).any { implInfo ->
-                implInfo.targetTypes == implTypeParts
-            }
-            if (hasExactMatch) {
-                continue
+            // Build list of concrete types for structural matching
+            val concreteTypes = mutableListOf(concreteType)
+            for (typeArg in constraint.typeArgs) {
+                concreteTypes.add(substitution.apply(typeArg))
             }
 
-            // Check for structural match using type annotations (for associated types)
-            // This handles cases like Container [Int] having 'item = Int
-            val hasStructuralMatch = context.getAbilityImpls(abilityName).any { implInfo ->
+            // OPTIMIZATION: Cache ability impls lookup - called once per constraint instead of 4x
+            val abilityImpls = context.getAbilityImpls(abilityName)
+
+            // PRIMARY: Check for structural match using type annotations
+            // This is the preferred method - avoids string serialization
+            val hasStructuralMatch = abilityImpls.any { implInfo ->
                 val annotations = implInfo.targetTypeAnnotations ?: return@any false
-                // For abilities with associated types, match only against primary type params
-                // (not associated types which are in associatedTypeBindings)
-                if (annotations.size == 1 && implTypeParts.size == 1) {
-                    typeMatchesAnnotation(concreteType, annotations.first())
-                } else {
-                    false
+                if (annotations.size != concreteTypes.size) return@any false
+                concreteTypes.zip(annotations).all { (type, annotation) ->
+                    typeMatchesAnnotation(type, annotation)
                 }
             }
             if (hasStructuralMatch) {
+                continue
+            }
+
+            // FALLBACK: Check for exact string match (for backward compatibility)
+            val hasExactMatch = abilityImpls.any { implInfo ->
+                implInfo.targetTypes == implTypeParts
+            }
+            if (hasExactMatch) {
                 continue
             }
 
@@ -441,7 +446,7 @@ class TypeValidator(
             // check if any type alias in scope matches its structure
             val hasRecordAliasMatch = if (implTypeParts.size == 1 && concreteType is MezzeType.RecordType && concreteType.typeName == null) {
                 val matchingAliases = findMatchingRecordTypeAliases(concreteType)
-                context.getAbilityImpls(abilityName).any { implInfo ->
+                abilityImpls.any { implInfo ->
                     implInfo.targetTypes.size == 1 && matchingAliases.contains(implInfo.targetTypes[0])
                 }
             } else {
@@ -455,7 +460,7 @@ class TypeValidator(
             // check if any type alias in scope matches its structure and infer type arguments
             val hasVariantAliasMatch = if (implTypeParts.size == 1 && concreteType is MezzeType.VariantType && concreteType.typeName == null) {
                 val matchingAliases = findMatchingVariantTypeAliases(concreteType)
-                context.getAbilityImpls(abilityName).any { implInfo ->
+                abilityImpls.any { implInfo ->
                     implInfo.targetTypes.size == 1 && matchingAliases.contains(implInfo.targetTypes[0])
                 }
             } else {
@@ -469,7 +474,11 @@ class TypeValidator(
             // For example, if we're looking for Convert_Int and there's Convert_Int_String, that's a match
             val hasPartialMatch = if (implTypeParts.size == 1 && constraint.typeArgs.isNotEmpty()) {
                 // We only have the first type arg - look for any impl that starts with this prefix
-                findMatchingMultiParameterImpl(abilityName, implTypeParts)
+                // Inline lookup using cached abilityImpls
+                abilityImpls.any { implInfo ->
+                    implInfo.targetTypes.size >= implTypeParts.size &&
+                    implInfo.targetTypes.take(implTypeParts.size) == implTypeParts
+                }
             } else {
                 false
             }
@@ -508,26 +517,6 @@ class TypeValidator(
         }
 
         return errors
-    }
-
-    /**
-     * Find a matching multi-parameter ability implementation.
-     *
-     * For multi-parameter abilities like Convert 'a 'b, when we only know the first type arg,
-     * we look for any implementation that matches the prefix.
-     *
-     * Example: Looking for Convert with knownTypeParts=["Int"] when impl has targetTypes=["Int", "String"] -> returns true
-     */
-    private fun findMatchingMultiParameterImpl(
-        abilityName: String,
-        knownTypeParts: List<String>
-    ): Boolean {
-        // Search for implementations where targetTypes starts with knownTypeParts
-        return context.getAbilityImpls(abilityName).any { implInfo ->
-            // Check if the impl's target types start with our known types
-            implInfo.targetTypes.size >= knownTypeParts.size &&
-            implInfo.targetTypes.take(knownTypeParts.size) == knownTypeParts
-        }
     }
 
     /**
@@ -697,9 +686,22 @@ class TypeValidator(
                     }
                 }
             }
-            else -> {
-                // Other annotation types don't contain type parameters we need to extract
+            is FunctionTypeAnnotation -> {
+                // Match function parameter and return types
+                if (concreteType is MezzeType.FunctionType) {
+                    extractTypeParamMappings(annotation.paramType, concreteType.paramType, typeParams, mappings)
+                    extractTypeParamMappings(annotation.returnType, concreteType.returnType, typeParams, mappings)
+                }
             }
+            is ArrayTypeAnnotation -> {
+                // Match array element types
+                if (concreteType is MezzeType.ArrayType) {
+                    extractTypeParamMappings(annotation.elementType, concreteType.elementType, typeParams, mappings)
+                }
+            }
+            // These annotation types don't contain type parameters we need to extract
+            is QualifiedTypeAnnotation,
+            is EffectRowAnnotation -> { /* no type parameters to extract */ }
         }
     }
 

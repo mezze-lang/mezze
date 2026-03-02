@@ -249,7 +249,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool"
+            "Bool <Log>"  // Effect propagates from getText {}
         )
     }
 
@@ -275,7 +275,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool"
+            "Bool <Log>"  // Effect propagates from getBool {}
         )
     }
 
@@ -299,7 +299,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool"
+            "Bool <Log>"  // Effect propagates from getBool {}
         )
     }
 
@@ -325,7 +325,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool"
+            "Bool <Log>"  // Effect propagates from getNumber {}
         )
     }
 
@@ -353,7 +353,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool"
+            "Bool <Log>"  // Effect propagates from both getX {} and getY {}
         )
     }
 
@@ -379,7 +379,7 @@ class SuspendedTypeAbilityTest {
             result
             """.trimIndent(),
             "result",
-            "Bool"
+            "Bool <Log>"  // Effect propagates from getNumber {}
         )
     }
 

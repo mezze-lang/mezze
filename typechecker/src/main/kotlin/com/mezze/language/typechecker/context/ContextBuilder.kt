@@ -58,7 +58,8 @@ class ContextBuilder {
         parentContext: TypingContext = TypingContext.empty,
         importedImpls: Map<String, com.mezze.language.ast.ImplDeclaration> = emptyMap(),
         importedAbilities: Map<String, AbilityDeclaration> = emptyMap(),
-        importedTypes: Map<String, TypeDeclaration> = emptyMap()
+        importedTypes: Map<String, TypeDeclaration> = emptyMap(),
+        importedEffects: Map<String, EffectDeclaration> = emptyMap()
     ): BuildResult {
         // VALIDATION PHASE 1: Check for duplicate declarations BEFORE building context
         // This catches errors early and provides clear error messages
@@ -112,9 +113,16 @@ class ContextBuilder {
             ctx = addEffectOperations(ctx, effectDecl)
         }
 
+        // Merge local and imported effect declarations for performer lookup
+        val allEffectDecls = effectDecls + importedEffects
+
         // Add effect performers (impl blocks) to context
+        // Include both local AND imported impls so their PerformerTypeInfo is available
         for (implDecl in implDecls) {
-            ctx = addEffectPerformer(ctx, implDecl, effectDecls)
+            ctx = addEffectPerformer(ctx, implDecl, allEffectDecls)
+        }
+        for ((_, implDecl) in importedImpls) {
+            ctx = addEffectPerformer(ctx, implDecl, allEffectDecls)
         }
 
         // Add ability implementations to context
@@ -351,6 +359,209 @@ class ContextBuilder {
     }
 
     /**
+     * Analyze an impl body to find calls to `suspend_with` and extract the suspension type.
+     *
+     * The suspension type is what's passed as `value` to `suspend_with`. This determines
+     * what the perform expression should return.
+     *
+     * Example: For `throw = {error} -> cont.suspend_with {value = Err {error}}`
+     *   - The suspension expression is `Err {error}`
+     *   - We infer the type pattern `| Err { error: 'error } |` → `Result 'val 'error`
+     *
+     * @param implDecl The impl declaration to analyze
+     * @param associatedTypes Map of associated type names to their bound types
+     * @return The inferred suspension type, or null if not found/inferrable
+     */
+    private fun extractSuspensionType(
+        implDecl: ImplDeclaration,
+        associatedTypes: Map<String, MezzeType>
+    ): MezzeType? {
+        // Look through all operations for suspend_with calls
+        for (op in implDecl.operations) {
+            val impl = op.implementation
+            if (impl !is LambdaExpression) continue
+
+            val suspendWithValue = findSuspendWithValue(impl.body)
+            if (suspendWithValue != null) {
+                return inferSuspensionTypeFromExpression(suspendWithValue, associatedTypes)
+            }
+        }
+        return null
+    }
+
+    /**
+     * Recursively find the value expression passed to suspend_with.
+     * Looks for patterns like: cont.suspend_with {value = expr}
+     */
+    private fun findSuspendWithValue(expr: Expression): Expression? {
+        return when (expr) {
+            is FunctionCall -> {
+                // Check if this is a call to suspend_with
+                val callee = expr.function
+                if (callee is MemberAccess && callee.member == "suspend_with") {
+                    // Found suspend_with call, extract the value from arguments
+                    val args = expr.arguments
+                    if (args is RecordLiteral) {
+                        for (entry in args.entries) {
+                            if (entry is RecordFieldEntry && entry.name == "value") {
+                                return entry.value
+                            }
+                        }
+                    }
+                }
+                // Not a suspend_with call, recurse into arguments
+                findSuspendWithValue(expr.arguments)
+            }
+            is DoExpression -> {
+                // Check the result expression
+                findSuspendWithValue(expr.result) ?: run {
+                    // Check statements
+                    for (stmt in expr.statements.reversed()) {
+                        when (stmt) {
+                            is ExpressionStatement -> {
+                                val found = findSuspendWithValue(stmt.expression)
+                                if (found != null) return found
+                            }
+                            is LetStatement -> {
+                                val found = findSuspendWithValue(stmt.expression)
+                                if (found != null) return found
+                            }
+                        }
+                    }
+                    null
+                }
+            }
+            is IfExpression -> {
+                // Check both branches
+                findSuspendWithValue(expr.thenBranch) ?: findSuspendWithValue(expr.elseBranch)
+            }
+            is MatchExpression -> {
+                // Check all cases
+                for (case in expr.cases) {
+                    val found = findSuspendWithValue(case.expression)
+                    if (found != null) return found
+                }
+                null
+            }
+            is LambdaExpression -> findSuspendWithValue(expr.body)
+            else -> null
+        }
+    }
+
+    /**
+     * Infer the suspension type from the expression passed to suspend_with.
+     *
+     * For variant constructors like `Err {error}`, we create a variant type.
+     * For other expressions, we try to infer a reasonable type.
+     */
+    private fun inferSuspensionTypeFromExpression(
+        expr: Expression,
+        associatedTypes: Map<String, MezzeType>
+    ): MezzeType? {
+        return when (expr) {
+            is VariantConstruction -> {
+                // Variant like Err {error} or Ok {val}
+                val constructorName = expr.constructor
+                val exprValue = expr.value
+                val payloadType = if (exprValue != null) {
+                    inferPayloadType(exprValue, associatedTypes)
+                } else null
+
+                // Create a variant type with this constructor
+                // For Result patterns, we need both Ok and Err constructors
+                if (constructorName == "Err" || constructorName == "Ok") {
+                    // This is a Result type - create Result 'val 'error
+                    // CRITICAL: Use the SAME type variable from associatedTypes
+                    // This ensures constraint propagation works - when the operation
+                    // call constrains 'error to String, the suspension type also sees it
+                    val errorType = associatedTypes["error"] ?: MezzeType.VarType(TypeVar.fresh())
+                    val valType = MezzeType.VarType(TypeVar.fresh())
+
+                    MezzeType.TypeApplication(
+                        constructor = "Result",
+                        args = listOf(valType, errorType)
+                    )
+                } else if (constructorName == "None") {
+                    // This is Option None - create Option 'a
+                    MezzeType.TypeApplication(
+                        constructor = "Option",
+                        args = listOf(MezzeType.VarType(TypeVar.fresh()))
+                    )
+                } else if (constructorName == "Some") {
+                    // This is Option Some - create Option with the payload type
+                    val innerType = payloadType ?: MezzeType.VarType(TypeVar.fresh())
+                    MezzeType.TypeApplication(
+                        constructor = "Option",
+                        args = listOf(innerType)
+                    )
+                } else {
+                    // Generic variant - create open variant type
+                    val constructors: Map<String, MezzeType?> = mapOf(constructorName to payloadType)
+                    MezzeType.VariantType(
+                        constructors = constructors,
+                        rowVar = RowVar.fresh()
+                    )
+                }
+            }
+            is RecordLiteral -> {
+                // Record literal - infer field types
+                val fields = mutableMapOf<String, MezzeType>()
+                for (entry in expr.entries) {
+                    if (entry is RecordFieldEntry) {
+                        val entryValue = entry.value
+                        val fieldType = if (entryValue != null) {
+                            inferPayloadType(entryValue, associatedTypes)
+                        } else {
+                            // Shorthand {foo} - look up in associated types
+                            associatedTypes[entry.name] ?: MezzeType.VarType(TypeVar.fresh())
+                        }
+                        fields[entry.name] = fieldType
+                    }
+                }
+                MezzeType.RecordType(fields)
+            }
+            is Identifier -> {
+                // Reference to a variable - check if it's an associated type
+                val name = expr.localName
+                associatedTypes[name] ?: MezzeType.VarType(TypeVar.fresh())
+            }
+            else -> {
+                // For other expressions, use a fresh type variable
+                MezzeType.VarType(TypeVar.fresh())
+            }
+        }
+    }
+
+    /**
+     * Infer the type of a payload expression.
+     */
+    private fun inferPayloadType(expr: Expression, associatedTypes: Map<String, MezzeType>): MezzeType {
+        return when (expr) {
+            is RecordLiteral -> {
+                val fields = mutableMapOf<String, MezzeType>()
+                for (entry in expr.entries) {
+                    if (entry is RecordFieldEntry) {
+                        val entryValue = entry.value
+                        val fieldType = if (entryValue != null) {
+                            inferPayloadType(entryValue, associatedTypes)
+                        } else {
+                            // Shorthand {foo} - look up in associated types
+                            associatedTypes[entry.name] ?: MezzeType.VarType(TypeVar.fresh())
+                        }
+                        fields[entry.name] = fieldType
+                    }
+                }
+                MezzeType.RecordType(fields)
+            }
+            is Identifier -> {
+                val name = expr.localName
+                associatedTypes[name] ?: MezzeType.VarType(TypeVar.fresh())
+            }
+            else -> MezzeType.VarType(TypeVar.fresh())
+        }
+    }
+
+    /**
      * Add effect performer to context.
      *
      * Stores the performer's associated type bindings so they can be used
@@ -399,10 +610,56 @@ class ContextBuilder {
                     "Ensure computeDeclarationHashes was called before ContextBuilder."
                 )
 
+            // Convert performer parameters to a RecordType (e.g., {cont: Continuation 'a 'b 'c})
+            // These are the parameters that must be passed when using the performer at a perform site
+            val performerFieldsType = if (implDecl.performerParams.isNotEmpty()) {
+                MezzeType.RecordType(
+                    fields = implDecl.performerParams.associate { param ->
+                        param.name to convertTypeAnnotationInternal(param.type)
+                    }
+                )
+            } else null
+
+            // Extract the suspension type from the impl body
+            // This analyzes calls to suspend_with to determine what type the perform should return
+            val associatedTypesMap = performerType.fields.mapKeys { (k, _) -> k }
+            val suspensionType = extractSuspensionType(implDecl, associatedTypesMap)
+
             val performerInfo = TypingContext.PerformerTypeInfo(
                 performerName = implDecl.performerName,
                 effectName = implDecl.effectName,
                 associatedTypes = performerType,
+                performerFields = performerFieldsType,
+                suspensionType = suspensionType,
+                contentHash = contentHash
+            )
+
+            return ctx.extendWithPerformerTypeInfo(contentHash, performerInfo)
+        }
+
+        // Even if no associated types, we still need to store performer fields for continuation inference
+        if (implDecl.performerParams.isNotEmpty()) {
+            val contentHash = implDecl.contentHash
+                ?: throw IllegalStateException(
+                    "Content hash not computed for impl: ${implDecl.performerName}. " +
+                    "Ensure computeDeclarationHashes was called before ContextBuilder."
+                )
+
+            val performerFieldsType = MezzeType.RecordType(
+                fields = implDecl.performerParams.associate { param ->
+                    param.name to convertTypeAnnotationInternal(param.type)
+                }
+            )
+
+            // Extract the suspension type from the impl body (even without associated types)
+            val suspensionType = extractSuspensionType(implDecl, emptyMap())
+
+            val performerInfo = TypingContext.PerformerTypeInfo(
+                performerName = implDecl.performerName,
+                effectName = implDecl.effectName,
+                associatedTypes = MezzeType.RecordType(emptyMap()),  // No associated types
+                performerFields = performerFieldsType,
+                suspensionType = suspensionType,
                 contentHash = contentHash
             )
 
@@ -558,7 +815,7 @@ class ContextBuilder {
                     effects = annotation.effects?.let { effectRow ->
                         // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                         val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
-                        MezzeType.EffectRow(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
+                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
                     },
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->
                         MezzeType.FunctionAbilityConstraint(

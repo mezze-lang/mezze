@@ -229,40 +229,40 @@ class PerformedMarkerTest {
     @Test
     fun `EffectRow toString shows performed marker correctly`() {
         // <*> - performed only
-        val performedOnly = MezzeType.EffectRow(emptySet(), null, true)
+        val performedOnly = MezzeType.EffectRow.simple(emptySet(), null, true)
         assertTrue(performedOnly.toString().contains("*"), "Should show * for performed")
 
         // <Log, *> - effects plus performed
-        val effectsAndPerformed = MezzeType.EffectRow(setOf("Log"), null, true)
+        val effectsAndPerformed = MezzeType.EffectRow.simple(setOf("Log"), null, true)
         assertTrue(effectsAndPerformed.toString().contains("Log"), "Should show Log")
         assertTrue(effectsAndPerformed.toString().contains("*"), "Should show *")
 
         // <Log> - effects without performed
-        val effectsOnly = MezzeType.EffectRow(setOf("Log"), null, false)
+        val effectsOnly = MezzeType.EffectRow.simple(setOf("Log"), null, false)
         assertTrue(effectsOnly.toString().contains("Log"), "Should show Log")
         assertFalse(effectsOnly.toString().contains("*"), "Should not show * when not performed")
 
         // <> - empty
-        val empty = MezzeType.EffectRow(emptySet(), null, false)
+        val empty = MezzeType.EffectRow.simple(emptySet(), null, false)
         assertFalse(empty.toString().contains("*"), "Empty should not show *")
     }
 
     @Test
     fun `EffectRow isPure correctly identifies pure effects`() {
         // Pure: no effects, no row var, not performed
-        val pure = MezzeType.EffectRow(emptySet(), null, false)
+        val pure = MezzeType.EffectRow.simple(emptySet(), null, false)
         assertTrue(pure.isPure, "Empty non-performed effect row should be pure")
 
         // Not pure: performed
-        val performed = MezzeType.EffectRow(emptySet(), null, true)
+        val performed = MezzeType.EffectRow.simple(emptySet(), null, true)
         assertFalse(performed.isPure, "Performed effect row should not be pure")
 
         // Not pure: has effects
-        val hasEffects = MezzeType.EffectRow(setOf("Log"), null, false)
+        val hasEffects = MezzeType.EffectRow.simple(setOf("Log"), null, false)
         assertFalse(hasEffects.isPure, "Effect row with effects should not be pure")
 
         // Not pure: has row var (open)
-        val hasRowVar = MezzeType.EffectRow(emptySet(), RowVar("e"), false)
+        val hasRowVar = MezzeType.EffectRow.simple(emptySet(), RowVar("e"), false)
         assertFalse(hasRowVar.isPure, "Open effect row should not be pure")
     }
 
@@ -394,7 +394,7 @@ class PerformedMarkerTest {
     @Test
     fun `performed marker appears at end of effect row string`() {
         // <Log, *> - effects plus performed, * should be at the end
-        val effectsAndPerformed = MezzeType.EffectRow(setOf("Log"), null, true)
+        val effectsAndPerformed = MezzeType.EffectRow.simple(setOf("Log"), null, true)
         val str = effectsAndPerformed.toString()
         assertTrue(str.contains("Log"), "Should contain Log")
         assertTrue(str.contains("*"), "Should contain *")
@@ -408,7 +408,7 @@ class PerformedMarkerTest {
     @Test
     fun `performed marker at end with multiple effects`() {
         // <Log, State, *> - multiple effects plus performed
-        val multiEffects = MezzeType.EffectRow(setOf("Log", "State"), null, true)
+        val multiEffects = MezzeType.EffectRow.simple(setOf("Log", "State"), null, true)
         val str = multiEffects.toString()
 
         assertTrue(str.contains("Log"), "Should contain Log")
@@ -426,7 +426,7 @@ class PerformedMarkerTest {
     @Test
     fun `performed marker at end with row variable`() {
         // <Log, 'e, *> - effect, row var, and performed
-        val withRowVar = MezzeType.EffectRow(setOf("Log"), RowVar("e"), true)
+        val withRowVar = MezzeType.EffectRow.simple(setOf("Log"), RowVar("e"), true)
         val str = withRowVar.toString()
 
         assertTrue(str.contains("Log"), "Should contain Log")

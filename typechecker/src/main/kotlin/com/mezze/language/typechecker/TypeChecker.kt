@@ -225,7 +225,7 @@ class TypeChecker(
         val hashedProgram = computeDeclarationHashes(program)
 
         // PHASE 1: Build Context
-        // Pass imported impls, abilities, and types to ContextBuilder
+        // Pass imported impls, abilities, types, and effects to ContextBuilder
         // so performerToEffect map includes them and ability impl validation works with qualified names
         val contextBuilder = ContextBuilder()
         val buildResult = contextBuilder.build(
@@ -233,7 +233,8 @@ class TypeChecker(
             parentContext = enhancedContext,
             importedImpls = importContext?.importedImpls ?: emptyMap(),
             importedAbilities = importContext?.importedAbilities ?: emptyMap(),
-            importedTypes = importContext?.importedTypes ?: emptyMap()
+            importedTypes = importContext?.importedTypes ?: emptyMap(),
+            importedEffects = importContext?.importedEffects ?: emptyMap()
         )
         val context = buildResult.context
 
@@ -696,7 +697,8 @@ class TypeChecker(
                 parentContext = enhancedContext,
                 importedImpls = importContext?.importedImpls ?: emptyMap(),
                 importedAbilities = importContext?.importedAbilities ?: emptyMap(),
-                importedTypes = importContext?.importedTypes ?: emptyMap()
+                importedTypes = importContext?.importedTypes ?: emptyMap(),
+                importedEffects = importContext?.importedEffects ?: emptyMap()
             )
         } catch (e: Exception) {
             // Context building failed - return with error

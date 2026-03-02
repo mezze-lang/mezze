@@ -110,7 +110,7 @@ class TypeSubstitutor(
                 paramType = applyToType(type.paramType),
                 returnType = applyToType(type.returnType),
                 effects = type.effects?.let { row ->
-                    MezzeType.EffectRow(row.effects, row.rowVar)
+                    MezzeType.EffectRow.simple(row.effects, row.rowVar)
                 },
                 abilityConstraints = type.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(
@@ -151,7 +151,7 @@ class TypeSubstitutor(
 
             is MezzeType.SuspendedType -> MezzeType.SuspendedType(
                 valueType = applyToType(type.valueType),
-                effects = MezzeType.EffectRow(type.effects.effects, type.effects.rowVar)
+                effects = MezzeType.EffectRow.simple(type.effects.effects, type.effects.rowVar)
             )
 
             // Concrete types stay as-is
@@ -372,7 +372,7 @@ class TypeSubstitutor(
                 paramType = convertTypeAnnotationToMezzeType(annotation.paramType),
                 returnType = convertTypeAnnotationToMezzeType(annotation.returnType),
                 effects = annotation.effects?.let { row ->
-                    MezzeType.EffectRow(row.effects.toSet(), if (row.isPolymorphic) RowVar("e") else null, row.isPerformed)
+                    MezzeType.EffectRow.simple(row.effects.toSet(), if (row.isPolymorphic) RowVar("e") else null, row.isPerformed)
                 },
                 abilityConstraints = annotation.abilityConstraints.map { constraint ->
                     MezzeType.FunctionAbilityConstraint(

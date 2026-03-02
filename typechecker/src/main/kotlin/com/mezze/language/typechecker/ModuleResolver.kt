@@ -842,7 +842,7 @@ class ModuleResolver(
                 val effectRow = annotation.effects?.let { effectRowAnnotation ->
                     // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                     val rowVar = if (effectRowAnnotation.isPolymorphic) RowVar.fresh() else null
-                    MezzeType.EffectRow(effectRowAnnotation.effects.toSet(), rowVar, effectRowAnnotation.isPerformed)
+                    MezzeType.EffectRow.simple(effectRowAnnotation.effects.toSet(), rowVar, effectRowAnnotation.isPerformed)
                 }
                 MezzeType.FunctionType(
                     paramType = convertTypeAnnotation(annotation.paramType),

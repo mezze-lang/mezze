@@ -111,6 +111,50 @@ class ConstraintSolver(
      */
     private val patternBasedRowVars = mutableSetOf<RowVar>()
 
+    // ========================================================================
+    // OPTIMIZATION: Constructor-to-Variant Index for O(1) lookup
+    // ========================================================================
+
+    /**
+     * Index from constructor name to (TypeDeclaration, VariantDefinition) pairs.
+     * Built lazily on first use of findVariantWithConstructors.
+     * Enables O(1) lookup instead of O(n) iteration over all type declarations.
+     */
+    private val constructorIndex: Map<String, List<Pair<TypeDeclaration, VariantDefinition>>> by lazy {
+        buildConstructorIndex()
+    }
+
+    /**
+     * Build the constructor-to-variant index from type declarations.
+     */
+    private fun buildConstructorIndex(): Map<String, List<Pair<TypeDeclaration, VariantDefinition>>> {
+        val index = mutableMapOf<String, MutableList<Pair<TypeDeclaration, VariantDefinition>>>()
+        for ((_, typeDecl) in typeDeclarations) {
+            val definition = typeDecl.definition
+            if (definition is VariantDefinition) {
+                for (constructor in definition.constructors) {
+                    index.getOrPut(constructor.name) { mutableListOf() }
+                        .add(Pair(typeDecl, definition))
+                }
+            }
+        }
+        return index
+    }
+
+    // ========================================================================
+    // OPTIMIZATION: typeMatchesAnnotation memoization cache
+    // ========================================================================
+
+    /**
+     * Cache for typeMatchesAnnotation results.
+     * Key: Pair of type hashCode and annotation hashCode
+     * Value: Boolean result
+     *
+     * This avoids repeated matching of the same type/annotation pairs during
+     * ability constraint validation.
+     */
+    private val typeMatchesAnnotationCache = mutableMapOf<Pair<Int, Int>, Boolean>()
+
     /**
      * Get the set of type variables that must remain open (have row variables).
      */
@@ -260,75 +304,90 @@ class ConstraintSolver(
      * CRITICAL: This function validates closed variants!
      * For `type Color = | Red, Blue, Green |`, seeing `{Red, Blue, Pink}` will return Failure
      * because Pink is not in the closed variant's constructor list.
+     *
+     * OPTIMIZATION: Uses constructor index for O(1) lookup instead of O(n) iteration.
      */
     private fun findVariantWithConstructors(
         constructors: Set<String>,
         constructorPayloads: Map<String, MezzeType?> = emptyMap()
     ): VariantInferenceResult? {
-        for ((typeName, typeDecl) in typeDeclarations) {
-            val definition = typeDecl.definition
-            if (definition is VariantDefinition) {
-                // Get constructor names from definition
-                val declaredConstructors = definition.constructors.map { it.name }.toSet()
+        // OPTIMIZATION: Use constructor index for O(1) lookup of candidate variants
+        // Collect all variant declarations that have at least one of the constructors
+        val candidateVariants = mutableSetOf<Pair<TypeDeclaration, VariantDefinition>>()
+        for (constructorName in constructors) {
+            constructorIndex[constructorName]?.let { variants ->
+                candidateVariants.addAll(variants)
+            }
+        }
 
-                // Check if SOME constructors match (needed for both open and closed)
-                val matchingConstructors = constructors.intersect(declaredConstructors)
+        // If no candidates found, it's an anonymous/structural variant
+        if (candidateVariants.isEmpty()) {
+            return null
+        }
 
-                if (matchingConstructors.isEmpty()) {
-                    // No constructors match - skip this variant
-                    continue
-                }
+        // Check each candidate variant
+        for ((typeDecl, definition) in candidateVariants) {
+            val typeName = typeDecl.name
+            // Get constructor names from definition
+            val declaredConstructors = definition.constructors.map { it.name }.toSet()
 
-                // Create fresh type variables for type parameters
-                val typeParams = typeDecl.typeParams
-                val freshArgs = typeParams.map { MezzeType.VarType(TypeVar.fresh()) }
-                val typeParamSubst = typeParams.zip(freshArgs).toMap()
+            // Check if SOME constructors match (needed for both open and closed)
+            val matchingConstructors = constructors.intersect(declaredConstructors)
 
-                // Generate payload constraints to specialize type parameters
-                val payloadConstraints = mutableListOf<Constraint.Equality>()
-                for (constructorDef in definition.constructors) {
-                    val actualPayload = constructorPayloads[constructorDef.name]
-                    val declaredPayload = constructorDef.dataType?.let { convertTypeAnnotation(it, typeParamSubst) }
+            if (matchingConstructors.isEmpty()) {
+                // No constructors match - skip this variant
+                continue
+            }
 
-                    if (actualPayload != null && declaredPayload != null) {
-                        payloadConstraints.add(
-                            Constraint.Equality(
-                                left = actualPayload,
-                                right = declaredPayload,
-                                context = "Constructor '${constructorDef.name}' payload type"
-                            )
+            // Create fresh type variables for type parameters
+            val typeParams = typeDecl.typeParams
+            val freshArgs = typeParams.map { MezzeType.VarType(TypeVar.fresh()) }
+            val typeParamSubst = typeParams.zip(freshArgs).toMap()
+
+            // Generate payload constraints to specialize type parameters
+            val payloadConstraints = mutableListOf<Constraint.Equality>()
+            for (constructorDef in definition.constructors) {
+                val actualPayload = constructorPayloads[constructorDef.name]
+                val declaredPayload = constructorDef.dataType?.let { convertTypeAnnotation(it, typeParamSubst) }
+
+                if (actualPayload != null && declaredPayload != null) {
+                    payloadConstraints.add(
+                        Constraint.Equality(
+                            left = actualPayload,
+                            right = declaredPayload,
+                            context = "Constructor '${constructorDef.name}' payload type"
                         )
-                    }
+                    )
                 }
+            }
 
-                if (definition.isOpen) {
-                    // OPEN variant: Accept if SOME constructors match
-                    val variantType = if (freshArgs.isNotEmpty()) {
-                        MezzeType.TypeApplication(typeName, freshArgs)
-                    } else {
-                        MezzeType.TypeApplication(typeName, emptyList())
-                    }
-                    return VariantInferenceResult.Success(variantType, payloadConstraints)
+            if (definition.isOpen) {
+                // OPEN variant: Accept if SOME constructors match
+                val variantType = if (freshArgs.isNotEmpty()) {
+                    MezzeType.TypeApplication(typeName, freshArgs)
                 } else {
-                    // CLOSED variant: ALL constructors must be in the declaration
-                    val invalidConstructors = constructors - declaredConstructors
-
-                    if (invalidConstructors.isNotEmpty()) {
-                        // Found invalid constructors for this closed variant - ERROR!
-                        val errorMsg = "Constructor(s) ${invalidConstructors.joinToString()} not found in closed variant '$typeName'. " +
-                                      "Available constructors: ${declaredConstructors.joinToString()}"
-                        return VariantInferenceResult.Failure(errorMsg)
-                    }
-
-                    // All constructors match - this is the right variant
-                    val variantType = if (freshArgs.isNotEmpty()) {
-                        MezzeType.TypeApplication(typeName, freshArgs)
-                    } else {
-                        // Non-parametric variant type
-                        MezzeType.TypeApplication(typeName, emptyList())
-                    }
-                    return VariantInferenceResult.Success(variantType, payloadConstraints)
+                    MezzeType.TypeApplication(typeName, emptyList())
                 }
+                return VariantInferenceResult.Success(variantType, payloadConstraints)
+            } else {
+                // CLOSED variant: ALL constructors must be in the declaration
+                val invalidConstructors = constructors - declaredConstructors
+
+                if (invalidConstructors.isNotEmpty()) {
+                    // Found invalid constructors for this closed variant - ERROR!
+                    val errorMsg = "Constructor(s) ${invalidConstructors.joinToString()} not found in closed variant '$typeName'. " +
+                                  "Available constructors: ${declaredConstructors.joinToString()}"
+                    return VariantInferenceResult.Failure(errorMsg)
+                }
+
+                // All constructors match - this is the right variant
+                val variantType = if (freshArgs.isNotEmpty()) {
+                    MezzeType.TypeApplication(typeName, freshArgs)
+                } else {
+                    // Non-parametric variant type
+                    MezzeType.TypeApplication(typeName, emptyList())
+                }
+                return VariantInferenceResult.Success(variantType, payloadConstraints)
             }
         }
 
@@ -512,17 +571,30 @@ class ConstraintSolver(
         substitution = closePatternBasedVariants(substitution)
 
         // PHASE 2c: Solve remaining constraints (Equality, HasField, etc.)
-        // OPTIMIZATION: Sort constraints so Equality constraints come first.
+        // OPTIMIZATION: Partition constraints by priority instead of sorting (O(n) vs O(n log n)).
         // Equality constraints are simpler and faster to solve, and they bind type variables
         // that other constraints depend on. Processing them first reduces iterations.
-        val sortedConstraints = (hasConstructorWorklist + otherConstraints).sortedBy { constraint ->
-            when (constraint) {
-                is Constraint.Equality -> 0  // Highest priority
-                is Constraint.HasField -> 1
-                is Constraint.HasConstructor -> 2
-                is Constraint.AbilityRequired -> 3
-                is Constraint.AssociatedTypeResolution -> 4
-                else -> 5
+        val allRemainingConstraints = hasConstructorWorklist + otherConstraints
+        val sortedConstraints = buildList {
+            // Priority 0: Equality constraints (bind type variables)
+            addAll(allRemainingConstraints.filterIsInstance<Constraint.Equality>())
+            // Priority 1: HasField constraints
+            addAll(allRemainingConstraints.filterIsInstance<Constraint.HasField>())
+            // Priority 2: HasConstructor constraints
+            addAll(allRemainingConstraints.filterIsInstance<Constraint.HasConstructor>())
+            // Priority 3-5: Remaining constraints (exhaustive - no else needed)
+            for (c in allRemainingConstraints) {
+                when (c) {
+                    is Constraint.Equality,
+                    is Constraint.HasField,
+                    is Constraint.HasConstructor -> { /* already added */ }
+                    is Constraint.AbilityRequired,
+                    is Constraint.AssociatedTypeResolution,
+                    is Constraint.EffectUsed,
+                    is Constraint.Subsumes,
+                    is Constraint.MustBeOpen,
+                    is Constraint.RecordPatternExhaustive -> add(c)
+                }
             }
         }
         val constraintWorklist = sortedConstraints.toMutableList()
@@ -579,8 +651,8 @@ class ConstraintSolver(
                                     // For other contexts (like let bindings with explicit type annotations),
                                     // don't merge - let unification fail properly if types don't match.
                                     //
-                                    // Match case contexts have "Match case" in the context string.
-                                    val isMatchContext = originalConstraint.context?.contains("Match case") == true
+                                    // OPTIMIZATION: Use boolean flag instead of string parsing
+                                    val isMatchContext = originalConstraint.isMatchCaseContext
 
                                     // Also allow merging if BOTH variants are open (have row variables)
                                     // AND neither is a pattern-based variant (which should be closed)
@@ -843,10 +915,11 @@ class ConstraintSolver(
                     }
 
                     if (variantType != null) {
-                        val constructors = variantType.constructors.keys.sorted()
-                        val firstConstructor = constructors.firstOrNull() ?: "ConstructorName"
+                        // OPTIMIZATION: Get first element without sorting, then sort only for error message
+                        val firstConstructor = variantType.constructors.keys.firstOrNull() ?: "ConstructorName"
+                        val sortedConstructors = variantType.constructors.keys.sorted()
                         return ConstraintResult.Failure(
-                            "Cannot match variant type [${constructors.joinToString(", ")}] with a literal pattern. " +
+                            "Cannot match variant type [${sortedConstructors.joinToString(", ")}] with a literal pattern. " +
                             "Use a constructor pattern like '$firstConstructor' instead."
                         )
                     }
@@ -1239,8 +1312,23 @@ class ConstraintSolver(
      * This enables structural matching for ability implementations.
      * For example, checking if `VariantType({Just: RecordType({val: Int})})`
      * matches `TypeApplicationAnnotation("Maybe", [IdentifierTypeAnnotation("Int")])`.
+     *
+     * OPTIMIZATION: Uses memoization cache to avoid repeated matching of same pairs.
      */
     private fun typeMatchesAnnotation(type: MezzeType, annotation: TypeAnnotation): Boolean {
+        // OPTIMIZATION: Check cache first
+        val cacheKey = Pair(System.identityHashCode(type), System.identityHashCode(annotation))
+        typeMatchesAnnotationCache[cacheKey]?.let { return it }
+
+        val result = typeMatchesAnnotationImpl(type, annotation)
+        typeMatchesAnnotationCache[cacheKey] = result
+        return result
+    }
+
+    /**
+     * Implementation of typeMatchesAnnotation without caching.
+     */
+    private fun typeMatchesAnnotationImpl(type: MezzeType, annotation: TypeAnnotation): Boolean {
         return when (annotation) {
             is IdentifierTypeAnnotation -> {
                 // Check if annotation refers to a primitive type
@@ -1479,9 +1567,22 @@ class ConstraintSolver(
                     }
                 }
             }
-            else -> {
-                // Other annotation types don't contain type parameters we need to extract
+            is FunctionTypeAnnotation -> {
+                // Match function parameter and return types
+                if (concreteType is MezzeType.FunctionType) {
+                    extractTypeParamMappings(annotation.paramType, concreteType.paramType, typeParams, mappings)
+                    extractTypeParamMappings(annotation.returnType, concreteType.returnType, typeParams, mappings)
+                }
             }
+            is ArrayTypeAnnotation -> {
+                // Match array element types
+                if (concreteType is MezzeType.ArrayType) {
+                    extractTypeParamMappings(annotation.elementType, concreteType.elementType, typeParams, mappings)
+                }
+            }
+            // These annotation types don't contain type parameters we need to extract
+            is QualifiedTypeAnnotation,
+            is EffectRowAnnotation -> { /* no type parameters to extract */ }
         }
     }
 
@@ -1569,10 +1670,17 @@ class ConstraintSolver(
      * - `let user = Decode.decode {...}` returns Result 'a DecodeError
      * - `match user is Ok { val } -> val.name` constrains 'a to {name: 'b, ...}
      * - We close this to {name: String} (after field type resolution) for codec generation
+     *
+     * OPTIMIZATION: Checks if already closed before rebuilding to avoid unnecessary allocations.
      */
     private fun closeOpenRecordsForCodec(type: MezzeType): MezzeType {
         return when (type) {
             is MezzeType.RecordType -> {
+                // OPTIMIZATION: Check if already closed and no fields need closing
+                val needsClosing = type.rowVar != null || type.fields.values.any { needsClosingForCodec(it) }
+                if (!needsClosing) {
+                    return type
+                }
                 // Close the record (remove row variable) and recursively close nested types
                 val closedFields = type.fields.mapValues { (_, fieldType) ->
                     closeOpenRecordsForCodec(fieldType)
@@ -1580,30 +1688,118 @@ class ConstraintSolver(
                 MezzeType.RecordType(fields = closedFields, rowVar = null, typeName = type.typeName)
             }
             is MezzeType.TypeApplication -> {
+                // OPTIMIZATION: Check if any args need closing
+                if (type.args.none { needsClosingForCodec(it) }) {
+                    return type
+                }
                 // For Result {name: String} DecodeError, close nested records in args
                 val closedArgs = type.args.map { closeOpenRecordsForCodec(it) }
                 MezzeType.TypeApplication(type.constructor, closedArgs)
             }
             is MezzeType.VariantType -> {
+                // OPTIMIZATION: Check if already closed and no payloads need closing
+                val needsClosing = type.rowVar != null || type.constructors.values.any { it != null && needsClosingForCodec(it) }
+                if (!needsClosing) {
+                    return type
+                }
                 // Close records in variant payloads
                 val closedConstructors = type.constructors.mapValues { (_, payload) ->
                     payload?.let { closeOpenRecordsForCodec(it) }
                 }
                 MezzeType.VariantType(closedConstructors, rowVar = null, typeName = type.typeName)
             }
-            is MezzeType.ListType -> MezzeType.ListType(closeOpenRecordsForCodec(type.elementType))
-            is MezzeType.ArrayType -> MezzeType.ArrayType(closeOpenRecordsForCodec(type.elementType))
-            is MezzeType.SetType -> MezzeType.SetType(closeOpenRecordsForCodec(type.elementType))
-            is MezzeType.SortedSetType -> MezzeType.SortedSetType(closeOpenRecordsForCodec(type.elementType))
-            is MezzeType.MapType -> MezzeType.MapType(
-                closeOpenRecordsForCodec(type.keyType),
-                closeOpenRecordsForCodec(type.valueType)
-            )
-            is MezzeType.SortedMapType -> MezzeType.SortedMapType(
-                closeOpenRecordsForCodec(type.keyType),
-                closeOpenRecordsForCodec(type.valueType)
-            )
-            else -> type
+            is MezzeType.ListType -> {
+                if (!needsClosingForCodec(type.elementType)) return type
+                MezzeType.ListType(closeOpenRecordsForCodec(type.elementType))
+            }
+            is MezzeType.ArrayType -> {
+                if (!needsClosingForCodec(type.elementType)) return type
+                MezzeType.ArrayType(closeOpenRecordsForCodec(type.elementType))
+            }
+            is MezzeType.SetType -> {
+                if (!needsClosingForCodec(type.elementType)) return type
+                MezzeType.SetType(closeOpenRecordsForCodec(type.elementType))
+            }
+            is MezzeType.SortedSetType -> {
+                if (!needsClosingForCodec(type.elementType)) return type
+                MezzeType.SortedSetType(closeOpenRecordsForCodec(type.elementType))
+            }
+            is MezzeType.MapType -> {
+                if (!needsClosingForCodec(type.keyType) && !needsClosingForCodec(type.valueType)) return type
+                MezzeType.MapType(
+                    closeOpenRecordsForCodec(type.keyType),
+                    closeOpenRecordsForCodec(type.valueType)
+                )
+            }
+            is MezzeType.SortedMapType -> {
+                if (!needsClosingForCodec(type.keyType) && !needsClosingForCodec(type.valueType)) return type
+                MezzeType.SortedMapType(
+                    closeOpenRecordsForCodec(type.keyType),
+                    closeOpenRecordsForCodec(type.valueType)
+                )
+            }
+            is MezzeType.FunctionType -> {
+                if (!needsClosingForCodec(type.paramType) && !needsClosingForCodec(type.returnType)) return type
+                MezzeType.FunctionType(
+                    paramType = closeOpenRecordsForCodec(type.paramType),
+                    returnType = closeOpenRecordsForCodec(type.returnType),
+                    effects = type.effects,
+                    abilityConstraints = type.abilityConstraints
+                )
+            }
+            is MezzeType.SuspendedType -> {
+                if (!needsClosingForCodec(type.valueType)) return type
+                MezzeType.SuspendedType(
+                    valueType = closeOpenRecordsForCodec(type.valueType),
+                    effects = type.effects
+                )
+            }
+            // Types that don't contain nested types - return as-is
+            is MezzeType.VarType -> type
+            is MezzeType.EffectRow -> type
+            is MezzeType.IntType,
+            is MezzeType.FloatType,
+            is MezzeType.StringType,
+            is MezzeType.BooleanType,
+            is MezzeType.NatType,
+            is MezzeType.FracType,
+            is MezzeType.CharType,
+            is MezzeType.OrderingType,
+            is MezzeType.BytesType,
+            is MezzeType.ByteBufferType -> type
+        }
+    }
+
+    /**
+     * Check if a type needs closing for codec generation.
+     * Returns true if the type contains any open records or variants.
+     */
+    private fun needsClosingForCodec(type: MezzeType): Boolean {
+        return when (type) {
+            is MezzeType.RecordType -> type.rowVar != null || type.fields.values.any { needsClosingForCodec(it) }
+            is MezzeType.VariantType -> type.rowVar != null || type.constructors.values.any { it != null && needsClosingForCodec(it) }
+            is MezzeType.TypeApplication -> type.args.any { needsClosingForCodec(it) }
+            is MezzeType.ListType -> needsClosingForCodec(type.elementType)
+            is MezzeType.ArrayType -> needsClosingForCodec(type.elementType)
+            is MezzeType.SetType -> needsClosingForCodec(type.elementType)
+            is MezzeType.SortedSetType -> needsClosingForCodec(type.elementType)
+            is MezzeType.MapType -> needsClosingForCodec(type.keyType) || needsClosingForCodec(type.valueType)
+            is MezzeType.SortedMapType -> needsClosingForCodec(type.keyType) || needsClosingForCodec(type.valueType)
+            is MezzeType.FunctionType -> needsClosingForCodec(type.paramType) || needsClosingForCodec(type.returnType)
+            is MezzeType.SuspendedType -> needsClosingForCodec(type.valueType)
+            is MezzeType.VarType -> false  // Type variables don't need closing
+            is MezzeType.EffectRow -> false  // Effect rows don't need closing
+            // Concrete primitive types don't need closing
+            is MezzeType.IntType,
+            is MezzeType.FloatType,
+            is MezzeType.StringType,
+            is MezzeType.BooleanType,
+            is MezzeType.NatType,
+            is MezzeType.FracType,
+            is MezzeType.CharType,
+            is MezzeType.OrderingType,
+            is MezzeType.BytesType,
+            is MezzeType.ByteBufferType -> false
         }
     }
 
@@ -1784,97 +1980,32 @@ class ConstraintSolver(
      */
     private fun isConcrete(type: MezzeType): Boolean {
         return when (type) {
-            is MezzeType.IntType, is MezzeType.FloatType, is MezzeType.StringType,
-            is MezzeType.BooleanType, is MezzeType.NatType, is MezzeType.FracType,
-            is MezzeType.OrderingType, is MezzeType.BytesType,
+            // Primitive types are always concrete
+            is MezzeType.IntType,
+            is MezzeType.FloatType,
+            is MezzeType.StringType,
+            is MezzeType.BooleanType,
+            is MezzeType.NatType,
+            is MezzeType.FracType,
+            is MezzeType.CharType,
+            is MezzeType.OrderingType,
+            is MezzeType.BytesType,
             is MezzeType.ByteBufferType -> true
-            is MezzeType.VariantType -> true
+            // Compound types
+            is MezzeType.VariantType -> type.rowVar == null && type.constructors.values.all { it == null || isConcrete(it) }
             is MezzeType.RecordType -> type.rowVar == null && type.fields.values.all { isConcrete(it) }
-            is MezzeType.FunctionType -> true
-            is MezzeType.TypeApplication -> type.args.all { it !is MezzeType.VarType }
+            is MezzeType.FunctionType -> isConcrete(type.paramType) && isConcrete(type.returnType)
+            is MezzeType.TypeApplication -> type.args.all { isConcrete(it) }
+            is MezzeType.ArrayType -> isConcrete(type.elementType)
+            is MezzeType.ListType -> isConcrete(type.elementType)
+            is MezzeType.SetType -> isConcrete(type.elementType)
+            is MezzeType.SortedSetType -> isConcrete(type.elementType)
+            is MezzeType.MapType -> isConcrete(type.keyType) && isConcrete(type.valueType)
+            is MezzeType.SortedMapType -> isConcrete(type.keyType) && isConcrete(type.valueType)
+            is MezzeType.SuspendedType -> isConcrete(type.valueType)
+            // Non-concrete types
             is MezzeType.VarType -> false
-            else -> false
-        }
-    }
-
-    /**
-     * Get the type name for ability implementation lookup.
-     */
-    private fun getTypeName(type: MezzeType): String {
-        return when (type) {
-            is MezzeType.IntType -> "Int"
-            is MezzeType.FloatType -> "Float"
-            is MezzeType.StringType -> "String"
-            is MezzeType.BooleanType -> "Bool"
-            is MezzeType.NatType -> "Nat"
-            is MezzeType.FracType -> "Frac"
-            is MezzeType.OrderingType -> "Ordering"
-            is MezzeType.BytesType -> "Bytes"
-            is MezzeType.ByteBufferType -> "ByteBuffer"
-            is MezzeType.TypeApplication -> {
-                // For "List Int" -> "List"
-                // The full type would need all args: "List_Int"
-                if (type.args.isEmpty()) {
-                    type.constructor
-                } else {
-                    val argNames = type.args.map { getTypeName(it) }
-                    "${type.constructor}_${argNames.joinToString("_")}"
-                }
-            }
-            is MezzeType.ArrayType -> "Array_${getTypeName(type.elementType)}"
-            is MezzeType.ListType -> "List_${getTypeName(type.elementType)}"
-            is MezzeType.SetType -> "Set_${getTypeName(type.elementType)}"
-            is MezzeType.SortedMapType -> "SortedMap_${getTypeName(type.keyType)}_${getTypeName(type.valueType)}"
-            is MezzeType.SortedSetType -> "SortedSet_${getTypeName(type.elementType)}"
-            is MezzeType.MapType -> "Map_${getTypeName(type.keyType)}_${getTypeName(type.valueType)}"
-            is MezzeType.VariantType -> {
-                // Use typeName if available, otherwise check for Bool or use generated name
-                type.typeName ?: if (isBoolVariant(type)) {
-                    "Bool"
-                } else if (type.constructors.size == 1) {
-                    // Single constructor variant - likely a type alias, use constructor name
-                    type.constructors.keys.first()
-                } else {
-                    // For other variant types, use a generated name
-                    "Variant_${type.constructors.keys.sorted().joinToString("_")}"
-                }
-            }
-            is MezzeType.RecordType -> {
-                // Use typeName if available
-                type.typeName ?: "Record"
-            }
-            is MezzeType.FunctionType -> "Function"
-            is MezzeType.SuspendedType -> getTypeName(type.valueType)
-            else -> type.toString()
-        }
-    }
-
-    /**
-     * Get the type name from a TypeAnnotation for ability implementation lookup.
-     * This converts AST type annotations to string names for comparison.
-     */
-    private fun typeAnnotationToName(annotation: TypeAnnotation): String {
-        return when (annotation) {
-            is IdentifierTypeAnnotation -> annotation.name
-            is TypeApplicationAnnotation -> {
-                val args = annotation.args.map { typeAnnotationToName(it) }
-                if (args.isEmpty()) annotation.constructor else "${annotation.constructor}_${args.joinToString("_")}"
-            }
-            is FunctionTypeAnnotation -> "Function"
-            is RecordTypeAnnotation -> {
-                val fieldNames = annotation.entries.map { it.name }.sorted().joinToString("_")
-                if (fieldNames.isEmpty()) "Record" else "Record_$fieldNames"
-            }
-            is VariantTypeAnnotation -> {
-                val constructorNames = annotation.constructors.map { it.name }.sorted().joinToString("_")
-                if (constructorNames.isEmpty()) "Variant" else "Variant_$constructorNames"
-            }
-            is ArrayTypeAnnotation -> "Array_${typeAnnotationToName(annotation.elementType)}"
-            is EffectRowAnnotation -> "EffectRow"
-            is QualifiedTypeAnnotation -> {
-                val args = annotation.args.map { typeAnnotationToName(it) }
-                if (args.isEmpty()) annotation.typeName else "${annotation.typeName}_${args.joinToString("_")}"
-            }
+            is MezzeType.EffectRow -> false  // Effect rows are not value types
         }
     }
 
@@ -1906,22 +2037,18 @@ class ConstraintSolver(
 
             // If format is concrete and data is a type variable, try to infer from generated impls
             if (formatType !is MezzeType.VarType && dataType is MezzeType.VarType) {
-                val formatTypeName = getTypeName(formatType)
-
-                // Look for generated Decode impls for this format
-                // Filter by ability name and format type (first target type)
+                // Look for generated Decode impls for this format using STRUCTURAL matching
                 val matchingImpls = generatedCodecImpls.values.filter { impl ->
                     impl.abilityName == "Decode" &&
                     impl.targetTypes.size >= 2 &&
-                    typeAnnotationToName(impl.targetTypes[0]) == formatTypeName
+                    typeMatchesAnnotation(formatType, impl.targetTypes[0])
                 }
 
                 if (matchingImpls.size == 1) {
                     // Exactly one impl - we can infer the data type!
                     val impl = matchingImpls.first()
-                    // Extract the data type from the impl's target types
-                    val dataTypeName = typeAnnotationToName(impl.targetTypes[1])
-                    val inferredType = parseTypeName(dataTypeName)
+                    // Extract the data type from the impl's target types using structural conversion
+                    val inferredType = convertAnnotationToType(impl.targetTypes[1])
 
                     if (inferredType != null) {
                         return Substitution.single(dataType.variable, inferredType)
@@ -1939,25 +2066,26 @@ class ConstraintSolver(
             return null  // No implementations at all
         }
 
-        // Find implementations that match the pattern
+        // Find implementations that match the pattern using STRUCTURAL matching
         // For NumAdd 'b Int, we want to find NumAdd T Int where T is concrete
-        val matchingImpls = mutableListOf<List<String>>()
+        // Uses targetTypeAnnotations for structural comparison (not string-based targetTypes)
+        val matchingImpls = mutableListOf<List<TypeAnnotation>>()
 
         for (impl in allImpls) {
-            if (impl.targetTypes.size != typeArgs.size) {
-                continue  // Wrong arity
+            // Prefer structural matching via targetTypeAnnotations
+            val annotations = impl.targetTypeAnnotations
+            if (annotations == null || annotations.size != typeArgs.size) {
+                continue  // Wrong arity or no structural type info
             }
 
             // Check if this implementation matches the pattern
             var matches = true
             for (i in typeArgs.indices) {
                 val constraintType = typeArgs[i]
-                val implType = impl.targetTypes[i]
 
-                // If constraint has a concrete type, impl must match exactly
+                // If constraint has a concrete type, impl must match structurally
                 if (constraintType !is MezzeType.VarType) {
-                    val constraintTypeName = getTypeName(constraintType)
-                    if (implType != constraintTypeName) {
+                    if (!typeMatchesAnnotation(constraintType, annotations[i])) {
                         matches = false
                         break
                     }
@@ -1966,7 +2094,7 @@ class ConstraintSolver(
             }
 
             if (matches) {
-                matchingImpls.add(impl.targetTypes)
+                matchingImpls.add(annotations)
             }
         }
 
@@ -1981,14 +2109,15 @@ class ConstraintSolver(
         }
 
         // Exactly one matching implementation - infer type variables!
-        val implTypes = matchingImpls.first()
+        val implAnnotations = matchingImpls.first()
         val substitutionMap = mutableMapOf<TypeVar, MezzeType>()
 
         for (i in typeArgs.indices) {
             val constraintType = typeArgs[i]
             if (constraintType is MezzeType.VarType) {
-                // Infer this type variable from the implementation
-                val inferredType = parseTypeName(implTypes[i])
+                // Infer this type variable from the implementation annotation
+                // Convert TypeAnnotation to MezzeType structurally
+                val inferredType = convertAnnotationToType(implAnnotations[i])
                 if (inferredType != null) {
                     substitutionMap[constraintType.variable] = inferredType
                 }
@@ -2003,108 +2132,10 @@ class ConstraintSolver(
     }
 
     /**
-     * Parse a type name string back to a MezzeType.
-     * Used for bidirectional inference.
-     *
-     * Supports:
-     * - Primitive types: Int, Float, String, Bool, etc.
-     * - Record types: Record_field1_field2 (field types looked up from impls)
-     * - List/Array/Set: List_ElementType, Array_ElementType, etc.
-     * - Map: Map_KeyType_ValueType
-     * - Option/Result: Option_InnerType, Result_OkType_ErrType
+     * Convert a TypeAnnotation to MezzeType for bidirectional inference.
+     * This is the structural alternative to parseTypeName().
      */
-    private fun parseTypeName(typeName: String): MezzeType? {
-        return when {
-            typeName == "Int" -> MezzeType.IntType
-            typeName == "Float" -> MezzeType.FloatType
-            typeName == "String" -> MezzeType.StringType
-            typeName == "Bool" -> MezzeType.BooleanType
-            typeName == "Nat" -> MezzeType.NatType
-            typeName == "Frac" -> MezzeType.FracType
-            typeName == "Ordering" -> MezzeType.OrderingType
-            typeName == "Bytes" -> MezzeType.BytesType
-            typeName == "Char" -> MezzeType.CharType
-
-            // Record types: Record_age_name -> look up the impl for field types
-            typeName.startsWith("Record_") -> parseRecordTypeName(typeName)
-
-            // List types: List_Int -> List[Int]
-            typeName.startsWith("List_") -> {
-                val elementTypeName = typeName.removePrefix("List_")
-                parseTypeName(elementTypeName)?.let { MezzeType.ListType(it) }
-            }
-
-            // Array types: Array_Int -> Array[Int]
-            typeName.startsWith("Array_") -> {
-                val elementTypeName = typeName.removePrefix("Array_")
-                parseTypeName(elementTypeName)?.let { MezzeType.ArrayType(it) }
-            }
-
-            // Set types: Set_Int -> Set[Int]
-            typeName.startsWith("Set_") -> {
-                val elementTypeName = typeName.removePrefix("Set_")
-                parseTypeName(elementTypeName)?.let { MezzeType.SetType(it) }
-            }
-
-            // Option types: Option_Int -> Option[Int]
-            typeName.startsWith("Option_") -> {
-                val innerTypeName = typeName.removePrefix("Option_")
-                parseTypeName(innerTypeName)?.let {
-                    MezzeType.TypeApplication("Option", listOf(it))
-                }
-            }
-
-            // Type applications (like Json, Person, etc.)
-            else -> {
-                // Check if this is a known type alias in type declarations
-                if (typeDeclarations.containsKey(typeName)) {
-                    MezzeType.TypeApplication(typeName, emptyList())
-                } else {
-                    null
-                }
-            }
-        }
-    }
-
-    /**
-     * Parse a record type name like "Record_age_name" back to a record type.
-     *
-     * We look up the generated Decode impl to find the actual field types.
-     * The impl key format is: "Decode_FormatType_Record_field1_field2"
-     */
-    private fun parseRecordTypeName(typeName: String): MezzeType.RecordType? {
-        // Extract field names from the type name
-        val fieldPart = typeName.removePrefix("Record_")
-        if (fieldPart.isEmpty()) {
-            return MezzeType.RecordType(emptyMap())
-        }
-
-        // Look for a generated impl that matches this record type
-        // We need to find the data type (second type arg) for any Decode impl with this pattern
-        for ((implKey, impl) in generatedCodecImpls) {
-            if (implKey.contains("_$typeName") && implKey.startsWith("Decode_")) {
-                // Found a matching impl - extract the data type from the target types
-                val dataTypeAnnotation = impl.targetTypes.getOrNull(1)
-                if (dataTypeAnnotation is RecordTypeAnnotation) {
-                    // Convert the annotation back to MezzeType.RecordType
-                    val fields = dataTypeAnnotation.entries.associate { entry ->
-                        entry.name to annotationToMezzeType(entry.type)
-                    }.filterValues { it != null }.mapValues { it.value!! }
-                    return MezzeType.RecordType(fields)
-                }
-            }
-        }
-
-        // If no impl found, we can't reconstruct the field types
-        // Return null to indicate inference failed
-        return null
-    }
-
-    /**
-     * Convert a TypeAnnotation back to a MezzeType.
-     * Used for extracting types from generated impls during bidirectional inference.
-     */
-    private fun annotationToMezzeType(annotation: TypeAnnotation): MezzeType? {
+    private fun convertAnnotationToType(annotation: TypeAnnotation): MezzeType? {
         return when (annotation) {
             is IdentifierTypeAnnotation -> when (annotation.name) {
                 "Int" -> MezzeType.IntType
@@ -2116,22 +2147,51 @@ class ConstraintSolver(
                 "Char" -> MezzeType.CharType
                 "Ordering" -> MezzeType.OrderingType
                 "Bytes" -> MezzeType.BytesType
-                else -> MezzeType.TypeApplication(annotation.name, emptyList())
-            }
-            is RecordTypeAnnotation -> {
-                val fields = annotation.entries.associate { entry ->
-                    entry.name to annotationToMezzeType(entry.type)
-                }.filterValues { it != null }.mapValues { it.value!! }
-                MezzeType.RecordType(fields)
+                "ByteBuffer" -> MezzeType.ByteBufferType
+                else -> {
+                    // Check if this is a known type declaration
+                    if (typeDeclarations.containsKey(annotation.name)) {
+                        MezzeType.TypeApplication(annotation.name, emptyList())
+                    } else {
+                        null
+                    }
+                }
             }
             is TypeApplicationAnnotation -> {
-                val args = annotation.args.mapNotNull { annotationToMezzeType(it) }
-                MezzeType.TypeApplication(annotation.constructor, args)
+                val args = annotation.args.mapNotNull { convertAnnotationToType(it) }
+                if (args.size != annotation.args.size) {
+                    null  // Some args couldn't be converted
+                } else {
+                    MezzeType.TypeApplication(annotation.constructor, args)
+                }
             }
             is ArrayTypeAnnotation -> {
-                annotationToMezzeType(annotation.elementType)?.let { MezzeType.ArrayType(it) }
+                convertAnnotationToType(annotation.elementType)?.let { MezzeType.ArrayType(it) }
             }
-            else -> null
+            is RecordTypeAnnotation -> {
+                val fields = mutableMapOf<String, MezzeType>()
+                for (entry in annotation.entries) {
+                    val fieldType = convertAnnotationToType(entry.type) ?: return null
+                    fields[entry.name] = fieldType
+                }
+                MezzeType.RecordType(fields)
+            }
+            is VariantTypeAnnotation -> {
+                val constructors = mutableMapOf<String, MezzeType?>()
+                for (ctor in annotation.constructors) {
+                    val payload = ctor.dataType?.let { convertAnnotationToType(it) }
+                    constructors[ctor.name] = payload
+                }
+                MezzeType.VariantType(constructors)
+            }
+            is FunctionTypeAnnotation -> {
+                val paramType = convertAnnotationToType(annotation.paramType) ?: return null
+                val returnType = convertAnnotationToType(annotation.returnType) ?: return null
+                MezzeType.FunctionType(paramType, returnType)
+            }
+            // These don't convert to simple MezzeType
+            is QualifiedTypeAnnotation,
+            is EffectRowAnnotation -> null
         }
     }
 
@@ -2654,12 +2714,20 @@ class ConstraintSolver(
             if (!isPatternContext) {
                 // First check if there's a user-defined type with this constructor
                 // If so, use the normal open variant logic
-                val userDefinedType = findTypeDeclarationForConstructor(constructorName)
-                val isUserDefinedConstructor = userDefinedType != null
+                val typeForConstructor = findTypeDeclarationForConstructor(constructorName)
+
+                // A type is "user-defined" if it exists AND is not one of the built-in types
+                // (Result, Option). Built-in types are registered in typeDeclarations but
+                // should still use the built-in resolution logic.
+                val builtInTypeNames = setOf("Result", "Option")
+                val isUserDefinedConstructor = typeForConstructor != null &&
+                    typeForConstructor.name !in builtInTypeNames
 
                 // Only apply built-in resolution if there's no user-defined type
                 if (!isUserDefinedConstructor) {
-                    // Check if this is a built-in constructor WITH the expected payload pattern
+                    // Check if this is a built-in constructor with the expected payload structure.
+                    // Ok requires {val}, Err requires {error}, Some requires {val}, None has no payload.
+                    // hasFieldNamed returns true for VarType (assumed, verified during unification).
                     val shouldUseBuiltInType = when (constructorName) {
                         "Ok" -> expectedPayloadType != null && hasFieldNamed(expectedPayloadType, "val")
                         "Err" -> expectedPayloadType != null && hasFieldNamed(expectedPayloadType, "error")
@@ -3097,7 +3165,8 @@ class ConstraintSolver(
                 left = substitution.apply(constraint.left),
                 right = substitution.apply(constraint.right),
                 context = constraint.context,
-                sourceLocation = constraint.sourceLocation
+                sourceLocation = constraint.sourceLocation,
+                isMatchCaseContext = constraint.isMatchCaseContext
             )
 
             is Constraint.AbilityRequired -> Constraint.AbilityRequired(
@@ -3367,7 +3436,9 @@ class ConstraintSolver(
     private fun hasFieldNamed(type: MezzeType, fieldName: String): Boolean {
         return when (type) {
             is MezzeType.RecordType -> type.fields.containsKey(fieldName)
-            is MezzeType.VarType -> false // Can't know at constraint solving time
+            // For VarType, assume the field might exist - actual structure
+            // will be verified during unification when we create the built-in type
+            is MezzeType.VarType -> true
             else -> false
         }
     }
@@ -3428,7 +3499,7 @@ class ConstraintSolver(
                     paramType = convertTypeAnnotation(annotation.paramType, typeParamSubst),
                     returnType = convertTypeAnnotation(annotation.returnType, typeParamSubst),
                     effects = annotation.effects?.let { effectRow ->
-                        MezzeType.EffectRow(effectRow.effects.toSet(), null, effectRow.isPerformed)
+                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), null, effectRow.isPerformed)
                     },
                     abilityConstraints = emptyList()
                 )
@@ -3461,7 +3532,7 @@ class ConstraintSolver(
             }
             is EffectRowAnnotation -> {
                 val rowVar = if (annotation.isPolymorphic) RowVar.fresh() else null
-                MezzeType.EffectRow(annotation.effects.toSet(), rowVar, annotation.isPerformed)
+                MezzeType.EffectRow.simple(annotation.effects.toSet(), rowVar, annotation.isPerformed)
             }
             is QualifiedTypeAnnotation -> {
                 val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")

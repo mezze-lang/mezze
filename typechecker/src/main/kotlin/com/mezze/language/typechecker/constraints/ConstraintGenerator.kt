@@ -145,7 +145,7 @@ class ConstraintGenerator(
                     // Extend context with pattern bindings for subsequent items
                     // For simple variable bindings: extends with one binding
                     // For destructuring patterns: extends with multiple bindings
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = effectDeclarations, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
                     val patternResult = patternGenerator.generate(
                         item.pattern,
                         result.type,
@@ -330,7 +330,7 @@ class ConstraintGenerator(
                                         is MezzeType.FunctionType -> solvedType    // Functions have effects in signature
                                         else -> MezzeType.SuspendedType(
                                             valueType = solvedType,
-                                            effects = MezzeType.EffectRow(result.effects)
+                                            effects = MezzeType.EffectRow.simple(result.effects)
                                         )
                                     }
                                 }
@@ -475,7 +475,7 @@ class ConstraintGenerator(
                 }
                 is TopLevelExpression -> {
                     // Top-level expressions (for REPL)
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = effectDeclarations, abilityDeclarations = abilityDeclarations, typeDeclarations = typeDeclarations)
                     val result = expressionGenerator.generate(
                         item.expression,
                         constraintContext
@@ -563,6 +563,7 @@ class ConstraintGenerator(
             performerAddedEffects = performerAddedEffects,
             abilityNames = abilityNames,
             effectNames = effectNames,
+            effectDeclarations = effectDeclarations,
             abilityDeclarations = abilityDeclarations,
             recordLiteralBindings = recordLiteralBindings,
             typeDeclarations = typeDeclarations,
@@ -921,7 +922,7 @@ class ConstraintGenerator(
                     effects = annotation.effects?.let { effectRow ->
                         // If the effect row is polymorphic (<...> or <Effect, ...>), create a fresh row variable
                         val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
-                        MezzeType.EffectRow(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
+                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
                     },
                     abilityConstraints = abilityConstraints
                 )
@@ -1033,6 +1034,7 @@ class ConstraintGenerator(
                     performerAddedEffects = performerAddedEffects,
                     abilityNames = abilityNames,
                     effectNames = effectNames,
+                    effectDeclarations = effectDeclarations,
                     abilityDeclarations = abilityDeclarations,
                     typeDeclarations = typeDeclarations
                 )
@@ -1248,6 +1250,7 @@ class ConstraintGenerator(
                     performerAddedEffects = performerAddedEffects,
                     abilityNames = abilityNames,
                     effectNames = effectNames,
+                    effectDeclarations = effectDeclarations,
                     abilityDeclarations = abilityDeclarations,
                     typeDeclarations = typeDeclarations
                 )

@@ -275,7 +275,7 @@ class SubstitutionApplier(
                 is MezzeType.FunctionType -> substitutedType // Functions have effects in signature
                 else -> MezzeType.SuspendedType(
                     valueType = substitutedType,
-                    effects = MezzeType.EffectRow(effects)
+                    effects = MezzeType.EffectRow.simple(effects)
                 )
             }
         } else {
@@ -1386,27 +1386,39 @@ class SubstitutionApplier(
 
     /**
      * Find an ability implementation matching the given ability name and type arguments.
+     * Uses structural matching via targetTypeAnnotations, falling back to string matching.
+     * OPTIMIZATION: Uses secondary index for O(1) ability name lookup.
      */
     private fun findAbilityImplementation(
         abilityName: String,
         typeArgs: List<MezzeType>
     ): com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo? {
-        // Look for implementations of this ability
-        for ((_, implInfo) in mutableAbilityImpls) {
-            if (implInfo.abilityName != abilityName) continue
-            if (implInfo.targetTypes.size != typeArgs.size) continue
+        // O(1) lookup via secondary index instead of O(n) iteration
+        val implHashes = mutableAbilityImplsByName[abilityName] ?: return null
 
-            // Check if types match
-            var matches = true
-            for (i in typeArgs.indices) {
-                val implTypeName = implInfo.targetTypes[i]
-                val argTypeName = getTypeNameForAbility(typeArgs[i])
-                if (implTypeName != argTypeName) {
-                    matches = false
-                    break
+        for (hash in implHashes) {
+            val implInfo = mutableAbilityImpls[hash] ?: continue
+
+            // PRIMARY: Use structural matching via targetTypeAnnotations
+            val annotations = implInfo.targetTypeAnnotations
+            if (annotations != null && annotations.size == typeArgs.size) {
+                val matches = typeArgs.zip(annotations).all { (type, annotation) ->
+                    typeMatchesAnnotation(type, annotation)
                 }
+                if (matches) return implInfo
+            } else if (implInfo.targetTypes.size == typeArgs.size) {
+                // FALLBACK: String-based matching when annotations not available
+                var matches = true
+                for (i in typeArgs.indices) {
+                    val implTypeName = implInfo.targetTypes[i]
+                    val argTypeName = getTypeNameForAbility(typeArgs[i])
+                    if (implTypeName != argTypeName) {
+                        matches = false
+                        break
+                    }
+                }
+                if (matches) return implInfo
             }
-            if (matches) return implInfo
         }
         return null
     }
@@ -1420,18 +1432,135 @@ class SubstitutionApplier(
         abilityName: String,
         firstType: MezzeType
     ): com.mezze.language.typechecker.context.TypingContext.AbilityImplInfo? {
-        val firstTypeName = getTypeNameForAbility(firstType)
         // O(1) lookup via secondary index, then filter the smaller list
         val implHashes = mutableAbilityImplsByName[abilityName] ?: return null
         val candidates = implHashes.mapNotNull { hash ->
             mutableAbilityImpls[hash]?.takeIf { implInfo ->
-                implInfo.targetTypes.isNotEmpty() &&
-                implInfo.targetTypes.first() == firstTypeName
+                // PRIMARY: Structural matching via targetTypeAnnotations
+                val annotations = implInfo.targetTypeAnnotations
+                if (annotations != null && annotations.isNotEmpty()) {
+                    typeMatchesAnnotation(firstType, annotations.first())
+                } else {
+                    // FALLBACK: String matching
+                    implInfo.targetTypes.isNotEmpty() &&
+                    implInfo.targetTypes.first() == getTypeNameForAbility(firstType)
+                }
             }
         }
         // If there's exactly one candidate, use it
         // If there are multiple, we can't disambiguate without more context
         return if (candidates.size == 1) candidates.first() else null
+    }
+
+    /**
+     * Check if a MezzeType matches a TypeAnnotation structurally.
+     */
+    private fun typeMatchesAnnotation(type: MezzeType, annotation: TypeAnnotation): Boolean {
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                when (annotation.name) {
+                    "Int" -> type is MezzeType.IntType
+                    "Float" -> type is MezzeType.FloatType
+                    "String" -> type is MezzeType.StringType
+                    "Bool" -> type is MezzeType.BooleanType
+                    "Nat" -> type is MezzeType.NatType
+                    "Frac" -> type is MezzeType.FracType
+                    "Char" -> type is MezzeType.CharType
+                    "Bytes" -> type is MezzeType.BytesType
+                    "ByteBuffer" -> type is MezzeType.ByteBufferType
+                    "Ordering" -> type is MezzeType.OrderingType
+                    else -> {
+                        // Type variable in annotation - matches any type
+                        if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
+                            true
+                        } else {
+                            // Type constructor match
+                            when (type) {
+                                is MezzeType.TypeApplication -> type.constructor == annotation.name && type.args.isEmpty()
+                                is MezzeType.RecordType -> type.typeName == annotation.name
+                                is MezzeType.VariantType -> type.typeName == annotation.name
+                                else -> false
+                            }
+                        }
+                    }
+                }
+            }
+            is TypeApplicationAnnotation -> {
+                when (type) {
+                    is MezzeType.TypeApplication -> {
+                        type.constructor == annotation.constructor &&
+                        type.args.size == annotation.args.size &&
+                        type.args.zip(annotation.args).all { (argType, argAnnotation) ->
+                            typeMatchesAnnotation(argType, argAnnotation)
+                        }
+                    }
+                    is MezzeType.ArrayType -> {
+                        annotation.constructor == "Array" &&
+                        annotation.args.size == 1 &&
+                        typeMatchesAnnotation(type.elementType, annotation.args[0])
+                    }
+                    is MezzeType.ListType -> {
+                        annotation.constructor == "List" &&
+                        annotation.args.size == 1 &&
+                        typeMatchesAnnotation(type.elementType, annotation.args[0])
+                    }
+                    is MezzeType.SetType -> {
+                        annotation.constructor == "Set" &&
+                        annotation.args.size == 1 &&
+                        typeMatchesAnnotation(type.elementType, annotation.args[0])
+                    }
+                    is MezzeType.MapType -> {
+                        annotation.constructor == "Map" &&
+                        annotation.args.size == 2 &&
+                        typeMatchesAnnotation(type.keyType, annotation.args[0]) &&
+                        typeMatchesAnnotation(type.valueType, annotation.args[1])
+                    }
+                    else -> false
+                }
+            }
+            is RecordTypeAnnotation -> {
+                if (type !is MezzeType.RecordType) return false
+                annotation.entries.all { entry ->
+                    val fieldType = type.fields[entry.name]
+                    fieldType != null && typeMatchesAnnotation(fieldType, entry.type)
+                }
+            }
+            is VariantTypeAnnotation -> {
+                if (type !is MezzeType.VariantType) return false
+                annotation.constructors.all { ctor ->
+                    val payload = type.constructors[ctor.name]
+                    val dataType = ctor.dataType
+                    when {
+                        dataType == null -> payload == null
+                        payload == null -> false
+                        else -> typeMatchesAnnotation(payload, dataType)
+                    }
+                }
+            }
+            is ArrayTypeAnnotation -> {
+                type is MezzeType.ArrayType &&
+                typeMatchesAnnotation(type.elementType, annotation.elementType)
+            }
+            is FunctionTypeAnnotation -> {
+                type is MezzeType.FunctionType &&
+                typeMatchesAnnotation(type.paramType, annotation.paramType) &&
+                typeMatchesAnnotation(type.returnType, annotation.returnType)
+            }
+            is QualifiedTypeAnnotation -> {
+                when (type) {
+                    is MezzeType.TypeApplication -> {
+                        val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                        type.constructor == qualifiedName &&
+                        type.args.size == annotation.args.size &&
+                        type.args.zip(annotation.args).all { (argType, argAnnotation) ->
+                            typeMatchesAnnotation(argType, argAnnotation)
+                        }
+                    }
+                    else -> false
+                }
+            }
+            is EffectRowAnnotation -> false // Effect rows don't match concrete types
+        }
     }
 
     /**
@@ -1897,7 +2026,7 @@ class SubstitutionApplier(
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow(emptySet(), null, true),  // Mark as performed
+                        effects = MezzeType.EffectRow.simple(emptySet(), null, true),  // Mark as performed
                         abilityConstraints = type.abilityConstraints
                     )
                 } else {
@@ -1908,7 +2037,7 @@ class SubstitutionApplier(
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow(remainingEffects, effects.rowVar, true),
+                        effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, true),
                         abilityConstraints = type.abilityConstraints
                     )
                 }
@@ -1921,7 +2050,7 @@ class SubstitutionApplier(
                 // This allows top-level validation to reject values with <*> marker
                 MezzeType.SuspendedType(
                     valueType = type.valueType,
-                    effects = MezzeType.EffectRow(remainingEffects, type.effects.rowVar, true)
+                    effects = MezzeType.EffectRow.simple(remainingEffects, type.effects.rowVar, true)
                 )
             }
             else -> {
@@ -1998,7 +2127,7 @@ class SubstitutionApplier(
                     paramType = convertTypeAnnotation(annotation.paramType),
                     returnType = convertTypeAnnotation(annotation.returnType),
                     effects = annotation.effects?.let { effectRow ->
-                        MezzeType.EffectRow(effectRow.effects.toSet(), null, effectRow.isPerformed)
+                        MezzeType.EffectRow.simple(effectRow.effects.toSet(), null, effectRow.isPerformed)
                     },
                     abilityConstraints = annotation.abilityConstraints.map { constraint ->
                         MezzeType.FunctionAbilityConstraint(

@@ -87,6 +87,8 @@ data class TypingContext(
         val performerName: String,
         val effectName: String,
         val associatedTypes: MezzeType,  // RecordType with associated type bindings
+        val performerFields: MezzeType? = null,  // RecordType with performer parameter types (e.g., {cont: Continuation 'a 'b 'c})
+        val suspensionType: MezzeType? = null,  // Type passed to suspend_with in the handler (for continuation inference)
         val contentHash: String? = null
     )
 

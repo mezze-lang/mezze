@@ -25,8 +25,38 @@ import com.mezze.language.typechecker.ErrorType
  * - Pure functions (no mutation!)
  * - Exhaustive when on Expression sealed interface
  * - No catch-all else clauses
+ *
+ * Performance optimizations:
+ * - TypeVar mapping cache for effect operations (avoids repeated structural traversal)
+ * - Lazy effectInstance creation (only when in perform context with associated types)
+ * - Short-circuit checks to avoid unnecessary work
  */
 class ExpressionConstraintGenerator {
+
+    // ========================================================================
+    // CACHES FOR PERFORMANCE
+    // ========================================================================
+
+    /**
+     * Cache for TypeVar mappings from original to instantiated types.
+     * Key: Pair of (original type identity hashCode, instantiated type identity hashCode)
+     * This avoids repeated structural traversal for the same type pairs.
+     *
+     * The cache is automatically cleared when it grows too large to prevent memory issues
+     * in long-running sessions.
+     */
+    private val typeVarMappingCache = mutableMapOf<Pair<Int, Int>, Map<TypeVar, TypeVar>>()
+
+    /** Maximum cache size before automatic cleanup */
+    private val maxCacheSize = 1000
+
+    /**
+     * Clear all internal caches. Call this between type-checking different modules
+     * to prevent stale data and memory growth.
+     */
+    fun clearCaches() {
+        typeVarMappingCache.clear()
+    }
 
     /**
      * Generate constraints for an expression.
@@ -259,6 +289,7 @@ class ExpressionConstraintGenerator {
                                 type = type,
                                 constraints = emptyList(),
                                 effects = type.effects.effects,  // Propagate effects from SuspendedType
+                                effectInstances = type.effects.effectInstances,  // Propagate effect instances for associated type bindings
                                 usedVariables = setOf(expr.name),  // Track variable usage
                                 referencedBindings = setOf(referencedBinding)
                             )
@@ -286,10 +317,14 @@ class ExpressionConstraintGenerator {
                             )
                         }
 
-                        // CRITICAL: If the type is SuspendedType, extract its effects
+                        // CRITICAL: If the type is SuspendedType, extract its effects and effectInstances
                         val type = instantiation.type
                         val effects = when (type) {
                             is MezzeType.SuspendedType -> type.effects.effects
+                            else -> emptySet()
+                        }
+                        val effectInstances = when (type) {
+                            is MezzeType.SuspendedType -> type.effects.effectInstances
                             else -> emptySet()
                         }
 
@@ -300,6 +335,7 @@ class ExpressionConstraintGenerator {
                             type = type,
                             constraints = emptyList(),
                             effects = effects,
+                            effectInstances = effectInstances,  // Propagate effect instances for associated type bindings
                             abilityConstraints = abilityConstraints,
                             usedVariables = setOf(expr.name),  // Track variable usage
                             referencedBindings = setOf(referencedBinding)
@@ -453,6 +489,8 @@ class ExpressionConstraintGenerator {
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val usedVars = mutableSetOf<String>()
+        val effects = mutableSetOf<String>()  // Collect effects from field expressions
+        val effectInstances = mutableSetOf<MezzeType.EffectInstance>()  // Collect effect instances
 
         // Pre-pass: collect ALL explicit field names upfront
         // This is needed because spread validation needs to know all field names,
@@ -477,12 +515,25 @@ class ExpressionConstraintGenerator {
                     val fieldValue = entry.value ?: Identifier(localName = entry.name)
                     val fieldResult = generate(fieldValue, fieldContext)
 
-                    explicitFieldTypes[entry.name] = fieldResult.type
+                    // If the field value is a SuspendedType (effectful value), unwrap it:
+                    // - Use the inner valueType for the field type (effects are evaluated, not stored)
+                    // - Propagate the effects upward to the record expression
+                    val fieldType = when (val t = fieldResult.type) {
+                        is MezzeType.SuspendedType -> {
+                            effects.addAll(t.effects.effects)  // Propagate effects from SuspendedType
+                            t.valueType  // Use the unwrapped value type
+                        }
+                        else -> t
+                    }
+
+                    explicitFieldTypes[entry.name] = fieldType
                     constraints.addAll(fieldResult.constraints)
                     undefinedVars.addAll(fieldResult.undefinedVariables)
                     abilityConstraints.addAll(fieldResult.abilityConstraints)
                     associatedTypeConstraints.addAll(fieldResult.associatedTypeConstraints)
                     usedVars.addAll(fieldResult.usedVariables)
+                    effects.addAll(fieldResult.effects)  // Propagate effects from field expressions
+                    effectInstances.addAll(fieldResult.effectInstances)  // Propagate effect instances
                 }
                 is RecordSpreadEntry -> {
                     // Spread: {...baseRecord}
@@ -493,6 +544,8 @@ class ExpressionConstraintGenerator {
                     abilityConstraints.addAll(spreadResult.abilityConstraints)
                     associatedTypeConstraints.addAll(spreadResult.associatedTypeConstraints)
                     usedVars.addAll(spreadResult.usedVariables)
+                    effects.addAll(spreadResult.effects)  // Propagate effects from spread expressions
+                    effectInstances.addAll(spreadResult.effectInstances)  // Propagate effect instances
 
                     // Extract fields from the spread type and merge into our record
                     // The spread expression must be a record type (or unify with one via constraints)
@@ -607,6 +660,8 @@ class ExpressionConstraintGenerator {
         return ConstraintResult(
             type = recordType,
             constraints = constraints,
+            effects = effects,  // Include effects from field expressions
+            effectInstances = effectInstances,  // Include effect instances
             undefinedVariables = undefinedVars,
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
@@ -1043,7 +1098,6 @@ class ExpressionConstraintGenerator {
                 // Get the performer's associated type bindings using dedicated map
                 val performerInfos = context.typingContext.getPerformerTypeInfosByName(performerName)
                 if (performerInfos.isNotEmpty()) {
-                    // Use the first matching performer (usually there's only one per name in a program)
                     val performerInfo = performerInfos.first()
                     val performerType = performerInfo.associatedTypes
 
@@ -1054,14 +1108,55 @@ class ExpressionConstraintGenerator {
                             instantiatedOperationType,
                             performerType.fields
                         )
+
+                        // CRITICAL: Preserve performer binding TypeVars during instantiation
+                        // These TypeVars connect to the suspension type, so constraints
+                        // from operation calls (e.g., 'error = String) must flow to the
+                        // suspension type (e.g., Result 'val 'error -> Result 'val String)
+                        val performerTypeVarNames = performerType.fields.values
+                            .filterIsInstance<MezzeType.VarType>()
+                            .map { it.variable.name }
+                        instantiatedOperationType = instantiateTypeWithFreshVarsPreservingPerformerBindings(
+                            instantiatedOperationType,
+                            performerTypeVarNames
+                        )
+                    } else {
+                        // No performer bindings to preserve
+                        instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
                     }
+                } else {
+                    // No performer info, use regular instantiation
+                    instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
                 }
+            } else {
+                // No performer found, use regular instantiation
+                instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
             }
+        } else {
+            // Not in perform context, use regular instantiation
+            instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
         }
 
-        // NOW instantiate with fresh vars to avoid variable sharing across different calls
-        // But this is AFTER substitution, so associated types have been replaced with concrete types
-        instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
+        // OPTIMIZATION: Only create effectInstance when the effect has associated types
+        // This avoids expensive structural traversal for simple effects without associated types
+        val effectDecl = context.effectDeclarations[effectName]
+        val hasAssociatedTypes = effectDecl != null && effectDecl.associatedTypes.isNotEmpty()
+
+        val effectInstances = if (hasAssociatedTypes) {
+            // Create an EffectInstance with associated types from the INSTANTIATED operation type
+            // This tracks the TypeVars that will be constrained by the call arguments
+            // For example: Exception.throw {error = "boom"} creates Exception having 'error = String
+            val effectInstance = createEffectInstanceFromInstantiated(
+                effectName,
+                operationType,
+                instantiatedOperationType,
+                context
+            )
+            setOf(effectInstance)
+        } else {
+            // No associated types - skip the expensive mapping
+            emptySet()
+        }
 
         // Return the plain function type with the effect tracked in ConstraintResult
         // When this operation is called, the effect will be collected and propagated
@@ -1069,11 +1164,139 @@ class ExpressionConstraintGenerator {
         return ConstraintResult(
             type = instantiatedOperationType,
             constraints = emptyList(),
-            effects = setOf(effectName),  // Track effect here, not in function type
+            effects = setOf(effectName),  // Track simple effect name for backward compatibility
+            effectInstances = effectInstances,  // Track effect with associated types (only if present)
             undefinedVariables = emptyList()
         )
     }
 
+    /**
+     * Create an EffectInstance from an instantiated operation type.
+     *
+     * This function maps from the original operation type (with named TypeVars like 'error)
+     * to the instantiated type (with fresh TypeVars like $tv123). It finds the corresponding
+     * fresh TypeVars for each associated type by structural matching.
+     *
+     * Example: For Exception.throw
+     *   - Original type: {error: 'error} -> 'a
+     *   - Instantiated type: {error: $tv1} -> $tv2
+     *   - Effect declaration has associatedTypes = ["error"]
+     *   - We match 'error to $tv1 by finding it in the same structural position
+     *   - Creates EffectInstance("Exception", {"error" -> VarType($tv1)})
+     */
+    private fun createEffectInstanceFromInstantiated(
+        effectName: String,
+        originalType: MezzeType,
+        instantiatedType: MezzeType,
+        context: ConstraintContext
+    ): MezzeType.EffectInstance {
+        // Get the effect declaration to find associated type names
+        // Note: Caller already checked that effectDecl exists and has associated types
+        val effectDecl = context.effectDeclarations[effectName]
+            ?: return MezzeType.EffectInstance(effectName, emptyMap())
+
+        if (effectDecl.associatedTypes.isEmpty()) {
+            return MezzeType.EffectInstance(effectName, emptyMap())
+        }
+
+        // OPTIMIZATION: Build TypeVar mapping only once using cache
+        val typeVarMapping = buildTypeVarMapping(originalType, instantiatedType)
+
+        // For each associated type, find the original TypeVar and map it to the instantiated one
+        // OPTIMIZATION: Use sized map to avoid rehashing
+        val associatedTypeBindings = HashMap<String, MezzeType>(effectDecl.associatedTypes.size)
+
+        if (originalType is MezzeType.FunctionType) {
+            // OPTIMIZATION: Instead of collecting all TypeVars into a Set first,
+            // search directly for each associated type name
+            for (assocTypeName in effectDecl.associatedTypes) {
+                val normalizedName = assocTypeName.removePrefix("'")
+
+                // Find the TypeVar by name directly in the mapping keys
+                val originalVar = typeVarMapping.keys.find { tv ->
+                    tv.name == normalizedName || tv.name == "'$normalizedName"
+                }
+
+                if (originalVar != null) {
+                    val instantiatedVar = typeVarMapping[originalVar]
+                    if (instantiatedVar != null) {
+                        associatedTypeBindings[normalizedName] = MezzeType.VarType(instantiatedVar)
+                    } else {
+                        associatedTypeBindings[normalizedName] = MezzeType.VarType(originalVar)
+                    }
+                }
+            }
+        }
+
+        return MezzeType.EffectInstance(effectName, associatedTypeBindings)
+    }
+
+    /**
+     * Build a mapping from TypeVars in the original type to TypeVars in the instantiated type.
+     * This works by structural matching - we walk both types in parallel and collect the mappings.
+     * Uses caching to avoid repeated traversal for the same type pairs.
+     */
+    private fun buildTypeVarMapping(original: MezzeType, instantiated: MezzeType): Map<TypeVar, TypeVar> {
+        // Use identity hash codes for cache key (fast, works for same object references)
+        val cacheKey = System.identityHashCode(original) to System.identityHashCode(instantiated)
+
+        // Check cache first
+        typeVarMappingCache[cacheKey]?.let { return it }
+
+        // Cache miss - compute the mapping
+        val mapping = mutableMapOf<TypeVar, TypeVar>()
+        buildTypeVarMappingHelper(original, instantiated, mapping)
+
+        // Store in cache with size management
+        if (typeVarMappingCache.size >= maxCacheSize) {
+            // Clear half the cache when full (simple LRU approximation)
+            val keysToRemove = typeVarMappingCache.keys.take(maxCacheSize / 2)
+            keysToRemove.forEach { typeVarMappingCache.remove(it) }
+        }
+        typeVarMappingCache[cacheKey] = mapping
+
+        return mapping
+    }
+
+    private fun buildTypeVarMappingHelper(original: MezzeType, instantiated: MezzeType, mapping: MutableMap<TypeVar, TypeVar>) {
+        when {
+            original is MezzeType.VarType && instantiated is MezzeType.VarType -> {
+                mapping[original.variable] = instantiated.variable
+            }
+            original is MezzeType.FunctionType && instantiated is MezzeType.FunctionType -> {
+                buildTypeVarMappingHelper(original.paramType, instantiated.paramType, mapping)
+                buildTypeVarMappingHelper(original.returnType, instantiated.returnType, mapping)
+            }
+            original is MezzeType.RecordType && instantiated is MezzeType.RecordType -> {
+                for ((fieldName, fieldType) in original.fields) {
+                    val instFieldType = instantiated.fields[fieldName]
+                    if (instFieldType != null) {
+                        buildTypeVarMappingHelper(fieldType, instFieldType, mapping)
+                    }
+                }
+            }
+            original is MezzeType.VariantType && instantiated is MezzeType.VariantType -> {
+                for ((ctorName, ctorType) in original.constructors) {
+                    val instCtorType = instantiated.constructors[ctorName]
+                    if (ctorType != null && instCtorType != null) {
+                        buildTypeVarMappingHelper(ctorType, instCtorType, mapping)
+                    }
+                }
+            }
+            original is MezzeType.TypeApplication && instantiated is MezzeType.TypeApplication -> {
+                original.args.zip(instantiated.args).forEach { (orig, inst) ->
+                    buildTypeVarMappingHelper(orig, inst, mapping)
+                }
+            }
+            original is MezzeType.ListType && instantiated is MezzeType.ListType -> {
+                buildTypeVarMappingHelper(original.elementType, instantiated.elementType, mapping)
+            }
+            original is MezzeType.ArrayType && instantiated is MezzeType.ArrayType -> {
+                buildTypeVarMappingHelper(original.elementType, instantiated.elementType, mapping)
+            }
+            // Add more cases as needed...
+        }
+    }
     /**
      * Try to generate a performer method call (e.g., BasicLogger.info).
      *
@@ -1279,6 +1502,42 @@ class ExpressionConstraintGenerator {
     }
 
     /**
+     * Instantiate type with fresh type variables, but preserve TypeVars that came from
+     * performer bindings. These TypeVars are used to connect effect operation argument types
+     * to the performer's associated type bindings, which then flow to Result type parameters.
+     *
+     * Unlike instantiateTypeWithFreshVarsPreservingAssociated which preserves based on
+     * names starting with ', this function preserves based on an explicit list of names
+     * (typically the TypeVars from performerType.fields.values).
+     */
+    private fun instantiateTypeWithFreshVarsPreservingPerformerBindings(
+        type: MezzeType,
+        performerTypeVarNames: List<String>
+    ): MezzeType {
+        val freeVars = getFreeTypeVariables(type)
+        if (freeVars.isEmpty()) {
+            return type
+        }
+
+        // Create a set of names to preserve (handle both with and without ' prefix)
+        val namesToPreserve = performerTypeVarNames.flatMap { name ->
+            listOf(name, name.removePrefix("'"), "'$name")
+        }.toSet()
+
+        // Create substitution: fresh vars for regular type params, preserve performer bindings
+        val substitution = freeVars.associateWith { oldVar ->
+            if (namesToPreserve.contains(oldVar.name) || namesToPreserve.contains(oldVar.name.removePrefix("'"))) {
+                // Performer binding TypeVar - keep the SAME instance so constraints connect
+                oldVar
+            } else {
+                // Regular type variable - create fresh one
+                TypeVar.fresh()
+            }
+        }
+        return applyTypeVarSubstitution(type, substitution)
+    }
+
+    /**
      * Get all free type variables in a type.
      */
     private fun getFreeTypeVariables(type: MezzeType): Set<TypeVar> {
@@ -1409,6 +1668,9 @@ class ExpressionConstraintGenerator {
      * - Type variables in `typeArgs` can match concrete types in implementation
      * - This enables inference: Convert Int 'a can match impl Convert Int String
      *
+     * Uses structural type matching via targetTypeAnnotations for correctness,
+     * falling back to string-based matching only when annotations are not available.
+     *
      * @param abilityName The ability name (e.g., "Convert")
      * @param typeArgs The type arguments from the constraint (may contain type variables)
      * @param context The constraint context (for looking up implementations)
@@ -1426,58 +1688,188 @@ class ExpressionConstraintGenerator {
             return null
         }
 
-        // Find implementation that matches the type arguments
-        // BIDIRECTIONAL TYPE INFERENCE: Allow type variables in constraint to match concrete types in implementation
+        // Find implementation that matches the type arguments using structural matching
         for (impl in impls) {
-            if (impl.targetTypes.size != typeArgs.size) {
-                continue
-            }
+            val annotations = impl.targetTypeAnnotations
 
-            // Check if all target types match (allowing type variables to unify)
-            var allMatch = true
-            for (i in typeArgs.indices) {
-                val implTypeName = impl.targetTypes[i]  // Type name from implementation (e.g., "String")
-                val constraintType = typeArgs[i]  // Type from constraint (may have type variables)
-
-                // Bidirectional matching: Allow constraint type variables to match impl concrete types
-                val canMatch = when (constraintType) {
-                    is MezzeType.VarType -> {
-                        // Type variable can match any concrete type
-                        // This enables inference: Convert Int 'a can match impl Convert Int String
-                        true
-                    }
-                    is MezzeType.IntType -> implTypeName == "Int"
-                    is MezzeType.FloatType -> implTypeName == "Float"
-                    is MezzeType.StringType -> implTypeName == "String"
-                    is MezzeType.BooleanType -> implTypeName == "Bool"
-                    is MezzeType.NatType -> implTypeName == "Nat"
-                    is MezzeType.FracType -> implTypeName == "Frac"
-                    is MezzeType.OrderingType -> implTypeName == "Ordering"
-                    is MezzeType.BytesType -> implTypeName == "Bytes"
-                    is MezzeType.ByteBufferType -> implTypeName == "ByteBuffer"
-                    is MezzeType.TypeApplication -> {
-                        // For type constructors, match by name
-                        // TODO: Handle type arguments
-                        implTypeName == constraintType.constructor
-                    }
-                    else -> {
-                        // Other types - try string matching
-                        implTypeName == constraintType.toString()
-                    }
+            // Prefer structural matching via targetTypeAnnotations
+            if (annotations != null && annotations.size == typeArgs.size) {
+                val allMatch = typeArgs.zip(annotations).all { (constraintType, annotation) ->
+                    typeMatchesAnnotationBidirectional(constraintType, annotation)
                 }
-
-                if (!canMatch) {
-                    allMatch = false
-                    break
+                if (allMatch) {
+                    return impl.targetTypes
                 }
-            }
-
-            if (allMatch) {
-                return impl.targetTypes
+            } else if (impl.targetTypes.size == typeArgs.size) {
+                // Fallback to string matching only when annotations not available
+                val allMatch = typeArgs.zip(impl.targetTypes).all { (constraintType, implTypeName) ->
+                    typeMatchesStringBidirectional(constraintType, implTypeName)
+                }
+                if (allMatch) {
+                    return impl.targetTypes
+                }
             }
         }
 
         return null
+    }
+
+    /**
+     * Check if a MezzeType matches a TypeAnnotation with bidirectional inference.
+     * Type variables in constraintType can match any concrete type in the annotation.
+     */
+    private fun typeMatchesAnnotationBidirectional(constraintType: MezzeType, annotation: TypeAnnotation): Boolean {
+        // Type variables can match any concrete type (bidirectional inference)
+        if (constraintType is MezzeType.VarType) {
+            return true
+        }
+
+        return when (annotation) {
+            is IdentifierTypeAnnotation -> {
+                when (annotation.name) {
+                    "Int" -> constraintType is MezzeType.IntType
+                    "Float" -> constraintType is MezzeType.FloatType
+                    "String" -> constraintType is MezzeType.StringType
+                    "Bool" -> constraintType is MezzeType.BooleanType || isBoolVariant(constraintType)
+                    "Nat" -> constraintType is MezzeType.NatType
+                    "Frac" -> constraintType is MezzeType.FracType
+                    "Char" -> constraintType is MezzeType.CharType
+                    "Bytes" -> constraintType is MezzeType.BytesType
+                    "ByteBuffer" -> constraintType is MezzeType.ByteBufferType
+                    "Ordering" -> constraintType is MezzeType.OrderingType
+                    else -> {
+                        // Type variable in annotation (e.g., 'a) - always matches
+                        if (annotation.name.startsWith("'") || annotation.name.first().isLowerCase()) {
+                            true
+                        } else {
+                            // Type constructor - match by name
+                            when (constraintType) {
+                                is MezzeType.TypeApplication -> constraintType.constructor == annotation.name && constraintType.args.isEmpty()
+                                is MezzeType.RecordType -> constraintType.typeName == annotation.name
+                                is MezzeType.VariantType -> constraintType.typeName == annotation.name
+                                else -> false
+                            }
+                        }
+                    }
+                }
+            }
+            is TypeApplicationAnnotation -> {
+                when (constraintType) {
+                    is MezzeType.TypeApplication -> {
+                        constraintType.constructor == annotation.constructor &&
+                        constraintType.args.size == annotation.args.size &&
+                        constraintType.args.zip(annotation.args).all { (argType, argAnnotation) ->
+                            typeMatchesAnnotationBidirectional(argType, argAnnotation)
+                        }
+                    }
+                    is MezzeType.ArrayType -> {
+                        annotation.constructor == "Array" &&
+                        annotation.args.size == 1 &&
+                        typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
+                    }
+                    is MezzeType.ListType -> {
+                        annotation.constructor == "List" &&
+                        annotation.args.size == 1 &&
+                        typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
+                    }
+                    is MezzeType.SetType -> {
+                        annotation.constructor == "Set" &&
+                        annotation.args.size == 1 &&
+                        typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.args[0])
+                    }
+                    is MezzeType.MapType -> {
+                        annotation.constructor == "Map" &&
+                        annotation.args.size == 2 &&
+                        typeMatchesAnnotationBidirectional(constraintType.keyType, annotation.args[0]) &&
+                        typeMatchesAnnotationBidirectional(constraintType.valueType, annotation.args[1])
+                    }
+                    else -> false
+                }
+            }
+            is RecordTypeAnnotation -> {
+                if (constraintType !is MezzeType.RecordType) return false
+                annotation.entries.all { entry ->
+                    val fieldType = constraintType.fields[entry.name]
+                    fieldType != null && typeMatchesAnnotationBidirectional(fieldType, entry.type)
+                }
+            }
+            is VariantTypeAnnotation -> {
+                if (constraintType !is MezzeType.VariantType) return false
+                annotation.constructors.all { ctor ->
+                    val payload = constraintType.constructors[ctor.name]
+                    val dataType = ctor.dataType
+                    when {
+                        dataType == null -> payload == null
+                        payload == null -> false
+                        else -> typeMatchesAnnotationBidirectional(payload, dataType)
+                    }
+                }
+            }
+            is ArrayTypeAnnotation -> {
+                constraintType is MezzeType.ArrayType &&
+                typeMatchesAnnotationBidirectional(constraintType.elementType, annotation.elementType)
+            }
+            is FunctionTypeAnnotation -> {
+                constraintType is MezzeType.FunctionType &&
+                typeMatchesAnnotationBidirectional(constraintType.paramType, annotation.paramType) &&
+                typeMatchesAnnotationBidirectional(constraintType.returnType, annotation.returnType)
+            }
+            is QualifiedTypeAnnotation -> {
+                when (constraintType) {
+                    is MezzeType.TypeApplication -> {
+                        val qualifiedName = (annotation.modulePath + annotation.typeName).joinToString("::")
+                        constraintType.constructor == qualifiedName &&
+                        constraintType.args.size == annotation.args.size &&
+                        constraintType.args.zip(annotation.args).all { (argType, argAnnotation) ->
+                            typeMatchesAnnotationBidirectional(argType, argAnnotation)
+                        }
+                    }
+                    else -> false
+                }
+            }
+            is EffectRowAnnotation -> false // Effect rows don't match concrete types
+        }
+    }
+
+    /**
+     * Check if a MezzeType matches a type name string with bidirectional inference.
+     * Used as fallback when targetTypeAnnotations are not available.
+     */
+    private fun typeMatchesStringBidirectional(constraintType: MezzeType, implTypeName: String): Boolean {
+        // Type variable can match any concrete type
+        if (constraintType is MezzeType.VarType) {
+            return true
+        }
+
+        return when (constraintType) {
+            is MezzeType.IntType -> implTypeName == "Int"
+            is MezzeType.FloatType -> implTypeName == "Float"
+            is MezzeType.StringType -> implTypeName == "String"
+            is MezzeType.BooleanType -> implTypeName == "Bool"
+            is MezzeType.NatType -> implTypeName == "Nat"
+            is MezzeType.FracType -> implTypeName == "Frac"
+            is MezzeType.CharType -> implTypeName == "Char"
+            is MezzeType.OrderingType -> implTypeName == "Ordering"
+            is MezzeType.BytesType -> implTypeName == "Bytes"
+            is MezzeType.ByteBufferType -> implTypeName == "ByteBuffer"
+            is MezzeType.TypeApplication -> implTypeName == constraintType.constructor || implTypeName.startsWith("${constraintType.constructor}_")
+            is MezzeType.ArrayType -> implTypeName.startsWith("Array")
+            is MezzeType.ListType -> implTypeName.startsWith("List")
+            is MezzeType.SetType -> implTypeName.startsWith("Set")
+            is MezzeType.MapType -> implTypeName.startsWith("Map")
+            is MezzeType.RecordType -> implTypeName == constraintType.typeName
+            is MezzeType.VariantType -> implTypeName == constraintType.typeName
+            else -> false
+        }
+    }
+
+    /**
+     * Check if a type is a Bool variant (True/False constructors).
+     */
+    private fun isBoolVariant(type: MezzeType): Boolean {
+        if (type !is MezzeType.VariantType) return false
+        val constructors = type.constructors.keys
+        return constructors.size == 2 && "True" in constructors && "False" in constructors
     }
 
     private fun generateRecordUpdate(expr: RecordUpdate, context: ConstraintContext): ConstraintResult {
@@ -1636,6 +2028,8 @@ class ExpressionConstraintGenerator {
             return ConstraintResult(
                 type = resultType,
                 constraints = constraints,
+                effects = payloadResult.effects,  // Propagate effects from payload
+                effectInstances = payloadResult.effectInstances,  // Propagate effect instances
                 undefinedVariables = payloadResult.undefinedVariables,
                 usedVariables = payloadResult.usedVariables,
                 abilityConstraints = payloadResult.abilityConstraints,
@@ -1724,9 +2118,15 @@ class ExpressionConstraintGenerator {
         val bodyResult = generate(expr.body, bodyContext)
 
         // Create function type with effects from body
-        // CRITICAL: If the body has effects or performed effects, add them to the FunctionType
-        val effectRow = if (bodyResult.effects.isNotEmpty() || bodyResult.performed) {
-            MezzeType.EffectRow(bodyResult.effects, null, bodyResult.performed)
+        // CRITICAL: If the body has effects, effect instances, or performed effects, add them to the FunctionType
+        // Include effectInstances in the EffectRow for effect-polymorphic signatures
+        val effectRow = if (bodyResult.effects.isNotEmpty() || bodyResult.effectInstances.isNotEmpty() || bodyResult.performed) {
+            MezzeType.EffectRow(
+                effects = bodyResult.effects,
+                effectInstances = bodyResult.effectInstances,
+                rowVar = null,
+                performed = bodyResult.performed
+            )
         } else {
             null
         }
@@ -1935,6 +2335,7 @@ class ExpressionConstraintGenerator {
                         type = partialResult,
                         constraints = constraints,
                         effects = functionResult.effects + argumentResult.effects,
+                        effectInstances = functionResult.effectInstances + argumentResult.effectInstances,
                         performed = functionResult.performed || argumentResult.performed,
                         abilityConstraints = functionResult.abilityConstraints + argumentResult.abilityConstraints,
                         undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
@@ -1995,6 +2396,7 @@ class ExpressionConstraintGenerator {
                     type = resultType,
                     constraints = constraints,
                     effects = propagatedEffects,  // Propagate effects from function type
+                    effectInstances = functionResult.effectInstances + argumentResult.effectInstances,
                     performed = propagatedPerformed,  // Propagate performed flag
                     undefinedVariables = functionResult.undefinedVariables + argumentResult.undefinedVariables,
                     usedVariables = functionResult.usedVariables + argumentResult.usedVariables,
@@ -2046,6 +2448,7 @@ class ExpressionConstraintGenerator {
             type = returnType,
             constraints = constraints,
             effects = collectedEffects,  // Propagate effects from function and arguments
+            effectInstances = functionResult.effectInstances + argumentResult.effectInstances,
             performed = collectedPerformed,  // Propagate performed flag
             abilityConstraints = collectedAbilityConstraints,  // Propagate ability constraints
             associatedTypeConstraints = collectedAssociatedTypeConstraints,  // Propagate associated type constraints
@@ -2100,6 +2503,7 @@ class ExpressionConstraintGenerator {
         // If the condition has effects, the whole if expression has those effects
         // Example: `if getBool {} then 1 else 2` where getBool has <Log> → result is Int <Log>
         val effects = conditionResult.effects + thenResult.effects + elseResult.effects
+        val effectInstances = conditionResult.effectInstances + thenResult.effectInstances + elseResult.effectInstances
         val performed = conditionResult.performed || thenResult.performed || elseResult.performed
         val abilityConstraints = conditionResult.abilityConstraints + thenResult.abilityConstraints + elseResult.abilityConstraints
         val associatedTypeConstraints = conditionResult.associatedTypeConstraints + thenResult.associatedTypeConstraints + elseResult.associatedTypeConstraints
@@ -2111,6 +2515,7 @@ class ExpressionConstraintGenerator {
             type = thenResult.type,
             constraints = constraints,
             effects = effects,
+            effectInstances = effectInstances,
             performed = performed,
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
@@ -2138,6 +2543,8 @@ class ExpressionConstraintGenerator {
         associatedTypeConstraints.addAll(scrutineeResult.associatedTypeConstraints)
         val effects = mutableSetOf<String>()
         effects.addAll(scrutineeResult.effects)
+        val effectInstances = mutableSetOf<MezzeType.EffectInstance>()
+        effectInstances.addAll(scrutineeResult.effectInstances)
         var performed = scrutineeResult.performed  // Track performed flag
         val duplicateBindings = mutableListOf<ConstraintResult.DuplicateBinding>()
         duplicateBindings.addAll(scrutineeResult.duplicateBindings)
@@ -2211,6 +2618,7 @@ class ExpressionConstraintGenerator {
                 abilityConstraints.addAll(guardResult.abilityConstraints)
                 associatedTypeConstraints.addAll(guardResult.associatedTypeConstraints)
                 effects.addAll(guardResult.effects)
+                effectInstances.addAll(guardResult.effectInstances)
                 performed = performed || guardResult.performed  // Propagate performed
                 duplicateBindings.addAll(guardResult.duplicateBindings)
                 referencedBindings.addAll(guardResult.referencedBindings)
@@ -2266,6 +2674,7 @@ class ExpressionConstraintGenerator {
             abilityConstraints.addAll(caseBodyResult.abilityConstraints)
             associatedTypeConstraints.addAll(caseBodyResult.associatedTypeConstraints)
             effects.addAll(caseBodyResult.effects)
+            effectInstances.addAll(caseBodyResult.effectInstances)
             performed = performed || caseBodyResult.performed  // Propagate performed
             duplicateBindings.addAll(caseBodyResult.duplicateBindings)
             tailCalls.addAll(caseBodyResult.tailCalls)
@@ -2305,7 +2714,8 @@ class ExpressionConstraintGenerator {
                 Constraint.Equality(
                     left = caseType,
                     right = resultType,
-                    context = "Match case must have same type as other cases"
+                    context = "Match case must have same type as other cases",
+                    isMatchCaseContext = true  // OPTIMIZATION: Use flag instead of string parsing
                 )
             )
         }
@@ -2314,6 +2724,7 @@ class ExpressionConstraintGenerator {
             type = resultType,
             constraints = constraints,
             effects = effects,
+            effectInstances = effectInstances,
             performed = performed,  // Include performed flag
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
@@ -2342,6 +2753,7 @@ class ExpressionConstraintGenerator {
         val constraints = mutableListOf<Constraint>()
         val undefinedVars = mutableListOf<ConstraintResult.UndefinedVariable>()
         val effects = mutableSetOf<String>()
+        val effectInstances = mutableSetOf<MezzeType.EffectInstance>()
         var performed = false  // Track performed flag
         val abilityConstraints = mutableListOf<Constraint.AbilityRequired>()
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
@@ -2377,6 +2789,7 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)
+                    effectInstances.addAll(exprResult.effectInstances)
                     performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
                     associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
@@ -2440,6 +2853,7 @@ class ExpressionConstraintGenerator {
                     constraints.addAll(exprResult.constraints)
                     undefinedVars.addAll(exprResult.undefinedVariables)
                     effects.addAll(exprResult.effects)
+                    effectInstances.addAll(exprResult.effectInstances)
                     performed = performed || exprResult.performed  // Propagate performed
                     abilityConstraints.addAll(exprResult.abilityConstraints)
                     associatedTypeConstraints.addAll(exprResult.associatedTypeConstraints)
@@ -2461,6 +2875,7 @@ class ExpressionConstraintGenerator {
         constraints.addAll(resultResult.constraints)
         undefinedVars.addAll(resultResult.undefinedVariables)
         effects.addAll(resultResult.effects)
+        effectInstances.addAll(resultResult.effectInstances)
         performed = performed || resultResult.performed  // Propagate performed
         abilityConstraints.addAll(resultResult.abilityConstraints)
         associatedTypeConstraints.addAll(resultResult.associatedTypeConstraints)
@@ -2479,10 +2894,10 @@ class ExpressionConstraintGenerator {
                     // Result is already suspended - merge effects and performed flag
                     val mergedEffects = innerType.effects.effects + effects
                     val mergedPerformed = innerType.effects.performed || performed
-                    MezzeType.SuspendedType(innerType.valueType, MezzeType.EffectRow(mergedEffects, innerType.effects.rowVar, mergedPerformed))
+                    MezzeType.SuspendedType(innerType.valueType, MezzeType.EffectRow.simple(mergedEffects, innerType.effects.rowVar, mergedPerformed))
                 }
                 else -> {
-                    MezzeType.SuspendedType(resultResult.type, MezzeType.EffectRow(effects, null, performed))
+                    MezzeType.SuspendedType(resultResult.type, MezzeType.EffectRow.simple(effects, null, performed))
                 }
             }
         } else {
@@ -2493,6 +2908,7 @@ class ExpressionConstraintGenerator {
             type = resultType,
             constraints = constraints,
             effects = effects,  // Still track effects for propagation
+            effectInstances = effectInstances,
             performed = performed,  // Include performed flag
             abilityConstraints = abilityConstraints,
             associatedTypeConstraints = associatedTypeConstraints,
@@ -2661,8 +3077,140 @@ class ExpressionConstraintGenerator {
             )
         }
 
+        // =================================================================
+        // SUSPENSION TYPE INFERENCE
+        // =================================================================
+        // For handlers that use continuations with suspend_with, use the statically
+        // analyzed suspension type from PerformerTypeInfo to determine the perform result.
+        //
+        // Example: ToResult { cont: Continuation 'a 'b 'c }
+        //   The impl body has: throw = {error} -> cont.suspend_with {value = Err {error}}
+        //   The suspension type is analyzed as: Result 'val 'error
+        //   At perform site, 'error is bound to the concrete error type (e.g., String)
+        //   So the perform result type is: Result 'val String
+        //
+        // This implements cross-module type inference for continuation-based effect handlers.
+
+        val continuationConstraints = mutableListOf<Constraint>()
+        var performResultType: MezzeType = exprResult.type
+
+        for (handler in expr.handlers) {
+            // Look up the performer's type info
+            val performerInfos = context.typingContext.getPerformerTypeInfosByName(handler.name)
+            val performerInfo = performerInfos.firstOrNull() ?: continue
+
+            // Type handler parameters if present
+            val handlerParams = handler.parameters
+            if (handlerParams != null) {
+                val performerFields = performerInfo.performerFields
+                if (performerFields is MezzeType.RecordType) {
+                    val actualParamsResult = generate(handlerParams, context)
+                    val actualParamsType = actualParamsResult.type
+
+                    // Generate constraint: actual params = expected fields
+                    continuationConstraints.add(
+                        Constraint.Equality(
+                            left = actualParamsType,
+                            right = performerFields,
+                            context = "Handler parameters must match performer field types",
+                            sourceLocation = handlerParams.sourceLocation
+                        )
+                    )
+                }
+            }
+
+            // Use the pre-analyzed suspension type from the performer
+            // This type was extracted from the impl body's suspend_with calls
+            val suspensionType = performerInfo.suspensionType
+            if (suspensionType != null) {
+                // Substitute associated types in the suspension type
+                // The suspension type may reference associated types like 'error
+                // which need to be resolved to their concrete bindings
+                //
+                // CRITICAL: Get concrete associated type bindings from effectInstances!
+                // The effectInstances track concrete bindings like 'error = String
+                // from expressions that use the effect, not the generic bindings from the performer.
+                val effectName = performerInfo.effectName
+                val effectInstance = exprResult.effectInstances.find { instance ->
+                    instance.name == effectName || instance.name.endsWith("::$effectName")
+                }
+
+                // Build substitution map from effectInstance's concrete bindings
+                // CRITICAL: The performer's associated types maps effect associated type names to
+                // TypeVars (e.g., 'error -> VarType('e)). The effectInstance maps associated type
+                // names to concrete types (e.g., 'error -> String).
+                // We need to compose these: get the TypeVar for each associated type name from
+                // the performer, then substitute that TypeVar with the concrete type.
+                val performerAssocTypes = performerInfo.associatedTypes as? MezzeType.RecordType
+                val concreteBindings: Map<String, MezzeType> = if (effectInstance != null && effectInstance.associatedTypes.isNotEmpty() && performerAssocTypes != null) {
+                    // For each associated type name in the effectInstance (e.g., "error" -> String),
+                    // look up the performer's binding for that name (e.g., "error" -> VarType('e))
+                    // and create a mapping from the TypeVar name ('e) to the concrete type (String)
+                    val result = mutableMapOf<String, MezzeType>()
+                    for ((assocTypeName, concreteType) in effectInstance.associatedTypes) {
+                        val performerBinding = performerAssocTypes.fields[assocTypeName]
+                        if (performerBinding is MezzeType.VarType) {
+                            // Map the TypeVar name (e.g., "e") to the concrete type
+                            val typeVarName = performerBinding.variable.name.removePrefix("'")
+                            result[typeVarName] = concreteType
+                        } else {
+                            // Fallback: map the associated type name directly
+                            result[assocTypeName] = concreteType
+                        }
+                    }
+                    result
+                } else if (performerAssocTypes != null) {
+                    // Fallback to performer's associated types (generic case)
+                    performerAssocTypes.fields
+                } else {
+                    emptyMap()
+                }
+
+                val resolvedSuspensionType = if (concreteBindings.isNotEmpty()) {
+                    substituteAssociatedTypesInType(suspensionType, concreteBindings)
+                } else {
+                    suspensionType
+                }
+
+                DebugLogger.debugSection(Category.ExpressionConstraints, "suspension type inference") {
+                    listOf(
+                        "handler: ${handler.name}",
+                        "effectName: $effectName",
+                        "effectInstance: $effectInstance",
+                        "suspensionType: $suspensionType",
+                        "concreteBindings: $concreteBindings",
+                        "resolvedSuspensionType: $resolvedSuspensionType",
+                        "performResultType: $performResultType"
+                    )
+                }
+
+                // Generate constraint: perform result type = resolved suspension type
+                // This connects the perform expression's result to what suspend_with returns
+                continuationConstraints.add(
+                    Constraint.Equality(
+                        left = performResultType,
+                        right = resolvedSuspensionType,
+                        context = "Perform result type must match handler suspension type",
+                        sourceLocation = expr.sourceLocation
+                    )
+                )
+
+                // Update the perform result type to reflect the inferred type
+                performResultType = resolvedSuspensionType
+            }
+        }
+
+        // Merge continuation constraints with expression constraints
+        val allConstraints = exprResult.constraints + continuationConstraints
+
         // Remove handled effects from the expression's type (for types that already have effects embedded)
-        val resultType = removeEffectsFromType(exprResult.type, handledEffects)
+        // If continuation inference found a specific type, use that; otherwise use the expression type
+        val baseType = if (continuationConstraints.isNotEmpty()) {
+            performResultType
+        } else {
+            exprResult.type
+        }
+        val resultType = removeEffectsFromType(baseType, handledEffects)
 
         // CRITICAL: Also remove handled effects from ConstraintResult.effects
         // This is where effects are tracked during constraint generation
@@ -2681,15 +3229,23 @@ class ExpressionConstraintGenerator {
         DebugLogger.debugSection(Category.ExpressionConstraints, "generatePerform result") {
             listOf(
                 "resultType after removal: $resultType",
+                "baseType: $baseType",
+                "continuationConstraints count: ${continuationConstraints.size}",
                 "addedEffects: $addedEffects",
                 "remainingEffects: $remainingEffects"
             )
         }
 
+        // Filter out handled effect instances (keep only unhandled ones)
+        val remainingEffectInstances = exprResult.effectInstances.filter { instance ->
+            instance.name !in handledEffects
+        }.toSet()
+
         return ConstraintResult(
             type = resultType,
-            constraints = exprResult.constraints,
+            constraints = allConstraints,  // Include continuation constraints!
             effects = remainingEffects,  // Return remaining unhandled effects
+            effectInstances = remainingEffectInstances,  // Return remaining unhandled effect instances
             performed = true,  // Mark that effects were performed
             undefinedVariables = exprResult.undefinedVariables,
             usedVariables = exprResult.usedVariables,
@@ -2726,7 +3282,28 @@ class ExpressionConstraintGenerator {
             is MezzeType.SuspendedType -> {
                 ExtractedEffects(type.effects.effects, type.effects.rowVar != null)
             }
-            else -> ExtractedEffects(emptySet(), false)
+            // Types that don't carry effects - exhaustive matching
+            is MezzeType.VarType,
+            is MezzeType.RecordType,
+            is MezzeType.VariantType,
+            is MezzeType.TypeApplication,
+            is MezzeType.ArrayType,
+            is MezzeType.ListType,
+            is MezzeType.SetType,
+            is MezzeType.SortedSetType,
+            is MezzeType.MapType,
+            is MezzeType.SortedMapType,
+            is MezzeType.EffectRow,
+            is MezzeType.IntType,
+            is MezzeType.FloatType,
+            is MezzeType.StringType,
+            is MezzeType.BooleanType,
+            is MezzeType.NatType,
+            is MezzeType.FracType,
+            is MezzeType.CharType,
+            is MezzeType.OrderingType,
+            is MezzeType.BytesType,
+            is MezzeType.ByteBufferType -> ExtractedEffects(emptySet(), false)
         }
     }
 
@@ -2737,8 +3314,92 @@ class ExpressionConstraintGenerator {
         return when (type) {
             is MezzeType.FunctionType -> type.effects?.performed == true
             is MezzeType.SuspendedType -> type.effects.performed
-            else -> false
+            // Types that don't have performed marker - exhaustive matching
+            is MezzeType.VarType,
+            is MezzeType.RecordType,
+            is MezzeType.VariantType,
+            is MezzeType.TypeApplication,
+            is MezzeType.ArrayType,
+            is MezzeType.ListType,
+            is MezzeType.SetType,
+            is MezzeType.SortedSetType,
+            is MezzeType.MapType,
+            is MezzeType.SortedMapType,
+            is MezzeType.EffectRow,
+            is MezzeType.IntType,
+            is MezzeType.FloatType,
+            is MezzeType.StringType,
+            is MezzeType.BooleanType,
+            is MezzeType.NatType,
+            is MezzeType.FracType,
+            is MezzeType.CharType,
+            is MezzeType.OrderingType,
+            is MezzeType.BytesType,
+            is MezzeType.ByteBufferType -> false
         }
+    }
+
+    /**
+     * Extract Continuation type parameters from a type.
+     *
+     * Continuation 'suspend 'resume 'result is a type alias that expands to a record type.
+     * This function detects if a type is a Continuation and extracts its type parameters.
+     *
+     * At the constraint generation phase, Continuation types appear as TypeApplication,
+     * e.g., TypeApplication("Continuation", ['suspend, 'resume, 'result])
+     *
+     * Returns Triple(suspendType, resumeType, resultType) if the type is a Continuation,
+     * null otherwise.
+     */
+    private fun extractContinuationType(type: MezzeType): Triple<MezzeType, MezzeType, MezzeType>? {
+        // Handle TypeApplication case - this is how Continuation appears before expansion
+        // TypeApplication("Continuation", [suspendType, resumeType, resultType])
+        if (type is MezzeType.TypeApplication) {
+            // Check if it's a Continuation type (handle both qualified and unqualified names)
+            val isContinuation = type.constructor == "Continuation" ||
+                type.constructor.endsWith("::Continuation")
+
+            if (isContinuation && type.args.size == 3) {
+                // Args order: 'suspend, 'resume, 'result
+                return Triple(type.args[0], type.args[1], type.args[2])
+            }
+            return null
+        }
+
+        // Handle expanded RecordType case - for cases where the type alias was already expanded
+        if (type !is MezzeType.RecordType) return null
+
+        // Look for suspend_with field - this is the key field that tells us about 'suspend
+        // Continuation is defined as:
+        // type Continuation 'suspend 'resume 'result = {
+        //     suspend_with: { value: 'suspend } -> 'result,
+        //     ...
+        // }
+        val suspendWithField = type.fields["suspend_with"]
+        if (suspendWithField !is MezzeType.FunctionType) return null
+
+        // suspend_with: { value: 'suspend } -> 'result
+        val paramType = suspendWithField.paramType
+        if (paramType !is MezzeType.RecordType) return null
+
+        val valueField = paramType.fields["value"]
+        if (valueField == null) return null
+
+        // Extract 'suspend from the value field
+        val suspendType = valueField
+
+        // Extract 'result from the return type
+        val resultType = suspendWithField.returnType
+
+        // Try to extract 'resume from the suspend field: {} -> 'resume
+        val suspendField = type.fields["suspend"]
+        val resumeType = if (suspendField is MezzeType.FunctionType) {
+            suspendField.returnType
+        } else {
+            MezzeType.VarType(TypeVar.fresh())  // Fallback if not found
+        }
+
+        return Triple(suspendType, resumeType, resultType)
     }
 
     /**
@@ -2756,7 +3417,7 @@ class ExpressionConstraintGenerator {
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow(emptySet(), null, true),  // Mark as performed
+                        effects = MezzeType.EffectRow.simple(emptySet(), null, true),  // Mark as performed
                         abilityConstraints = type.abilityConstraints
                     )
                 } else {
@@ -2767,7 +3428,7 @@ class ExpressionConstraintGenerator {
                     MezzeType.FunctionType(
                         paramType = type.paramType,
                         returnType = type.returnType,
-                        effects = MezzeType.EffectRow(remainingEffects, effects.rowVar, true),
+                        effects = MezzeType.EffectRow.simple(remainingEffects, effects.rowVar, true),
                         abilityConstraints = type.abilityConstraints
                     )
                 }
@@ -2780,7 +3441,7 @@ class ExpressionConstraintGenerator {
                 // This allows top-level validation to reject values with <*> marker
                 MezzeType.SuspendedType(
                     valueType = type.valueType,
-                    effects = MezzeType.EffectRow(remainingEffects, type.effects.rowVar, true)
+                    effects = MezzeType.EffectRow.simple(remainingEffects, type.effects.rowVar, true)
                 )
             }
             else -> {
@@ -2830,11 +3491,14 @@ class ExpressionConstraintGenerator {
         // Handle associated type substitution if we're in a perform context
         var instantiatedOperationType = operationType
         val performContext = context.performContext
+        println("DEBUG generateEffectCall: effectName=$effectName, operationName=$operationName, performContext=${performContext != null}, isFunctionType=${instantiatedOperationType is MezzeType.FunctionType}")
         if (performContext != null && instantiatedOperationType is MezzeType.FunctionType) {
+            println("DEBUG generateEffectCall: handlers=${performContext.handlers.map { it.name }}, performerToEffect=${context.performerToEffect}")
             // Find which performer is handling this effect
             var performerName: String? = null
             for (handler in performContext.handlers) {
                 val handlerEffectName = context.performerToEffect[handler.name]
+                println("DEBUG generateEffectCall: handler=${handler.name}, handlerEffectName=$handlerEffectName")
                 if (handlerEffectName == effectName) {
                     performerName = handler.name
                     break
@@ -2844,21 +3508,40 @@ class ExpressionConstraintGenerator {
             if (performerName != null) {
                 // Get the performer's associated type bindings using dedicated map
                 val performerInfos = context.typingContext.getPerformerTypeInfosByName(performerName)
+                println("DEBUG generateEffectCall: performerName=$performerName, performerInfos.size=${performerInfos.size}, effectName=$effectName")
                 if (performerInfos.isNotEmpty()) {
                     val performerInfo = performerInfos.first()
                     val performerType = performerInfo.associatedTypes
+                    println("DEBUG generateEffectCall: performerType=$performerType")
                     if (performerType is MezzeType.RecordType) {
+                        println("DEBUG generateEffectCall: fields=${performerType.fields}")
                         instantiatedOperationType = substituteAssociatedTypesInType(
                             instantiatedOperationType,
                             performerType.fields
+                        )
+                        println("DEBUG generateEffectCall: after substitution=$instantiatedOperationType")
+
+                        // CRITICAL: After substituting associated types, we need to instantiate
+                        // with fresh vars BUT preserve the TypeVars that came from the performer's
+                        // bindings. These are the TypeVars in performerType.fields values.
+                        // This ensures constraint solving connects the effect call's argument types
+                        // to the performer's type variables (which flow to Result's type params).
+                        val performerTypeVarNames = performerType.fields.values
+                            .filterIsInstance<MezzeType.VarType>()
+                            .map { it.variable.name }
+                        instantiatedOperationType = instantiateTypeWithFreshVarsPreservingPerformerBindings(
+                            instantiatedOperationType,
+                            performerTypeVarNames
                         )
                     }
                 }
             }
         }
 
-        // Instantiate with fresh vars to avoid variable sharing across different calls
-        instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
+        // Instantiate with fresh vars if we didn't already (no performer substitution happened)
+        if (performContext == null || performContext.handlers.none { context.performerToEffect[it.name] == effectName }) {
+            instantiatedOperationType = instantiateTypeWithFreshVars(instantiatedOperationType)
+        }
 
         // Generate constraints for arguments
         val argResult = generate(expr.arguments, context)
@@ -3006,7 +3689,7 @@ class ExpressionConstraintGenerator {
                 MezzeType.FunctionType(
                     paramType = convertFieldType(annotation.paramType),
                     returnType = convertFieldType(annotation.returnType),
-                    effects = annotation.effects?.let { MezzeType.EffectRow(it.effects.toSet(), null, it.isPerformed) }
+                    effects = annotation.effects?.let { MezzeType.EffectRow.simple(it.effects.toSet(), null, it.isPerformed) }
                 )
             }
             is TypeApplicationAnnotation -> {

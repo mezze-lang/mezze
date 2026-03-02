@@ -953,6 +953,12 @@ private fun unifyEffectRows(eff1: MezzeType.EffectRow, eff2: MezzeType.EffectRow
  * Format a type for error messages.
  */
 private fun formatType(type: MezzeType): String {
+    // Use prettyPrintType for normalized output (converts 'q12 to 'a, 'b, etc.)
+    return prettyPrintType(type)
+}
+
+// Keep original implementation for internal use if needed
+private fun formatTypeRaw(type: MezzeType): String {
     return when (type) {
         is MezzeType.VarType -> type.variable.name
         is MezzeType.IntType -> "Int"

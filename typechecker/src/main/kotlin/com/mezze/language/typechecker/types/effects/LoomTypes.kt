@@ -42,7 +42,7 @@ object LoomTypes {
             return MezzeType.FunctionType(
                 MezzeType.RecordType(emptyMap()),
                 returnType,
-                effects = MezzeType.EffectRow(emptySet<String>(), RowVar.fresh(), performed = false)
+                effects = MezzeType.EffectRow.simple(emptySet<String>(), RowVar.fresh(), performed = false)
             )
         }
 
@@ -191,7 +191,7 @@ object LoomTypes {
             return MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("x" to inputType)),
                 outputType,
-                effects = MezzeType.EffectRow(emptySet<String>(), RowVar.fresh(), performed = false)
+                effects = MezzeType.EffectRow.simple(emptySet<String>(), RowVar.fresh(), performed = false)
             )
         }
 
@@ -268,7 +268,7 @@ object LoomTypes {
             return MezzeType.FunctionType(
                 MezzeType.RecordType(mapOf("scope" to scopeType)),
                 returnType,
-                effects = MezzeType.EffectRow(emptySet<String>(), RowVar.fresh(), performed = false)
+                effects = MezzeType.EffectRow.simple(emptySet<String>(), RowVar.fresh(), performed = false)
             )
         }
 

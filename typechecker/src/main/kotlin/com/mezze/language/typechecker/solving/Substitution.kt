@@ -92,10 +92,12 @@ data class Substitution(
             is MezzeType.SortedSetType -> needsSubstitution(type.elementType)
             is MezzeType.SortedMapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
             is MezzeType.MapType -> needsSubstitution(type.keyType) || needsSubstitution(type.valueType)
-            is MezzeType.SuspendedType -> needsSubstitution(type.valueType)
+            is MezzeType.SuspendedType -> needsSubstitution(type.valueType) || needsSubstitutionInEffectRow(type.effects)
 
-            // Concrete types and effect rows don't need substitution
-            is MezzeType.EffectRow,
+            // Effect rows may need substitution if they have effectInstances with TypeVars
+            is MezzeType.EffectRow -> needsSubstitutionInEffectRow(type)
+
+            // Concrete types don't need substitution
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
@@ -106,6 +108,16 @@ data class Substitution(
             is MezzeType.BytesType,
             is MezzeType.ByteBufferType,
             is MezzeType.CharType -> false
+        }
+    }
+
+    /**
+     * Check if an effect row needs substitution applied.
+     * Returns true if any effectInstance has an associated type containing a mapped TypeVar.
+     */
+    private fun needsSubstitutionInEffectRow(effectRow: MezzeType.EffectRow): Boolean {
+        return effectRow.effectInstances.any { instance ->
+            instance.associatedTypes.values.any { needsSubstitution(it) }
         }
     }
 
@@ -222,22 +234,51 @@ data class Substitution(
     /**
      * Apply substitution to an effect row.
      *
-     * Effect rows contain effect names (not types), so we only need to
-     * handle the row variable if present.
+     * Effect rows contain:
+     * - Effect names (Strings) - don't change
+     * - EffectInstances with associated types (may contain TypeVars) - need substitution
+     * - Row variable - handled separately in row unification
      */
     private fun applyToEffectRow(effectRow: MezzeType.EffectRow): MezzeType.EffectRow {
-        // Effect names are not types, so they don't change
-        // Row variables are handled separately in row unification
-        return effectRow
+        return applyToEffectRowWithVisited(effectRow, emptySet())
     }
 
     /**
      * Apply substitution to an effect row (with cycle detection).
+     *
+     * Applies substitution to the associated types in effectInstances.
+     * This ensures that type variables like 'error get resolved to concrete types like String.
+     *
+     * OPTIMIZATION: Only creates new objects if substitution actually changes something.
      */
     private fun applyToEffectRowWithVisited(effectRow: MezzeType.EffectRow, visitedVars: Set<TypeVar>): MezzeType.EffectRow {
-        // Effect names are not types, so they don't change
-        // Row variables are handled separately in row unification
-        return effectRow
+        // Fast path: no effectInstances, nothing to substitute
+        if (effectRow.effectInstances.isEmpty()) {
+            return effectRow
+        }
+
+        // Check if any substitution would actually change the effectInstances
+        var anyChanged = false
+        val substitutedInstances = effectRow.effectInstances.map { instance ->
+            if (instance.associatedTypes.isEmpty()) {
+                instance
+            } else {
+                // Check if any associated type needs substitution
+                val needsSub = instance.associatedTypes.values.any { needsSubstitution(it) }
+                if (!needsSub) {
+                    instance
+                } else {
+                    anyChanged = true
+                    val substitutedAssocTypes = instance.associatedTypes.mapValues { (_, type) ->
+                        applyWithVisited(type, visitedVars)
+                    }
+                    MezzeType.EffectInstance(instance.name, substitutedAssocTypes)
+                }
+            }
+        }
+
+        // OPTIMIZATION: Return original if nothing changed
+        return if (anyChanged) effectRow.copy(effectInstances = substitutedInstances.toSet()) else effectRow
     }
 
     /**
