@@ -213,10 +213,38 @@ sealed interface MezzeType {
         }
     }
 
+    /**
+     * An effect instance with its associated type bindings.
+     * Example: Exception with 'error = String
+     */
+    @Serializable
+    data class EffectInstance(
+        val name: String,
+        val associatedTypes: Map<String, MezzeType> = emptyMap()
+    ) {
+        override fun toString(): String {
+            return if (associatedTypes.isEmpty()) {
+                name
+            } else {
+                val bindings = associatedTypes.entries.joinToString(", ") { (k, v) ->
+                    "'$k = $v"
+                }
+                "$name having $bindings"
+            }
+        }
+
+        /** Check if this effect matches another by name (ignoring associated types) */
+        fun matchesName(other: String): Boolean = name == other
+
+        /** Check if this effect matches another (same name, compatible associated types) */
+        fun matches(other: EffectInstance): Boolean = name == other.name
+    }
+
     // Effect rows
     @Serializable
     data class EffectRow(
         val effects: Set<String>,
+        val effectInstances: Set<EffectInstance> = emptySet(), // Effects with associated type info
         val rowVar: RowVar? = null, // null = closed, non-null = open
         val performed: Boolean = false // true = effects have been performed via 'perform'
     ) : MezzeType {
@@ -224,21 +252,54 @@ sealed interface MezzeType {
         val isClosed: Boolean get() = rowVar == null
 
         /** True if this is truly pure - no effects, not open, nothing performed */
-        val isPure: Boolean get() = effects.isEmpty() && rowVar == null && !performed
+        val isPure: Boolean get() = effects.isEmpty() && effectInstances.isEmpty() && rowVar == null && !performed
+
+        /** Get all effect names (from both simple effects and effect instances) */
+        val allEffectNames: Set<String> get() = effects + effectInstances.map { it.name }.toSet()
+
+        /** Get associated types for an effect by name */
+        fun getAssociatedTypes(effectName: String): Map<String, MezzeType>? {
+            return effectInstances.find { it.name == effectName }?.associatedTypes
+        }
+
+        /** Create a new EffectRow with an effect instance added/updated */
+        fun withEffectInstance(instance: EffectInstance): EffectRow {
+            // Remove from simple effects if present, add to instances
+            val newEffects = effects - instance.name
+            val newInstances = effectInstances.filterNot { it.name == instance.name }.toSet() + instance
+            return copy(effects = newEffects, effectInstances = newInstances)
+        }
 
         override fun toString(): String {
-            val effectList = effects.take(5).joinToString(", ")
+            // Combine simple effects and effect instances for display
+            val simpleEffects = effects.take(3).toList()
+            val instanceStrs = effectInstances.take(3).map { it.toString() }
+            val allEffects = simpleEffects + instanceStrs
+            val effectList = allEffects.take(5).joinToString(", ")
+            val totalCount = effects.size + effectInstances.size
             val suffix = when {
-                performed && effects.isNotEmpty() -> ", *"
+                performed && totalCount > 0 -> ", *"
                 performed -> "*"
-                effects.size > 5 -> ", ..."
+                totalCount > 5 -> ", ..."
                 else -> ""
             }
             return safeToString(
                 "EffectRow",
-                truncatedContent = { if (performed) "${effects.size} effects, *" else "${effects.size} effects" },
+                truncatedContent = { if (performed) "$totalCount effects, *" else "$totalCount effects" },
                 fullContent = { "$effectList$suffix" }
             )
+        }
+
+        companion object {
+            /** Create an EffectRow from simple effect names (backward compatible) */
+            fun simple(effects: Set<String>, rowVar: RowVar? = null, performed: Boolean = false): EffectRow {
+                return EffectRow(effects = effects, effectInstances = emptySet(), rowVar = rowVar, performed = performed)
+            }
+
+            /** Create an EffectRow with a single effect instance (with associated types) */
+            fun withInstance(instance: EffectInstance, rowVar: RowVar? = null, performed: Boolean = false): EffectRow {
+                return EffectRow(effects = emptySet(), effectInstances = setOf(instance), rowVar = rowVar, performed = performed)
+            }
         }
     }
 

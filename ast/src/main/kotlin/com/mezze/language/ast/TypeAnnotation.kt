@@ -126,7 +126,12 @@ fun convertTypeAnnotation(annotation: TypeAnnotation): MezzeType {
             // Convert effect annotations (including polymorphic and performed flags)
             val effects = annotation.effects?.let { effectRow ->
                 val rowVar = if (effectRow.isPolymorphic) RowVar.fresh() else null
-                MezzeType.EffectRow(effectRow.effects.toSet(), rowVar, effectRow.isPerformed)
+                MezzeType.EffectRow(
+                    effects = effectRow.effects.toSet(),
+                    effectInstances = emptySet(),
+                    rowVar = rowVar,
+                    performed = effectRow.isPerformed
+                )
             }
 
             // Convert ability constraints

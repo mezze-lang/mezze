@@ -42,8 +42,10 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int = 0) {
             // Get or initialize counter for this level, starting from 0
             val scopeCounter = scopeCounters.getOrPut(level) { 0 }
 
-            // Generate name: 'a', 'b', 'c', etc.
-            val name = "'${('a' + scopeCounter)}"
+            // Generate name: 'a', 'b', ..., 'z', 'a1', 'b1', ..., 'z1', 'a2', etc.
+            val letterIndex = scopeCounter % 26
+            val suffix = if (scopeCounter >= 26) (scopeCounter / 26).toString() else ""
+            val name = "'${('a' + letterIndex)}$suffix"
 
             // Increment counters
             scopeCounters[level] = scopeCounter + 1

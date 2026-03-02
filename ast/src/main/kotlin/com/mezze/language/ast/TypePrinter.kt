@@ -137,6 +137,71 @@ private fun printVariantType(
 }
 
 // ============================================================================
+// EFFECT ROW PRINTING
+// ============================================================================
+
+/**
+ * Pretty print an effect row, including effect instances with their associated types.
+ *
+ * Examples:
+ * - Simple effects: <Log, FileSystem>
+ * - Effect with associated types: <Exception having 'error = String>
+ * - Mixed: <Log, Exception having 'error = String, *>
+ */
+private fun prettyPrintEffectRow(effectRow: MezzeType.EffectRow, typeVarMapping: Map<TypeVar, String>): String {
+    // Collect all effect parts
+    val parts = mutableListOf<String>()
+
+    // Add simple effects (deduplicated by keeping shortest name variant)
+    val deduped = effectRow.effects.groupBy { effect ->
+        effect.substringAfterLast("::")
+    }.mapValues { (_, variants) ->
+        variants.minByOrNull { it.length } ?: variants.first()
+    }.values.sorted()
+    parts.addAll(deduped)
+
+    // Add effect instances with their associated types
+    for (instance in effectRow.effectInstances.sortedBy { it.name }) {
+        // Skip if we already have this effect as a simple name
+        if (instance.name in effectRow.effects || deduped.any { it == instance.name.substringAfterLast("::") }) {
+            // If the simple effect is already listed but we have associated types, replace it
+            if (instance.associatedTypes.isNotEmpty()) {
+                // Remove the simple effect and add the instance with associated types
+                val simpleName = instance.name.substringAfterLast("::")
+                parts.removeIf { it == simpleName }
+                val bindingsStr = instance.associatedTypes.entries
+                    .sortedBy { it.key }
+                    .joinToString(", ") { (name, type) ->
+                        "'$name = ${prettyPrintTypeWithMapping(type, typeVarMapping)}"
+                    }
+                parts.add("${simpleName} having $bindingsStr")
+            }
+        } else {
+            // Effect not in simple effects set
+            if (instance.associatedTypes.isEmpty()) {
+                parts.add(instance.name.substringAfterLast("::"))
+            } else {
+                val simpleName = instance.name.substringAfterLast("::")
+                val bindingsStr = instance.associatedTypes.entries
+                    .sortedBy { it.key }
+                    .joinToString(", ") { (name, type) ->
+                        "'$name = ${prettyPrintTypeWithMapping(type, typeVarMapping)}"
+                    }
+                parts.add("$simpleName having $bindingsStr")
+            }
+        }
+    }
+
+    // Add row variable marker if open
+    if (effectRow.isOpen) parts.add("...")
+
+    // Add performed marker
+    if (effectRow.performed) parts.add("*")
+
+    return "<${parts.joinToString(", ")}>"
+}
+
+// ============================================================================
 // PRETTY PRINTING
 // ============================================================================
 
@@ -155,10 +220,12 @@ fun prettyPrintType(type: MezzeType): String {
 private fun collectTypeVariables(type: MezzeType): Map<TypeVar, String> {
     val orderedVars = collectTypeVarsInOrder(type).distinct()
 
-    // Assign names 'a, 'b, 'c, etc. in order of appearance
+    // Assign names 'a, 'b, ..., 'z, 'a1, 'b1, ..., 'z1, 'a2, etc. in order of appearance
     return orderedVars.mapIndexed { index, typeVar ->
-        val letter = ('a' + index).toString()
-        typeVar to "'$letter"
+        val letterIndex = index % 26
+        val suffix = if (index >= 26) (index / 26).toString() else ""
+        val letter = ('a' + letterIndex).toString()
+        typeVar to "'$letter$suffix"
     }.toMap()
 }
 
@@ -217,11 +284,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     is MezzeType.SuspendedType -> {
         // Suspended types print as: valueType <effects, *>
         val valueTypeStr = prettyPrintTypeWithMapping(type.valueType, typeVarMapping)
-        val parts = mutableListOf<String>()
-        parts.addAll(type.effects.effects.sorted())
-        if (type.effects.isOpen) parts.add("...")
-        if (type.effects.performed) parts.add("*")
-        "$valueTypeStr <${parts.joinToString(", ")}>"
+        "$valueTypeStr ${prettyPrintEffectRow(type.effects, typeVarMapping)}"
     }
     is MezzeType.FunctionType -> {
         // Build parameter type string - add parentheses if parameter is also a function type
@@ -255,23 +318,9 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
         // Build return type string
         val returnTypeStr = prettyPrintTypeWithMapping(type.returnType, typeVarMapping)
         
-        // Add effects (including performed marker)
-        val effects = if (type.effects != null && (type.effects.effects.isNotEmpty() || type.effects.performed)) {
-            // Deduplicate effects by keeping shortest name variant
-            // E.g., if we have both "FileSystem" and "filesystem::FileSystem", keep "FileSystem"
-            val deduped = type.effects.effects.groupBy { effect ->
-                // Group by the simple name (last component after ::)
-                effect.substringAfterLast("::")
-            }.mapValues { (_, variants) ->
-                // Keep the shortest variant (usually the unqualified name)
-                variants.minByOrNull { it.length } ?: variants.first()
-            }.values.sorted()
-
-            val parts = mutableListOf<String>()
-            parts.addAll(deduped)
-            if (type.effects.isOpen) parts.add("...")
-            if (type.effects.performed) parts.add("*")
-            " <${parts.joinToString(", ")}>"
+        // Add effects (including performed marker and effect instances with associated types)
+        val effects = if (type.effects != null && (type.effects.effects.isNotEmpty() || type.effects.effectInstances.isNotEmpty() || type.effects.performed)) {
+            " ${prettyPrintEffectRow(type.effects, typeVarMapping)}"
         } else {
             ""
         }
@@ -282,13 +331,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: Map<Type
     is MezzeType.OrderingType -> "Ordering"
     is MezzeType.BytesType -> "Bytes"
     is MezzeType.ByteBufferType -> "ByteBuffer"
-    is MezzeType.EffectRow -> {
-        val parts = mutableListOf<String>()
-        parts.addAll(type.effects.sorted())
-        if (type.isOpen) parts.add("...")
-        if (type.performed) parts.add("*")
-        "<${parts.joinToString(", ")}>"
-    }
+    is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
 }
 
 /**
@@ -583,23 +626,9 @@ private fun prettyPrintTypeWithAliasesRecursive(
         // Build return type string
         val returnTypeStr = prettyPrintWithAliasCheck(type.returnType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
 
-        // Add effects (including performed marker)
-        val effects = if (type.effects != null && (type.effects.effects.isNotEmpty() || type.effects.performed)) {
-            // Deduplicate effects by keeping shortest name variant
-            // E.g., if we have both "FileSystem" and "filesystem::FileSystem", keep "FileSystem"
-            val deduped = type.effects.effects.groupBy { effect ->
-                // Group by the simple name (last component after ::)
-                effect.substringAfterLast("::")
-            }.mapValues { (_, variants) ->
-                // Keep the shortest variant (usually the unqualified name)
-                variants.minByOrNull { it.length } ?: variants.first()
-            }.values.sorted()
-
-            val parts = mutableListOf<String>()
-            parts.addAll(deduped)
-            if (type.effects.isOpen) parts.add("...")
-            if (type.effects.performed) parts.add("*")
-            " <${parts.joinToString(", ")}>"
+        // Add effects (including performed marker and effect instances)
+        val effects = if (type.effects != null && (type.effects.effects.isNotEmpty() || type.effects.effectInstances.isNotEmpty() || type.effects.performed)) {
+            " ${prettyPrintEffectRow(type.effects, typeVarMapping)}"
         } else {
             ""
         }
@@ -612,22 +641,12 @@ private fun prettyPrintTypeWithAliasesRecursive(
         // Example: String <Log, FileSystem>
         // These represent values with unhandled effects
         val valueTypeStr = prettyPrintWithAliasCheck(type.valueType, typeAliases, showExpansion, typeVarMapping, typeDeclarations)
-        val parts = mutableListOf<String>()
-        parts.addAll(type.effects.effects.sorted())
-        if (type.effects.isOpen) parts.add("...")
-        if (type.effects.performed) parts.add("*")
-        "$valueTypeStr <${parts.joinToString(", ")}>"
+        "$valueTypeStr ${prettyPrintEffectRow(type.effects, typeVarMapping)}"
     }
     is MezzeType.OrderingType -> "Ordering"
     is MezzeType.BytesType -> "Bytes"
     is MezzeType.ByteBufferType -> "ByteBuffer"
-    is MezzeType.EffectRow -> {
-        val parts = mutableListOf<String>()
-        parts.addAll(type.effects.sorted())
-        if (type.isOpen) parts.add("...")
-        if (type.performed) parts.add("*")
-        "<${parts.joinToString(", ")}>"
-    }
+    is MezzeType.EffectRow -> prettyPrintEffectRow(type, typeVarMapping)
 }
 
 /**
