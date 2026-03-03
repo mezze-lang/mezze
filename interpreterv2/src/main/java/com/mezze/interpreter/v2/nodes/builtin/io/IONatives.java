@@ -105,14 +105,12 @@ public final class IONatives {
     }
 
     @TruffleBoundary
-    public static MezzeList bufferToBytes(MezzeRecord args) {
+    public static MezzeBytes bufferToBytes(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
+        // Return MezzeBytes from the buffer's written content (up to position)
         byte[] data = buf.getData();
-        Object[] result = new Object[data.length];
-        for (int i = 0; i < data.length; i++) {
-            result[i] = (long) (data[i] & 0xFF);
-        }
-        return MezzeList.fromObjects(result);
+        int size = buf.getPosition();
+        return MezzeBytes.copyOf(data, 0, size);
     }
 
     @TruffleBoundary
@@ -231,15 +229,28 @@ public final class IONatives {
     @TruffleBoundary
     public static MezzeBuffer bufferWrite(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
-        MezzeList bytes = getList(args, "bytes");
-        Object[] store = bytes.getObjectStore();
-        byte[] data = new byte[store.length];
-        for (int i = 0; i < store.length; i++) {
-            if (store[i] instanceof Long l) {
-                data[i] = l.byteValue();
+        Object bytesValue = getField(args, "bytes");
+
+        // Handle both MezzeBytes and MezzeList
+        if (bytesValue instanceof MezzeBytes mb) {
+            // Copy the relevant portion of MezzeBytes to a byte array
+            byte[] data = new byte[mb.length()];
+            System.arraycopy(mb.getData(), mb.getOffset(), data, 0, mb.length());
+            buf.writeBytes(data);
+        } else if (bytesValue instanceof MezzeList list) {
+            Object[] store = list.getObjectStore();
+            byte[] data = new byte[store.length];
+            for (int i = 0; i < store.length; i++) {
+                if (store[i] instanceof Long l) {
+                    data[i] = l.byteValue();
+                }
             }
+            buf.writeBytes(data);
+        } else {
+            throw new RuntimeException("Expected MezzeBytes or List for field 'bytes', got: " +
+                (bytesValue == null ? "null" : bytesValue.getClass().getSimpleName()));
         }
-        buf.writeBytes(data);
+
         return buf;  // Return the buffer for functional API
     }
 
