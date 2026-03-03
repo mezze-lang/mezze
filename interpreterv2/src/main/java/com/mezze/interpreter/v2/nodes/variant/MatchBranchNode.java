@@ -335,6 +335,9 @@ public final class MatchBranchNode extends MezzeNode {
             this.stringSuffix = null;
             this.stringHasSingleCapture = false;
         }
+
+        // Initialize Cons/Nil pattern info - precompute for O(1) runtime checks
+        initListPatternInfo();
     }
 
     /**
@@ -862,63 +865,88 @@ public final class MatchBranchNode extends MezzeNode {
         return bodyNode.execute(frame);
     }
 
-    // ===== CONS/NIL LIST PATTERN DETECTION =====
+    // ===== CONS/NIL LIST PATTERN - PRECOMPUTED FOR PERFORMANCE =====
+
+    // Precomputed: is this a Cons pattern? Computed once at construction.
+    @CompilationFinal
+    private boolean isConsPat;
+
+    // Precomputed: is this a Nil pattern? Computed once at construction.
+    @CompilationFinal
+    private boolean isNilPat;
+
+    // Precomputed slot indices for Cons binding - NO string comparison at runtime
+    @CompilationFinal
+    private int consHeadSlot = -1;
+
+    @CompilationFinal
+    private int consTailSlot = -1;
+
+    /**
+     * Initialize Cons/Nil pattern detection. Called once after construction.
+     * This precomputes all pattern info to avoid runtime string comparisons.
+     */
+    private void initListPatternInfo() {
+        // Check for Nil pattern: no payload fields
+        if (tag >= 0 && payloadSlotCount == 0 &&
+            (variantPayloadFieldNames == null || variantPayloadFieldNames.length == 0)) {
+            this.isNilPat = true;
+            this.isConsPat = false;
+            return;
+        }
+
+        // Check for Cons pattern: exactly "head" and "tail" fields
+        if (tag >= 0 && variantPayloadFieldNames != null && variantPayloadFieldNames.length == 2) {
+            int headIdx = -1;
+            int tailIdx = -1;
+            for (int i = 0; i < variantPayloadFieldNames.length; i++) {
+                if ("head".equals(variantPayloadFieldNames[i])) {
+                    headIdx = i;
+                } else if ("tail".equals(variantPayloadFieldNames[i])) {
+                    tailIdx = i;
+                }
+            }
+            if (headIdx >= 0 && tailIdx >= 0) {
+                this.isConsPat = true;
+                this.isNilPat = false;
+                // Precompute slot indices for O(1) binding
+                this.consHeadSlot = (headIdx < payloadSlotCount) ? payloadSlots[headIdx] : -1;
+                this.consTailSlot = (tailIdx < payloadSlotCount) ? payloadSlots[tailIdx] : -1;
+                return;
+            }
+        }
+
+        this.isConsPat = false;
+        this.isNilPat = false;
+    }
 
     /**
      * Check if this is a Cons pattern (for MezzeList matching).
-     * Cons patterns have exactly two payload fields: "head" and "tail".
+     * O(1) - uses precomputed flag.
      */
     public boolean isConsPattern() {
-        if (tag < 0 || variantPayloadFieldNames == null) {
-            return false;
-        }
-        if (variantPayloadFieldNames.length != 2) {
-            return false;
-        }
-        // Check if field names are "head" and "tail" (in either order)
-        boolean hasHead = false;
-        boolean hasTail = false;
-        for (String name : variantPayloadFieldNames) {
-            if ("head".equals(name)) hasHead = true;
-            if ("tail".equals(name)) hasTail = true;
-        }
-        return hasHead && hasTail;
+        return isConsPat;
     }
 
     /**
      * Check if this is a Nil pattern (for MezzeList matching).
-     * Nil patterns have no payload fields.
+     * O(1) - uses precomputed flag.
      */
     public boolean isNilPattern() {
-        if (tag < 0) {
-            return false;
-        }
-        // Nil has no payload - check if payloadSlots is empty
-        return payloadSlotCount == 0 && (variantPayloadFieldNames == null || variantPayloadFieldNames.length == 0);
+        return isNilPat;
     }
 
     /**
-     * Bind MezzeList head and tail to frame slots.
-     * This is used when matching MezzeList against Cons { head, tail } pattern.
+     * FAST: Bind MezzeList head and tail to frame slots.
+     * Uses precomputed slot indices - NO string comparison, NO iteration.
      */
     public void bindListConsPayload(VirtualFrame frame, MezzeList list) {
-        if (variantPayloadFieldNames == null || payloadSlots == null) {
-            return;
+        // Direct slot assignment using precomputed indices
+        if (consHeadSlot >= 0) {
+            frame.setObject(consHeadSlot, list.get(0));
         }
-
-        Object head = list.get(0);
-        MezzeList tail = list.tail();
-
-        for (int i = 0; i < variantPayloadFieldNames.length && i < payloadSlotCount; i++) {
-            String fieldName = variantPayloadFieldNames[i];
-            int slot = payloadSlots[i];
-            if (slot >= 0) {
-                if ("head".equals(fieldName)) {
-                    frame.setObject(slot, head);
-                } else if ("tail".equals(fieldName)) {
-                    frame.setObject(slot, tail);
-                }
-            }
+        if (consTailSlot >= 0) {
+            frame.setObject(consTailSlot, list.tail());
         }
     }
 }

@@ -69,6 +69,21 @@ public final class MatchNode extends MezzeNode {
     // Error branch profile - tell JIT this path is cold
     private final InlinedBranchProfile noMatchProfile = InlinedBranchProfile.getUncached();
 
+    // ===== CONS/NIL LIST PATTERN OPTIMIZATION =====
+    // Pre-computed at construction time - NO runtime scanning
+
+    // True if this match has Cons/Nil patterns (for MezzeList matching)
+    @CompilationFinal
+    private final boolean hasListPatterns;
+
+    // Index of Cons branch, or -1 if none
+    @CompilationFinal
+    private final int consBranchIndex;
+
+    // Index of Nil branch, or -1 if none
+    @CompilationFinal
+    private final int nilBranchIndex;
+
     public MatchNode(MezzeNode valueNode, MatchBranchNode[] branches, int wildcardBranchIndex) {
         this.valueNode = valueNode;
         this.branches = branches;
@@ -87,6 +102,20 @@ public final class MatchNode extends MezzeNode {
         this.tagToIndex = info.tagToIndex;
         this.minTag = info.minTag;
         this.maxTag = info.maxTag;
+
+        // Pre-compute Cons/Nil pattern indices - O(N) once at construction, O(1) at runtime
+        int consIdx = -1;
+        int nilIdx = -1;
+        for (int i = 0; i < branches.length; i++) {
+            if (branches[i].isConsPattern()) {
+                consIdx = i;
+            } else if (branches[i].isNilPattern()) {
+                nilIdx = i;
+            }
+        }
+        this.consBranchIndex = consIdx;
+        this.nilBranchIndex = nilIdx;
+        this.hasListPatterns = (consIdx >= 0 || nilIdx >= 0);
     }
 
     /**
@@ -175,10 +204,9 @@ public final class MatchNode extends MezzeNode {
 
         // Check for array pattern matching (MezzeList for immutable lists)
         if (value instanceof MezzeList list) {
-            // First try to match as Cons/Nil variant pattern
-            // This allows user code to pattern match on lists with `Cons { head, tail }` / `Nil`
-            if (hasConsNilPatterns()) {
-                return executeListAsVariantMatch(frame, list);
+            // Fast path: use precomputed hasListPatterns flag (O(1) check)
+            if (hasListPatterns) {
+                return executeListAsVariantMatchFast(frame, list);
             }
             return executeArrayMatch(frame, list);
         }
@@ -414,48 +442,35 @@ public final class MatchNode extends MezzeNode {
         throw new RuntimeException("No matching record pattern");
     }
 
-    // ===== CONS/NIL LIST PATTERN MATCHING =====
+    // ===== CONS/NIL LIST PATTERN MATCHING - OPTIMIZED =====
 
     /**
-     * Check if this match expression has Cons/Nil patterns.
-     * Used to enable MezzeList matching against Cons { head, tail } / Nil patterns.
-     */
-    private boolean hasConsNilPatterns() {
-        for (int i = 0; i < branchCount; i++) {
-            if (branches[i].isConsPattern() || branches[i].isNilPattern()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Match MezzeList against Cons/Nil variant patterns.
-     * This allows efficient list representation while supporting user-friendly pattern matching.
+     * FAST PATH: Match MezzeList against Cons/Nil patterns using precomputed branch indices.
+     *
+     * Optimizations:
+     * 1. Uses precomputed consBranchIndex/nilBranchIndex - NO runtime scanning
+     * 2. Direct array indexing O(1) instead of O(N) branch iteration
+     * 3. Single isEmpty() check determines which branch to take
+     * 4. Branch profiles for JIT optimization
      *
      * Cons { head, tail } matches non-empty list, binding head to first element, tail to rest.
      * Nil matches empty list.
      */
-    @ExplodeLoop
-    private Object executeListAsVariantMatch(VirtualFrame frame, MezzeList list) {
-        boolean isEmpty = list.isEmpty();
-
-        // Try each branch
-        for (int i = 0; i < branchCount; i++) {
-            MatchBranchNode branch = branches[i];
-
-            if (!isEmpty && branch.isConsPattern()) {
-                // Non-empty list matches Cons pattern
-                if (branchProfiles[i].profile(true)) {
-                    branch.bindListConsPayload(frame, list);
-                    return branch.execute(frame);
+    private Object executeListAsVariantMatchFast(VirtualFrame frame, MezzeList list) {
+        // Single check determines the branch - VERY fast
+        if (list.isEmpty()) {
+            // Empty list -> Nil pattern
+            if (nilBranchIndex >= 0) {
+                if (branchProfiles[nilBranchIndex].profile(true)) {
+                    return branches[nilBranchIndex].execute(frame);
                 }
             }
-
-            if (isEmpty && branch.isNilPattern()) {
-                // Empty list matches Nil pattern
-                if (branchProfiles[i].profile(true)) {
-                    return branch.execute(frame);
+        } else {
+            // Non-empty list -> Cons pattern
+            if (consBranchIndex >= 0) {
+                if (branchProfiles[consBranchIndex].profile(true)) {
+                    branches[consBranchIndex].bindListConsPayload(frame, list);
+                    return branches[consBranchIndex].execute(frame);
                 }
             }
         }
@@ -467,7 +482,7 @@ public final class MatchNode extends MezzeNode {
             return wildcard.execute(frame);
         }
 
-        // No match - fall back to array pattern matching
+        // Fall back to array pattern matching (for patterns like [a, b, ...rest])
         return executeArrayMatch(frame, list);
     }
 }
