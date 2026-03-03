@@ -1562,6 +1562,10 @@ public final class ConcurrencyNatives {
     private static MezzeList getList(MezzeRecord args, String fieldName) {
         Object value = getField(args, fieldName);
         if (value instanceof MezzeList list) return list;
+        // Handle array literals (Object[]) - convert to MezzeList
+        if (value instanceof Object[] arr) {
+            return MezzeList.fromObjects(arr);
+        }
         throw new RuntimeException("Expected List for field '" + fieldName + "'");
     }
 

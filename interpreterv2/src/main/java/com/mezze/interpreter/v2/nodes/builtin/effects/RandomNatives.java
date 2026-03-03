@@ -102,6 +102,9 @@ public final class RandomNatives {
         }
         Object val = r.getField(index);
         if (val instanceof Long l) return l;
-        throw new RuntimeException("Expected Long for field '" + name + "'");
+        if (val instanceof Integer i) return i.longValue();
+        if (val instanceof Double d) return d.longValue();
+        throw new RuntimeException("Expected Long for field '" + name + "', got: " +
+            (val == null ? "null" : val.getClass().getSimpleName()));
     }
 }

@@ -144,6 +144,48 @@ public final class SortedMapNatives {
         return map.entries();
     }
 
+    // ==================== Additional Operations ====================
+
+    @TruffleBoundary
+    public static boolean equals(MezzeSortedMap a, MezzeSortedMap b) {
+        if (a == b) return true;
+        if (a.size() != b.size()) return false;
+        return a.getMap().equals(b.getMap());
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant minEntry(MezzeSortedMap map) {
+        if (map.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        Map.Entry<Object, Object> entry = map.getMap().firstEntry();
+        return MezzeVariant.some(MezzeRecord.fromFields(
+            new String[]{"key", "value"},
+            new Object[]{entry.getKey(), entry.getValue()}
+        ));
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant maxEntry(MezzeSortedMap map) {
+        if (map.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        Map.Entry<Object, Object> entry = map.getMap().lastEntry();
+        return MezzeVariant.some(MezzeRecord.fromFields(
+            new String[]{"key", "value"},
+            new Object[]{entry.getKey(), entry.getValue()}
+        ));
+    }
+
+    @TruffleBoundary
+    public static MapNatives.MezzeMap toMap(MezzeSortedMap sortedMap) {
+        MapNatives.MezzeMap result = MapNatives.empty();
+        for (Map.Entry<Object, Object> entry : sortedMap.getMap().entrySet()) {
+            result = MapNatives.insert(result, entry.getKey(), entry.getValue());
+        }
+        return result;
+    }
+
     // ==================== Comparison Helper ====================
 
     @TruffleBoundary

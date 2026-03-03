@@ -41,13 +41,16 @@ public final class ContinuationSuspendNode extends MezzeNode {
         FrameDescriptor.Builder builder = FrameDescriptor.newBuilder();
         FrameDescriptor fd = builder.build();
 
+        // Note: ExtractValueNode uses frame.getArguments() directly,
+        // so we pass empty slotTypes to avoid MezzeRootNode trying to bind args to frame slots
         MezzeRootNode rootNode = new MezzeRootNode(
                 MezzeLanguage.get(this),
                 fd,
                 new ExtractValueNode(),
                 "suspend_continuation",
                 0,
-                1
+                1,
+                new int[0]  // No slot types - ExtractValueNode uses getArguments() directly
         );
 
         return MezzeContinuation.create(rootNode.getCallTarget(), delimiterId);

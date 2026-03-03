@@ -461,6 +461,14 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.values(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_entries", (r, c) ->
             SortedMapNatives.entries(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_equals", (r, c) ->
+            SortedMapNatives.equals(getSortedMap(r, "a"), getSortedMap(r, "b")));
+        HANDLERS.put("__native_sorted_map_min_entry", (r, c) ->
+            SortedMapNatives.minEntry(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_max_entry", (r, c) ->
+            SortedMapNatives.maxEntry(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_to_map", (r, c) ->
+            SortedMapNatives.toMap(getSortedMap(r, "m")));
     }
 
     // ==================== Deque ====================
@@ -864,6 +872,10 @@ public final class NativeDispatch extends MezzeNode {
     private static MezzeList getList(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof MezzeList list) return list;
+        // Handle array literals (Object[]) - convert to MezzeList
+        if (val instanceof Object[] arr) {
+            return MezzeList.fromObjects(arr);
+        }
         throw new RuntimeException("Expected MezzeList for field '" + name + "'");
     }
 

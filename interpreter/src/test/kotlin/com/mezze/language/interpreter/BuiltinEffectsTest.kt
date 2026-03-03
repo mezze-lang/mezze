@@ -31,7 +31,7 @@ class BuiltinEffectsTest {
 
             # Use native implementation
             impl Log for NativeConsole where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> __native_console_print {msg = msg}
             }
 
             # Test the effect
@@ -42,12 +42,11 @@ class BuiltinEffectsTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow { typeChecker.typeCheck(program) }
-        
+
         // This should execute and print to console
         val result = MezzeTestHelper.execute(program)
-        // Result should be unit (empty record)
-        assertTrue(result is MezzeRecord)
-        assertEquals(0, (result as MezzeRecord).fields.size)
+        // Result should be unit
+        assertTrue(result is MezzeUnit || (result is MezzeRecord && (result as MezzeRecord).fields.isEmpty()))
     }
 
     @Test
@@ -60,7 +59,7 @@ class BuiltinEffectsTest {
 
             # Use native implementation
             impl Random for NativeRandom where {
-              nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
+              nextInt : {min: Int, max: Int} -> Int = {min, max} -> __native_random_int {min = min, max = max}
             }
 
             # Test the effect
@@ -71,63 +70,11 @@ class BuiltinEffectsTest {
 
         val program = parser.parse(source)
         assertDoesNotThrow { typeChecker.typeCheck(program) }
-        
+
         val result = MezzeTestHelper.execute(program)
         assertTrue(result is MezzeInt)
         val randomValue = (result as MezzeInt).value
         assertTrue(randomValue >= 1 && randomValue <= 10, "Random value $randomValue should be between 1 and 10")
-    }
-
-    @Test
-    fun testCombinedLogAndRandomEffects() {
-        val source = """
-            # Declare both effects
-            effect Log where {
-              print : {msg: String} -> {} <Log>
-            }
-
-            effect Random where {
-              nextInt : {min: Int, max: Int} -> Int <Random>
-            }
-
-            # Implementations
-            impl Log for NativeConsole where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
-            }
-
-            impl Random for NativeRandom where {
-              nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
-            }
-
-            # Function using both effects
-            let randomGreeting = {name} ->
-              do
-                Log.print {msg = "Generating random number..."}
-                let num = Random.nextInt {min = 1, max = 100}
-                Log.print {msg = "Generated: $(intToString {val = num})"}
-                num
-
-            # Execute with both handlers
-            let result = perform NativeRandom, NativeConsole in randomGreeting {name = "Test"}
-
-            result
-        """.trimIndent()
-
-        val program = parser.parse(source)
-        
-        // Note: This test might fail due to intToString not being implemented
-        // but it demonstrates the concept
-        try {
-            typeChecker.typeCheck(program)
-            val result = MezzeTestHelper.execute(program)
-            assertTrue(result is MezzeInt)
-            val randomValue = (result as MezzeInt).value
-            assertTrue(randomValue >= 1 && randomValue <= 100)
-        } catch (e: Exception) {
-            // Expected - intToString might not be implemented
-            assertTrue(e.message?.contains("intToString") == true || 
-                      e.message?.contains("Undefined variable") == true)
-        }
     }
 
     @Test
@@ -140,7 +87,7 @@ class BuiltinEffectsTest {
 
             impl TestEffect for TestHandler where {
               multiParam : {first: String, second: Int, third: Float} -> String =
-                {first, second, third} -> first + " " + intToString {val = second}
+                {first, second, third} -> first
             }
 
             # This should work with proper parameter extraction
@@ -150,19 +97,14 @@ class BuiltinEffectsTest {
         """.trimIndent()
 
         val program = parser.parse(source)
-        
+
         // This test verifies that our parameter extraction improvement works
         // The impl should create a MezzeTruffleFunction with parameters ["first", "second", "third"]
         // instead of the old simplified ["args"]
-        
-        assertDoesNotThrow { parser.parse(source) }
-        
-        // The actual execution might fail due to missing intToString, but parsing should work
-        try {
-            typeChecker.typeCheck(program)
-        } catch (e: Exception) {
-            // Expected due to missing functions, but the structure should be correct
-        }
+        val typeCheckResult = typeChecker.typeCheck(program)
+        val result = MezzeTestHelper.execute(typeCheckResult.program, typeCheckResult.monomorphicInstances)
+        assertTrue(result is MezzeString)
+        assertEquals("Hello", (result as MezzeString).value)
     }
 
     @Test

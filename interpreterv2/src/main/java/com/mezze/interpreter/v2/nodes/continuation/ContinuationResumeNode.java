@@ -116,7 +116,8 @@ public final class ContinuationResumeNode extends MezzeNode {
 
         errorProfile.enter(this);
         CompilerDirectives.transferToInterpreterAndInvalidate();
-        throw new RuntimeException("__native_continuation_resume expects 'cont' field as function or continuation");
+        throw new RuntimeException("__native_continuation_resume expects 'cont' field as function or continuation, got: " +
+            (contObj == null ? "null" : contObj.getClass().getSimpleName()));
     }
 
     public static ContinuationResumeNode create(MezzeNode argsNode) {

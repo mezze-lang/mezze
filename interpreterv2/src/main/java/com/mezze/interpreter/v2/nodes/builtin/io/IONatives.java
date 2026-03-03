@@ -134,19 +134,19 @@ public final class IONatives {
     }
 
     @TruffleBoundary
-    public static MezzeRecord bufferSetPosition(MezzeRecord args) {
+    public static MezzeBuffer bufferSetPosition(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
         long pos = getLong(args, "pos");
         buf.setPosition((int) pos);
-        return MezzeRecord.empty();
+        return buf;  // Return the buffer for functional API
     }
 
     @TruffleBoundary
-    public static MezzeRecord bufferWriteByte(MezzeRecord args) {
+    public static MezzeBuffer bufferWriteByte(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
-        long b = getLong(args, "byte");
+        long b = getLong(args, "b");  // Field is 'b', not 'byte'
         buf.writeByte((int) b);
-        return MezzeRecord.empty();
+        return buf;  // Return the buffer for functional API
     }
 
     @TruffleBoundary
@@ -156,7 +156,7 @@ public final class IONatives {
     }
 
     @TruffleBoundary
-    public static MezzeRecord bufferWriteBytes(MezzeRecord args) {
+    public static MezzeBuffer bufferWriteBytes(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
         MezzeList bytes = getList(args, "bytes");
         Object[] store = bytes.getObjectStore();
@@ -167,7 +167,7 @@ public final class IONatives {
             }
         }
         buf.writeBytes(data);
-        return MezzeRecord.empty();
+        return buf;  // Return the buffer for functional API
     }
 
     @TruffleBoundary
@@ -213,23 +213,23 @@ public final class IONatives {
     }
 
     @TruffleBoundary
-    public static MezzeRecord bufferClear(MezzeRecord args) {
+    public static MezzeBuffer bufferClear(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
         Arrays.fill(buf.getData(), (byte) 0);
         buf.setPosition(0);
-        return MezzeRecord.empty();
+        return buf;  // Return the buffer for functional API
     }
 
     @TruffleBoundary
-    public static MezzeRecord bufferWriteString(MezzeRecord args) {
+    public static MezzeBuffer bufferWriteString(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
         String s = getString(args, "s");
         buf.writeBytes(s.getBytes(StandardCharsets.UTF_8));
-        return MezzeRecord.empty();
+        return buf;  // Return the buffer for functional API
     }
 
     @TruffleBoundary
-    public static MezzeRecord bufferWrite(MezzeRecord args) {
+    public static MezzeBuffer bufferWrite(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
         MezzeList bytes = getList(args, "bytes");
         Object[] store = bytes.getObjectStore();
@@ -240,19 +240,19 @@ public final class IONatives {
             }
         }
         buf.writeBytes(data);
-        return MezzeRecord.empty();
+        return buf;  // Return the buffer for functional API
     }
 
     @TruffleBoundary
     public static boolean bufferIsEmpty(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
-        return buf.getCapacity() == 0;
+        return buf.getPosition() == 0;  // Empty = no bytes written
     }
 
     @TruffleBoundary
     public static long bufferSize(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
-        return buf.getCapacity();
+        return buf.getPosition();  // Size = bytes written (position)
     }
 
     private static MezzeBuffer getBuffer(MezzeRecord args, String fieldName) {
@@ -582,6 +582,10 @@ public final class IONatives {
     private static MezzeList getList(MezzeRecord args, String fieldName) {
         Object value = getField(args, fieldName);
         if (value instanceof MezzeList list) return list;
+        // Handle array literals (Object[]) - convert to MezzeList
+        if (value instanceof Object[] arr) {
+            return MezzeList.fromObjects(arr);
+        }
         throw new RuntimeException("Expected List for field '" + fieldName + "'");
     }
 

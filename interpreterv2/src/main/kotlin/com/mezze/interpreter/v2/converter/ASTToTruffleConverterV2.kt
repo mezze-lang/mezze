@@ -484,20 +484,38 @@ class ASTToTruffleConverterV2(
                     } else {
                         val tag = getTagForConstructor(pattern.constructor)
                         // Collect both field names and slots for proper record extraction
+                        // Also collect nested pattern info for wrapped body generation
+                        val nestedPatterns = mutableListOf<Pair<String, RecordPattern>>() // (tempSlotName, nestedPattern)
+
                         val fieldNames = pattern.recordPattern?.let { recordPattern ->
                             recordPattern.entries.map { it.name }.toTypedArray()
                         } ?: arrayOf()
                         val fieldSlots = pattern.recordPattern?.let { recordPattern ->
-                            recordPattern.entries.map { entry ->
+                            recordPattern.entries.mapIndexed { entryIdx, entry ->
                                 when (val fp = entry.pattern) {
                                     is VariablePattern -> getOrCreateSlot(fp.name)
                                     null -> getOrCreateSlot(entry.name)
+                                    is RecordPattern -> {
+                                        // Nested record pattern: bind intermediate value to temp slot
+                                        // and record it for body wrapping
+                                        val tempName = "__nested_${entry.name}_$entryIdx"
+                                        val tempSlot = getOrCreateSlot(tempName)
+                                        nestedPatterns.add(tempName to fp)
+                                        tempSlot
+                                    }
                                     else -> -1
                                 }
                             }.toIntArray()
                         } ?: intArrayOf()
 
-                        val bodyNode = convertExpression(case.expression)
+                        // Create body with nested pattern extraction
+                        var bodyNode = convertExpression(case.expression)
+
+                        // Wrap body with nested record field extractions (in reverse order)
+                        for ((tempName, nestedPattern) in nestedPatterns.reversed()) {
+                            bodyNode = wrapBodyWithNestedRecordExtraction(tempName, nestedPattern, bodyNode)
+                        }
+
                         branches.add(MatchBranchNode.variantPatternWithFieldNames(tag, fieldNames, fieldSlots, bodyNode))
                     }
                 }
@@ -1279,10 +1297,79 @@ class ASTToTruffleConverterV2(
                         // Fall back to NativeDispatch (HashMap-based, handles all remaining natives)
                         com.mezze.interpreter.v2.nodes.builtin.NativeDispatch.create(funcName, convertExpression(args))
                     }
+                } else if (funcName.startsWith("native_") && com.mezze.interpreter.v2.nodes.builtin.NativeDispatch.isNativeFunction(funcName)) {
+                    // Legacy native functions without double underscore prefix (backward compatibility)
+                    com.mezze.interpreter.v2.nodes.builtin.NativeDispatch.create(funcName, convertExpression(args))
                 } else {
                     null
                 }
             }
         }
+    }
+
+    /**
+     * Wraps a body node with nested record field extraction.
+     *
+     * For a pattern like `Some { val = { value, cont = k } }`:
+     * 1. The variant pattern binds `val` to a temp slot
+     * 2. This method wraps the body with code to extract `value` and `k` from the temp slot
+     *
+     * @param tempName The name of the temp variable holding the intermediate record
+     * @param nestedPattern The nested RecordPattern to extract fields from
+     * @param bodyNode The original body node to wrap
+     * @return A BlockNode that extracts fields then executes the body
+     */
+    private fun wrapBodyWithNestedRecordExtraction(
+        tempName: String,
+        nestedPattern: RecordPattern,
+        bodyNode: MezzeNode
+    ): MezzeNode {
+        val statements = mutableListOf<MezzeNode>()
+        val tempSlot = getOrCreateSlot(tempName)
+
+        // For each entry in the nested pattern, create a field access and write
+        for (entry in nestedPattern.entries) {
+            val fieldName = entry.name
+
+            // Determine the variable name to bind
+            val bindName = when (val p = entry.pattern) {
+                is VariablePattern -> p.name
+                null -> entry.name // shorthand: { x } means x = x
+                is RecordPattern -> {
+                    // Doubly-nested patterns - create a temp for this level
+                    val nestedTempName = "__nested_${fieldName}_${entry.hashCode()}"
+                    val nestedTempSlot = getOrCreateSlot(nestedTempName)
+
+                    // Read the field and write to nested temp
+                    val fieldAccessNode = RecordFieldAccessNode.createByName(
+                        ReadLocalNode.createObject(tempSlot),
+                        fieldName
+                    )
+                    statements.add(WriteLocalNode.createObject(fieldAccessNode, nestedTempSlot))
+
+                    // Recursively wrap the body with extraction for this nested pattern
+                    // Note: We only wrap once at the end, so track this for now
+                    // For now, just bind to a temp - deeper nesting would need more work
+                    continue
+                }
+                else -> continue // Skip unsupported nested patterns
+            }
+
+            val targetSlot = getOrCreateSlot(bindName)
+
+            // Create a field access node: temp.fieldName (using dynamic by-name access)
+            val fieldAccessNode = RecordFieldAccessNode.createByName(
+                ReadLocalNode.createObject(tempSlot),
+                fieldName
+            )
+
+            // Write the extracted field to the target slot
+            statements.add(WriteLocalNode.createObject(fieldAccessNode, targetSlot))
+        }
+
+        // Add the original body as the final statement
+        statements.add(bodyNode)
+
+        return BlockNode(statements.toTypedArray())
     }
 }
