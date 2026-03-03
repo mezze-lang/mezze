@@ -700,7 +700,11 @@ public final class NativeFunctions extends MezzeNode {
 
     @TruffleBoundary
     private static String substringBoundary(String s, int start, int end) {
-        return s.substring(Math.max(0, start), Math.min(s.length(), end));
+        // Clamp start to [0, length]
+        int startIdx = Math.max(0, Math.min(start, s.length()));
+        // Clamp end to [startIdx, length] - ensures end >= start
+        int endIdx = Math.max(startIdx, Math.min(end, s.length()));
+        return s.substring(startIdx, endIdx);
     }
 
     private boolean stringContains(MezzeRecord record) {
@@ -791,18 +795,25 @@ public final class NativeFunctions extends MezzeNode {
         return new StringBuilder(s).reverse().toString();
     }
 
-    private String stringCharAt(MezzeRecord record) {
+    /**
+     * Get character at index.
+     * Returns: Option Char (Some {val = char} or None)
+     * Char is represented as a single-character String in V2.
+     */
+    private MezzeVariant stringCharAt(MezzeRecord record) {
         String s = getString(record, "s");
         long index = getLong(record, "i");
         return charAtBoundary(s, (int) index);
     }
 
     @TruffleBoundary
-    private static String charAtBoundary(String s, int index) {
+    private static MezzeVariant charAtBoundary(String s, int index) {
         if (index < 0 || index >= s.length()) {
-            return "";
+            return MezzeVariant.none();
         }
-        return String.valueOf(s.charAt(index));
+        // Return char as single-character String
+        String charStr = String.valueOf(s.charAt(index));
+        return MezzeVariant.some(charStr);
     }
 
     private MezzeVariant stringIndexOf(MezzeRecord record) {

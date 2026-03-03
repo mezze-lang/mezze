@@ -861,4 +861,64 @@ public final class MatchBranchNode extends MezzeNode {
     public Object execute(VirtualFrame frame) {
         return bodyNode.execute(frame);
     }
+
+    // ===== CONS/NIL LIST PATTERN DETECTION =====
+
+    /**
+     * Check if this is a Cons pattern (for MezzeList matching).
+     * Cons patterns have exactly two payload fields: "head" and "tail".
+     */
+    public boolean isConsPattern() {
+        if (tag < 0 || variantPayloadFieldNames == null) {
+            return false;
+        }
+        if (variantPayloadFieldNames.length != 2) {
+            return false;
+        }
+        // Check if field names are "head" and "tail" (in either order)
+        boolean hasHead = false;
+        boolean hasTail = false;
+        for (String name : variantPayloadFieldNames) {
+            if ("head".equals(name)) hasHead = true;
+            if ("tail".equals(name)) hasTail = true;
+        }
+        return hasHead && hasTail;
+    }
+
+    /**
+     * Check if this is a Nil pattern (for MezzeList matching).
+     * Nil patterns have no payload fields.
+     */
+    public boolean isNilPattern() {
+        if (tag < 0) {
+            return false;
+        }
+        // Nil has no payload - check if payloadSlots is empty
+        return payloadSlotCount == 0 && (variantPayloadFieldNames == null || variantPayloadFieldNames.length == 0);
+    }
+
+    /**
+     * Bind MezzeList head and tail to frame slots.
+     * This is used when matching MezzeList against Cons { head, tail } pattern.
+     */
+    public void bindListConsPayload(VirtualFrame frame, MezzeList list) {
+        if (variantPayloadFieldNames == null || payloadSlots == null) {
+            return;
+        }
+
+        Object head = list.get(0);
+        MezzeList tail = list.tail();
+
+        for (int i = 0; i < variantPayloadFieldNames.length && i < payloadSlotCount; i++) {
+            String fieldName = variantPayloadFieldNames[i];
+            int slot = payloadSlots[i];
+            if (slot >= 0) {
+                if ("head".equals(fieldName)) {
+                    frame.setObject(slot, head);
+                } else if ("tail".equals(fieldName)) {
+                    frame.setObject(slot, tail);
+                }
+            }
+        }
+    }
 }

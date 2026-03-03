@@ -175,6 +175,11 @@ public final class MatchNode extends MezzeNode {
 
         // Check for array pattern matching (MezzeList for immutable lists)
         if (value instanceof MezzeList list) {
+            // First try to match as Cons/Nil variant pattern
+            // This allows user code to pattern match on lists with `Cons { head, tail }` / `Nil`
+            if (hasConsNilPatterns()) {
+                return executeListAsVariantMatch(frame, list);
+            }
             return executeArrayMatch(frame, list);
         }
 
@@ -407,5 +412,62 @@ public final class MatchNode extends MezzeNode {
         noMatchProfile.enter(this);
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching record pattern");
+    }
+
+    // ===== CONS/NIL LIST PATTERN MATCHING =====
+
+    /**
+     * Check if this match expression has Cons/Nil patterns.
+     * Used to enable MezzeList matching against Cons { head, tail } / Nil patterns.
+     */
+    private boolean hasConsNilPatterns() {
+        for (int i = 0; i < branchCount; i++) {
+            if (branches[i].isConsPattern() || branches[i].isNilPattern()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Match MezzeList against Cons/Nil variant patterns.
+     * This allows efficient list representation while supporting user-friendly pattern matching.
+     *
+     * Cons { head, tail } matches non-empty list, binding head to first element, tail to rest.
+     * Nil matches empty list.
+     */
+    @ExplodeLoop
+    private Object executeListAsVariantMatch(VirtualFrame frame, MezzeList list) {
+        boolean isEmpty = list.isEmpty();
+
+        // Try each branch
+        for (int i = 0; i < branchCount; i++) {
+            MatchBranchNode branch = branches[i];
+
+            if (!isEmpty && branch.isConsPattern()) {
+                // Non-empty list matches Cons pattern
+                if (branchProfiles[i].profile(true)) {
+                    branch.bindListConsPayload(frame, list);
+                    return branch.execute(frame);
+                }
+            }
+
+            if (isEmpty && branch.isNilPattern()) {
+                // Empty list matches Nil pattern
+                if (branchProfiles[i].profile(true)) {
+                    return branch.execute(frame);
+                }
+            }
+        }
+
+        // Try wildcard
+        if (wildcardBranchIndex >= 0) {
+            MatchBranchNode wildcard = branches[wildcardBranchIndex];
+            wildcard.bindValue(frame, list);
+            return wildcard.execute(frame);
+        }
+
+        // No match - fall back to array pattern matching
+        return executeArrayMatch(frame, list);
     }
 }

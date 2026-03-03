@@ -280,10 +280,169 @@ public final class IONatives {
 
     // ==================== JSON ====================
 
+    /**
+     * Serialize a Json variant type to a JSON string.
+     * Takes: {json: Json, pretty: Bool}
+     * Returns: Result String Error (Ok {val = string} or Err {error = {...}})
+     *
+     * Json variant type:
+     * - JNull
+     * - JBool {val: Bool}
+     * - JInt {val: Int}
+     * - JFloat {val: Float}
+     * - JString {val: String}
+     * - JArray {items: Array Json}
+     * - JObject {fields: Array {key: String, value: Json}}
+     */
     @TruffleBoundary
-    public static String jsonSerialize(MezzeRecord args) {
-        Object value = getField(args, "value");
-        return toJson(value);
+    public static MezzeVariant jsonSerialize(MezzeRecord args) {
+        Object jsonValue = getField(args, "json");
+        Object prettyObj = getField(args, "pretty");
+        boolean pretty = prettyObj instanceof Boolean b && b;
+
+        try {
+            String result = serializeJsonVariant(jsonValue, pretty, 0);
+            return MezzeVariant.ok(result);
+        } catch (Exception e) {
+            MezzeRecord error = MezzeRecord.fromFields(
+                new String[]{"path", "message"},
+                new Object[]{MezzeList.empty(), "JSON serialize error: " + e.getMessage()}
+            );
+            return MezzeVariant.err(error);
+        }
+    }
+
+    /**
+     * Serialize a Json variant to JSON string.
+     */
+    private static String serializeJsonVariant(Object value, boolean pretty, int indent) {
+        if (value instanceof MezzeVariant variant) {
+            String constructor = variant.getConstructorName();
+            return switch (constructor) {
+                case "JNull" -> "null";
+                case "JBool" -> {
+                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
+                    Boolean b = (Boolean) payload.getField("val");
+                    yield b.toString();
+                }
+                case "JInt" -> {
+                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
+                    Long l = (Long) payload.getField("val");
+                    yield l.toString();
+                }
+                case "JFloat" -> {
+                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
+                    Double d = (Double) payload.getField("val");
+                    yield d.toString();
+                }
+                case "JString" -> {
+                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
+                    String s = (String) payload.getField("val");
+                    yield "\"" + escapeJsonString(s) + "\"";
+                }
+                case "JArray" -> {
+                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
+                    Object items = payload.getField("items");
+                    yield serializeJsonArray(items, pretty, indent);
+                }
+                case "JObject" -> {
+                    MezzeRecord payload = (MezzeRecord) variant.getPayloadValue();
+                    Object fields = payload.getField("fields");
+                    yield serializeJsonObject(fields, pretty, indent);
+                }
+                default -> throw new RuntimeException("Unknown Json variant: " + constructor);
+            };
+        }
+        throw new RuntimeException("Expected Json variant, got: " + (value == null ? "null" : value.getClass().getSimpleName()));
+    }
+
+    /**
+     * Serialize JArray items to JSON string.
+     */
+    private static String serializeJsonArray(Object items, boolean pretty, int indent) {
+        Object[] elements = getArrayElements(items);
+        if (elements.length == 0) {
+            return "[]";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+        if (pretty) {
+            sb.append("\n");
+        }
+
+        for (int i = 0; i < elements.length; i++) {
+            if (i > 0) {
+                sb.append(",");
+                if (pretty) sb.append("\n");
+            }
+            if (pretty) {
+                sb.append("  ".repeat(indent + 1));
+            }
+            sb.append(serializeJsonVariant(elements[i], pretty, indent + 1));
+        }
+
+        if (pretty) {
+            sb.append("\n");
+            sb.append("  ".repeat(indent));
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
+     * Serialize JObject fields to JSON string.
+     */
+    private static String serializeJsonObject(Object fields, boolean pretty, int indent) {
+        Object[] entries = getArrayElements(fields);
+        if (entries.length == 0) {
+            return "{}";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        if (pretty) {
+            sb.append("\n");
+        }
+
+        for (int i = 0; i < entries.length; i++) {
+            if (i > 0) {
+                sb.append(",");
+                if (pretty) sb.append("\n");
+            }
+            if (pretty) {
+                sb.append("  ".repeat(indent + 1));
+            }
+
+            // Each entry is {key: String, value: Json}
+            MezzeRecord entry = (MezzeRecord) entries[i];
+            String key = (String) entry.getField("key");
+            Object value = entry.getField("value");
+
+            sb.append("\"").append(escapeJsonString(key)).append("\"");
+            sb.append(":");
+            if (pretty) sb.append(" ");
+            sb.append(serializeJsonVariant(value, pretty, indent + 1));
+        }
+
+        if (pretty) {
+            sb.append("\n");
+            sb.append("  ".repeat(indent));
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    /**
+     * Get array elements from either MezzeList or Object[] (Array in Mezze).
+     */
+    private static Object[] getArrayElements(Object arr) {
+        if (arr instanceof MezzeList list) {
+            return list.getObjectStore();
+        } else if (arr instanceof Object[] objArr) {
+            return objArr;
+        }
+        throw new RuntimeException("Expected array, got: " + (arr == null ? "null" : arr.getClass().getSimpleName()));
     }
 
     @TruffleBoundary

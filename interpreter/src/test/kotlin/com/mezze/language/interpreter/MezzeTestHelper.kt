@@ -270,7 +270,7 @@ object MezzeTestHelper {
      * Convert V2 MezzeMap to V1 MezzeMap
      */
     private fun convertV2Map(v2Map: com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.MezzeMap): MezzeMap {
-        val keys = com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.keys(v2Map)
+        val keys = v2Map.keys()  // Returns Object[]
         val entries = mutableMapOf<MezzeValue, MezzeValue>()
         for (key in keys) {
             val v2Result = com.mezze.interpreter.v2.nodes.builtin.collections.MapNatives.get(v2Map, key)

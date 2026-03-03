@@ -1361,8 +1361,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS_WITH_NODE.put("__native_parallel_any", (r, c, n) -> ConcurrencyNatives.parallelAny(r, c, n));
 
         // === SortedMap additional ===
-        HANDLERS.put("__native_sorted_map_min_key", (r, c) -> ConcurrencyNatives.sortedMapMinKey(r));
-        HANDLERS.put("__native_sorted_map_max_key", (r, c) -> ConcurrencyNatives.sortedMapMaxKey(r));
+        HANDLERS.put("__native_sorted_map_min_key", (r, c) ->
+            SortedMapNatives.minKey(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_max_key", (r, c) ->
+            SortedMapNatives.maxKey(getSortedMap(r, "m")));
 
         // === Additional STM ===
         HANDLERS.put("__native_stm_swap", (r, c) -> ConcurrencyNatives.stmSwap(r));

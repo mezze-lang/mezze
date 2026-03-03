@@ -264,9 +264,18 @@ public final class BytesNatives {
 
     // ==================== Conversion ====================
 
+    /**
+     * Convert bytes to UTF-8 string.
+     * Returns: Result String String (Ok {val = string} or Err {error = "Invalid UTF-8"})
+     */
     @TruffleBoundary
-    public static String bytesToString(MezzeBytes bytes) {
-        return new String(bytes.getData(), StandardCharsets.UTF_8);
+    public static MezzeVariant bytesToString(MezzeBytes bytes) {
+        try {
+            String s = new String(bytes.getData(), StandardCharsets.UTF_8);
+            return MezzeVariant.ok(s);
+        } catch (Exception e) {
+            return MezzeVariant.err("Invalid UTF-8");
+        }
     }
 
     @TruffleBoundary

@@ -111,7 +111,7 @@ public final class InspectNatives {
                 return "{}";
             }
             StringBuilder sb = new StringBuilder("{ ");
-            Object[] keys = MapNatives.keys(map);
+            Object[] keys = map.keys();
             for (int i = 0; i < keys.length; i++) {
                 if (i > 0) sb.append(", ");
                 Object k = keys[i];

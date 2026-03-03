@@ -186,6 +186,22 @@ public final class SortedMapNatives {
         return result;
     }
 
+    @TruffleBoundary
+    public static MezzeVariant minKey(MezzeSortedMap map) {
+        if (map.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        return MezzeVariant.some(map.getMap().firstKey());
+    }
+
+    @TruffleBoundary
+    public static MezzeVariant maxKey(MezzeSortedMap map) {
+        if (map.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        return MezzeVariant.some(map.getMap().lastKey());
+    }
+
     // ==================== Comparison Helper ====================
 
     @TruffleBoundary

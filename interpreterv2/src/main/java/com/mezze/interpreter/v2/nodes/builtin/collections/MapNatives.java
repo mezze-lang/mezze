@@ -148,16 +148,27 @@ public final class MapNatives {
         return new MezzeMap(newMap);
     }
 
-    public static Object[] keys(MezzeMap map) {
-        return map.keys();
+    /**
+     * Get all keys as a List (not Array).
+     * Returns MezzeList to match the type signature: (Map 'k 'v) -> (List 'k)
+     */
+    public static MezzeList keys(MezzeMap map) {
+        return MezzeList.fromObjects(map.keys());
     }
 
-    public static Object[] values(MezzeMap map) {
-        return map.values();
+    /**
+     * Get all values as a List (not Array).
+     * Returns MezzeList to match the type signature: (Map 'k 'v) -> (List 'v)
+     */
+    public static MezzeList values(MezzeMap map) {
+        return MezzeList.fromObjects(map.values());
     }
 
-    public static Object[] entries(MezzeMap map) {
-        return map.entries();
+    /**
+     * Get all entries as a List (not Array).
+     */
+    public static MezzeList entries(MezzeMap map) {
+        return MezzeList.fromObjects(map.entries());
     }
 
     // ==================== Transform Operations ====================
