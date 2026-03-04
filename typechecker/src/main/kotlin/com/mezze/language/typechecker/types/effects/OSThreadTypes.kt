@@ -205,22 +205,22 @@ object OSThreadTypes {
         // Scope type for OS threads
         val scopeType = MezzeType.TypeApplication("Scope", listOf(MezzeType.VarType(TypeVar("a"))))
 
-        // __native_os_scoped: {f: {scope: Scope 'a} -> 'a} -> 'a
+        // __native_os_scoped: {f: {sc: Scope 'a} -> 'a} -> 'a
         context["__native_os_scoped"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("scope" to scopeType)),
+                    MezzeType.RecordType(mapOf("sc" to scopeType)),
                     MezzeType.VarType(TypeVar("a"))
                 )
             )),
             MezzeType.VarType(TypeVar("a"))
         )
 
-        // __native_os_scope_spawn: {scope: Scope 'a, f: {} -> 'b} -> Promise 'b
+        // __native_os_scope_spawn: {sc: Scope 'a, f: {} -> 'b} -> Promise 'b
         val scopeSpawnPromiseType = MezzeType.TypeApplication("Promise", listOf(MezzeType.VarType(TypeVar("b"))))
         context["__native_os_scope_spawn"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "scope" to scopeType,
+                "sc" to scopeType,
                 "f" to MezzeType.FunctionType(
                     MezzeType.RecordType(emptyMap()),
                     MezzeType.VarType(TypeVar("b"))
@@ -229,10 +229,10 @@ object OSThreadTypes {
             scopeSpawnPromiseType
         )
 
-        // __native_os_scope_cancel_all: {scope: Scope 'a} -> {}
+        // __native_os_scope_cancel_all: {sc: Scope 'a} -> {}
         context["__native_os_scope_cancel_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "scope" to scopeType
+                "sc" to scopeType
             )),
             MezzeType.RecordType(emptyMap())
         )

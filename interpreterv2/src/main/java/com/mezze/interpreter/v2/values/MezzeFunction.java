@@ -21,6 +21,8 @@ import com.oracle.truffle.api.nodes.ExplodeLoop;
  * - callTarget: The compiled Truffle CallTarget
  * - name: Function name (for debugging/display)
  * - closureValues: Captured closure variables as Object[]
+ * - parameterNames: Expected parameter names for partial application
+ * - partialArgs: Already-provided arguments for partial application (null if none)
  *
  * Closure variables are captured eagerly when the function is created,
  * stored in a positional array for fast access.
@@ -40,6 +42,14 @@ public final class MezzeFunction implements TruffleObject {
     @CompilationFinal
     private final int closureLength;
 
+    // Parameter names for partial application support
+    @CompilationFinal(dimensions = 1)
+    private final String[] parameterNames;
+
+    // Partial arguments already provided (null = no partial application)
+    // Maps parameter name -> value
+    private final java.util.Map<String, Object> partialArgs;
+
     /**
      * Assumption for inlining stability.
      * Invalidated when the function is redefined, causing deoptimization
@@ -47,21 +57,40 @@ public final class MezzeFunction implements TruffleObject {
      */
     private final Assumption inlineAssumption;
 
+    private static final Object[] EMPTY_CLOSURE = new Object[0];
+    private static final String[] EMPTY_PARAMS = new String[0];
+
     public MezzeFunction(CallTarget callTarget, String name, Object[] closureValues) {
+        this(callTarget, name, closureValues, EMPTY_PARAMS, null);
+    }
+
+    public MezzeFunction(CallTarget callTarget, String name, Object[] closureValues, String[] parameterNames) {
+        this(callTarget, name, closureValues, parameterNames, null);
+    }
+
+    public MezzeFunction(CallTarget callTarget, String name, Object[] closureValues,
+                         String[] parameterNames, java.util.Map<String, Object> partialArgs) {
         this.callTarget = callTarget;
         this.name = name;
         this.closureValues = closureValues != null ? closureValues : EMPTY_CLOSURE;
         this.closureLength = this.closureValues.length;
+        this.parameterNames = parameterNames != null ? parameterNames : EMPTY_PARAMS;
+        this.partialArgs = partialArgs;
         this.inlineAssumption = Truffle.getRuntime().createAssumption("inline:" + name);
     }
-
-    private static final Object[] EMPTY_CLOSURE = new Object[0];
 
     /**
      * Create a function with no closure.
      */
     public static MezzeFunction create(CallTarget callTarget, String name) {
-        return new MezzeFunction(callTarget, name, EMPTY_CLOSURE);
+        return new MezzeFunction(callTarget, name, EMPTY_CLOSURE, EMPTY_PARAMS, null);
+    }
+
+    /**
+     * Create a function with parameter names for partial application support.
+     */
+    public static MezzeFunction create(CallTarget callTarget, String name, String[] parameterNames) {
+        return new MezzeFunction(callTarget, name, EMPTY_CLOSURE, parameterNames, null);
     }
 
     public CallTarget getCallTarget() {
@@ -82,6 +111,100 @@ public final class MezzeFunction implements TruffleObject {
 
     public boolean hasClosure() {
         return closureLength > 0;
+    }
+
+    public String[] getParameterNames() {
+        return parameterNames;
+    }
+
+    public java.util.Map<String, Object> getPartialArgs() {
+        return partialArgs;
+    }
+
+    public boolean hasPartialArgs() {
+        return partialArgs != null && !partialArgs.isEmpty();
+    }
+
+    /**
+     * Get remaining parameter names (those not yet provided).
+     */
+    @TruffleBoundary
+    public String[] getRemainingParameterNames() {
+        if (partialArgs == null || partialArgs.isEmpty()) {
+            return parameterNames;
+        }
+        java.util.List<String> remaining = new java.util.ArrayList<>();
+        for (String param : parameterNames) {
+            if (!partialArgs.containsKey(param)) {
+                remaining.add(param);
+            }
+        }
+        return remaining.toArray(new String[0]);
+    }
+
+    /**
+     * Check if all required parameters are satisfied by the given record.
+     */
+    @TruffleBoundary
+    public boolean hasAllParameters(MezzeRecord record) {
+        for (String param : parameterNames) {
+            // Check if param is already provided via partial args
+            if (partialArgs != null && partialArgs.containsKey(param)) {
+                continue;
+            }
+            // Check if param is in the record
+            if (record.getFieldIndex(param) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Create a partially applied function by adding the given arguments.
+     */
+    @TruffleBoundary
+    public MezzeFunction withPartialArgs(MezzeRecord record) {
+        java.util.Map<String, Object> newPartial = partialArgs != null
+            ? new java.util.LinkedHashMap<>(partialArgs)
+            : new java.util.LinkedHashMap<>();
+
+        // Add arguments from the record using shape to get field names
+        MezzeRecord.Shape shape = record.getShape();
+        for (int i = 0; i < record.getFieldCount(); i++) {
+            String fieldName = shape.getFieldName(i);
+            Object fieldValue = record.getField(i);
+            newPartial.put(fieldName, fieldValue);
+        }
+
+        return new MezzeFunction(callTarget, name, closureValues, parameterNames, newPartial);
+    }
+
+    /**
+     * Build a complete record by merging partial args with new args.
+     */
+    @TruffleBoundary
+    public MezzeRecord buildCompleteRecord(MezzeRecord newArgs) {
+        if (partialArgs == null || partialArgs.isEmpty()) {
+            return newArgs;
+        }
+
+        // Merge partial args with new args (new args override)
+        java.util.LinkedHashMap<String, Object> merged = new java.util.LinkedHashMap<>(partialArgs);
+        MezzeRecord.Shape shape = newArgs.getShape();
+        for (int i = 0; i < newArgs.getFieldCount(); i++) {
+            merged.put(shape.getFieldName(i), newArgs.getField(i));
+        }
+
+        // Build array of field names and values in parameter order
+        String[] names = new String[parameterNames.length];
+        Object[] values = new Object[parameterNames.length];
+        for (int i = 0; i < parameterNames.length; i++) {
+            names[i] = parameterNames[i];
+            values[i] = merged.get(parameterNames[i]);
+        }
+
+        return MezzeRecord.fromFields(names, values);
     }
 
     /**

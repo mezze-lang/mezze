@@ -7,8 +7,9 @@ import kotlin.test.assertFails
 /**
  * Tests for reserved name validation.
  *
- * Names starting with '__native' are reserved for Mezze internals
- * and should not be allowed in user code.
+ * Reserved names include:
+ * - Names starting with '__native' (reserved for Mezze internals)
+ * - 'scope' (reserved for scoped effects)
  */
 class ReservedNameTest {
 
@@ -100,6 +101,132 @@ class ReservedNameTest {
     fun `names with native (no double underscore prefix) are allowed`() {
         val source = """
             let native_function = {native_param} -> native_param
+        """.trimIndent()
+
+        // Should not throw
+        parser.parse(source)
+    }
+
+    // ========================================
+    // 'scope' reserved word tests
+    // ========================================
+
+    @Test
+    fun `scope not allowed in let binding`() {
+        val source = """
+            let scope = 42
+        """.trimIndent()
+
+        val error = assertFails { parser.parse(source) }
+        val msg = error.message ?: ""
+        assertTrue(
+            msg.contains("'scope'") && msg.contains("reserved"),
+            "Error message should mention 'scope' is reserved: $msg"
+        )
+    }
+
+    @Test
+    fun `scope not allowed in lambda parameter`() {
+        val source = """
+            let foo = {scope} -> scope
+        """.trimIndent()
+
+        val error = assertFails { parser.parse(source) }
+        val msg = error.message ?: ""
+        assertTrue(
+            msg.contains("'scope'") && msg.contains("reserved"),
+            "Error message should mention 'scope' is reserved: $msg"
+        )
+    }
+
+    @Test
+    fun `scope not allowed in typed lambda parameter`() {
+        val source = """
+            let foo = {scope: Int} -> scope
+        """.trimIndent()
+
+        val error = assertFails { parser.parse(source) }
+        val msg = error.message ?: ""
+        assertTrue(
+            msg.contains("'scope'") && msg.contains("reserved"),
+            "Error message should mention 'scope' is reserved: $msg"
+        )
+    }
+
+    @Test
+    fun `scope not allowed in match pattern`() {
+        val source = """
+            let foo = {x} ->
+                match x is
+                    scope -> scope
+        """.trimIndent()
+
+        val error = assertFails { parser.parse(source) }
+        val msg = error.message ?: ""
+        assertTrue(
+            msg.contains("'scope'") && msg.contains("reserved"),
+            "Error message should mention 'scope' is reserved: $msg"
+        )
+    }
+
+    @Test
+    fun `scope not allowed in record pattern field`() {
+        val source = """
+            let foo = {rec} ->
+                match rec is
+                    {scope} -> 42
+        """.trimIndent()
+
+        val error = assertFails { parser.parse(source) }
+        val msg = error.message ?: ""
+        assertTrue(
+            msg.contains("'scope'") && msg.contains("reserved"),
+            "Error message should mention 'scope' is reserved: $msg"
+        )
+    }
+
+    @Test
+    fun `scope not allowed in let destructuring`() {
+        // Test that scope can't be bound in let destructuring
+        val source = "let {scope} = myRecord"
+
+        val error = assertFails { parser.parse(source) }
+        val msg = error.message ?: ""
+        assertTrue(
+            msg.contains("'scope'") && msg.contains("reserved"),
+            "Error message should mention 'scope' is reserved: $msg"
+        )
+    }
+
+    @Test
+    fun `scope allowed as record field name`() {
+        // scope can be used as a field name in records
+        // It's only reserved as a variable binding name
+        val source = """
+            let rec = {scope = 42}
+        """.trimIndent()
+
+        // Should not throw - scope as field name is allowed
+        parser.parse(source)
+    }
+
+    @Test
+    fun `scope allowed as member access`() {
+        // scope can be used as a member access
+        val source = """
+            let foo = {x} -> x.scope
+        """.trimIndent()
+
+        // Should not throw - member access is allowed
+        parser.parse(source)
+    }
+
+    @Test
+    fun `scoped and scope_data are allowed`() {
+        // Names containing 'scope' but not exactly 'scope' are fine
+        val source = """
+            let scoped = 42
+            let scope_data = {scoped_val} -> scoped_val
         """.trimIndent()
 
         // Should not throw

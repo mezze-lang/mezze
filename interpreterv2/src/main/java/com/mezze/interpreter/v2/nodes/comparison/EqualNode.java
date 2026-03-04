@@ -13,6 +13,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
  * Equality comparison node - OPTIMIZED.
+ * Nat is represented as primitive long for optimal JIT performance.
  *
  * Mezze uses structural equality for all values.
  * Primitive comparisons (long, double, boolean) are fully JIT-compilable.
@@ -26,7 +27,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 public abstract class EqualNode extends MezzeNode {
 
     /**
-     * Fast path: Int == Int (unboxed longs) - FULLY JIT-COMPILABLE.
+     * Fast path: Int/Nat == Int/Nat (unboxed longs) - FULLY JIT-COMPILABLE.
      */
     @Specialization
     protected boolean equalLongs(long left, long right) {
@@ -70,6 +71,7 @@ public abstract class EqualNode extends MezzeNode {
 
     /**
      * Record structural equality - identity check first.
+     * Special case for fractions: use mathematical equality.
      */
     @Specialization
     protected boolean equalRecords(MezzeRecord left, MezzeRecord right) {
@@ -83,7 +85,21 @@ public abstract class EqualNode extends MezzeNode {
 
     @TruffleBoundary
     private static boolean deepRecordEquals(MezzeRecord left, MezzeRecord right) {
+        // Check if both are fractions - if so, use mathematical equality
+        if (isFraction(left) && isFraction(right)) {
+            long ln = (Long) left.getField("numerator");
+            long ld = (Long) left.getField("denominator");
+            long rn = (Long) right.getField("numerator");
+            long rd = (Long) right.getField("denominator");
+            // a/b == c/d iff a*d == b*c
+            return ln * rd == ld * rn;
+        }
         return left.equals(right);
+    }
+
+    private static boolean isFraction(MezzeRecord record) {
+        return record.getFieldIndex("numerator") >= 0 && record.getFieldIndex("denominator") >= 0
+            && record.getFieldCount() == 2;
     }
 
     /**

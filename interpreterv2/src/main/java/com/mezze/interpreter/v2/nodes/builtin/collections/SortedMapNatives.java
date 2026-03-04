@@ -132,16 +132,16 @@ public final class SortedMapNatives {
         return map.isEmpty();
     }
 
-    public static Object[] keys(MezzeSortedMap map) {
-        return map.keys();
+    public static MezzeList keys(MezzeSortedMap map) {
+        return MezzeList.fromObjects(map.keys());
     }
 
-    public static Object[] values(MezzeSortedMap map) {
-        return map.values();
+    public static MezzeList values(MezzeSortedMap map) {
+        return MezzeList.fromObjects(map.values());
     }
 
-    public static Object[] entries(MezzeSortedMap map) {
-        return map.entries();
+    public static MezzeList entries(MezzeSortedMap map) {
+        return MezzeList.fromObjects(map.entries());
     }
 
     // ==================== Additional Operations ====================
@@ -182,6 +182,15 @@ public final class SortedMapNatives {
         MapNatives.MezzeMap result = MapNatives.empty();
         for (Map.Entry<Object, Object> entry : sortedMap.getMap().entrySet()) {
             result = MapNatives.insert(result, entry.getKey(), entry.getValue());
+        }
+        return result;
+    }
+
+    @TruffleBoundary
+    public static MezzeSortedMap fromMap(MapNatives.MezzeMap map) {
+        MezzeSortedMap result = new MezzeSortedMap();
+        for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            result = result.insert(entry.getKey(), entry.getValue());
         }
         return result;
     }

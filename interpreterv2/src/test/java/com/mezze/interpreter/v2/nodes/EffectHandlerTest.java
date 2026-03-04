@@ -9,7 +9,6 @@ import com.mezze.interpreter.v2.nodes.literal.IntLiteralNode;
 import com.mezze.interpreter.v2.nodes.record.RecordLiteralNode;
 import com.mezze.interpreter.v2.nodes.variable.ReadLocalNode;
 import com.mezze.interpreter.v2.nodes.variable.WriteLocalNode;
-import com.mezze.interpreter.v2.values.MezzeCont;
 import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.CallTarget;
@@ -251,5 +250,85 @@ public class EffectHandlerTest {
 
         // Should be fast - just handler install/restore
         assertTrue(elapsed / iterations < 5000, "Handle pattern should be <5µs per op");
+    }
+
+    // ========================================================================
+    // SCOPED EFFECTS TESTS
+    // ========================================================================
+
+    /**
+     * Test: Scoped HandleNode has correct flags when created
+     */
+    @Test
+    void testScopedHandleNodeHasCorrectFlags() {
+        FrameDescriptor.Builder builder = FrameDescriptor.newBuilder();
+        int handlerSlot = builder.addSlot(FrameSlotKind.Object, "handler", null);
+        int scopeSlot = builder.addSlot(FrameSlotKind.Object, "scope", null);
+        FrameDescriptor fd = builder.build();
+
+        // Dummy nodes for structure only
+        MezzeNode handlerNode = new IntLiteralNode(1);
+        MezzeNode bodyNode = new IntLiteralNode(2);
+        MezzeNode initializeScopeNode = new IntLiteralNode(3);
+        MezzeNode finalizeScopeNode = new IntLiteralNode(4);
+
+        HandleNode handleNode = HandleNode.createScoped(
+                handlerSlot,
+                "test-hash",
+                new String[]{"Pool"},
+                "PgPool",
+                bodyNode,
+                scopeSlot,
+                initializeScopeNode,
+                finalizeScopeNode
+        );
+
+        assertTrue(handleNode.isScopedEffect(), "Scoped handle should report isScopedEffect=true");
+        assertEquals(scopeSlot, handleNode.getScopeSlot(), "Scope slot should match");
+    }
+
+    /**
+     * Test: Non-scoped HandleNode created with old constructor has correct flags
+     */
+    @Test
+    void testNonScopedHandleNodeHasCorrectFlags() {
+        FrameDescriptor.Builder builder = FrameDescriptor.newBuilder();
+        int handlerSlot = builder.addSlot(FrameSlotKind.Object, "handler", null);
+        FrameDescriptor fd = builder.build();
+
+        MezzeNode handlerNode = new IntLiteralNode(1);
+        MezzeNode bodyNode = new IntLiteralNode(2);
+
+        // Use old constructor (backward compatible)
+        HandleNode handleNode = new HandleNode(handlerSlot, new String[]{"Effect"}, "Handler", handlerNode, bodyNode);
+
+        assertFalse(handleNode.isScopedEffect(), "Non-scoped handle should report isScopedEffect=false");
+        assertEquals(-1, handleNode.getScopeSlot(), "Scope slot should be -1 for non-scoped");
+    }
+
+    /**
+     * Test: createScoped with null nodes results in isScopedEffect=false
+     */
+    @Test
+    void testCreateScopedWithNullNodesIsNotScoped() {
+        FrameDescriptor.Builder builder = FrameDescriptor.newBuilder();
+        int handlerSlot = builder.addSlot(FrameSlotKind.Object, "handler", null);
+        FrameDescriptor fd = builder.build();
+
+        MezzeNode handlerNode = new IntLiteralNode(1);
+        MezzeNode bodyNode = new IntLiteralNode(2);
+
+        HandleNode handleNode = HandleNode.createScoped(
+                handlerSlot,
+                "test-hash",
+                new String[]{"Effect"},
+                "Handler",
+                bodyNode,
+                -1,  // no scope slot
+                null,  // no initialize_scope
+                null   // no finalize_scope
+        );
+
+        assertFalse(handleNode.isScopedEffect(), "createScoped with null nodes should not be scoped");
     }
 }

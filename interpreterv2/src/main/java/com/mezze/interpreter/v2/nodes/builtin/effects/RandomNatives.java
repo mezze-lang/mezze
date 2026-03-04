@@ -60,6 +60,18 @@ public final class RandomNatives {
 
     // ============== Seeded Random Operations ==============
 
+    /**
+     * Reset the seeded random generator to a fresh state.
+     * This should be called at the start of each `perform SeededRandom` block
+     * to ensure deterministic behavior across multiple perform blocks with the same seed.
+     */
+    @TruffleBoundary
+    public static Object resetSeededRandom(MezzeRecord args) {
+        long seed = getLong(args, "seed");
+        SEEDED_RANDOMS.put(seed, new Random(seed));
+        return MezzeUnit.INSTANCE;
+    }
+
     @TruffleBoundary
     public static double seededRandomFloat(MezzeRecord args) {
         long seed = getLong(args, "seed");

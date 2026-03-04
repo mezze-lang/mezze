@@ -52,8 +52,9 @@ class SortedSetModuleTest {
     fun `test sorted_set from_list`() {
         val result = eval("""
             use std::collections::sorted_set
-            let xs = Cons { head = 3, tail = Cons { head = 1, tail = Cons { head = 2, tail = Nil } } }
-            let s = sorted_set::from_list { list = xs }
+            use std::collections::list
+            let xs = list::cons { head = 3, tail = list::cons { head = 1, tail = list::cons { head = 2, tail = list::empty {} } } }
+            let s = sorted_set::from_list { xs = xs }
             sorted_set::size { s = s }
         """)
         assertEquals(MezzeInt(3), result)
@@ -63,8 +64,9 @@ class SortedSetModuleTest {
     fun `test sorted_set from_list removes duplicates`() {
         val result = eval("""
             use std::collections::sorted_set
-            let xs = Cons { head = 1, tail = Cons { head = 1, tail = Cons { head = 2, tail = Nil } } }
-            let s = sorted_set::from_list { list = xs }
+            use std::collections::list
+            let xs = list::cons { head = 1, tail = list::cons { head = 1, tail = list::cons { head = 2, tail = list::empty {} } } }
+            let s = sorted_set::from_list { xs = xs }
             sorted_set::size { s = s }
         """)
         assertEquals(MezzeInt(2), result)

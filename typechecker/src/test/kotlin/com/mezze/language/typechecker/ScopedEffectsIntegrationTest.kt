@@ -1,0 +1,196 @@
+package com.mezze.language.typechecker
+
+import com.mezze.language.parser.MezzeParser
+import org.junit.jupiter.api.Disabled
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.BeforeEach
+import kotlin.test.assertTrue
+import kotlin.test.assertFails
+
+/**
+ * Integration tests for scoped effects type checking.
+ *
+ * These tests verify that the 'scope' variable is:
+ * - Available in operations when initialize_scope is present
+ * - Available in finalize_scope
+ * - NOT available in initialize_scope itself
+ * - NOT available when initialize_scope is absent
+ */
+class ScopedEffectsIntegrationTest {
+
+    private val parser = MezzeParser()
+    private lateinit var typeChecker: TypeChecker
+
+    @BeforeEach
+    fun setUp() {
+        ModuleResolver.clearCache()
+        typeChecker = TypeChecker()
+    }
+
+    private fun typeCheck(source: String) {
+        val program = parser.parse(source)
+        typeChecker.typeCheck(program)
+    }
+
+    @Test
+    fun `scope is available in operations when initialize_scope is present`() {
+        val source = """
+            effect Pool where {
+                query: { sql: String } -> String <Pool>
+            }
+
+            impl Pool for PgPool where {
+                initialize_scope = {} -> { pool_id = 42 },
+                finalize_scope = {} -> {},
+                query = { sql } ->
+                    do
+                        let id = scope.pool_id
+                        "result"
+            }
+        """.trimIndent()
+
+        // Should not throw - scope.pool_id should be accessible
+        typeCheck(source)
+    }
+
+    @Test
+    fun `scope is available in finalize_scope`() {
+        val source = """
+            effect Pool where {
+                query: { sql: String } -> String <Pool>
+            }
+
+            impl Pool for PgPool where {
+                initialize_scope = {} -> { pool_id = 42 },
+                finalize_scope = {} ->
+                    do
+                        let id = scope.pool_id
+                        {},
+                query = { sql } -> "result"
+            }
+        """.trimIndent()
+
+        // Should not throw - scope.pool_id should be accessible in finalize_scope
+        typeCheck(source)
+    }
+
+    @Test
+    fun `scope is NOT available in initialize_scope`() {
+        val source = """
+            effect Pool where {
+                query: { sql: String } -> String <Pool>
+            }
+
+            impl Pool for PgPool where {
+                initialize_scope = {} ->
+                    do
+                        let x = scope.something
+                        { pool_id = 42 },
+                finalize_scope = {} -> {},
+                query = { sql } -> "result"
+            }
+        """.trimIndent()
+
+        // Should fail - scope is not available in initialize_scope
+        val error = assertFails { typeCheck(source) }
+        assertTrue(
+            error.message?.contains("scope") == true ||
+            error.message?.contains("undefined") == true ||
+            error.message?.contains("Undefined") == true,
+            "Expected error about 'scope' not being available: ${error.message}"
+        )
+    }
+
+    @Test
+    fun `scope is NOT available without initialize_scope`() {
+        val source = """
+            effect Log where {
+                info: { msg: String } -> {} <Log>
+            }
+
+            impl Log for Console where {
+                info = { msg } ->
+                    do
+                        let x = scope.something
+                        {}
+            }
+        """.trimIndent()
+
+        // Should fail - no initialize_scope means no scope
+        val error = assertFails { typeCheck(source) }
+        assertTrue(
+            error.message?.contains("scope") == true ||
+            error.message?.contains("undefined") == true ||
+            error.message?.contains("Undefined") == true,
+            "Expected error about 'scope' not being available: ${error.message}"
+        )
+    }
+
+    @Test
+    fun `scope has correct field types`() {
+        val source = """
+            effect Counter where {
+                increment: {} -> Int <Counter>
+            }
+
+            impl Counter for SimpleCounter where {
+                initialize_scope = {} -> { count = 0, name = "counter" },
+                finalize_scope = {} -> {},
+                increment = {} ->
+                    do
+                        let n: Int = scope.count
+                        let s: String = scope.name
+                        n + 1
+            }
+        """.trimIndent()
+
+        // Should not throw - scope fields have correct types
+        typeCheck(source)
+    }
+
+    // NOTE: This test is disabled because type mismatches inside effect impl bodies
+    // are not currently validated. This is a general typechecker limitation, not
+    // specific to scoped effects. See: `let s: String = 42` inside any impl body
+    // is not caught as a type error.
+    @org.junit.jupiter.api.Disabled("Type mismatches in effect impl bodies not validated - existing limitation")
+    @Test
+    fun `scope field type mismatch produces error`() {
+        val source = """
+            effect Counter where {
+                increment: {} -> Int <Counter>
+            }
+
+            impl Counter for SimpleCounter where {
+                initialize_scope = {} -> { count = 0 },
+                finalize_scope = {} -> {},
+                increment = {} ->
+                    do
+                        let s: String = scope.count
+                        0
+            }
+        """.trimIndent()
+
+        // Should fail - scope.count is Int, not String
+        val error = assertFails { typeCheck(source) }
+        assertTrue(
+            error.message?.contains("type") == true ||
+            error.message?.contains("Type") == true,
+            "Expected type mismatch error: ${error.message}"
+        )
+    }
+
+    @Test
+    fun `scope cannot be used as variable name`() {
+        val source = """
+            let scope = 42
+        """.trimIndent()
+
+        // Should fail - scope is a reserved word
+        val error = assertFails { parser.parse(source) }
+        assertTrue(
+            error.message?.contains("scope") == true &&
+            error.message?.contains("reserved") == true,
+            "Expected 'scope is reserved' error: ${error.message}"
+        )
+    }
+}

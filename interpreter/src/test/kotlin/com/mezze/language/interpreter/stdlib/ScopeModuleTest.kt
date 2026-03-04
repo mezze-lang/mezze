@@ -59,8 +59,8 @@ class ScopeModuleTest {
             use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
-                Async.scoped { f = { scope } -> do
-                    let p = scope_spawn { scope = scope, f = {} -> 42 }
+                Async.scoped { f = { sc } -> do
+                    let p = scope_spawn { sc = sc, f = {} -> 42 }
                     Async.await { p = p }
                 }
         """)
@@ -73,10 +73,10 @@ class ScopeModuleTest {
             use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
-                Async.scoped { f = { scope } -> do
-                    let p1 = scope_spawn { scope = scope, f = {} -> 10 }
-                    let p2 = scope_spawn { scope = scope, f = {} -> 20 }
-                    let p3 = scope_spawn { scope = scope, f = {} -> 30 }
+                Async.scoped { f = { sc } -> do
+                    let p1 = scope_spawn { sc = sc, f = {} -> 10 }
+                    let p2 = scope_spawn { sc = sc, f = {} -> 20 }
+                    let p3 = scope_spawn { sc = sc, f = {} -> 30 }
 
                     let r1 = Async.await { p = p1 }
                     let r2 = Async.await { p = p2 }
@@ -94,8 +94,8 @@ class ScopeModuleTest {
             use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
-                Async.scoped { f = { scope } -> do
-                    let p = scope_spawn { scope = scope, f = {} -> 100 }
+                Async.scoped { f = { sc } -> do
+                    let p = scope_spawn { sc = sc, f = {} -> 100 }
                     let _ = Async.await { p = p }
                     "completed"
                 }
@@ -109,7 +109,7 @@ class ScopeModuleTest {
             use std::effects::async::{Async, LoomAsync}
 
             perform LoomAsync in do
-                Async.scoped { f = { scope } -> 42 }
+                Async.scoped { f = { sc } -> 42 }
         """)
         assertEquals(MezzeInt(42), result)
     }
@@ -120,12 +120,12 @@ class ScopeModuleTest {
             use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
-                Async.scoped { f = { scope } -> do
-                    let p1 = scope_spawn { scope = scope, f = {} -> 1 }
-                    Async.scoped { f = { scope } -> do
-                        let p2 = scope_spawn { scope = scope, f = {} -> 2 }
-                        Async.scoped { f = { scope } -> do
-                            let p3 = scope_spawn { scope = scope, f = {} -> 3 }
+                Async.scoped { f = { sc } -> do
+                    let p1 = scope_spawn { sc = sc, f = {} -> 1 }
+                    Async.scoped { f = { sc } -> do
+                        let p2 = scope_spawn { sc = sc, f = {} -> 2 }
+                        Async.scoped { f = { sc } -> do
+                            let p3 = scope_spawn { sc = sc, f = {} -> 3 }
                             let r3 = Async.await { p = p3 }
                             let r2 = Async.await { p = p2 }
                             let r1 = Async.await { p = p1 }
@@ -147,9 +147,9 @@ class ScopeModuleTest {
             use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
-                Async.scoped { f = { scope } -> do
-                    let p1 = scope_spawn { scope = scope, f = {} -> 10 }
-                    let p2 = scope_spawn { scope = scope, f = {} -> 20 }
+                Async.scoped { f = { sc } -> do
+                    let p1 = scope_spawn { sc = sc, f = {} -> 10 }
+                    let p2 = scope_spawn { sc = sc, f = {} -> 20 }
 
                     let joined = Async.join {
                         left = {} -> 5,
@@ -175,9 +175,9 @@ class ScopeModuleTest {
             use std::effects::async::{Async, LoomAsync, scope_spawn}
 
             perform LoomAsync in do
-                Async.scoped { f = { scope } -> do
-                    let p1 = scope_spawn { scope = scope, f = {} -> { a = 10, b = 20 } }
-                    let p2 = scope_spawn { scope = scope, f = {} -> { a = 30, b = 40 } }
+                Async.scoped { f = { sc } -> do
+                    let p1 = scope_spawn { sc = sc, f = {} -> { a = 10, b = 20 } }
+                    let p2 = scope_spawn { sc = sc, f = {} -> { a = 30, b = 40 } }
 
                     let r1 = Async.await { p = p1 }
                     let r2 = Async.await { p = p2 }
@@ -199,8 +199,8 @@ class ScopeModuleTest {
 
             perform LoomAsync in do
                 let multiplier = 10
-                Async.scoped { f = { scope } -> do
-                    let p = scope_spawn { scope = scope, f = {} -> 5 * multiplier }
+                Async.scoped { f = { sc } -> do
+                    let p = scope_spawn { sc = sc, f = {} -> 5 * multiplier }
                     Async.await { p = p }
                 }
         """)

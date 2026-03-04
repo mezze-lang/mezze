@@ -90,6 +90,26 @@ public abstract class InvokeNode extends MezzeNode {
     }
 
     /**
+     * Check if a function with partial args has all parameters satisfied.
+     * Returns true if the function has partial args AND the new record completes it.
+     */
+    protected static boolean isCompletePartialCall(MezzeFunction function, Object arg) {
+        if (!function.hasPartialArgs()) return false;
+        if (!(arg instanceof MezzeRecord record)) return false;
+        return function.hasAllParameters(record);
+    }
+
+    /**
+     * Check if a function call is a partial application.
+     * Returns true if the record doesn't provide all required parameters.
+     */
+    protected static boolean isPartialApplication(MezzeFunction function, Object arg) {
+        if (function.getParameterNames().length == 0) return false;
+        if (!(arg instanceof MezzeRecord record)) return false;
+        return !function.hasAllParameters(record);
+    }
+
+    /**
      * FASTEST PATH: Zero-closure function call with zero arguments.
      * No allocation at all - uses singleton empty array.
      */
@@ -109,9 +129,11 @@ public abstract class InvokeNode extends MezzeNode {
     /**
      * FAST PATH: Zero-closure function call with single argument.
      * Single element array - JIT scalar-replaces this.
+     * Note: doesn't handle partial application - that's handled by separate specializations.
      */
     @Specialization(
-        guards = {"function.getCallTarget() == cachedTarget", "!function.hasClosure()", "hasOneArg()"},
+        guards = {"function.getCallTarget() == cachedTarget", "!function.hasClosure()", "hasOneArg()",
+                  "function.getParameterNames().length == 0"},  // No partial app if no param names
         limit = "3"
     )
     protected Object callDirectNoClosureOneArg(
@@ -121,6 +143,65 @@ public abstract class InvokeNode extends MezzeNode {
             @Cached("create(function.getCallTarget())") DirectCallNode callNode
     ) {
         return callNode.call(argumentNodes[0].execute(frame));
+    }
+
+    /**
+     * Partial application: function with parameter names receiving incomplete record.
+     * Returns a new function with the partial arguments captured.
+     */
+    @Specialization(
+        guards = {"hasOneArg()", "function.getParameterNames().length > 0"}
+    )
+    protected Object callWithPartialAppCheck(
+            VirtualFrame frame,
+            MezzeFunction function
+    ) {
+        Object arg = argumentNodes[0].execute(frame);
+
+        if (!(arg instanceof MezzeRecord record)) {
+            // Not a record - just call directly (this handles {} case)
+            return callFunctionDirect(function, arg);
+        }
+
+        // Check if this completes a partial application
+        if (function.hasPartialArgs()) {
+            if (function.hasAllParameters(record)) {
+                // Complete the partial application
+                MezzeRecord completeRecord = function.buildCompleteRecord(record);
+                return callFunctionWithRecord(function, completeRecord);
+            } else {
+                // Add more partial args
+                return function.withPartialArgs(record);
+            }
+        }
+
+        // Check if this is a new partial application
+        if (!function.hasAllParameters(record)) {
+            return function.withPartialArgs(record);
+        }
+
+        // All parameters present - call directly
+        return callFunctionWithRecord(function, record);
+    }
+
+    @TruffleBoundary
+    private Object callFunctionDirect(MezzeFunction function, Object arg) {
+        Object[] closureValues = function.getClosureValues();
+        int closureLength = closureValues.length;
+        Object[] arguments = new Object[closureLength + 1];
+        System.arraycopy(closureValues, 0, arguments, 0, closureLength);
+        arguments[closureLength] = arg;
+        return function.getCallTarget().call(arguments);
+    }
+
+    @TruffleBoundary
+    private Object callFunctionWithRecord(MezzeFunction function, MezzeRecord record) {
+        Object[] closureValues = function.getClosureValues();
+        int closureLength = closureValues.length;
+        Object[] arguments = new Object[closureLength + 1];
+        System.arraycopy(closureValues, 0, arguments, 0, closureLength);
+        arguments[closureLength] = record;
+        return function.getCallTarget().call(arguments);
     }
 
     /**

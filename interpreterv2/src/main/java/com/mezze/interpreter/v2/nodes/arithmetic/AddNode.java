@@ -12,10 +12,12 @@ import com.oracle.truffle.api.nodes.NodeInfo;
  * Addition node with proper Truffle DSL specializations.
  *
  * Specialization order (most to least common):
- * 1. long + long (Int + Int) - unboxed, with overflow handling
+ * 1. long + long (Int/Nat + Int/Nat) - unboxed, with overflow handling
  * 2. double + double (Float + Float) - unboxed
  * 3. String + String - concatenation
  * 4. Fallback - error
+ *
+ * Nat is represented as primitive long for optimal JIT performance.
  */
 @NodeChild("left")
 @NodeChild("right")
@@ -23,7 +25,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 public abstract class AddNode extends MezzeNode {
 
     /**
-     * Fast path: Int + Int (unboxed longs).
+     * Fast path: Int/Nat + Int/Nat (unboxed longs).
      * Uses Math.addExact to detect overflow.
      */
     @Specialization(rewriteOn = ArithmeticException.class)

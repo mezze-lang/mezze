@@ -8,6 +8,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
  * Division node with proper Truffle DSL specializations.
+ * Nat is represented as primitive long for optimal JIT performance.
  *
  * Note: Integer division in Mezze produces a Float result,
  * matching mathematical semantics (5 / 2 = 2.5, not 2).
@@ -18,7 +19,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 public abstract class DivideNode extends MezzeNode {
 
     /**
-     * Int / Int produces Float (mathematical division).
+     * Int/Nat / Int/Nat produces Float (mathematical division).
      */
     @Specialization
     protected double divideLongs(long left, long right) {

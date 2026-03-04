@@ -132,12 +132,38 @@ public final class DequeNatives {
         return deque.pushBack(element);
     }
 
-    public static MezzeDeque popFront(MezzeDeque deque) {
-        return deque.popFront();
+    /**
+     * Pop from front - returns Option { head: T, tail: Deque[T] }.
+     * Returns None if empty, Some { val = { head, tail } } otherwise.
+     */
+    @TruffleBoundary
+    public static MezzeVariant popFront(MezzeDeque deque) {
+        if (deque.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        Object head = deque.getDeque().getFirst();
+        MezzeDeque tail = deque.popFront();
+        MezzeRecord result = MezzeRecord.fromFields(
+            new String[]{"head", "tail"}, new Object[]{head, tail}
+        );
+        return MezzeVariant.some(result);
     }
 
-    public static MezzeDeque popBack(MezzeDeque deque) {
-        return deque.popBack();
+    /**
+     * Pop from back - returns Option { init: Deque[T], last: T }.
+     * Returns None if empty, Some { val = { init, last } } otherwise.
+     */
+    @TruffleBoundary
+    public static MezzeVariant popBack(MezzeDeque deque) {
+        if (deque.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        Object last = deque.getDeque().getLast();
+        MezzeDeque init = deque.popBack();
+        MezzeRecord result = MezzeRecord.fromFields(
+            new String[]{"init", "last"}, new Object[]{init, last}
+        );
+        return MezzeVariant.some(result);
     }
 
     public static MezzeVariant peekFront(MezzeDeque deque) {

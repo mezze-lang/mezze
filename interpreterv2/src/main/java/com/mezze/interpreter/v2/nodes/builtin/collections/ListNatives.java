@@ -324,7 +324,7 @@ public final class ListNatives {
         System.arraycopy(nonMatching, 0, nonMatchTrimmed, 0, nonMatchCount);
 
         return MezzeRecord.fromFields(
-            new String[]{"matching", "non_matching"},
+            new String[]{"matching", "not_matching"},
             new Object[]{
                 MezzeList.fromObjects(matchTrimmed),
                 MezzeList.fromObjects(nonMatchTrimmed)
@@ -355,13 +355,17 @@ public final class ListNatives {
         Object[] seconds = new Object[list.size()];
         for (int i = 0; i < list.size(); i++) {
             MezzeRecord pair = (MezzeRecord) list.get(i);
-            int firstIdx = pair.getFieldIndex("first");
-            int secondIdx = pair.getFieldIndex("second");
+            // Try both naming conventions: fst/snd and first/second
+            int firstIdx = pair.getFieldIndex("fst");
+            if (firstIdx < 0) firstIdx = pair.getFieldIndex("first");
+            int secondIdx = pair.getFieldIndex("snd");
+            if (secondIdx < 0) secondIdx = pair.getFieldIndex("second");
             firsts[i] = pair.getField(firstIdx);
             seconds[i] = pair.getField(secondIdx);
         }
+        // Return {fsts, snds} (plural) per stdlib convention
         return MezzeRecord.fromFields(
-            new String[]{"first", "second"},
+            new String[]{"fsts", "snds"},
             new Object[]{
                 MezzeList.fromObjects(firsts),
                 MezzeList.fromObjects(seconds)
@@ -414,41 +418,28 @@ public final class ListNatives {
     }
 
     @TruffleBoundary
-    public static MezzeList sortBy(MezzeList list, MezzeFunction keyFn,
-                                    
+    public static MezzeList sortBy(MezzeList list, MezzeFunction cmpFn,
+
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.size() <= 1) return list;
 
-        // Extract keys first
-        Object[][] pairs = new Object[list.size()][2];
+        // Copy to array for sorting
+        Object[] arr = new Object[list.size()];
         for (int i = 0; i < list.size(); i++) {
-            pairs[i][0] = list.get(i);
-            pairs[i][1] = callNode.call(keyFn.getCallTarget(),
-                prepareArgs(keyFn, list.get(i)));
+            arr[i] = list.get(i);
         }
 
-        // Sort by keys
-        java.util.Arrays.sort(pairs, (a, b) -> {
-            Object keyA = a[1];
-            Object keyB = b[1];
-            if (keyA instanceof Long && keyB instanceof Long) {
-                return Long.compare((Long) keyA, (Long) keyB);
-            }
-            if (keyA instanceof Double && keyB instanceof Double) {
-                return Double.compare((Double) keyA, (Double) keyB);
-            }
-            if (keyA instanceof String && keyB instanceof String) {
-                return ((String) keyA).compareTo((String) keyB);
+        // Sort using comparator function that takes {a, b} record
+        java.util.Arrays.sort(arr, (elemA, elemB) -> {
+            Object cmpResult = callNode.call(cmpFn.getCallTarget(),
+                prepareArgsComparator(cmpFn, elemA, elemB));
+            if (cmpResult instanceof Long) {
+                return ((Long) cmpResult).intValue();
             }
             return 0;
         });
 
-        // Extract sorted values
-        Object[] result = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            result[i] = pairs[i][0];
-        }
-        return MezzeList.fromObjects(result);
+        return MezzeList.fromObjects(arr);
     }
 
     // ==================== Conversion ====================
@@ -485,6 +476,16 @@ public final class ListNatives {
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
             new String[]{"acc", "x"}, new Object[]{arg1, arg2}
+        );
+        return args;
+    }
+
+    private static Object[] prepareArgsComparator(MezzeFunction fn, Object arg1, Object arg2) {
+        Object[] closureValues = fn.getClosureValues();
+        Object[] args = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+        args[closureValues.length] = MezzeRecord.fromFields(
+            new String[]{"a", "b"}, new Object[]{arg1, arg2}
         );
         return args;
     }

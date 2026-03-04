@@ -1,7 +1,4 @@
-package com.mezze.interpreter.v2.values;
-
-import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
-import com.oracle.truffle.api.interop.TruffleObject;
+package com.mezze.interpreter.v2.nodes.continuation;
 
 /**
  * Opaque delimiter handle for delimited continuations - CANNOT BE FORGED.
@@ -14,9 +11,8 @@ import com.oracle.truffle.api.interop.TruffleObject;
  * - Primitive identity comparison
  * - No heap allocation after creation
  */
-public final class MezzeCont implements TruffleObject {
+public final class MezzeCont {
 
-    @CompilationFinal
     private final long id;
 
     // Static counter for generating unique IDs (faster than UUID)
@@ -45,7 +41,8 @@ public final class MezzeCont implements TruffleObject {
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
-        if (!(obj instanceof MezzeCont other)) return false;
+        if (!(obj instanceof MezzeCont)) return false;
+        MezzeCont other = (MezzeCont) obj;
         return this.id == other.id;
     }
 

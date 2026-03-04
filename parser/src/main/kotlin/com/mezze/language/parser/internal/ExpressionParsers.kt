@@ -293,12 +293,13 @@ internal val MezzeParser.lambdaParameterEntry: Parser<Pair<String, TypeAnnotatio
             is ParseResult.Success -> {
                 val paramName = ident.value.text
 
-                // Disallow __native prefix - reserved for Mezze internals
-                if (paramName.startsWith("__native")) {
+                // Check for reserved names
+                val reservedError = checkReservedName(paramName)
+                if (reservedError != null) {
                     // Use remaining position so this error "wins" over earlier failures,
                     // but report the token's line/column for better error pointing
                     ParseResult.Failure(
-                        "Names starting with '__native' are reserved for Mezze internals",
+                        reservedError,
                         ident.remaining.getSourcePosition(),
                         ident.value.line,
                         ident.value.column
@@ -375,15 +376,17 @@ internal val MezzeParser.untypedLambdaParams: Parser<LambdaParameters>
             is ParseResult.Success -> {
                 val tokens = params.value
 
-                // Check for __native prefix in parameter names - reserved for Mezze internals
-                val invalidToken = tokens.find { it.text.startsWith("__native") }
-                if (invalidToken != null) {
-                    return@parser ParseResult.Failure(
-                        "Names starting with '__native' are reserved for Mezze internals",
-                        params.remaining.getSourcePosition(),
-                        invalidToken.line,
-                        invalidToken.column
-                    )
+                // Check for reserved names in parameter names
+                for (token in tokens) {
+                    val reservedError = checkReservedName(token.text)
+                    if (reservedError != null) {
+                        return@parser ParseResult.Failure(
+                            reservedError,
+                            params.remaining.getSourcePosition(),
+                            token.line,
+                            token.column
+                        )
+                    }
                 }
 
                 val names = tokens.map { it.text }

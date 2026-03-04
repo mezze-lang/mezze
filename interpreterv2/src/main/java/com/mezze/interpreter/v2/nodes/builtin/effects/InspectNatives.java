@@ -175,10 +175,10 @@ public final class InspectNatives {
                 return "SortedMap{}";
             }
             StringBuilder sb = new StringBuilder("SortedMap{ ");
-            Object[] keys = SortedMapNatives.keys(sortedMap);
-            for (int i = 0; i < keys.length; i++) {
+            MezzeList keysList = SortedMapNatives.keys(sortedMap);
+            for (int i = 0; i < keysList.size(); i++) {
                 if (i > 0) sb.append(", ");
-                Object k = keys[i];
+                Object k = keysList.get(i);
                 Object v = SortedMapNatives.get(sortedMap, k);
                 // get returns a variant, extract the value
                 if (v instanceof MezzeVariant opt && opt.isSome()) {

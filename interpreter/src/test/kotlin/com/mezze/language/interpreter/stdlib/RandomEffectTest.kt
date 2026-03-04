@@ -263,7 +263,7 @@ class RandomEffectTest {
 
             perform SeededRandom { seed = 42 } in do
                 # Call Random.seed to update the seed
-                Random.seed { seed = 100 }
+                Random.seed { new_seed = 100 }
                 # Then get a random value
                 let r = Random.random_float {}
                 r >= 0.0 && r < 1.0

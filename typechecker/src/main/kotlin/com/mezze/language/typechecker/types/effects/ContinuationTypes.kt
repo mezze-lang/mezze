@@ -154,5 +154,17 @@ object ContinuationTypes {
                 ))
             ))
         )
+
+        // __native_continuation_deactivate: { delim: 'c } -> {}
+        // Pops the delimiter from the thread-local stack, ending its scope.
+        // Should be called when done using a continuation to prevent stack leaks.
+        context["__native_continuation_deactivate"] = MezzeType.FunctionType(
+            // Parameter type: { delim: 'c }
+            MezzeType.RecordType(mapOf(
+                "delim" to MezzeType.VarType(com.mezze.language.ast.TypeVar("c"))
+            )),
+            // Return type: {} (unit)
+            MezzeType.RecordType(emptyMap())
+        )
     }
 }

@@ -30,22 +30,25 @@ pub type Continuation 'suspend 'resume 'result = {
     resume: { cont: { value: 'resume } -> 'result, value: 'resume } -> 'result,
     fork: { cont: { value: 'resume } -> 'result, values: ['resume] } -> ['result],
     abort: {} -> 'result,
-    extract_suspended: { suspended: 'result } -> (Option { value: 'suspend, cont: { value: 'resume } -> 'result })
+    extract_suspended: { suspended: 'result } -> (Option { value: 'suspend, cont: { value: 'resume } -> 'result }),
+    reset: {} -> {}
 }
 
 # Create a new Continuation record with bound methods.
 # Returns a Continuation record with all methods bound to the same delimiter.
+# IMPORTANT: Call cont.reset {} when done to clean up the delimiter stack.
 pub let new: {} -> Continuation 'suspend 'resume 'result = {} -> do
     let delim_handle = __native_continuation_delimit {}
     let _ = __native_continuation_activate { delim = delim_handle }
     {
         capture = {} -> __native_continuation_capture { delim = delim_handle },
-        suspend = {} -> __native_continuation_suspend {},
+        suspend = {} -> __native_continuation_suspend_with { delim = delim_handle, value = {} },
         suspend_with = { value } -> __native_continuation_suspend_with { delim = delim_handle, value = value },
         resume = { cont, value } -> __native_continuation_resume { delim = delim_handle, cont = cont, value = value },
         fork = { cont, values } -> __native_continuation_fork { delim = delim_handle, cont = cont, values = values },
         abort = {} -> __native_continuation_abort { delim = delim_handle },
-        extract_suspended = { suspended } -> __native_continuation_extract_suspended { delim = delim_handle, suspended = suspended }
+        extract_suspended = { suspended } -> __native_continuation_extract_suspended { delim = delim_handle, suspended = suspended },
+        reset = {} -> __native_continuation_deactivate { delim = delim_handle }
     }
 
 # Standalone functions using Delim handle directly
@@ -61,8 +64,10 @@ pub let capture: { delim: Delim } -> ({ value: 'a } -> 'b) = { delim } ->
         Delim { val = handle } -> __native_continuation_capture { delim = handle }
 
 # Suspend execution, returning control to the delimiter.
-pub let suspend: {} -> 'a = {} ->
-    __native_continuation_suspend {}
+# Note: Requires an active delimiter on the stack.
+pub let suspend: { delim: Delim } -> 'a = { delim } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_suspend_with { delim = handle, value = {} }
 
 # Suspend execution with a value.
 pub let suspend_with: { delim: Delim, value: 'a } -> 'b = { delim, value } ->
@@ -83,3 +88,9 @@ pub let fork: { delim: Delim, cont: { value: 'a } -> 'b, values: ['a] } -> ['b] 
 pub let abort: { delim: Delim } -> 'a = { delim } ->
     match delim is
         Delim { val = handle } -> __native_continuation_abort { delim = handle }
+
+# Deactivate a delimiter, popping it from the stack.
+# Call this when done using a delimiter to prevent stack leaks.
+pub let reset: { delim: Delim } -> {} = { delim } ->
+    match delim is
+        Delim { val = handle } -> __native_continuation_deactivate { delim = handle }

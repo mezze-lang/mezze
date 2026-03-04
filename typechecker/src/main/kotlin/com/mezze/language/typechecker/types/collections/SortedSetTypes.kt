@@ -159,11 +159,11 @@ object SortedSetTypes {
             )
         }
 
-        // __native_sorted_set_from_list: {list: List 'a} -> SortedSet 'a
+        // __native_sorted_set_from_list: {xs: List 'a} -> SortedSet 'a
         run {
             val elementType = MezzeType.VarType(TypeVar("a"))
             context["__native_sorted_set_from_list"] = MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("list" to MezzeType.ListType(elementType))),
+                MezzeType.RecordType(mapOf("xs" to MezzeType.ListType(elementType))),
                 MezzeType.SortedSetType(elementType)
             )
         }

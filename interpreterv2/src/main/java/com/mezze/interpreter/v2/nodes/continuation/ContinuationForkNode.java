@@ -1,8 +1,7 @@
 package com.mezze.interpreter.v2.nodes.continuation;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
-import com.mezze.interpreter.v2.values.MezzeCont;
-import com.mezze.interpreter.v2.values.MezzeContinuation;
+
 import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.mezze.interpreter.v2.values.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
@@ -64,10 +63,17 @@ public final class ContinuationForkNode extends MezzeNode {
         Object contObj = record.getField("cont");
         Object valuesObj = record.getField("values");
 
-        if (!(valuesObj instanceof MezzeList values)) {
+        // Handle both MezzeList and Object[] (raw array)
+        MezzeList values;
+        if (valuesObj instanceof MezzeList ml) {
+            values = ml;
+        } else if (valuesObj instanceof Object[] arr) {
+            values = new MezzeList(arr);
+        } else {
             errorProfile.enter(this);
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            throw new RuntimeException("__native_continuation_fork expects 'values' field as array");
+            throw new RuntimeException("__native_continuation_fork expects 'values' field as array, got: " +
+                (valuesObj != null ? valuesObj.getClass().getSimpleName() : "null"));
         }
 
         // Empty values - abort
@@ -151,25 +157,3 @@ public final class ContinuationForkNode extends MezzeNode {
     }
 }
 
-/**
- * Exception thrown for nested fork operations.
- */
-class ForkedExecutionException extends RuntimeException {
-    final Object continuation;
-    final MezzeList values;
-
-    ForkedExecutionException(Object continuation, MezzeList values) {
-        super("Forked execution");
-        this.continuation = continuation;
-        this.values = values;
-    }
-}
-
-/**
- * Exception thrown when a continuation is aborted.
- */
-class ContinuationAbortedException extends RuntimeException {
-    ContinuationAbortedException(String message) {
-        super(message);
-    }
-}

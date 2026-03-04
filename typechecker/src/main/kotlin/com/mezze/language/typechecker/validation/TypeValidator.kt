@@ -7,6 +7,7 @@ import com.mezze.language.typechecker.constraints.ConstraintResult
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.solving.Substitution
+import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.hashing.ContentHashComputer
@@ -710,7 +711,16 @@ class TypeValidator(
      */
     private fun isBuiltInAbilityImplementation(abilityName: String, type: MezzeType): Boolean {
         // Unwrap SuspendedType to check the inner value type
-        val unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
+        var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
+
+        // Expand TypeApplication to VariantType if possible
+        // This allows deriving Eq/Ord for named variant types like Option, Result, etc.
+        if (unwrappedType is MezzeType.TypeApplication) {
+            val expanded = expandTypeApplicationToVariant(unwrappedType, typeDeclarations)
+            if (expanded != null) {
+                unwrappedType = expanded
+            }
+        }
 
         // Built-in abilities have implicit implementations for certain types
         return when (abilityName) {
@@ -733,6 +743,8 @@ class TypeValidator(
                 unwrappedType is MezzeType.OrderingType ||
                 unwrappedType is MezzeType.BytesType ||
                 unwrappedType is MezzeType.ByteBufferType ||
+                // Type variables are assumed to have Eq - they're constrained at the call site
+                unwrappedType is MezzeType.VarType ||
                 isBoolVariant(unwrappedType) ||
                 // Derive Eq for records if all fields have Eq
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Eq", it) }) ||
@@ -751,6 +763,8 @@ class TypeValidator(
                 unwrappedType is MezzeType.StringType ||
                 unwrappedType is MezzeType.NatType ||
                 unwrappedType is MezzeType.FracType ||
+                // Type variables are assumed to have Ord - they're constrained at the call site
+                unwrappedType is MezzeType.VarType ||
                 // Derive Ord for records if all fields have Ord
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Ord", it) }) ||
                 // Derive Ord for variants if all constructor payloads have Ord (or no payload)

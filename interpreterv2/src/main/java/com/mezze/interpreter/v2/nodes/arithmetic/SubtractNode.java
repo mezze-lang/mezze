@@ -8,6 +8,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
  * Subtraction node with proper Truffle DSL specializations.
+ * Nat is represented as primitive long for optimal JIT performance.
  */
 @NodeChild("left")
 @NodeChild("right")
@@ -15,7 +16,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 public abstract class SubtractNode extends MezzeNode {
 
     /**
-     * Fast path: Int - Int (unboxed longs).
+     * Fast path: Int/Nat - Int/Nat (unboxed longs).
      */
     @Specialization(rewriteOn = ArithmeticException.class)
     protected long subtractLongs(long left, long right) {

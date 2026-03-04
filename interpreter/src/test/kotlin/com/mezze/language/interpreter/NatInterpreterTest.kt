@@ -24,6 +24,19 @@ class NatInterpreterTest {
         return result
     }
 
+    /**
+     * Assert that a numeric value equals expected, accepting both MezzeNat and MezzeInt.
+     * V2 uses primitive long for both types for optimal JIT performance.
+     */
+    private fun assertNumericEquals(expected: Long, actual: MezzeValue) {
+        val actualValue = when (actual) {
+            is MezzeNat -> actual.value
+            is MezzeInt -> actual.value
+            else -> throw AssertionError("Expected numeric value, got ${actual::class.simpleName}")
+        }
+        assertEquals(expected, actualValue)
+    }
+
     // ========================================
     // Basic Operations
     // ========================================
@@ -35,7 +48,7 @@ class NatInterpreterTest {
             nat::min { l = 3n, r = 7n }
         """
         val result = eval(code)
-        assertEquals(MezzeNat(3L), result)
+        assertNumericEquals(3L, result)
     }
 
     @Test
@@ -45,7 +58,7 @@ class NatInterpreterTest {
             nat::max { l = 3n, r = 7n }
         """
         val result = eval(code)
-        assertEquals(MezzeNat(7L), result)
+        assertNumericEquals(7L, result)
     }
 
     @Test
@@ -143,7 +156,7 @@ class NatInterpreterTest {
             nat::clamp { n = 15n, min = 0n, max = 10n }
         """
         val result = eval(code)
-        assertEquals(MezzeNat(10L), result)
+        assertNumericEquals(10L, result)
     }
 
     @Test
@@ -153,7 +166,7 @@ class NatInterpreterTest {
             nat::clamp { n = 5n, min = 0n, max = 10n }
         """
         val result = eval(code)
-        assertEquals(MezzeNat(5L), result)
+        assertNumericEquals(5L, result)
     }
 
     @Test
@@ -163,7 +176,7 @@ class NatInterpreterTest {
             nat::clamp { n = 0n, min = 5n, max = 10n }
         """
         val result = eval(code)
-        assertEquals(MezzeNat(5L), result)
+        assertNumericEquals(5L, result)
     }
 
     // ========================================

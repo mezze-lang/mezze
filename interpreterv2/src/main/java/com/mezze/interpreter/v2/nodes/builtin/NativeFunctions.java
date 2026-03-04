@@ -882,7 +882,7 @@ public final class NativeFunctions extends MezzeNode {
 
     private String boolToString(MezzeRecord record) {
         boolean b = getBoolean(record, "b");
-        return b ? "True" : "False";
+        return b ? "true" : "false";
     }
 
     private boolean boolAnd(MezzeRecord record) {

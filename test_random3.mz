@@ -1,0 +1,17 @@
+# Test multiple performs
+
+use std::effects::log::{Log, Console, println}
+use std::effects::random::{Random, SeededRandom, random_int}
+use std::int
+
+pub let main: {} -> {} <*> = {} ->
+    perform Console in do
+        println {msg = "First perform:"}
+        let r1 = perform SeededRandom {seed = 42} in random_int {min = 1, max = 10}
+        println {msg = "r1 = $(int::to_string {n = r1})"}
+
+        println {msg = "Second perform:"}
+        let r2 = perform SeededRandom {seed = 42} in random_int {min = 1, max = 10}
+        println {msg = "r2 = $(int::to_string {n = r2})"}
+
+        println {msg = "Done"}

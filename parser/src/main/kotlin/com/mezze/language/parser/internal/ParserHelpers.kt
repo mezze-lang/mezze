@@ -18,6 +18,34 @@ import com.mezze.language.parser.internal.lib.*
  */
 
 // ============================================================================
+// RESERVED WORDS
+// ============================================================================
+
+/**
+ * Set of reserved words that cannot be used as variable/parameter names.
+ * These are reserved for Mezze language features.
+ */
+internal val RESERVED_WORDS = setOf(
+    "scope"  // Reserved for scoped effects
+)
+
+/**
+ * Check if a name is reserved.
+ * Returns an error message if reserved, null otherwise.
+ */
+internal fun checkReservedName(name: String): String? {
+    // Check __native prefix
+    if (name.startsWith("__native")) {
+        return "Names starting with '__native' are reserved for Mezze internals"
+    }
+    // Check reserved words
+    if (name in RESERVED_WORDS) {
+        return "'$name' is a reserved word"
+    }
+    return null
+}
+
+// ============================================================================
 // SOURCE LOCATION HELPERS
 // ============================================================================
 

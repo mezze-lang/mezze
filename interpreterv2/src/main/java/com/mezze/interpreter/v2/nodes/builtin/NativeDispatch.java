@@ -6,6 +6,9 @@ import com.mezze.interpreter.v2.nodes.builtin.concurrency.*;
 import com.mezze.interpreter.v2.nodes.builtin.effects.*;
 import com.mezze.interpreter.v2.nodes.builtin.io.*;
 import com.mezze.interpreter.v2.nodes.builtin.primitives.*;
+import com.mezze.interpreter.v2.nodes.continuation.ContinuationAbortedException;
+import com.mezze.interpreter.v2.nodes.continuation.DelimiterStack;
+import com.mezze.interpreter.v2.nodes.continuation.ForkedExecutionException;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -114,9 +117,10 @@ public final class NativeDispatch extends MezzeNode {
     /**
      * Check if a function name is a known native function.
      * Called at parse time, not in hot path.
+     * Supports both __native_ (new standard) and native_ (legacy) prefixes.
      */
     public static boolean isNativeFunction(String name) {
-        return name.startsWith("__native_") && (HANDLERS.containsKey(name) || HANDLERS_WITH_NODE.containsKey(name));
+        return HANDLERS.containsKey(name) || HANDLERS_WITH_NODE.containsKey(name);
     }
 
     // ==================== Handler Registration ====================
@@ -170,6 +174,19 @@ public final class NativeDispatch extends MezzeNode {
         registerConcurrencyHandlers();
         // Buffer, JSON, HTTP Mock
         registerIOHandlers();
+        // Crash function - terminates program with error message
+        registerCrashHandler();
+        // Continuation primitives (delimited continuations for effects)
+        registerContinuationHandlers();
+    }
+
+    // ==================== Crash ====================
+
+    private static void registerCrashHandler() {
+        HANDLERS.put("crash", (r, c) -> {
+            String msg = getString(r, "msg");
+            throw new RuntimeException("crash: " + msg);
+        });
     }
 
     // ==================== ArrayList ====================
@@ -414,7 +431,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_map_remove", (r, c) ->
             MapNatives.remove(getMap(r, "m"), getField(r, "k")));
         HANDLERS.put("__native_map_remove_all", (r, c) ->
-            MapNatives.removeAll(getMap(r, "m"), getArray(r, "ks")));
+            MapNatives.removeAll(getMap(r, "m"), listToObjectArray(getList(r, "ks"))));
         HANDLERS.put("__native_map_keys", (r, c) ->
             MapNatives.keys(getMap(r, "m")));
         HANDLERS.put("__native_map_values", (r, c) ->
@@ -436,7 +453,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_map_merge_with", (r, c) ->
             MapNatives.mergeWith(getMap(r, "m1"), getMap(r, "m2"), getFunction(r, "f"), c));
         HANDLERS.put("__native_map_from_keys", (r, c) ->
-            MapNatives.fromKeys(getArray(r, "ks"), getFunction(r, "f"), c));
+            MapNatives.fromKeys(listToObjectArray(getList(r, "ks")), getFunction(r, "f"), c));
     }
 
     // ==================== SortedMap ====================
@@ -462,7 +479,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_map_entries", (r, c) ->
             SortedMapNatives.entries(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_equals", (r, c) ->
-            SortedMapNatives.equals(getSortedMap(r, "a"), getSortedMap(r, "b")));
+            SortedMapNatives.equals(getSortedMap(r, "m1"), getSortedMap(r, "m2")));
         HANDLERS.put("__native_sorted_map_min_entry", (r, c) ->
             SortedMapNatives.minEntry(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_max_entry", (r, c) ->
@@ -543,7 +560,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_nel_append_list", (r, c) ->
             NonEmptyListNatives.appendList(getNonEmptyList(r, "xs"), getList(r, "ys")));
         HANDLERS.put("__native_nel_prepend_list", (r, c) ->
-            NonEmptyListNatives.prependList(getList(r, "xs"), getNonEmptyList(r, "y")));
+            NonEmptyListNatives.prependList(getList(r, "xs"), getField(r, "y")));
         HANDLERS.put("__native_nel_reverse", (r, c) ->
             NonEmptyListNatives.reverse(getNonEmptyList(r, "xs")));
         HANDLERS.put("__native_nel_contains", (r, c) ->
@@ -575,7 +592,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_nel_all", (r, c) ->
             NonEmptyListNatives.all(getNonEmptyList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_nel_sort_by", (r, c) ->
-            NonEmptyListNatives.sortBy(getNonEmptyList(r, "nel"), getFunction(r, "f"), c));
+            NonEmptyListNatives.sortBy(getNonEmptyList(r, "xs"), getFunction(r, "cmp"), c));
     }
 
     // ==================== Nat ====================
@@ -631,7 +648,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_char_to_lower", (r, c) ->
             CharNatives.toLower(getString(r, "c")));
         HANDLERS.put("__native_char_digit_to_int", (r, c) ->
-            CharNatives.digitToInt(getString(r, "c")));
+            CharNatives.digitToInt(getString(r, "c"), getLong(r, "radix")));
         HANDLERS.put("__native_char_eq", (r, c) ->
             CharNatives.eq(getString(r, "a"), getString(r, "b")));
         HANDLERS.put("__native_char_compare", (r, c) ->
@@ -806,8 +823,13 @@ public final class NativeDispatch extends MezzeNode {
             Math.max(getDouble(r, "min"), Math.min(getDouble(r, "max"), getDouble(r, "n"))));
         HANDLERS.put("__native_float_sign", (r, c) ->
             Math.signum(getDouble(r, "n")));
-        HANDLERS.put("__native_float_to_int", (r, c) ->
-            (long) getDouble(r, "n"));
+        HANDLERS.put("__native_float_to_int", (r, c) -> {
+            double n = getDouble(r, "n");
+            if (Double.isNaN(n) || Double.isInfinite(n)) {
+                return MezzeVariant.none();
+            }
+            return MezzeVariant.some((long) n);
+        });
         HANDLERS.put("__native_float_is_nan", (r, c) ->
             Double.isNaN(getDouble(r, "n")));
         HANDLERS.put("__native_float_is_infinite", (r, c) ->
@@ -863,8 +885,8 @@ public final class NativeDispatch extends MezzeNode {
     private static Object[] getArray(MezzeRecord r, String name) {
         Object val = getField(r, name);
         if (val instanceof Object[] arr) return arr;
-        // Also handle MezzeList (which wraps various storage strategies)
-        if (val instanceof MezzeList list) return list.getObjectStore();
+        // Also handle MezzeList - properly convert to Object[] using toArray
+        if (val instanceof MezzeList list) return ListNatives.toArray(list);
         throw new RuntimeException("Expected Object[] for field '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getSimpleName()));
     }
@@ -876,7 +898,47 @@ public final class NativeDispatch extends MezzeNode {
         if (val instanceof Object[] arr) {
             return MezzeList.fromObjects(arr);
         }
+        // Handle Cons/Nil linked list variants
+        if (val instanceof MezzeVariant variant) {
+            return convertLinkedListToMezzeList(variant);
+        }
         throw new RuntimeException("Expected MezzeList for field '" + name + "'");
+    }
+
+    /**
+     * Convert a Cons/Nil linked list variant to MezzeList
+     */
+    @TruffleBoundary
+    private static MezzeList convertLinkedListToMezzeList(MezzeVariant variant) {
+        java.util.ArrayList<Object> elements = new java.util.ArrayList<>();
+        Object current = variant;
+
+        while (current instanceof MezzeVariant v) {
+            if (v.getConstructorName().equals("Nil")) {
+                break;
+            } else if (v.getConstructorName().equals("Cons")) {
+                MezzeRecord payload = (MezzeRecord) v.getPayloadValue();
+                elements.add(payload.getField("head"));
+                current = payload.getField("tail");
+            } else {
+                // Not a Cons/Nil list, return empty
+                break;
+            }
+        }
+
+        return MezzeList.fromObjects(elements.toArray());
+    }
+
+    /**
+     * Convert a MezzeList to Object[]
+     */
+    @TruffleBoundary
+    private static Object[] listToObjectArray(MezzeList list) {
+        Object[] result = new Object[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            result[i] = list.get(i);
+        }
+        return result;
     }
 
     private static MezzeFunction getFunction(MezzeRecord r, String name) {
@@ -1053,12 +1115,67 @@ public final class NativeDispatch extends MezzeNode {
 
     @TruffleBoundary
     private static boolean globMatch(String pattern, String s) {
-        // Simple glob matching (* = any, ? = single char)
-        String regex = pattern
-            .replace(".", "\\.")
-            .replace("*", ".*")
-            .replace("?", ".");
-        return s.matches(regex);
+        // Custom glob matching optimized for both file paths and URL patterns
+        // ** = matches any characters including / (zero or more)
+        // * = matches any characters EXCEPT /
+        // ? = matches any single character EXCEPT /
+        // [abc] = character class
+        // [!abc] or [^abc] = negated character class
+
+        StringBuilder regex = new StringBuilder();
+        regex.append("^");
+        int i = 0;
+        while (i < pattern.length()) {
+            char c = pattern.charAt(i);
+            if (c == '*') {
+                if (i + 1 < pattern.length() && pattern.charAt(i + 1) == '*') {
+                    // Check if **/ - matches zero or more path segments
+                    if (i + 2 < pattern.length() && pattern.charAt(i + 2) == '/') {
+                        // **/ matches any path prefix including empty
+                        regex.append("(?:[^/]*/)*");
+                        i += 3;
+                    } else {
+                        // ** at end or before non-slash matches anything including /
+                        regex.append(".*");
+                        i += 2;
+                    }
+                } else {
+                    // * matches anything except /
+                    regex.append("[^/]*");
+                    i++;
+                }
+            } else if (c == '?') {
+                // ? matches any single char except /
+                regex.append("[^/]");
+                i++;
+            } else if (c == '[') {
+                // Character class
+                int end = pattern.indexOf(']', i);
+                if (end > i) {
+                    String charClass = pattern.substring(i + 1, end);
+                    // Handle negation
+                    if (charClass.startsWith("!") || charClass.startsWith("^")) {
+                        regex.append("[^").append(charClass.substring(1)).append("]");
+                    } else {
+                        regex.append("[").append(charClass).append("]");
+                    }
+                    i = end + 1;
+                } else {
+                    regex.append("\\[");
+                    i++;
+                }
+            } else if (c == '.' || c == '+' || c == '(' || c == ')' || c == '{' || c == '}'
+                       || c == '^' || c == '$' || c == '|' || c == '\\') {
+                // Escape regex special chars
+                regex.append("\\").append(c);
+                i++;
+            } else {
+                regex.append(c);
+                i++;
+            }
+        }
+        regex.append("$");
+        return s.matches(regex.toString());
     }
 
     @TruffleBoundary
@@ -1101,6 +1218,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seeded_random_int", (r, c) -> RandomNatives.seededRandomInt(r));
         HANDLERS.put("__native_seeded_random_nat", (r, c) -> RandomNatives.seededRandomNat(r));
         HANDLERS.put("__native_update_seed", (r, c) -> RandomNatives.updateSeed(r));
+        HANDLERS.put("__native_reset_seeded_random", (r, c) -> RandomNatives.resetSeededRandom(r));
         // Legacy aliases without double underscore prefix (used by some tests)
         HANDLERS.put("native_random_int", (r, c) -> RandomNatives.randomInt(r));
         HANDLERS.put("native_random_double", (r, c) -> RandomNatives.randomFloat(r));
@@ -1254,10 +1372,10 @@ public final class NativeDispatch extends MezzeNode {
 
         // === Atom ===
         HANDLERS.put("__native_atom_new", (r, c) -> ConcurrencyNatives.atomNew(r));
-        HANDLERS.put("__native_atom_new_validated", (r, c) -> ConcurrencyNatives.atomNewValidated(r));
+        HANDLERS.put("__native_atom_new_validated", (r, c) -> ConcurrencyNatives.atomNewValidated(r, c));
         HANDLERS.put("__native_atom_deref", (r, c) -> ConcurrencyNatives.atomDeref(r));
-        HANDLERS.put("__native_atom_reset", (r, c) -> ConcurrencyNatives.atomReset(r));
-        HANDLERS.put("__native_atom_swap", (r, c) -> ConcurrencyNatives.atomSwap(r));
+        HANDLERS.put("__native_atom_reset", (r, c) -> ConcurrencyNatives.atomReset(r, c));
+        HANDLERS.put("__native_atom_swap", (r, c) -> ConcurrencyNatives.atomSwapFunc(r, c));
         HANDLERS.put("__native_atom_compare_and_set", (r, c) -> ConcurrencyNatives.atomCompareAndSet(r));
 
         // === Mutex ===
@@ -1290,7 +1408,12 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_channel_make", (r, c) -> ConcurrencyNatives.channelMake(r));
         HANDLERS.put("__native_channel_send", (r, c) -> ConcurrencyNatives.channelSend(r));
         HANDLERS.put("__native_channel_receive", (r, c) -> ConcurrencyNatives.channelReceive(r));
+        HANDLERS.put("__native_channel_recv", (r, c) -> ConcurrencyNatives.channelReceive(r));  // alias for recv
         HANDLERS.put("__native_channel_close", (r, c) -> ConcurrencyNatives.channelClose(r));
+        HANDLERS.put("__native_channel_try_send", (r, c) -> ConcurrencyNatives.channelTrySend(r));
+        HANDLERS.put("__native_channel_try_recv", (r, c) -> ConcurrencyNatives.channelTryRecv(r));
+        HANDLERS.put("__native_channel_recv_any", (r, c) -> ConcurrencyNatives.channelRecvAny(r));
+        HANDLERS.put("__native_channel_recv_any_timeout", (r, c) -> ConcurrencyNatives.channelRecvAnyTimeout(r));
 
         // === CancellationToken ===
         HANDLERS.put("__native_cancellation_token_new", (r, c) -> ConcurrencyNatives.cancellationTokenNew(r));
@@ -1314,7 +1437,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // === Additional Atom functions ===
         HANDLERS.put("__native_atom_cas", (r, c) -> ConcurrencyNatives.atomCas(r));
-        HANDLERS.put("__native_atom_add_watch", (r, c) -> ConcurrencyNatives.atomAddWatch(r));
+        HANDLERS.put("__native_atom_add_watch", (r, c) -> ConcurrencyNatives.atomAddWatch(r, c));
         HANDLERS.put("__native_atom_remove_watch", (r, c) -> ConcurrencyNatives.atomRemoveWatch(r));
 
         // === Additional Mutex functions ===
@@ -1336,6 +1459,8 @@ public final class NativeDispatch extends MezzeNode {
         // === Additional Channel functions ===
         HANDLERS.put("__native_mock_channel_send", (r, c) -> ConcurrencyNatives.mockChannelSend(r));
         HANDLERS.put("__native_mock_channel_receive", (r, c) -> ConcurrencyNatives.mockChannelReceive(r));
+        HANDLERS.put("__native_mock_channel_recv", (r, c) -> ConcurrencyNatives.mockChannelReceive(r));  // alias
+        HANDLERS.put("__native_mock_channel_recv_any", (r, c) -> ConcurrencyNatives.mockChannelRecvAny(r));
 
         // === Additional CancellationToken functions ===
         HANDLERS.put("__native_cancellation_token_create_child", (r, c) -> ConcurrencyNatives.cancellationTokenCreateChild(r));
@@ -1374,7 +1499,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // === Additional Atom ===
         HANDLERS.put("__native_atom_swap_with", (r, c) -> ConcurrencyNatives.atomSwapWith(r, c));
-        HANDLERS.put("__native_atom_get_and_swap", (r, c) -> ConcurrencyNatives.atomGetAndSwap(r));
+        HANDLERS.put("__native_atom_get_and_swap", (r, c) -> ConcurrencyNatives.atomGetAndSwap(r, c));
         HANDLERS.put("__native_atom_set_validator", (r, c) -> ConcurrencyNatives.atomSetValidator(r));
 
         // === Additional Semaphore ===
@@ -1418,10 +1543,8 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS_WITH_NODE.put("__native_forkjoin_both", (r, c, n) -> ConcurrencyNatives.forkjoinBoth(r, c, n));
 
         // === SortedMap from_map ===
-        HANDLERS.put("__native_sorted_map_from_map", (r, c) -> {
-            // Convert regular map to sorted map - placeholder
-            return r.getField(r.getFieldIndex("m"));
-        });
+        HANDLERS.put("__native_sorted_map_from_map", (r, c) ->
+            SortedMapNatives.fromMap(getMap(r, "m")));
     }
 
     // ==================== Buffer, JSON, HTTP ====================
@@ -1458,5 +1581,257 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_http_mock_request", (r, c) -> IONatives.httpMockRequest(r));
         HANDLERS.put("__native_http_mock_set_response", (r, c) -> IONatives.httpMockSetResponse(r));
         HANDLERS.put("__native_http_mock_clear", (r, c) -> IONatives.httpMockClear(r));
+    }
+
+    // ==================== Continuation Primitives ====================
+
+    private static void registerContinuationHandlers() {
+        // __native_continuation_delimit - Creates a new delimiter
+        HANDLERS.put("__native_continuation_delimit", (r, c) -> com.mezze.interpreter.v2.nodes.continuation.MezzeCont.create());
+
+        // __native_continuation_activate - Pushes delimiter onto thread-local stack
+        HANDLERS.put("__native_continuation_activate", (r, c) -> {
+            Object delimObj = getField(r, "delim");
+            if (!(delimObj instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeCont delim)) {
+                throw new RuntimeException("__native_continuation_activate expects 'delim' field as MezzeCont");
+            }
+            DelimiterStack.push(delim);
+            return MezzeUnit.INSTANCE;
+        });
+
+        // __native_continuation_deactivate - Pops delimiter from stack
+        HANDLERS.put("__native_continuation_deactivate", (r, c) -> {
+            DelimiterStack.pop();
+            return MezzeUnit.INSTANCE;
+        });
+
+        // __native_continuation_capture - Captures current continuation
+        HANDLERS.put("__native_continuation_capture", (r, c) -> {
+            Object delimObj = getField(r, "delim");
+            if (!(delimObj instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeCont delim)) {
+                throw new RuntimeException("__native_continuation_capture expects 'delim' field as MezzeCont");
+            }
+
+            DelimiterStack.DelimiterEntry entry = DelimiterStack.find(delim.getId());
+
+            if (entry != null && entry.capturedContinuation != null) {
+                // Return captured continuation wrapped as function
+                com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation cont = entry.capturedContinuation;
+                return new MezzeFunction(
+                    cont.getCallTarget(),
+                    "continuation@" + cont.getDelimiterId(),
+                    cont.getCapturedValues()
+                );
+            }
+
+            // Return trivial identity continuation
+            return createTrivialContinuation(delim.getId());
+        });
+
+        // __native_continuation_suspend - Suspends without a value
+        HANDLERS.put("__native_continuation_suspend", (r, c) -> {
+            DelimiterStack.DelimiterEntry entry = DelimiterStack.current();
+            long delimiterId = entry != null ? entry.delimiter.getId() : 0;
+            com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation continuation = createResumableContinuation(delimiterId);
+            return new com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended(MezzeNull.INSTANCE, continuation);
+        });
+
+        // __native_continuation_suspend_with - Suspends with a value
+        HANDLERS.put("__native_continuation_suspend_with", (r, c) -> {
+            Object delimObj = getField(r, "delim");
+            if (!(delimObj instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeCont delim)) {
+                throw new RuntimeException("__native_continuation_suspend_with expects 'delim' field as MezzeCont");
+            }
+            Object value = getField(r, "value");
+            com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation continuation = createResumableContinuation(delim.getId());
+            return new com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended(value, continuation);
+        });
+
+        // __native_continuation_resume - Resumes a continuation with a value
+        HANDLERS.put("__native_continuation_resume", (r, c) -> {
+            Object contObj = getField(r, "cont");
+            Object value = getField(r, "value");
+
+            MezzeRecord valueRecord = MezzeRecord.fromFields(
+                new String[]{"value"},
+                new Object[]{value}
+            );
+
+            if (contObj instanceof MezzeFunction func) {
+                Object[] closureValues = func.getClosureValues();
+                int closureLen = closureValues.length;
+                Object[] callArgs = new Object[closureLen + 1];
+                System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
+                callArgs[closureLen] = valueRecord;
+                return func.getCallTarget().call(callArgs);
+            }
+
+            if (contObj instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation cont) {
+                return cont.resume(valueRecord);
+            }
+
+            throw new RuntimeException("__native_continuation_resume expects 'cont' field as function or continuation");
+        });
+
+        // __native_continuation_fork - Multi-shot continuation resume
+        HANDLERS.put("__native_continuation_fork", (r, c) -> {
+            Object contObj = getField(r, "cont");
+            Object valuesObj = getField(r, "values");
+
+            MezzeList values;
+            if (valuesObj instanceof MezzeList ml) {
+                values = ml;
+            } else if (valuesObj instanceof Object[] arr) {
+                values = new MezzeList(arr);
+            } else {
+                throw new RuntimeException("__native_continuation_fork expects 'values' field as array");
+            }
+
+            if (values.size() == 0) {
+                throw new ContinuationAbortedException("Cannot fork with empty values array");
+            }
+
+            if (DelimiterStack.isInsideFork()) {
+                throw new ForkedExecutionException(contObj, values);
+            }
+
+            return executeFork(contObj, values);
+        });
+
+        // __native_continuation_abort - Aborts current continuation
+        HANDLERS.put("__native_continuation_abort", (r, c) -> {
+            Object delimObj = getField(r, "delim");
+            if (!(delimObj instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeCont delim)) {
+                throw new RuntimeException("__native_continuation_abort expects 'delim' field as MezzeCont");
+            }
+            throw new ContinuationAbortedException("Continuation aborted for delimiter " + delim.getId());
+        });
+
+        // __native_continuation_is_suspended - Check if value is suspended
+        HANDLERS.put("__native_continuation_is_suspended", (r, c) -> {
+            Object value = getField(r, "value");
+            return value instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
+        });
+
+        // __native_continuation_extract_suspended - Extract value and continuation from suspended
+        HANDLERS.put("__native_continuation_extract_suspended", (r, c) -> {
+            Object suspended = getField(r, "suspended");
+
+            if (suspended instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended susp) {
+                Object value = susp.getSuspendedValue();
+                com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation cont = susp.getContinuation();
+
+                MezzeFunction contFunc = new MezzeFunction(
+                    cont.getCallTarget(),
+                    "extracted_continuation",
+                    cont.getCapturedValues()
+                );
+
+                MezzeRecord innerRecord = MezzeRecord.fromFields(
+                    new String[]{"value", "cont"},
+                    new Object[]{value, contFunc}
+                );
+
+                return MezzeVariant.some(innerRecord);
+            }
+
+            return MezzeVariant.none();
+        });
+    }
+
+    // Helper for creating trivial continuation that returns its input
+    @TruffleBoundary
+    private static MezzeFunction createTrivialContinuation(long delimiterId) {
+        // Create a function that extracts { value } and returns value
+        return new MezzeFunction(
+            TrivialContinuationCallTarget.INSTANCE,
+            "trivial_continuation@" + delimiterId,
+            new Object[0]
+        );
+    }
+
+    // Helper for creating resumable continuation
+    @TruffleBoundary
+    private static com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation createResumableContinuation(long delimiterId) {
+        return com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation.create(TrivialContinuationCallTarget.INSTANCE, delimiterId);
+    }
+
+    // Singleton call target for trivial continuations
+    private static final class TrivialContinuationCallTarget {
+        static final com.oracle.truffle.api.CallTarget INSTANCE;
+
+        static {
+            // Create a simple call target that extracts value from record
+            INSTANCE = new com.oracle.truffle.api.RootCallTarget() {
+                @Override
+                public Object call(Object... arguments) {
+                    if (arguments.length > 0) {
+                        Object last = arguments[arguments.length - 1];
+                        if (last instanceof MezzeRecord record) {
+                            Object value = record.getField("value");
+                            return value != null ? value : MezzeRecord.empty();
+                        }
+                    }
+                    return MezzeRecord.empty();
+                }
+
+                @Override
+                public com.oracle.truffle.api.nodes.RootNode getRootNode() {
+                    return null;
+                }
+            };
+        }
+    }
+
+    // Execute fork operation
+    @TruffleBoundary
+    private static MezzeList executeFork(Object cont, MezzeList values) {
+        java.util.List<Object> results = new java.util.ArrayList<>();
+        boolean wasInsideFork = DelimiterStack.isInsideFork();
+
+        for (int i = 0; i < values.size(); i++) {
+            Object value = values.get(i);
+
+            try {
+                DelimiterStack.setInsideFork(true);
+                Object result = resumeContinuation(cont, value);
+                results.add(result);
+            } catch (ForkedExecutionException e) {
+                MezzeList nestedResults = executeFork(e.continuation, e.values);
+                for (int j = 0; j < nestedResults.size(); j++) {
+                    results.add(nestedResults.get(j));
+                }
+            } catch (ContinuationAbortedException e) {
+                // This path aborted - skip it
+            } finally {
+                DelimiterStack.setInsideFork(wasInsideFork);
+            }
+        }
+
+        return new MezzeList(results.toArray());
+    }
+
+    // Resume a continuation with a value
+    @TruffleBoundary
+    private static Object resumeContinuation(Object cont, Object value) {
+        MezzeRecord valueRecord = MezzeRecord.fromFields(
+            new String[]{"value"},
+            new Object[]{value}
+        );
+
+        if (cont instanceof MezzeFunction func) {
+            Object[] closureValues = func.getClosureValues();
+            int closureLen = closureValues.length;
+            Object[] callArgs = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
+            callArgs[closureLen] = valueRecord;
+            return func.getCallTarget().call(callArgs);
+        }
+
+        if (cont instanceof com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation c) {
+            return c.resume(valueRecord);
+        }
+
+        throw new RuntimeException("Invalid continuation type: " + cont.getClass().getName());
     }
 }

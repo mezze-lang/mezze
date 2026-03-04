@@ -198,11 +198,11 @@ object CoopTypes {
         // Scope type for Coop
         val scopeType = MezzeType.TypeApplication("Scope", listOf(MezzeType.VarType(TypeVar("a"))))
 
-        // __native_coop_scoped: {f: {scope: Scope 'a} -> 'a, cont: Continuation} -> 'a
+        // __native_coop_scoped: {f: {sc: Scope 'a} -> 'a, cont: Continuation} -> 'a
         context["__native_coop_scoped"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "f" to MezzeType.FunctionType(
-                    MezzeType.RecordType(mapOf("scope" to scopeType)),
+                    MezzeType.RecordType(mapOf("sc" to scopeType)),
                     MezzeType.VarType(TypeVar("a"))
                 ),
                 "cont" to contType

@@ -6,8 +6,9 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 /**
  * Native Nat (Natural number) operations - ULTRA PERFORMANT.
  *
- * Nat in V2 is represented as Long with non-negative values.
- * All operations return Option when result could be invalid.
+ * Nat in V2 is represented as primitive long for optimal JIT performance.
+ * The type distinction (Nat vs Int) is known statically from the typechecker.
+ * Test helper handles the conversion to V1 MezzeNat based on expected types.
  */
 public final class NatNatives {
 
@@ -62,7 +63,7 @@ public final class NatNatives {
     }
 
     /**
-     * Integer power
+     * Integer power - fully JIT compilable
      */
     public static long pow(long base, long exp) {
         if (exp < 0) {

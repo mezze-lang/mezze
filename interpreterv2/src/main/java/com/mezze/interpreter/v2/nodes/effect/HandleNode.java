@@ -1,13 +1,20 @@
 package com.mezze.interpreter.v2.nodes.effect;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.runtime.ImplSignature;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
+import com.mezze.interpreter.v2.values.MezzeRecord;
+import com.mezze.interpreter.v2.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.FrameSlotKind;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
+
+import java.util.Arrays;
 
 /**
  * Node that looks up a handler by content hash.
@@ -84,6 +91,47 @@ public final class HandleNode extends MezzeNode {
     @Child
     private MezzeNode bodyNode;
 
+    // SCOPED EFFECTS: Slot for storing the scope record in the frame
+    // Operations access scope via this slot
+    @CompilationFinal
+    private final int scopeSlot;
+
+    // SCOPED EFFECTS: Node to execute initialize_scope (may be null)
+    @Child
+    private MezzeNode initializeScopeNode;
+
+    // SCOPED EFFECTS: Node to execute finalize_scope (may be null)
+    @Child
+    private MezzeNode finalizeScopeNode;
+
+    // SCOPED EFFECTS: Direct call node for initialize_scope (for parameterized impls)
+    @Child
+    private DirectCallNode initializeScopeCallNode;
+
+    // SCOPED EFFECTS: Direct call node for finalize_scope (for parameterized impls)
+    @Child
+    private DirectCallNode finalizeScopeCallNode;
+
+    // SCOPED EFFECTS: Flags for compile-time optimization
+    @CompilationFinal
+    private final boolean hasInitializeScope;
+
+    @CompilationFinal
+    private final boolean hasFinalizeScope;
+
+    // Cached slot validity - set on first execution, then constant for JIT
+    @CompilationFinal
+    private boolean slotValidityChecked = false;
+
+    @CompilationFinal
+    private boolean slotIsValid = false;
+
+    @CompilationFinal
+    private boolean scopeSlotIsValid = false;
+
+    /**
+     * Standard constructor for non-scoped effects (backward compatible).
+     */
     public HandleNode(
             int handlerSlot,
             String[] effectNames,
@@ -91,11 +139,35 @@ public final class HandleNode extends MezzeNode {
             MezzeNode handlerNode,
             MezzeNode bodyNode
     ) {
+        this(handlerSlot, effectNames, handlerName, handlerNode, bodyNode,
+             -1, null, null, false, false);
+    }
+
+    /**
+     * Full constructor with scoped effect support.
+     */
+    public HandleNode(
+            int handlerSlot,
+            String[] effectNames,
+            String handlerName,
+            MezzeNode handlerNode,
+            MezzeNode bodyNode,
+            int scopeSlot,
+            MezzeNode initializeScopeNode,
+            MezzeNode finalizeScopeNode,
+            boolean hasInitializeScope,
+            boolean hasFinalizeScope
+    ) {
         this.handlerSlot = handlerSlot;
         this.effectNames = effectNames != null ? effectNames : new String[0];
         this.handlerName = handlerName;
         this.handlerNode = handlerNode;
         this.bodyNode = bodyNode;
+        this.scopeSlot = scopeSlot;
+        this.initializeScopeNode = initializeScopeNode;
+        this.finalizeScopeNode = finalizeScopeNode;
+        this.hasInitializeScope = hasInitializeScope;
+        this.hasFinalizeScope = hasFinalizeScope;
     }
 
     /**
@@ -105,7 +177,8 @@ public final class HandleNode extends MezzeNode {
     public static HandleNode create(int handlerSlot, String contentHash, MezzeNode bodyChild) {
         // Create a handler lookup node
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
-        return new HandleNode(handlerSlot >= 0 ? handlerSlot : 0, null, null, handlerNode, bodyChild);
+        // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
+        return new HandleNode(handlerSlot, null, null, handlerNode, bodyChild);
     }
 
     /**
@@ -113,7 +186,59 @@ public final class HandleNode extends MezzeNode {
      */
     public static HandleNode create(int handlerSlot, String contentHash, String[] effectNames, String handlerName, MezzeNode bodyChild) {
         MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
-        return new HandleNode(handlerSlot >= 0 ? handlerSlot : 0, effectNames, handlerName, handlerNode, bodyChild);
+        // Pass handlerSlot as-is (including -1) - execute() will skip invalid slots
+        return new HandleNode(handlerSlot, effectNames, handlerName, handlerNode, bodyChild);
+    }
+
+    /**
+     * Create a handle node for scoped effects.
+     *
+     * @param handlerSlot Frame slot for storing the handler
+     * @param contentHash Content hash for handler lookup
+     * @param effectNames Effect names this handler handles
+     * @param handlerName The handler/performer name
+     * @param bodyChild The body to execute
+     * @param scopeSlot Frame slot for storing the scope record
+     * @param initializeScopeNode Node to execute initialize_scope
+     * @param finalizeScopeNode Node to execute finalize_scope
+     */
+    public static HandleNode createScoped(
+            int handlerSlot,
+            String contentHash,
+            String[] effectNames,
+            String handlerName,
+            MezzeNode bodyChild,
+            int scopeSlot,
+            MezzeNode initializeScopeNode,
+            MezzeNode finalizeScopeNode
+    ) {
+        MezzeNode handlerNode = new HandlerLookupNode(handlerSlot, contentHash);
+        return new HandleNode(
+                handlerSlot,
+                effectNames,
+                handlerName,
+                handlerNode,
+                bodyChild,
+                scopeSlot,
+                initializeScopeNode,
+                finalizeScopeNode,
+                initializeScopeNode != null,
+                finalizeScopeNode != null
+        );
+    }
+
+    /**
+     * Check if this handle node uses scoped effects.
+     */
+    public boolean isScopedEffect() {
+        return hasInitializeScope;
+    }
+
+    /**
+     * Get the scope slot (for operations to access).
+     */
+    public int getScopeSlot() {
+        return scopeSlot;
     }
 
     @Override
@@ -121,33 +246,143 @@ public final class HandleNode extends MezzeNode {
         // Evaluate the handler (may be parameterized impl call)
         Object handler = handlerNode.execute(frame);
 
+        // Cache slot validity on first execution - becomes constant for JIT
+        if (!slotValidityChecked) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            int frameSlotCount = frame.getFrameDescriptor().getNumberOfSlots();
+            slotIsValid = handlerSlot >= 0 && handlerSlot < frameSlotCount;
+            scopeSlotIsValid = scopeSlot >= 0 && scopeSlot < frameSlotCount;
+            slotValidityChecked = true;
+        }
+
         // Save previous handler value (for nested handlers)
         Object previousHandler = null;
         boolean hadPrevious = false;
 
-        if (frame.isObject(handlerSlot)) {
+        // Fast path: slot validity is now a compile-time constant
+        if (slotIsValid && frame.isObject(handlerSlot)) {
             previousHandler = frame.getObject(handlerSlot);
             hadPrevious = true;
         }
 
-        // Install the new handler in the frame slot
-        frame.setObject(handlerSlot, handler);
+        // Only set frame slot if valid
+        if (slotIsValid) {
+            frame.setObject(handlerSlot, handler);
+        }
 
         // Also register in context so DynamicEffectCallNode can find it
         registerHandlerInContext(handler);
 
+        // SCOPED EFFECTS: Execute initialize_scope if present
+        Object scope = null;
+        if (hasInitializeScope && initializeScopeNode != null) {
+            scope = initializeScopeNode.execute(frame);
+
+            // Store scope in frame slot so operations can access it
+            if (scopeSlotIsValid) {
+                frame.setObject(scopeSlot, scope);
+            }
+
+            // Also register scope in context under the name "scope"
+            registerScopeInContext(scope);
+        }
+
+        Throwable bodyException = null;
+        Object result = null;
+
         try {
-            // Execute the body with the handler installed
-            return bodyNode.execute(frame);
+            // Execute the body with the handler (and scope if scoped effect) installed
+            result = bodyNode.execute(frame);
+        } catch (Throwable t) {
+            // Capture exception for later - finalize_scope must still run
+            bodyException = t;
         } finally {
-            // Restore previous handler (or clear if none)
-            if (hadPrevious) {
-                frame.setObject(handlerSlot, previousHandler);
-            } else {
-                // Clear the slot to indicate no handler
-                frame.setObject(handlerSlot, null);
+            // SCOPED EFFECTS: Execute finalize_scope in finally block
+            // This ensures cleanup even if body throws
+            Throwable finalizeException = null;
+            if (hasFinalizeScope && finalizeScopeNode != null) {
+                try {
+                    finalizeScopeNode.execute(frame);
+                } catch (Throwable t) {
+                    finalizeException = t;
+                }
+            }
+
+            // Clear scope from frame
+            if (scopeSlotIsValid) {
+                frame.setObject(scopeSlot, null);
+            }
+
+            // Restore previous handler (or clear if none) - only if slot is valid
+            if (slotIsValid) {
+                if (hadPrevious) {
+                    frame.setObject(handlerSlot, previousHandler);
+                } else {
+                    // Clear the slot to indicate no handler
+                    frame.setObject(handlerSlot, null);
+                }
+            }
+
+            // Handle exceptions: body exception takes priority, but log finalize exception
+            // This matches try-with-resources semantics in Java
+            if (bodyException != null) {
+                if (finalizeException != null && finalizeException != bodyException) {
+                    // Add finalize exception as suppressed
+                    bodyException.addSuppressed(finalizeException);
+                }
+                // Re-throw body exception
+                if (bodyException instanceof RuntimeException) {
+                    throw (RuntimeException) bodyException;
+                } else if (bodyException instanceof Error) {
+                    throw (Error) bodyException;
+                } else {
+                    throw new RuntimeException(bodyException);
+                }
+            } else if (finalizeException != null) {
+                // Only finalize failed - throw it
+                if (finalizeException instanceof RuntimeException) {
+                    throw (RuntimeException) finalizeException;
+                } else if (finalizeException instanceof Error) {
+                    throw (Error) finalizeException;
+                } else {
+                    throw new RuntimeException(finalizeException);
+                }
             }
         }
+
+        return processResult(result);
+    }
+
+    /**
+     * Process the result:
+     * - For MezzeContinuationSuspended with Exception/Return effects, extract suspended value
+     * - For Exception effect, wrap successful results in Ok variant
+     */
+    @TruffleBoundary
+    private Object processResult(Object result) {
+        // Handle suspended continuations (for early return/exception)
+        if (result instanceof MezzeContinuationSuspended suspended) {
+            // Exception and Return effects use suspend_with to return early
+            if (hasEffect("Exception") || hasEffect("Return")) {
+                return suspended.getSuspendedValue();
+            }
+            return result;
+        }
+
+        // Wrap successful results in Ok for Exception effect
+        if (hasEffect("Exception")) {
+            return MezzeVariant.ok(result);
+        }
+
+        return result;
+    }
+
+    private boolean hasEffect(String effectName) {
+        if (effectNames == null) return false;
+        for (String name : effectNames) {
+            if (effectName.equals(name)) return true;
+        }
+        return false;
     }
 
     @TruffleBoundary
@@ -172,5 +407,25 @@ public final class HandleNode extends MezzeNode {
         for (String effectName : effectNames) {
             context.defineLocal(effectName, handler);
         }
+    }
+
+    /**
+     * Register scope in context so operations can access it.
+     * The scope is registered under the name "scope".
+     */
+    @TruffleBoundary
+    private void registerScopeInContext(Object scope) {
+        if (scope == null) return;
+
+        MezzeContext context;
+        try {
+            context = MezzeContext.get(this);
+        } catch (AssertionError e) {
+            // No polyglot context available (e.g., in isolated unit tests)
+            return;
+        }
+
+        // Register scope under the reserved name "scope"
+        context.defineLocal("scope", scope);
     }
 }

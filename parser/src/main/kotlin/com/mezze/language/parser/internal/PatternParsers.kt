@@ -40,12 +40,13 @@ internal val MezzeParser.variablePatternForLet: Parser<Pattern>
         when (ident) {
             is ParseResult.Success -> {
                 val name = ident.value.text
-                // Disallow __native prefix - reserved for Mezze internals
-                if (name.startsWith("__native")) {
+                // Check for reserved names
+                val reservedError = checkReservedName(name)
+                if (reservedError != null) {
                     // Use remaining position so this error "wins" over earlier failures,
                     // but report the token's line/column for better error pointing
                     ParseResult.Failure(
-                        "Names starting with '__native' are reserved for Mezze internals",
+                        reservedError,
                         ident.remaining.getSourcePosition(),
                         ident.value.line,
                         ident.value.column
@@ -209,15 +210,18 @@ internal val MezzeParser.standaloneRecordPattern: Parser<Pattern>
             is ParseResult.Success -> {
                 val stream1 = skipNewlines(lbrace.remaining)
 
-                // Check if first token after { is a __native identifier - report error early
+                // Check if first token after { is a reserved identifier - report error early
                 val firstToken = stream1.current()
-                if (firstToken?.type == TokenType.IDENTIFIER && firstToken.text.startsWith("__native")) {
-                    return@parser ParseResult.Failure(
-                        "Names starting with '__native' are reserved for Mezze internals",
-                        stream1.getSourcePosition(),
-                        stream1.getSourceLine(),
-                        stream1.getSourceColumn()
-                    )
+                if (firstToken?.type == TokenType.IDENTIFIER) {
+                    val reservedError = checkReservedName(firstToken.text)
+                    if (reservedError != null) {
+                        return@parser ParseResult.Failure(
+                            reservedError,
+                            stream1.getSourcePosition(),
+                            stream1.getSourceLine(),
+                            stream1.getSourceColumn()
+                        )
+                    }
                 }
 
                 val entries = sepEndByWithNewlines(
@@ -359,12 +363,13 @@ internal val MezzeParser.variablePattern: Parser<Pattern>
                     stream.failure("'${ident.value.text} {...}' is a constructor pattern, not a variable pattern.$suggestion")
                 } else {
                     val name = ident.value.text
-                    // Disallow __native prefix - reserved for Mezze internals
-                    if (name.startsWith("__native")) {
+                    // Check for reserved names
+                    val reservedError = checkReservedName(name)
+                    if (reservedError != null) {
                         // Use remaining position so this error "wins" over earlier failures,
                         // but report the token's line/column for better error pointing
                         ParseResult.Failure(
-                            "Names starting with '__native' are reserved for Mezze internals",
+                            reservedError,
                             ident.remaining.getSourcePosition(),
                             ident.value.line,
                             ident.value.column
@@ -421,12 +426,13 @@ internal val MezzeParser.constructorPattern: Parser<Pattern>
                             when (varPat) {
                                 is ParseResult.Success -> {
                                     val name = varPat.value.text
-                                    // Disallow __native prefix - reserved for Mezze internals
-                                    if (name.startsWith("__native")) {
+                                    // Check for reserved names
+                                    val reservedError = checkReservedName(name)
+                                    if (reservedError != null) {
                                         // Use remaining position so this error "wins" over earlier failures,
                                         // but report the token's line/column for better error pointing
                                         ParseResult.Failure(
-                                            "Names starting with '__native' are reserved for Mezze internals",
+                                            reservedError,
                                             varPat.remaining.getSourcePosition(),
                                             varPat.value.line,
                                             varPat.value.column
@@ -520,12 +526,13 @@ internal val MezzeParser.recordPatternEntryParser: Parser<RecordPatternEntry>
         when (ident) {
             is ParseResult.Success -> {
                 val fieldName = ident.value.text
-                // Disallow __native prefix - reserved for Mezze internals
-                if (fieldName.startsWith("__native")) {
+                // Check for reserved names
+                val reservedError = checkReservedName(fieldName)
+                if (reservedError != null) {
                     // Use remaining position so this error "wins" over earlier failures,
                     // but report the token's line/column for better error pointing
                     ParseResult.Failure(
-                        "Names starting with '__native' are reserved for Mezze internals",
+                        reservedError,
                         ident.remaining.getSourcePosition(),
                         ident.value.line,
                         ident.value.column

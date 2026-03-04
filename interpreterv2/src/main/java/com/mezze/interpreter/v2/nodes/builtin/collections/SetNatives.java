@@ -221,7 +221,7 @@ public final class SetNatives {
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"x"}, new Object[]{arg}
+            new String[]{"val"}, new Object[]{arg}
         );
         return args;
     }

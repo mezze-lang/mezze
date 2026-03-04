@@ -814,7 +814,9 @@ public final class AsyncNatives {
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
 
                 for (int i = batchStart; i < batchEnd; i++) {
-                    callArgs[closureLen] = xs[i];
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{xs[i]});
+                    callArgs[closureLen] = arg;
                     results[i] = callNode.call(callTarget, callArgs);
                 }
             });
@@ -839,7 +841,9 @@ public final class AsyncNatives {
         System.arraycopy(closure, 0, callArgs, 0, closure.length);
 
         for (int i = 0; i < xs.length; i++) {
-            callArgs[closure.length] = xs[i];
+            // Wrap element in record - callbacks expect {x} -> ...
+            MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{xs[i]});
+            callArgs[closure.length] = arg;
             results[i] = callNode.call(callTarget, callArgs);
         }
 
@@ -898,7 +902,9 @@ public final class AsyncNatives {
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
 
                 for (int i = batchStart; i < batchEnd; i++) {
-                    callArgs[closureLen] = xs[i];
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{xs[i]});
+                    callArgs[closureLen] = arg;
                     callNode.call(callTarget, callArgs);
                 }
             });
@@ -921,7 +927,9 @@ public final class AsyncNatives {
         System.arraycopy(closure, 0, callArgs, 0, closure.length);
 
         for (Object x : xs) {
-            callArgs[closure.length] = x;
+            // Wrap element in record - callbacks expect {x} -> ...
+            MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            callArgs[closure.length] = arg;
             callNode.call(callTarget, callArgs);
         }
         return MezzeUnit.INSTANCE;
@@ -982,7 +990,9 @@ public final class AsyncNatives {
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
 
                 for (int i = batchStart; i < batchEnd; i++) {
-                    callArgs[closureLen] = xs[i];
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{xs[i]});
+                    callArgs[closureLen] = arg;
                     Object result = callNode.call(callTarget, callArgs);
                     passed[i] = result instanceof Boolean && (Boolean) result;
                 }
@@ -1014,7 +1024,9 @@ public final class AsyncNatives {
 
         List<Object> results = new ArrayList<>();
         for (Object x : xs) {
-            callArgs[closure.length] = x;
+            // Wrap element in record - callbacks expect {x} -> ...
+            MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            callArgs[closure.length] = arg;
             Object result = callNode.call(callTarget, callArgs);
             if (result instanceof Boolean && (Boolean) result) {
                 results.add(x);
@@ -1081,7 +1093,7 @@ public final class AsyncNatives {
 
         try {
             MezzeRecord scopeArg = MezzeRecord.fromFields(
-                new String[]{"scope"},
+                new String[]{"sc"},
                 new Object[]{scope}
             );
             Object result = callNode.call(f.getCallTarget(), appendArg(f.getClosureValues(), scopeArg));
@@ -1102,7 +1114,7 @@ public final class AsyncNatives {
 
     @TruffleBoundary
     public static MezzePromise loomScopeSpawn(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
-        MezzeScope scope = getScope(args, "scope");
+        MezzeScope scope = getScope(args, "sc");
         MezzeFunction f = getFunction(args, "f");
 
         if (scope.isCancelled()) {
@@ -1142,18 +1154,18 @@ public final class AsyncNatives {
 
     @TruffleBoundary
     public static MezzeUnit loomScopeCancelAll(MezzeRecord args) {
-        getScope(args, "scope").cancelAll();
+        getScope(args, "sc").cancelAll();
         return MezzeUnit.INSTANCE;
     }
 
     @TruffleBoundary
     public static boolean loomScopeIsCancelled(MezzeRecord args) {
-        return getScope(args, "scope").isCancelled();
+        return getScope(args, "sc").isCancelled();
     }
 
     @TruffleBoundary
     public static MezzeRecord loomScopeGetToken(MezzeRecord args) {
-        MezzeScope scope = getScope(args, "scope");
+        MezzeScope scope = getScope(args, "sc");
         return MezzeRecord.fromFields(
             new String[]{"_scope_ref"},
             new Object[]{scope}
@@ -1710,7 +1722,7 @@ public final class AsyncNatives {
         MezzeScope scope = new MezzeScope();
 
         MezzeRecord scopeArg = MezzeRecord.fromFields(
-            new String[]{"scope"},
+            new String[]{"sc"},
             new Object[]{scope}
         );
 

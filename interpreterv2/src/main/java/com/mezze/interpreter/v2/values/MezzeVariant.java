@@ -253,6 +253,58 @@ public final class MezzeVariant implements TruffleObject {
         return singlePayload(TagRegistry.getGlobal(), tag, wrapped);
     }
 
+    // ==================== Ordering Variants ====================
+
+    // Cached singletons for Ordering variants (no payload)
+    private static volatile MezzeVariant CACHED_LT = null;
+    private static volatile MezzeVariant CACHED_GT = null;
+    private static volatile MezzeVariant CACHED_EQ = null;
+
+    /**
+     * Create an LT (less than) ordering variant.
+     * OPTIMIZED: Returns cached singleton.
+     */
+    public static MezzeVariant lt() {
+        MezzeVariant cached = CACHED_LT;
+        if (cached != null) {
+            return cached;
+        }
+        int tag = TagRegistry.getGlobal().getOrCreateTag("LT");
+        MezzeVariant variant = noPayload(TagRegistry.getGlobal(), tag);
+        CACHED_LT = variant;
+        return variant;
+    }
+
+    /**
+     * Create a GT (greater than) ordering variant.
+     * OPTIMIZED: Returns cached singleton.
+     */
+    public static MezzeVariant gt() {
+        MezzeVariant cached = CACHED_GT;
+        if (cached != null) {
+            return cached;
+        }
+        int tag = TagRegistry.getGlobal().getOrCreateTag("GT");
+        MezzeVariant variant = noPayload(TagRegistry.getGlobal(), tag);
+        CACHED_GT = variant;
+        return variant;
+    }
+
+    /**
+     * Create an EQ (equal) ordering variant.
+     * OPTIMIZED: Returns cached singleton.
+     */
+    public static MezzeVariant eq() {
+        MezzeVariant cached = CACHED_EQ;
+        if (cached != null) {
+            return cached;
+        }
+        int tag = TagRegistry.getGlobal().getOrCreateTag("EQ");
+        MezzeVariant variant = noPayload(TagRegistry.getGlobal(), tag);
+        CACHED_EQ = variant;
+        return variant;
+    }
+
     public TagRegistry getRegistry() {
         return registry;
     }

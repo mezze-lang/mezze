@@ -41,14 +41,14 @@ public final class ArrayListNatives {
         return MezzeVariant.some(arr[idx]);
     }
 
-    public static Object[] set(Object[] arr, long index, Object value) {
+    public static MezzeVariant set(Object[] arr, long index, Object value) {
         int idx = (int) index;
         if (idx < 0 || idx >= arr.length) {
-            return arr; // Return unchanged if out of bounds
+            return MezzeVariant.none();
         }
         Object[] result = arr.clone();
         result[idx] = value;
-        return result;
+        return MezzeVariant.some(result);
     }
 
     public static Object[] add(Object[] arr, Object element) {
@@ -58,15 +58,15 @@ public final class ArrayListNatives {
     }
 
     @TruffleBoundary
-    public static Object[] remove(Object[] arr, long index) {
+    public static MezzeVariant remove(Object[] arr, long index) {
         int idx = (int) index;
         if (idx < 0 || idx >= arr.length) {
-            return arr;
+            return MezzeVariant.none();
         }
         Object[] result = new Object[arr.length - 1];
         System.arraycopy(arr, 0, result, 0, idx);
         System.arraycopy(arr, idx + 1, result, idx, arr.length - idx - 1);
-        return result;
+        return MezzeVariant.some(result);
     }
 
     @TruffleBoundary
@@ -276,13 +276,17 @@ public final class ArrayListNatives {
         Object[] seconds = new Object[arr.length];
         for (int i = 0; i < arr.length; i++) {
             MezzeRecord pair = (MezzeRecord) arr[i];
-            int firstIdx = pair.getFieldIndex("first");
-            int secondIdx = pair.getFieldIndex("second");
+            // Try both naming conventions: fst/snd and first/second
+            int firstIdx = pair.getFieldIndex("fst");
+            if (firstIdx < 0) firstIdx = pair.getFieldIndex("first");
+            int secondIdx = pair.getFieldIndex("snd");
+            if (secondIdx < 0) secondIdx = pair.getFieldIndex("second");
             firsts[i] = pair.getField(firstIdx);
             seconds[i] = pair.getField(secondIdx);
         }
+        // Return {fsts, snds} (plural) per stdlib convention
         return MezzeRecord.fromFields(
-            new String[]{"first", "second"},
+            new String[]{"fsts", "snds"},
             new Object[]{firsts, seconds}
         );
     }
@@ -308,7 +312,7 @@ public final class ArrayListNatives {
         }
 
         return MezzeRecord.fromFields(
-            new String[]{"matching", "non_matching"},
+            new String[]{"matching", "not_matching"},
             new Object[]{
                 Arrays.copyOf(matching, matchCount),
                 Arrays.copyOf(nonMatching, nonMatchCount)
@@ -338,37 +342,21 @@ public final class ArrayListNatives {
     }
 
     @TruffleBoundary
-    public static Object[] sortBy(Object[] arr, MezzeFunction keyFn,
+    public static Object[] sortBy(Object[] arr, MezzeFunction cmpFn,
                                                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        // Extract keys first
-        Object[][] pairs = new Object[arr.length][2];
-        for (int i = 0; i < arr.length; i++) {
-            pairs[i][0] = arr[i];
-            pairs[i][1] = callNode.call(keyFn.getCallTarget(),
-                prepareArgs(keyFn, arr[i]));
-        }
+        // Copy array to avoid mutating original
+        Object[] result = Arrays.copyOf(arr, arr.length);
 
-        // Sort by keys
-        Arrays.sort(pairs, (a, b) -> {
-            Object keyA = a[1];
-            Object keyB = b[1];
-            if (keyA instanceof Long && keyB instanceof Long) {
-                return Long.compare((Long) keyA, (Long) keyB);
-            }
-            if (keyA instanceof Double && keyB instanceof Double) {
-                return Double.compare((Double) keyA, (Double) keyB);
-            }
-            if (keyA instanceof String && keyB instanceof String) {
-                return ((String) keyA).compareTo((String) keyB);
+        // Sort using comparator function that takes {a, b} record
+        Arrays.sort(result, (elemA, elemB) -> {
+            Object cmpResult = callNode.call(cmpFn.getCallTarget(),
+                prepareArgsComparator(cmpFn, elemA, elemB));
+            if (cmpResult instanceof Long) {
+                return ((Long) cmpResult).intValue();
             }
             return 0;
         });
 
-        // Extract sorted values
-        Object[] result = new Object[arr.length];
-        for (int i = 0; i < arr.length; i++) {
-            result[i] = pairs[i][0];
-        }
         return result;
     }
 
@@ -431,6 +419,16 @@ public final class ArrayListNatives {
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
             new String[]{"acc", "x"}, new Object[]{arg1, arg2}
+        );
+        return args;
+    }
+
+    private static Object[] prepareArgsComparator(MezzeFunction fn, Object arg1, Object arg2) {
+        Object[] closureValues = fn.getClosureValues();
+        Object[] args = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+        args[closureValues.length] = MezzeRecord.fromFields(
+            new String[]{"a", "b"}, new Object[]{arg1, arg2}
         );
         return args;
     }

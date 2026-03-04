@@ -13,6 +13,8 @@ import com.oracle.truffle.api.profiles.InlinedConditionProfile;
  * Optimized builtin binary operations that extract {l, r} from record
  * and perform the operation WITHOUT @TruffleBoundary.
  *
+ * Nat is represented as primitive long for optimal JIT performance.
+ *
  * These nodes take a record argument node and extract l/r fields for typed operations.
  * Field access is optimized using the record's typed field arrays.
  */
@@ -28,6 +30,59 @@ public abstract class BuiltinBinaryNodes {
     // Field indices for {l, r} record - always 0 and 1
     private static final int L_INDEX = 0;
     private static final int R_INDEX = 1;
+
+    // Fraction field names
+    private static final String NUMERATOR = "numerator";
+    private static final String DENOMINATOR = "denominator";
+    private static final String[] FRAC_FIELDS = new String[]{NUMERATOR, DENOMINATOR};
+
+    /**
+     * Check if a value is a fraction record (has numerator and denominator fields).
+     */
+    protected static boolean isFraction(Object value) {
+        if (!(value instanceof MezzeRecord)) return false;
+        MezzeRecord record = (MezzeRecord) value;
+        return record.getFieldIndex(NUMERATOR) >= 0 && record.getFieldIndex(DENOMINATOR) >= 0;
+    }
+
+    /**
+     * Get numerator from a fraction record.
+     */
+    protected static long getNumerator(MezzeRecord frac) {
+        return (Long) frac.getField(NUMERATOR);
+    }
+
+    /**
+     * Get denominator from a fraction record.
+     */
+    protected static long getDenominator(MezzeRecord frac) {
+        return (Long) frac.getField(DENOMINATOR);
+    }
+
+    /**
+     * Create a reduced fraction record.
+     */
+    protected static MezzeRecord makeFraction(long numerator, long denominator) {
+        long g = gcd(Math.abs(numerator), Math.abs(denominator));
+        if (g > 1) {
+            numerator /= g;
+            denominator /= g;
+        }
+        if (denominator < 0) {
+            numerator = -numerator;
+            denominator = -denominator;
+        }
+        return MezzeRecord.fromFields(FRAC_FIELDS, new Object[]{numerator, denominator});
+    }
+
+    private static long gcd(long a, long b) {
+        while (b != 0) {
+            long t = b;
+            b = a % b;
+            a = t;
+        }
+        return a;
+    }
 
     /**
      * Builtin add: {l, r} -> l + r
@@ -57,14 +112,24 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Double && r instanceof Double) {
                 return (Double) l + (Double) r;
             }
-            if (l instanceof Long && r instanceof Double) {
-                return ((Long) l).doubleValue() + (Double) r;
-            }
             if (l instanceof Double && r instanceof Long) {
                 return (Double) l + ((Long) r).doubleValue();
             }
+            if (l instanceof Long && r instanceof Double) {
+                return ((Long) l).doubleValue() + (Double) r;
+            }
             if (l instanceof String || r instanceof String) {
                 return String.valueOf(l) + String.valueOf(r);
+            }
+            // Fraction addition: (a/b) + (c/d) = (a*d + c*b) / (b*d)
+            if (isFraction(l) && isFraction(r)) {
+                MezzeRecord lFrac = (MezzeRecord) l;
+                MezzeRecord rFrac = (MezzeRecord) r;
+                long ln = getNumerator(lFrac);
+                long ld = getDenominator(lFrac);
+                long rn = getNumerator(rFrac);
+                long rd = getDenominator(rFrac);
+                return makeFraction(ln * rd + rn * ld, ld * rd);
             }
             throw new RuntimeException("Cannot add " + l + " and " + r);
         }
@@ -110,11 +175,21 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Double && r instanceof Double) {
                 return (Double) l - (Double) r;
             }
+            if (l instanceof Double && r instanceof Long) {
+                return (Double) l - ((Long) r).doubleValue();
+            }
             if (l instanceof Long && r instanceof Double) {
                 return ((Long) l).doubleValue() - (Double) r;
             }
-            if (l instanceof Double && r instanceof Long) {
-                return (Double) l - ((Long) r).doubleValue();
+            // Fraction subtraction: (a/b) - (c/d) = (a*d - c*b) / (b*d)
+            if (isFraction(l) && isFraction(r)) {
+                MezzeRecord lFrac = (MezzeRecord) l;
+                MezzeRecord rFrac = (MezzeRecord) r;
+                long ln = getNumerator(lFrac);
+                long ld = getDenominator(lFrac);
+                long rn = getNumerator(rFrac);
+                long rd = getDenominator(rFrac);
+                return makeFraction(ln * rd - rn * ld, ld * rd);
             }
             throw new RuntimeException("Cannot subtract " + l + " and " + r);
         }
@@ -160,11 +235,21 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Double && r instanceof Double) {
                 return (Double) l * (Double) r;
             }
+            if (l instanceof Double && r instanceof Long) {
+                return (Double) l * ((Long) r).doubleValue();
+            }
             if (l instanceof Long && r instanceof Double) {
                 return ((Long) l).doubleValue() * (Double) r;
             }
-            if (l instanceof Double && r instanceof Long) {
-                return (Double) l * ((Long) r).doubleValue();
+            // Fraction multiplication: (a/b) * (c/d) = (a*c) / (b*d)
+            if (isFraction(l) && isFraction(r)) {
+                MezzeRecord lFrac = (MezzeRecord) l;
+                MezzeRecord rFrac = (MezzeRecord) r;
+                long ln = getNumerator(lFrac);
+                long ld = getDenominator(lFrac);
+                long rn = getNumerator(rFrac);
+                long rd = getDenominator(rFrac);
+                return makeFraction(ln * rn, ld * rd);
             }
             throw new RuntimeException("Cannot multiply " + l + " and " + r);
         }
@@ -210,11 +295,21 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Double && r instanceof Double) {
                 return (Double) l / (Double) r;
             }
+            if (l instanceof Double && r instanceof Long) {
+                return (Double) l / ((Long) r).doubleValue();
+            }
             if (l instanceof Long && r instanceof Double) {
                 return ((Long) l).doubleValue() / (Double) r;
             }
-            if (l instanceof Double && r instanceof Long) {
-                return (Double) l / ((Long) r).doubleValue();
+            // Fraction division: (a/b) / (c/d) = (a*d) / (b*c)
+            if (isFraction(l) && isFraction(r)) {
+                MezzeRecord lFrac = (MezzeRecord) l;
+                MezzeRecord rFrac = (MezzeRecord) r;
+                long ln = getNumerator(lFrac);
+                long ld = getDenominator(lFrac);
+                long rn = getNumerator(rFrac);
+                long rd = getDenominator(rFrac);
+                return makeFraction(ln * rd, ld * rn);
             }
             throw new RuntimeException("Cannot divide " + l + " and " + r);
         }
@@ -260,11 +355,11 @@ public abstract class BuiltinBinaryNodes {
             if (l instanceof Double && r instanceof Double) {
                 return (Double) l % (Double) r;
             }
-            if (l instanceof Long && r instanceof Double) {
-                return ((Long) l).doubleValue() % (Double) r;
-            }
             if (l instanceof Double && r instanceof Long) {
                 return (Double) l % ((Long) r).doubleValue();
+            }
+            if (l instanceof Long && r instanceof Double) {
+                return ((Long) l).doubleValue() % (Double) r;
             }
             throw new RuntimeException("Cannot modulo " + l + " and " + r);
         }
@@ -303,6 +398,20 @@ public abstract class BuiltinBinaryNodes {
         protected boolean eqGeneric(MezzeRecord args) {
             Object l = args.getObjectField(L_INDEX);
             Object r = args.getObjectField(R_INDEX);
+            if (l instanceof Long && r instanceof Long) {
+                return (Long) l == (long) (Long) r;
+            }
+            // Special case for fractions: use mathematical equality
+            if (isFraction(l) && isFraction(r)) {
+                MezzeRecord lFrac = (MezzeRecord) l;
+                MezzeRecord rFrac = (MezzeRecord) r;
+                long ln = getNumerator(lFrac);
+                long ld = getDenominator(lFrac);
+                long rn = getNumerator(rFrac);
+                long rd = getDenominator(rFrac);
+                // a/b == c/d iff a*d == b*c
+                return ln * rd == rn * ld;
+            }
             return java.util.Objects.equals(l, r);
         }
 
@@ -340,6 +449,20 @@ public abstract class BuiltinBinaryNodes {
         protected boolean neqGeneric(MezzeRecord args) {
             Object l = args.getObjectField(L_INDEX);
             Object r = args.getObjectField(R_INDEX);
+            if (l instanceof Long && r instanceof Long) {
+                return (Long) l != (long) (Long) r;
+            }
+            // Special case for fractions: use mathematical equality
+            if (isFraction(l) && isFraction(r)) {
+                MezzeRecord lFrac = (MezzeRecord) l;
+                MezzeRecord rFrac = (MezzeRecord) r;
+                long ln = getNumerator(lFrac);
+                long ld = getDenominator(lFrac);
+                long rn = getNumerator(rFrac);
+                long rd = getDenominator(rFrac);
+                // a/b != c/d iff a*d != b*c
+                return ln * rd != rn * ld;
+            }
             return !java.util.Objects.equals(l, r);
         }
 
@@ -377,21 +500,13 @@ public abstract class BuiltinBinaryNodes {
         protected boolean ltGeneric(MezzeRecord args) {
             Object l = args.getObjectField(L_INDEX);
             Object r = args.getObjectField(R_INDEX);
-            return compareGeneric(l, r) < 0;
-        }
-
-        @SuppressWarnings("unchecked")
-        private static int compareGeneric(Object l, Object r) {
             if (l instanceof Long && r instanceof Long) {
-                return Long.compare((Long) l, (Long) r);
+                return (Long) l < (Long) r;
             }
             if (l instanceof Double && r instanceof Double) {
-                return Double.compare((Double) l, (Double) r);
+                return (Double) l < (Double) r;
             }
-            if (l instanceof Comparable && r != null) {
-                return ((Comparable<Object>) l).compareTo(r);
-            }
-            throw new RuntimeException("Cannot compare " + l + " and " + r);
+            throw new RuntimeException("Cannot compare " + l + " < " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -428,21 +543,13 @@ public abstract class BuiltinBinaryNodes {
         protected boolean gtGeneric(MezzeRecord args) {
             Object l = args.getObjectField(L_INDEX);
             Object r = args.getObjectField(R_INDEX);
-            return compareGeneric(l, r) > 0;
-        }
-
-        @SuppressWarnings("unchecked")
-        private static int compareGeneric(Object l, Object r) {
             if (l instanceof Long && r instanceof Long) {
-                return Long.compare((Long) l, (Long) r);
+                return (Long) l > (Long) r;
             }
             if (l instanceof Double && r instanceof Double) {
-                return Double.compare((Double) l, (Double) r);
+                return (Double) l > (Double) r;
             }
-            if (l instanceof Comparable && r != null) {
-                return ((Comparable<Object>) l).compareTo(r);
-            }
-            throw new RuntimeException("Cannot compare " + l + " and " + r);
+            throw new RuntimeException("Cannot compare " + l + " > " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -479,21 +586,13 @@ public abstract class BuiltinBinaryNodes {
         protected boolean leGeneric(MezzeRecord args) {
             Object l = args.getObjectField(L_INDEX);
             Object r = args.getObjectField(R_INDEX);
-            return compareGeneric(l, r) <= 0;
-        }
-
-        @SuppressWarnings("unchecked")
-        private static int compareGeneric(Object l, Object r) {
             if (l instanceof Long && r instanceof Long) {
-                return Long.compare((Long) l, (Long) r);
+                return (Long) l <= (Long) r;
             }
             if (l instanceof Double && r instanceof Double) {
-                return Double.compare((Double) l, (Double) r);
+                return (Double) l <= (Double) r;
             }
-            if (l instanceof Comparable && r != null) {
-                return ((Comparable<Object>) l).compareTo(r);
-            }
-            throw new RuntimeException("Cannot compare " + l + " and " + r);
+            throw new RuntimeException("Cannot compare " + l + " <= " + r);
         }
 
         protected static boolean isLongLongRecord(MezzeRecord args) {
@@ -530,19 +629,11 @@ public abstract class BuiltinBinaryNodes {
         protected boolean geGeneric(MezzeRecord args) {
             Object l = args.getObjectField(L_INDEX);
             Object r = args.getObjectField(R_INDEX);
-            return compareGeneric(l, r) >= 0;
-        }
-
-        @SuppressWarnings("unchecked")
-        private static int compareGeneric(Object l, Object r) {
             if (l instanceof Long && r instanceof Long) {
-                return Long.compare((Long) l, (Long) r);
+                return (Long) l >= (Long) r;
             }
             if (l instanceof Double && r instanceof Double) {
-                return Double.compare((Double) l, (Double) r);
-            }
-            if (l instanceof Comparable && r != null) {
-                return ((Comparable<Object>) l).compareTo(r);
+                return (Double) l >= (Double) r;
             }
             throw new RuntimeException("Cannot compare " + l + " and " + r);
         }

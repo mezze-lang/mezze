@@ -125,9 +125,13 @@ public class StringInterpreterTest {
 
     @Test
     void testCharAtReturnsCharacterAtIndex() {
+        // char_at returns Option[String], so we need to unwrap it
         Object result = MezzeTestHelper.run("""
             use std::string
-            string::char_at { s = "hello", i = 1 }
+            use std::option
+            match string::char_at { s = "hello", i = 1 } is
+                Some { val } -> val
+                None -> "not found"
             """);
         assertEquals("e", result);
     }

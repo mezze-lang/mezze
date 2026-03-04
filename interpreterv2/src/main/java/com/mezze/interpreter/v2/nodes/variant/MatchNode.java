@@ -9,8 +9,8 @@ import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.CountingConditionProfile;
-import com.oracle.truffle.api.profiles.InlinedBranchProfile;
 
 /**
  * Pattern match node for variants - AGGRESSIVELY OPTIMIZED.
@@ -67,7 +67,7 @@ public final class MatchNode extends MezzeNode {
     private final int maxTag;
 
     // Error branch profile - tell JIT this path is cold
-    private final InlinedBranchProfile noMatchProfile = InlinedBranchProfile.getUncached();
+    private final BranchProfile noMatchProfile = BranchProfile.create();
 
     // ===== CONS/NIL LIST PATTERN OPTIMIZATION =====
     // Pre-computed at construction time - NO runtime scanning
@@ -89,7 +89,6 @@ public final class MatchNode extends MezzeNode {
         this.branches = branches;
         this.wildcardBranchIndex = wildcardBranchIndex;
         this.branchCount = branches.length;
-
         // Create a profile for each branch
         this.branchProfiles = new CountingConditionProfile[branches.length];
         for (int i = 0; i < branches.length; i++) {
@@ -227,6 +226,7 @@ public final class MatchNode extends MezzeNode {
     /**
      * O(1) JUMP TABLE DISPATCH - FASTEST PATH.
      * Direct array indexing from tag to branch.
+     * Falls back to linear search if guard/if-let fails.
      */
     private Object executeJumpTableMatch(VirtualFrame frame, MezzeVariant variant) {
         int tag = variant.getTag();
@@ -237,9 +237,12 @@ public final class MatchNode extends MezzeNode {
             if (wildcardBranchIndex >= 0) {
                 MatchBranchNode wildcard = branches[wildcardBranchIndex];
                 wildcard.bindValue(frame, variant);
-                return wildcard.execute(frame);
+                Object result = wildcard.execute(frame);
+                if (result != null || !wildcard.hasGuardsOrIfLet()) {
+                    return result;
+                }
             }
-            noMatchProfile.enter(this);
+            noMatchProfile.enter();
             CompilerDirectives.transferToInterpreterAndInvalidate();
             throw new RuntimeException("No matching pattern for variant tag: " + tag);
         }
@@ -251,16 +254,25 @@ public final class MatchNode extends MezzeNode {
             // Direct branch hit
             MatchBranchNode branch = branches[branchIndex];
             branch.bindPayload(frame, variant);
-            return branch.execute(frame);
+            Object result = branch.execute(frame);
+            // If guard/if-let failed, fall back to linear search
+            if (result != null || !branch.hasGuardsOrIfLet()) {
+                return result;
+            }
+            // Guard failed - fall through to linear search for remaining branches
+            return executeVariantMatch(frame, variant);
         } else if (branchIndex == -1) {
             // Use wildcard
             MatchBranchNode wildcard = branches[wildcardBranchIndex];
             wildcard.bindValue(frame, variant);
-            return wildcard.execute(frame);
+            Object result = wildcard.execute(frame);
+            if (result != null || !wildcard.hasGuardsOrIfLet()) {
+                return result;
+            }
         }
 
         // -2 = no match
-        noMatchProfile.enter(this);
+        noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching pattern for variant tag: " + tag);
     }
@@ -277,7 +289,12 @@ public final class MatchNode extends MezzeNode {
             if (branchProfiles[i].profile(branch.matches(tag))) {
                 // Bind payload variables and execute branch body
                 branch.bindPayload(frame, variant);
-                return branch.execute(frame);
+                Object result = branch.execute(frame);
+                // If branch has guards/if-let that failed, result is null - continue to next
+                if (result != null || !branch.hasGuardsOrIfLet()) {
+                    return result;
+                }
+                // Guard/if-let failed, continue to next branch
             }
         }
 
@@ -285,11 +302,14 @@ public final class MatchNode extends MezzeNode {
         if (wildcardBranchIndex >= 0) {
             MatchBranchNode wildcard = branches[wildcardBranchIndex];
             wildcard.bindValue(frame, variant);
-            return wildcard.execute(frame);
+            Object result = wildcard.execute(frame);
+            if (result != null || !wildcard.hasGuardsOrIfLet()) {
+                return result;
+            }
         }
 
         // No match - this should be caught by typechecker
-        noMatchProfile.enter(this);
+        noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching pattern for variant tag: " + tag);
     }
@@ -300,7 +320,15 @@ public final class MatchNode extends MezzeNode {
         for (int i = 0; i < branchCount; i++) {
             MatchBranchNode branch = branches[i];
             if (branchProfiles[i].profile(branch.matchesLiteral(value))) {
-                return branch.execute(frame);
+                // For wildcards, bind the value first
+                if (branch.isWildcard()) {
+                    branch.bindValue(frame, value);
+                }
+                Object result = branch.execute(frame);
+                if (result != null || !branch.hasGuardsOrIfLet()) {
+                    return result;
+                }
+                // Guard/if-let failed, continue to next branch
             }
         }
 
@@ -308,10 +336,13 @@ public final class MatchNode extends MezzeNode {
         if (wildcardBranchIndex >= 0) {
             MatchBranchNode wildcard = branches[wildcardBranchIndex];
             wildcard.bindValue(frame, value);
-            return wildcard.execute(frame);
+            Object result = wildcard.execute(frame);
+            if (result != null || !wildcard.hasGuardsOrIfLet()) {
+                return result;
+            }
         }
 
-        noMatchProfile.enter(this);
+        noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching pattern for value: " + value);
     }
@@ -341,7 +372,7 @@ public final class MatchNode extends MezzeNode {
             return wildcard.execute(frame);
         }
 
-        noMatchProfile.enter(this);
+        noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching array pattern for array of size: " + array.length);
     }
@@ -371,13 +402,14 @@ public final class MatchNode extends MezzeNode {
             return wildcard.execute(frame);
         }
 
-        noMatchProfile.enter(this);
+        noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching array pattern for list of size: " + list.size());
     }
 
     /**
      * Execute string interpolation pattern matching - OPTIMIZED.
+     * Supports guards and if-let bindings on string patterns.
      */
     @ExplodeLoop
     private Object executeStringMatch(VirtualFrame frame, String str) {
@@ -387,8 +419,14 @@ public final class MatchNode extends MezzeNode {
 
             if (branch.isStringPattern()) {
                 if (branchProfiles[i].profile(branch.matchesString(str))) {
+                    // Bind captures BEFORE checking guards/if-let
                     branch.bindStringCaptures(frame, str);
-                    return branch.execute(frame);
+                    Object result = branch.execute(frame);
+                    // If guard/if-let failed (returned null), continue to next branch
+                    if (result != null || !branch.hasGuardsOrIfLet()) {
+                        return result;
+                    }
+                    // Guard/if-let failed - continue to try next branch
                 }
             }
         }
@@ -397,7 +435,10 @@ public final class MatchNode extends MezzeNode {
         for (int i = 0; i < branchCount; i++) {
             MatchBranchNode branch = branches[i];
             if (branchProfiles[i].profile(branch.matchesLiteral(str))) {
-                return branch.execute(frame);
+                Object result = branch.execute(frame);
+                if (result != null || !branch.hasGuardsOrIfLet()) {
+                    return result;
+                }
             }
         }
 
@@ -405,10 +446,13 @@ public final class MatchNode extends MezzeNode {
         if (wildcardBranchIndex >= 0) {
             MatchBranchNode wildcard = branches[wildcardBranchIndex];
             wildcard.bindValue(frame, str);
-            return wildcard.execute(frame);
+            Object result = wildcard.execute(frame);
+            if (result != null || !wildcard.hasGuardsOrIfLet()) {
+                return result;
+            }
         }
 
-        noMatchProfile.enter(this);
+        noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching string pattern for: " + str);
     }
@@ -437,7 +481,7 @@ public final class MatchNode extends MezzeNode {
             return wildcard.execute(frame);
         }
 
-        noMatchProfile.enter(this);
+        noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching record pattern");
     }

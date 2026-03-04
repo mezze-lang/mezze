@@ -105,12 +105,15 @@ public final class IONatives {
     }
 
     @TruffleBoundary
-    public static MezzeBytes bufferToBytes(MezzeRecord args) {
+    public static BytesNatives.MezzeBytes bufferToBytes(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
         // Return MezzeBytes from the buffer's written content (up to position)
         byte[] data = buf.getData();
         int size = buf.getPosition();
-        return MezzeBytes.copyOf(data, 0, size);
+        // Return BytesNatives.MezzeBytes for consistency with native bytes ops
+        byte[] copy = new byte[size];
+        System.arraycopy(data, 0, copy, 0, size);
+        return new BytesNatives.MezzeBytes(copy);
     }
 
     @TruffleBoundary
@@ -231,8 +234,10 @@ public final class IONatives {
         MezzeBuffer buf = getBuffer(args, "buf");
         Object bytesValue = getField(args, "bytes");
 
-        // Handle both MezzeBytes and MezzeList
-        if (bytesValue instanceof MezzeBytes mb) {
+        // Handle both BytesNatives.MezzeBytes (V2 native) and MezzeBytes (value wrapper)
+        if (bytesValue instanceof BytesNatives.MezzeBytes mb) {
+            buf.writeBytes(mb.getData());
+        } else if (bytesValue instanceof MezzeBytes mb) {
             // Copy the relevant portion of MezzeBytes to a byte array
             byte[] data = new byte[mb.length()];
             System.arraycopy(mb.getData(), mb.getOffset(), data, 0, mb.length());
@@ -556,28 +561,70 @@ public final class IONatives {
             };
         }
 
-        MezzeRecord parseObject() {
+        // Create Json variant constructors using global tag registry
+        MezzeVariant jNull() {
+            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JNull");
+            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), tag);
+        }
+
+        MezzeVariant jBool(boolean val) {
+            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JBool");
+            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
+            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
+        }
+
+        MezzeVariant jInt(long val) {
+            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JInt");
+            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
+            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
+        }
+
+        MezzeVariant jFloat(double val) {
+            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JFloat");
+            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
+            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
+        }
+
+        MezzeVariant jString(String val) {
+            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JString");
+            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
+            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
+        }
+
+        MezzeVariant jArray(Object[] items) {
+            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JArray");
+            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"items"}, new Object[]{items});
+            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
+        }
+
+        MezzeVariant jObject(Object[] fields) {
+            int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("JObject");
+            MezzeRecord payload = MezzeRecord.fromFields(new String[]{"fields"}, new Object[]{fields});
+            return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, payload);
+        }
+
+        MezzeVariant parseObject() {
             expect('{');
             skipWhitespace();
-            java.util.List<String> names = new java.util.ArrayList<>();
-            java.util.List<Object> values = new java.util.ArrayList<>();
+            java.util.List<MezzeRecord> fields = new java.util.ArrayList<>();
             if (peek() != '}') {
                 do {
                     skipWhitespace();
-                    String key = (String) parseString();
+                    String key = parseRawString();
                     skipWhitespace();
                     expect(':');
                     Object value = parseValue();
-                    names.add(key);
-                    values.add(value);
+                    // Each field is a record {key: String, value: Json}
+                    fields.add(MezzeRecord.fromFields(
+                        new String[]{"key", "value"}, new Object[]{key, value}));
                     skipWhitespace();
                 } while (match(','));
             }
             expect('}');
-            return MezzeRecord.fromFields(names.toArray(new String[0]), values.toArray());
+            return jObject(fields.toArray());
         }
 
-        MezzeList parseArray() {
+        MezzeVariant parseArray() {
             expect('[');
             skipWhitespace();
             java.util.List<Object> items = new java.util.ArrayList<>();
@@ -588,10 +635,16 @@ public final class IONatives {
                 } while (match(','));
             }
             expect(']');
-            return MezzeList.fromObjects(items.toArray());
+            return jArray(items.toArray());
         }
 
-        Object parseString() {
+        // Parse string and return as JString variant
+        MezzeVariant parseString() {
+            return jString(parseRawString());
+        }
+
+        // Parse raw string value (not wrapped in JString)
+        String parseRawString() {
             expect('"');
             StringBuilder sb = new StringBuilder();
             while (pos < s.length() && s.charAt(pos) != '"') {
@@ -621,39 +674,39 @@ public final class IONatives {
             return sb.toString();
         }
 
-        Object parseNumber() {
+        MezzeVariant parseNumber() {
             int start = pos;
             if (peek() == '-') pos++;
             while (pos < s.length() && Character.isDigit(s.charAt(pos))) pos++;
             if (pos < s.length() && s.charAt(pos) == '.') {
                 pos++;
                 while (pos < s.length() && Character.isDigit(s.charAt(pos))) pos++;
-                return Double.parseDouble(s.substring(start, pos));
+                return jFloat(Double.parseDouble(s.substring(start, pos)));
             }
             if (pos < s.length() && (s.charAt(pos) == 'e' || s.charAt(pos) == 'E')) {
                 pos++;
                 if (peek() == '+' || peek() == '-') pos++;
                 while (pos < s.length() && Character.isDigit(s.charAt(pos))) pos++;
-                return Double.parseDouble(s.substring(start, pos));
+                return jFloat(Double.parseDouble(s.substring(start, pos)));
             }
-            return Long.parseLong(s.substring(start, pos));
+            return jInt(Long.parseLong(s.substring(start, pos)));
         }
 
-        Object parseBoolean() {
+        MezzeVariant parseBoolean() {
             if (s.startsWith("true", pos)) {
                 pos += 4;
-                return true;
+                return jBool(true);
             } else if (s.startsWith("false", pos)) {
                 pos += 5;
-                return false;
+                return jBool(false);
             }
             throw new RuntimeException("Expected boolean");
         }
 
-        Object parseNull() {
+        MezzeVariant parseNull() {
             if (s.startsWith("null", pos)) {
                 pos += 4;
-                return MezzeUnit.INSTANCE;
+                return jNull();
             }
             throw new RuntimeException("Expected null");
         }
@@ -688,21 +741,165 @@ public final class IONatives {
 
     @TruffleBoundary
     public static Object httpMockRequest(MezzeRecord args) {
-        String method = getString(args, "method");
-        String url = getString(args, "url");
+        // Args: { req = { method, url, ... }, rules = [...] }
+        Object reqObj = getField(args, "req");
+        Object rulesObj = getField(args, "rules");
 
-        // Check if there's a mock response
+        if (!(reqObj instanceof MezzeRecord req)) {
+            // Fallback - try direct access for legacy API
+            String method = getStringOrNull(args, "method");
+            String url = getStringOrNull(args, "url");
+            if (method != null && url != null) {
+                return httpMockRequestByMethodUrl(method, url);
+            }
+            throw new RuntimeException("Expected 'req' field to be a record");
+        }
+
+        // Extract method and url from the request record
+        Object methodField = getField(req, "method");
+        String url = getString(req, "url");
+
+        // Method can be a variant (Get, Post, etc.) - extract the constructor name
+        String method;
+        if (methodField instanceof MezzeVariant mv) {
+            method = mv.getConstructorName();
+        } else if (methodField instanceof String s) {
+            method = s;
+        } else if (methodField instanceof MezzeRecord methodRec) {
+            // It could be a variant-as-record like { $variant = "Get" }
+            Object variantName = getField(methodRec, "$variant");
+            method = variantName != null ? variantName.toString() : "GET";
+        } else {
+            method = "GET";
+        }
+
+        // Process rules to find matching mock
+        if (rulesObj instanceof MezzeList rules) {
+            Object[] ruleStore = rules.getObjectStore();
+            for (Object ruleObj : ruleStore) {
+                if (ruleObj instanceof MezzeRecord rule) {
+                    Object response = matchMockRule(rule, method, url);
+                    if (response != null) {
+                        return response;
+                    }
+                }
+            }
+        }
+
+        // No matching rule - return a connection failed error
+        MezzeRecord errorRecord = MezzeRecord.fromFields(
+            new String[]{"url", "reason"},
+            new Object[]{url, "No mock rule matched for " + method + " " + url}
+        );
+        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("ConnectionFailed");
+        MezzeVariant error = MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, errorRecord);
+        return MezzeVariant.err(error);
+    }
+
+    private static Object httpMockRequestByMethodUrl(String method, String url) {
         String key = method + ":" + url;
         Object mockResponse = mockResponses.get(key);
         if (mockResponse != null) {
             return createOk(mockResponse);
         }
-
-        // Return a default mock response
         return createOk(MezzeRecord.fromFields(
             new String[]{"status", "body", "headers"},
             new Object[]{200L, "{}", MezzeRecord.empty()}
         ));
+    }
+
+    /**
+     * Match a mock rule against method and URL.
+     * Rule format: { methods = [Get, Post, ...], url = Glob { pattern = "..." } | Exact { url = "..." }, response = ... }
+     */
+    private static Object matchMockRule(MezzeRecord rule, String method, String url) {
+        // Check methods
+        Object methodsObj = getField(rule, "methods");
+        if (methodsObj instanceof MezzeList methods) {
+            Object[] methodStore = methods.getObjectStore();
+            if (methodStore.length > 0) {
+                boolean methodMatches = false;
+                for (Object m : methodStore) {
+                    String mName;
+                    if (m instanceof MezzeVariant mv) {
+                        mName = mv.getConstructorName();
+                    } else if (m instanceof MezzeRecord mr) {
+                        Object variantName = getField(mr, "$variant");
+                        mName = variantName != null ? variantName.toString() : "";
+                    } else {
+                        mName = m.toString();
+                    }
+                    if (mName.equalsIgnoreCase(method)) {
+                        methodMatches = true;
+                        break;
+                    }
+                }
+                if (!methodMatches) {
+                    return null;
+                }
+            }
+            // Empty methods list means match any method
+        }
+
+        // Check URL pattern
+        Object urlPattern = getField(rule, "url");
+        if (urlPattern instanceof MezzeVariant urlVar) {
+            String patternType = urlVar.getConstructorName();
+            Object payload = urlVar.hasPayload() ? urlVar.getPayloadValue() : null;
+            if (payload instanceof MezzeRecord payloadRec) {
+                if ("Glob".equals(patternType)) {
+                    String pattern = getStringOrNull(payloadRec, "pattern");
+                    if (pattern != null && !globMatches(pattern, url)) {
+                        return null;
+                    }
+                } else if ("Exact".equals(patternType)) {
+                    String exactUrl = getStringOrNull(payloadRec, "url");
+                    if (exactUrl != null && !exactUrl.equals(url)) {
+                        return null;
+                    }
+                }
+            }
+        } else if (urlPattern instanceof MezzeRecord urlRec) {
+            // Handle variant-as-record format
+            Object variantName = getField(urlRec, "$variant");
+            if ("Glob".equals(variantName)) {
+                String pattern = getStringOrNull(urlRec, "pattern");
+                if (pattern != null && !globMatches(pattern, url)) {
+                    return null;
+                }
+            } else if ("Exact".equals(variantName)) {
+                String exactUrl = getStringOrNull(urlRec, "url");
+                if (exactUrl != null && !exactUrl.equals(url)) {
+                    return null;
+                }
+            }
+        }
+
+        // Rule matches - return the response
+        Object response = getField(rule, "response");
+        return response;
+    }
+
+    /**
+     * Simple glob matching: * matches any chars, ** matches any path segments
+     */
+    private static boolean globMatches(String pattern, String url) {
+        if (pattern.equals("**") || pattern.equals("*")) {
+            return true;
+        }
+        // Convert glob to regex
+        String regex = pattern
+            .replace(".", "\\.")
+            .replace("**", ".*")
+            .replace("*", "[^/]*")
+            .replace("?", ".");
+        return url.matches(regex);
+    }
+
+    private static String getStringOrNull(MezzeRecord r, String name) {
+        Object value = getField(r, name);
+        if (value instanceof String s) return s;
+        return null;
     }
 
     @TruffleBoundary
@@ -722,12 +919,12 @@ public final class IONatives {
 
     // ==================== Helpers ====================
 
-    private static Object createOk(Object value) {
-        return MezzeRecord.fromFields(new String[]{"$variant", "val"}, new Object[]{"Ok", value});
+    private static MezzeVariant createOk(Object value) {
+        return MezzeVariant.ok(value);
     }
 
-    private static Object createErr(String message) {
-        return MezzeRecord.fromFields(new String[]{"$variant", "err"}, new Object[]{"Err", message});
+    private static MezzeVariant createErr(String message) {
+        return MezzeVariant.err(message);
     }
 
     private static Object getField(MezzeRecord r, String name) {

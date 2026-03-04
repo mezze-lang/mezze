@@ -1086,8 +1086,8 @@ object LoomImplementations {
             val record = args.firstOrNull() as? MezzeRecord
                 ?: throw NativeFunctionException("__native_loom_scope_spawn", "expects MezzeRecord")
 
-            val scopeVal = record.fields["scope"]
-                ?: throw NativeFunctionException("__native_loom_scope_spawn", "expects 'scope' field")
+            val scopeVal = record.fields["sc"]
+                ?: throw NativeFunctionException("__native_loom_scope_spawn", "expects 'sc' field")
 
             val fn = record.fields["f"]
                 ?: throw NativeFunctionException("__native_loom_scope_spawn", "expects 'f' field")
@@ -1113,8 +1113,8 @@ object LoomImplementations {
             val record = args.firstOrNull() as? MezzeRecord
                 ?: throw NativeFunctionException("__native_loom_scope_cancel_all", "expects MezzeRecord")
 
-            val scopeVal = record.fields["scope"]
-                ?: throw NativeFunctionException("__native_loom_scope_cancel_all", "expects 'scope' field")
+            val scopeVal = record.fields["sc"]
+                ?: throw NativeFunctionException("__native_loom_scope_cancel_all", "expects 'sc' field")
 
             val scope = scopeVal as? MezzeScope
                 ?: throw NativeFunctionException("__native_loom_scope_cancel_all", "scope must be a Scope")
@@ -1138,8 +1138,8 @@ object LoomImplementations {
             val record = args.firstOrNull() as? MezzeRecord
                 ?: throw NativeFunctionException("__native_loom_scope_get_token", "expects MezzeRecord")
 
-            val scopeVal = record.fields["scope"]
-                ?: throw NativeFunctionException("__native_loom_scope_get_token", "expects 'scope' field")
+            val scopeVal = record.fields["sc"]
+                ?: throw NativeFunctionException("__native_loom_scope_get_token", "expects 'sc' field")
 
             val scope = scopeVal as? MezzeScope
                 ?: throw NativeFunctionException("__native_loom_scope_get_token", "scope must be a Scope")
@@ -1161,8 +1161,8 @@ object LoomImplementations {
             val record = args.firstOrNull() as? MezzeRecord
                 ?: throw NativeFunctionException("__native_loom_scope_is_cancelled", "expects MezzeRecord")
 
-            val scopeVal = record.fields["scope"]
-                ?: throw NativeFunctionException("__native_loom_scope_is_cancelled", "expects 'scope' field")
+            val scopeVal = record.fields["sc"]
+                ?: throw NativeFunctionException("__native_loom_scope_is_cancelled", "expects 'sc' field")
 
             val scope = scopeVal as? MezzeScope
                 ?: throw NativeFunctionException("__native_loom_scope_is_cancelled", "scope must be a Scope")
@@ -1177,7 +1177,7 @@ object LoomImplementations {
      */
     @TruffleBoundary
     private fun callFunctionWithScopeArg(fn: MezzeValue, scope: MezzeScope): MezzeValue {
-        val recordArg = MezzeRecord(mapOf("scope" to scope))
+        val recordArg = MezzeRecord(mapOf("sc" to scope))
         return when (fn) {
             is MezzeTruffleFunction -> {
                 fn.callTarget.call(

@@ -3,8 +3,7 @@ package com.mezze.interpreter.v2.nodes.continuation;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.nodes.MezzeRootNode;
 import com.mezze.interpreter.v2.runtime.MezzeLanguage;
-import com.mezze.interpreter.v2.values.MezzeCont;
-import com.mezze.interpreter.v2.values.MezzeContinuation;
+
 import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.CallTarget;
@@ -93,13 +92,16 @@ public final class ContinuationCaptureNode extends MezzeNode {
         FrameDescriptor fd = builder.build();
 
         // Create a root node that extracts { value } from args and returns value
+        // Note: ExtractValueNode uses frame.getArguments() directly,
+        // so we pass empty slotTypes to avoid MezzeRootNode trying to bind args to frame slots
         MezzeRootNode rootNode = new MezzeRootNode(
                 MezzeLanguage.get(this),
                 fd,
                 new ExtractValueNode(),
                 "trivial_continuation",
                 0,
-                1
+                1,
+                new int[0]  // No slot types - ExtractValueNode uses getArguments() directly
         );
 
         return rootNode.getCallTarget();

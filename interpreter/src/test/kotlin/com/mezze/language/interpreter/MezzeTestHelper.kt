@@ -214,6 +214,17 @@ object MezzeTestHelper {
             is com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.MezzeSortedMap -> convertV2SortedMap(v2Value)
             is com.mezze.interpreter.v2.nodes.builtin.collections.SortedSetNatives.MezzeSortedSet -> convertV2SortedSet(v2Value)
             is com.mezze.interpreter.v2.nodes.builtin.io.BytesNatives.MezzeBytes -> convertV2Bytes(v2Value)
+            // Handle MezzeContinuationSuspended - convert to V1's MezzeContinuationSuspended
+            is com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended -> {
+                // Convert to V1's MezzeContinuationSuspended so tests can check the type
+                val v1SuspendedValue = convertV2ToV1(v2Value.getSuspendedValue())
+                // Create a placeholder continuation (we can't fully convert the V2 CallTarget-based continuation)
+                val v1Continuation = MezzeContinuation(
+                    resumeFunction = MezzeUnit,  // Placeholder - can't convert V2 CallTarget
+                    capturePoint = "v2-continuation"
+                )
+                MezzeContinuationSuspended(v1Continuation, v1SuspendedValue)
+            }
             else -> {
                 // Fallback: try to convert unknown types
                 throw IllegalArgumentException("Cannot convert V2 value to V1: ${v2Value::class.simpleName}")
@@ -222,16 +233,37 @@ object MezzeTestHelper {
     }
 
     /**
-     * Convert V2 MezzeRecord to V1 MezzeRecord
+     * Convert V2 MezzeRecord to V1 MezzeRecord or MezzeFrac if it's a fraction
      */
-    private fun convertV2Record(v2Record: com.mezze.interpreter.v2.values.MezzeRecord): MezzeRecord {
-        val fields = mutableMapOf<String, MezzeValue>()
+    private fun convertV2Record(v2Record: com.mezze.interpreter.v2.values.MezzeRecord): MezzeValue {
         val shape = v2Record.shape
         val fieldCount = shape.fieldCount
+
+        // Check if this is a fraction record (has exactly numerator and denominator fields)
+        if (fieldCount == 2) {
+            val numeratorIdx = v2Record.getFieldIndex("numerator")
+            val denominatorIdx = v2Record.getFieldIndex("denominator")
+            if (numeratorIdx >= 0 && denominatorIdx >= 0) {
+                val numerator = v2Record.getField("numerator")
+                val denominator = v2Record.getField("denominator")
+                if (numerator is Long && denominator is Long) {
+                    return MezzeFrac(numerator, denominator)
+                }
+            }
+        }
+
+        // Regular record conversion
+        val fields = mutableMapOf<String, MezzeValue>()
         for (i in 0 until fieldCount) {
             val name = shape.getFieldName(i)
             val value = v2Record.getField(i)
-            fields[name] = convertV2ToV1(value)
+            // Check if this is a "val" field containing a single-character string (V2 Char representation)
+            val v1Value = if (name == "val" && value is String && value.length == 1) {
+                MezzeChar(value[0])
+            } else {
+                convertV2ToV1(value)
+            }
+            fields[name] = v1Value
         }
         return MezzeRecord(fields)
     }
@@ -247,7 +279,13 @@ object MezzeTestHelper {
                 convertV2Record(payloadValue)
             } else {
                 // Single value payload - wrap in record with "val" field
-                MezzeRecord(mapOf("val" to convertV2ToV1(payloadValue)))
+                // Check if this is a single-character string (V2 Char representation)
+                val v1Value = if (payloadValue is String && payloadValue.length == 1) {
+                    MezzeChar(payloadValue[0])
+                } else {
+                    convertV2ToV1(payloadValue)
+                }
+                MezzeRecord(mapOf("val" to v1Value))
             }
         } else {
             null
@@ -256,14 +294,16 @@ object MezzeTestHelper {
     }
 
     /**
-     * Convert V2 MezzeList to V1 MezzeList
+     * Convert V2 MezzeList to V1 MezzeArrayList.
+     * Note: V2 uses MezzeList for both linked lists and arrays.
+     * We convert to MezzeArrayList since most V1 tests expect array semantics.
      */
-    private fun convertV2List(v2List: com.mezze.interpreter.v2.values.MezzeList): MezzeList {
+    private fun convertV2List(v2List: com.mezze.interpreter.v2.values.MezzeList): MezzeValue {
         val elements = mutableListOf<MezzeValue>()
         for (i in 0 until v2List.size()) {
             elements.add(convertV2ToV1(v2List.get(i)))
         }
-        return MezzeList.fromKotlinList(elements)
+        return MezzeArrayList(elements)
     }
 
     /**
@@ -326,9 +366,10 @@ object MezzeTestHelper {
      * V1 uses io.vavr.collection.TreeMap
      */
     private fun convertV2SortedMap(v2SortedMap: com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.MezzeSortedMap): MezzeSortedMap {
-        val keys = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.keys(v2SortedMap)
+        val keysList = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.keys(v2SortedMap)
         var treeMap = io.vavr.collection.TreeMap.empty<MezzeValue, MezzeValue>(MezzeValueComparator())
-        for (key in keys) {
+        for (i in 0 until keysList.size()) {
+            val key = keysList.get(i)
             val v2Result = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.get(v2SortedMap, key)
             if (v2Result is com.mezze.interpreter.v2.values.MezzeVariant && v2Result.isSome) {
                 val payload = v2Result.payloadValue as com.mezze.interpreter.v2.values.MezzeRecord

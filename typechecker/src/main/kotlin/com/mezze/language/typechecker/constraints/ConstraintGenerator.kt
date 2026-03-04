@@ -6,6 +6,10 @@ import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.context.TypeScheme
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.scope.ScopedEffectConstants
+import com.mezze.language.typechecker.scope.detectScopedEffectMembers
+import com.mezze.language.typechecker.scope.extractScopeTypeFromAnnotation
+import com.mezze.language.typechecker.scope.validateScopedEffectSignatures
 
 /**
  * Constraint generator - orchestrator for constraint-based type inference.
@@ -1148,8 +1152,144 @@ class ConstraintGenerator(
             baseContext = baseContext.extendMono(param.name, paramType)
         }
 
+        // SCOPED EFFECTS: Detect and extract scope type
+        // If this impl has initialize_scope, we need to make 'scope' available
+        // in operations and finalize_scope (but NOT in initialize_scope itself)
+        val scopedInfo = detectScopedEffectMembers(impl)
+
+        // SCOPED EFFECTS: Validate scoped effect signatures
+        // - initialize_scope requires finalize_scope (and vice versa)
+        // - initialize_scope must return a record type
+        // - finalize_scope must return {} (unit)
+        val scopedErrors = validateScopedEffectSignatures(scopedInfo)
+        if (scopedErrors.isNotEmpty()) {
+            val firstError = scopedErrors.first()
+            throw com.mezze.language.typechecker.TypeCheckError(
+                firstError.message,
+                firstError.sourceLocation
+            )
+        }
+
+        // SCOPED EFFECTS: Validate initialize_scope body and INFER scope type
+        // We need to:
+        // 1. Generate constraints for initialize_scope body (without 'scope' available)
+        // 2. Infer the scope type from the body's return type
+        // 3. Use that scope type for operations and finalize_scope
+        var inferredScopeType: MezzeType? = null
+
+        scopedInfo.initializeScope?.let { initOp ->
+            if (initOp.implementation is LambdaExpression) {
+                val lambda = initOp.implementation as LambdaExpression
+
+                // Build context WITHOUT scope for initialize_scope
+                val initContext = baseContext
+
+                val constraintContext = ConstraintContext(
+                    initContext,
+                    expectedType = null,
+                    performerToEffect = performerToEffect,
+                    performerAddedEffects = performerAddedEffects,
+                    abilityNames = abilityNames,
+                    effectNames = effectNames,
+                    effectDeclarations = effectDeclarations,
+                    abilityDeclarations = abilityDeclarations,
+                    typeDeclarations = typeDeclarations
+                )
+
+                // Generate constraints for lambda body
+                val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
+
+                // Check if 'scope' is used - this is an error
+                val scopeUndefined = bodyResult.undefinedVariables.find { it.name == "scope" }
+                if (scopeUndefined != null) {
+                    throw com.mezze.language.typechecker.TypeCheckError(
+                        "The 'scope' variable is not available in initialize_scope. " +
+                        "The scope is being created here and will only be available in operations and finalize_scope.",
+                        scopeUndefined.sourceLocation
+                    )
+                }
+
+                // INFER scope type from the body's return type
+                // This is the key change - we get the type from what initialize_scope actually returns
+                if (bodyResult.type is MezzeType.RecordType) {
+                    inferredScopeType = bodyResult.type
+                }
+
+                // Track effects from initialize_scope - they propagate to the perform site
+                // Effects run at the START of perform, before the body
+                val initEffects = bodyResult.effects - impl.effectName
+                if (initEffects.isNotEmpty()) {
+                    val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
+                    performerAddedEffects[impl.performerName] = existingEffects + initEffects
+                }
+            }
+        }
+
+        // Use inferred scope type, or try annotation as fallback
+        val scopeType: MezzeType? = inferredScopeType ?: if (scopedInfo.isScopedEffect) {
+            // Fallback: try to get scope type from initialize_scope return type annotation
+            scopedInfo.initializeScope?.let { initOp ->
+                extractScopeTypeFromAnnotation(initOp) { annotation ->
+                    convertTypeAnnotation(annotation)
+                }
+            }
+        } else {
+            null
+        }
+
+        // Build context with scope for operations and finalize_scope
+        val contextWithScope = if (scopeType != null) {
+            baseContext.extendMono("scope", scopeType)
+        } else {
+            baseContext
+        }
+
+        // SCOPED EFFECTS: Validate finalize_scope body and track its effects
+        // finalize_scope runs in a finally block at the END of perform
+        scopedInfo.finalizeScope?.let { finalOp ->
+            if (finalOp.implementation is LambdaExpression) {
+                val lambda = finalOp.implementation as LambdaExpression
+
+                // finalize_scope has access to 'scope' variable
+                val finalizeContext = contextWithScope
+
+                // SCOPED EFFECTS: Add 'scope' to recordLiteralBindings for field access validation
+                // This enables "field not found" errors with suggestions for scope.fieldName
+                val scopeRecordBindings = if (scopeType != null) setOf("scope") else emptySet()
+
+                val constraintContext = ConstraintContext(
+                    finalizeContext,
+                    expectedType = null,
+                    performerToEffect = performerToEffect,
+                    performerAddedEffects = performerAddedEffects,
+                    abilityNames = abilityNames,
+                    effectNames = effectNames,
+                    effectDeclarations = effectDeclarations,
+                    abilityDeclarations = abilityDeclarations,
+                    typeDeclarations = typeDeclarations,
+                    recordLiteralBindings = scopeRecordBindings
+                )
+
+                // Generate constraints for lambda body
+                val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
+
+                // Track effects from finalize_scope - they propagate to the perform site
+                // Effects run at the END of perform, in a finally block (even if body fails)
+                val finalizeEffects = bodyResult.effects - impl.effectName
+                if (finalizeEffects.isNotEmpty()) {
+                    val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()
+                    performerAddedEffects[impl.performerName] = existingEffects + finalizeEffects
+                }
+            }
+        }
+
         // Validate each operation's implementation body
         for (implOp in impl.operations) {
+            // Skip scoped effect special members - they're validated separately
+            if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE || implOp.name == ScopedEffectConstants.FINALIZE_SCOPE) {
+                continue
+            }
+
             val declOp = effectDeclaration.operations.find { it.name == implOp.name }
                 ?: continue  // Extra operations caught elsewhere
 
@@ -1257,9 +1397,25 @@ class ConstraintGenerator(
                 }
 
                 // Type-check the lambda body with parameters in scope (including performer params)
-                var bodyContext = baseContext
+                // SCOPED EFFECTS: Use contextWithScope for operations and finalize_scope,
+                // but NOT for initialize_scope (scope is being created, not yet available)
+                val operationBaseContext = if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE) {
+                    baseContext  // No scope access in initialize_scope
+                } else {
+                    contextWithScope  // Operations and finalize_scope have scope access
+                }
+                var bodyContext = operationBaseContext
                 for ((name, type) in paramTypes) {
                     bodyContext = bodyContext.extendMono(name, type)
+                }
+
+                // SCOPED EFFECTS: Add 'scope' to recordLiteralBindings for field access validation
+                // This enables "field not found" errors with suggestions for scope.fieldName
+                // Only add if scope is available (scopeType is set and this is not initialize_scope)
+                val scopeRecordBindings = if (scopeType != null && implOp.name != ScopedEffectConstants.INITIALIZE_SCOPE) {
+                    setOf("scope")
+                } else {
+                    emptySet()
                 }
 
                 val constraintContext = ConstraintContext(
@@ -1271,7 +1427,8 @@ class ConstraintGenerator(
                     effectNames = effectNames,
                     effectDeclarations = effectDeclarations,
                     abilityDeclarations = abilityDeclarations,
-                    typeDeclarations = typeDeclarations
+                    typeDeclarations = typeDeclarations,
+                    recordLiteralBindings = scopeRecordBindings
                 )
 
                 // Generate constraints for lambda body
@@ -1288,11 +1445,31 @@ class ConstraintGenerator(
                     performerAddedEffects[impl.performerName] = existingEffects + bodyEffects
                 }
 
-                // If there are undefined variables, skip detailed validation
+                // If there are undefined variables, check for 'scope' errors first
                 // The body may reference external performers or functions not yet in context
                 // Full validation will happen during the normal type-checking phase
                 if (bodyResult.undefinedVariables.isNotEmpty()) {
-                    // Skip validation - let the normal type-checking catch errors later
+                    // SCOPED EFFECTS: Check for 'scope' being undefined - this is a special error case
+                    // 'scope' is only available in operations and finalize_scope when initialize_scope exists
+                    val scopeUndefined = bodyResult.undefinedVariables.find { it.name == "scope" }
+                    if (scopeUndefined != null) {
+                        // Determine the error message based on context
+                        val errorMessage = if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE) {
+                            "The 'scope' variable is not available in initialize_scope. " +
+                            "The scope is being created here and will only be available in operations and finalize_scope."
+                        } else if (!scopedInfo.isScopedEffect) {
+                            "The 'scope' variable is not available because this impl does not define initialize_scope. " +
+                            "Add 'initialize_scope = {} -> { ... }' to create a scope."
+                        } else {
+                            // This shouldn't happen if our code is correct, but handle it anyway
+                            "Undefined variable 'scope' in operation '${implOp.name}'."
+                        }
+                        throw com.mezze.language.typechecker.TypeCheckError(
+                            errorMessage,
+                            scopeUndefined.sourceLocation
+                        )
+                    }
+                    // Skip validation for other undefined variables - let the normal type-checking catch errors later
                     continue
                 }
 

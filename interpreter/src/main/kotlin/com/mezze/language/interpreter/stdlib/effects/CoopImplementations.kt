@@ -566,7 +566,7 @@ object CoopImplementations {
             val scope = CoopScope()
 
             // Call the function with the scope
-            val scopeArg = MezzeRecord(mapOf("scope" to scope))
+            val scopeArg = MezzeRecord(mapOf("sc" to scope))
             val result = when (f) {
                 is MezzeTruffleFunction -> {
                     f.callTarget.call(

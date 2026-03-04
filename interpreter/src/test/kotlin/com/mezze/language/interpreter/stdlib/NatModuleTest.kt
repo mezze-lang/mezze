@@ -34,6 +34,18 @@ class NatModuleTest {
         return MezzeTestHelper.getLastExecutionContext()
     }
 
+    /**
+     * Extract numeric value from either MezzeNat or MezzeInt.
+     * V2 uses primitive long for both Nat and Int for optimal JIT performance.
+     */
+    private fun numericValue(value: MezzeValue): Long {
+        return when (value) {
+            is MezzeNat -> value.value
+            is MezzeInt -> value.value
+            else -> throw IllegalArgumentException("Expected numeric value, got ${value::class.simpleName}")
+        }
+    }
+
     @Test
     fun `test nat subtract_to_int - positive result`() {
         val source = """
@@ -75,7 +87,7 @@ class NatModuleTest {
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
-        assertEquals(3L, (variables["result"] as MezzeNat).value)
+        assertEquals(3L, numericValue(variables["result"]!!))
     }
 
     @Test
@@ -86,7 +98,7 @@ class NatModuleTest {
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
-        assertEquals(5L, (variables["result"] as MezzeNat).value)
+        assertEquals(5L, numericValue(variables["result"]!!))
     }
 
     @Test
@@ -97,7 +109,7 @@ class NatModuleTest {
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
-        assertEquals(5L, (variables["result"] as MezzeNat).value)
+        assertEquals(5L, numericValue(variables["result"]!!))
     }
 
     @Test
@@ -108,7 +120,7 @@ class NatModuleTest {
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
-        assertEquals(5L, (variables["result"] as MezzeNat).value)
+        assertEquals(5L, numericValue(variables["result"]!!))
     }
 
     @Test
@@ -174,7 +186,7 @@ class NatModuleTest {
         val variant = variables["result"] as MezzeVariant
         assertEquals("Some", variant.constructor)
         val payload = variant.value as MezzeRecord
-        assertEquals(42L, (payload.fields["val"] as MezzeNat).value)
+        assertEquals(42L, numericValue(payload.fields["val"]!!))
     }
 
     @Test
@@ -200,7 +212,7 @@ class NatModuleTest {
         val variant = variables["result"] as MezzeVariant
         assertEquals("Some", variant.constructor)
         val payload = variant.value as MezzeRecord
-        assertEquals(0L, (payload.fields["val"] as MezzeNat).value)
+        assertEquals(0L, numericValue(payload.fields["val"]!!))
     }
 
     // === Additional tests for missing functions ===
@@ -216,7 +228,7 @@ class NatModuleTest {
         val variant = variables["result"] as MezzeVariant
         assertEquals("Some", variant.constructor)
         val payload = variant.value as MezzeRecord
-        assertEquals(42L, (payload.fields["val"] as MezzeNat).value)
+        assertEquals(42L, numericValue(payload.fields["val"]!!))
     }
 
     @Test
@@ -242,7 +254,7 @@ class NatModuleTest {
         val variant = variables["result"] as MezzeVariant
         assertEquals("Some", variant.constructor)
         val payload = variant.value as MezzeRecord
-        assertEquals(0L, (payload.fields["val"] as MezzeNat).value)
+        assertEquals(0L, numericValue(payload.fields["val"]!!))
     }
 
     @Test
@@ -256,7 +268,7 @@ class NatModuleTest {
         val variant = variables["result"] as MezzeVariant
         assertEquals("Some", variant.constructor)
         val payload = variant.value as MezzeRecord
-        assertEquals(42L, (payload.fields["val"] as MezzeNat).value)
+        assertEquals(42L, numericValue(payload.fields["val"]!!))
     }
 
     @Test
@@ -321,7 +333,7 @@ class NatModuleTest {
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
-        assertEquals(5L, (variables["result"] as MezzeNat).value)
+        assertEquals(5L, numericValue(variables["result"]!!))
     }
 
     @Test
@@ -332,7 +344,7 @@ class NatModuleTest {
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
-        assertEquals(5L, (variables["result"] as MezzeNat).value)
+        assertEquals(5L, numericValue(variables["result"]!!))
     }
 
     @Test
@@ -343,7 +355,7 @@ class NatModuleTest {
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
-        assertEquals(10L, (variables["result"] as MezzeNat).value)
+        assertEquals(10L, numericValue(variables["result"]!!))
     }
 
     @Test
@@ -354,7 +366,7 @@ class NatModuleTest {
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
-        assertEquals(5L, (variables["result"] as MezzeNat).value)
+        assertEquals(5L, numericValue(variables["result"]!!))
     }
 
     @Test
@@ -365,6 +377,6 @@ class NatModuleTest {
         """.trimIndent()
 
         val variables = parseTypeCheckAndRun(source)
-        assertEquals(10L, (variables["result"] as MezzeNat).value)
+        assertEquals(10L, numericValue(variables["result"]!!))
     }
 }

@@ -106,8 +106,9 @@ public final class MapNatives {
                                                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         LinkedHashMap<Object, Object> map = new LinkedHashMap<>();
         for (Object key : keys) {
+            // from_keys callback: { val: 'k } -> 'v
             Object value = callNode.call(valueFn.getCallTarget(),
-                prepareArgs(valueFn, key));
+                prepareArgsVal(valueFn, key));
             map.put(key, value);
         }
         return new MezzeMap(map);
@@ -178,12 +179,13 @@ public final class MapNatives {
                                                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
         for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            // filter callback: { k: 'k, v: 'v } -> Bool
             MezzeRecord kvRecord = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
+                new String[]{"k", "v"},
                 new Object[]{entry.getKey(), entry.getValue()}
             );
             Object res = callNode.call(predicate.getCallTarget(),
-                prepareArgs(predicate, kvRecord));
+                prepareArgsKV(predicate, kvRecord));
             if (res instanceof Boolean && (Boolean) res) {
                 result.put(entry.getKey(), entry.getValue());
             }
@@ -196,8 +198,9 @@ public final class MapNatives {
                                                                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
         for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
+            // map_values callback: { val: 'v } -> 'w
             Object newValue = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, entry.getValue()));
+                prepareArgsVal(mapper, entry.getValue()));
             result.put(entry.getKey(), newValue);
         }
         return new MezzeMap(result);
@@ -208,12 +211,9 @@ public final class MapNatives {
                                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object acc = init;
         for (Map.Entry<Object, Object> entry : map.getMap().entrySet()) {
-            MezzeRecord kvRecord = MezzeRecord.fromFields(
-                new String[]{"key", "value"},
-                new Object[]{entry.getKey(), entry.getValue()}
-            );
+            // fold callback: { acc: 'acc, k: 'k, v: 'v } -> 'acc
             acc = callNode.call(folder.getCallTarget(),
-                prepareArgsTwo(folder, acc, kvRecord));
+                prepareArgsFold(folder, acc, entry.getKey(), entry.getValue()));
         }
         return acc;
     }
@@ -236,8 +236,9 @@ public final class MapNatives {
             Object newValue = entry.getValue();
             if (result.containsKey(key)) {
                 Object oldValue = result.get(key);
+                // merge_with callback: { l: 'v, r: 'v } -> 'v
                 newValue = callNode.call(merger.getCallTarget(),
-                    prepareArgsTwo(merger, oldValue, newValue));
+                    prepareArgsLR(merger, oldValue, newValue));
             }
             result.put(key, newValue);
         }
@@ -269,6 +270,48 @@ public final class MapNatives {
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
             new String[]{"acc", "x"}, new Object[]{arg1, arg2}
+        );
+        return args;
+    }
+
+    // Helper for map_values: { val: 'v } -> 'w
+    private static Object[] prepareArgsVal(MezzeFunction fn, Object val) {
+        Object[] closureValues = fn.getClosureValues();
+        Object[] args = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+        args[closureValues.length] = MezzeRecord.fromFields(
+            new String[]{"val"}, new Object[]{val}
+        );
+        return args;
+    }
+
+    // Helper for filter: { k: 'k, v: 'v } -> Bool
+    private static Object[] prepareArgsKV(MezzeFunction fn, MezzeRecord kvRecord) {
+        Object[] closureValues = fn.getClosureValues();
+        Object[] args = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+        args[closureValues.length] = kvRecord;
+        return args;
+    }
+
+    // Helper for fold: { acc: 'acc, k: 'k, v: 'v } -> 'acc
+    private static Object[] prepareArgsFold(MezzeFunction fn, Object acc, Object k, Object v) {
+        Object[] closureValues = fn.getClosureValues();
+        Object[] args = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+        args[closureValues.length] = MezzeRecord.fromFields(
+            new String[]{"acc", "k", "v"}, new Object[]{acc, k, v}
+        );
+        return args;
+    }
+
+    // Helper for merge_with: { l: 'v, r: 'v } -> 'v
+    private static Object[] prepareArgsLR(MezzeFunction fn, Object l, Object r) {
+        Object[] closureValues = fn.getClosureValues();
+        Object[] args = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+        args[closureValues.length] = MezzeRecord.fromFields(
+            new String[]{"l", "r"}, new Object[]{l, r}
         );
         return args;
     }

@@ -59,8 +59,8 @@ class SortedSetInterpreterTest {
         val result = eval("""
             use std::collections::sorted_set
             use std::collections::list
-            let xs = list::cons { head = 3, tail = list::cons { head = 1, tail = list::cons { head = 2, tail = list::empty {} } } }
-            sorted_set::size { s = sorted_set::from_list { list = xs } }
+            let elems = list::cons { head = 3, tail = list::cons { head = 1, tail = list::cons { head = 2, tail = list::empty {} } } }
+            sorted_set::size { s = sorted_set::from_list { xs = elems } }
         """)
         assertEquals(MezzeInt(3), result)
     }

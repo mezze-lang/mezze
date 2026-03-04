@@ -1,6 +1,7 @@
 package com.mezze.interpreter.v2.nodes.arithmetic;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -15,6 +16,8 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 @NodeChild("operand")
 @NodeInfo(shortName = "-")
 public abstract class NegateNode extends MezzeNode {
+
+    private static final String[] FRAC_FIELDS = new String[]{"numerator", "denominator"};
 
     /**
      * Negate Int (unboxed long).
@@ -38,6 +41,22 @@ public abstract class NegateNode extends MezzeNode {
     @Specialization
     protected static double negateDouble(double value) {
         return -value;
+    }
+
+    /**
+     * Negate fraction: -(a/b) = (-a)/b
+     */
+    @Specialization(guards = "isFraction(value)")
+    protected static MezzeRecord negateFraction(MezzeRecord value) {
+        long numerator = (Long) value.getField("numerator");
+        long denominator = (Long) value.getField("denominator");
+        return MezzeRecord.fromFields(FRAC_FIELDS, new Object[]{-numerator, denominator});
+    }
+
+    protected static boolean isFraction(MezzeRecord record) {
+        return record.getFieldIndex("numerator") >= 0
+            && record.getFieldIndex("denominator") >= 0
+            && record.getFieldCount() == 2;
     }
 
     /**

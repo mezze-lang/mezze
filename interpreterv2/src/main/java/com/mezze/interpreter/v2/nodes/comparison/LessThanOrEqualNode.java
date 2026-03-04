@@ -12,6 +12,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
  * Less-than-or-equal comparison node - OPTIMIZED.
+ * Nat is represented as primitive long for optimal JIT performance.
  *
  * Numeric comparisons are fully JIT-compilable.
  */
@@ -22,7 +23,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 public abstract class LessThanOrEqualNode extends MezzeNode {
 
     /**
-     * Fast path: Int <= Int - FULLY JIT-COMPILABLE.
+     * Fast path: Int/Nat <= Int/Nat - FULLY JIT-COMPILABLE.
      */
     @Specialization
     protected boolean leqLongs(long left, long right) {

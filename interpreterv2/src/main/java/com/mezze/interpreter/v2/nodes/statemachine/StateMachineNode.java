@@ -4,8 +4,8 @@ import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.nodes.MezzeRootNode;
 import com.mezze.interpreter.v2.nodes.continuation.DelimiterStack;
 import com.mezze.interpreter.v2.runtime.MezzeLanguage;
-import com.mezze.interpreter.v2.values.MezzeContinuation;
-import com.mezze.interpreter.v2.values.MezzeContinuationSuspended;
+import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuation;
+import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.oracle.truffle.api.CallTarget;
@@ -16,6 +16,7 @@ import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
+import com.oracle.truffle.api.profiles.InlinedBranchProfile;
 
 /**
  * State machine node for continuation-based effects - V2 OPTIMIZED.
@@ -69,6 +70,9 @@ public final class StateMachineNode extends MezzeNode {
 
     @CompilationFinal
     private final int stateCount;
+
+    // Branch profile for early return path - rarely taken, JIT optimizes for normal path
+    private final InlinedBranchProfile earlyReturnProfile = InlinedBranchProfile.getUncached();
 
     public StateMachineNode(
             MezzeNode[] stateNodes,
@@ -132,6 +136,13 @@ public final class StateMachineNode extends MezzeNode {
 
             switch (stateType) {
                 case STATE_COMPUTE -> {
+                    // CRITICAL: Check for early return/exception effects
+                    // MezzeContinuationSuspended signals that execution should abort
+                    // Uses branch profile - JIT assumes this is rarely taken (cold path)
+                    if (result instanceof MezzeContinuationSuspended) {
+                        earlyReturnProfile.enter(this);
+                        return result;
+                    }
                     // COMPUTE: Transition to next state with result as input
                     if (nextState < 0) {
                         return result;
@@ -147,6 +158,12 @@ public final class StateMachineNode extends MezzeNode {
                     return createSuspendedContinuation(result, capturedValues);
                 }
                 case STATE_COMPLETE -> {
+                    // CRITICAL: Check for early return/exception effects
+                    // Uses branch profile - JIT assumes this is rarely taken (cold path)
+                    if (result instanceof MezzeContinuationSuspended) {
+                        earlyReturnProfile.enter(this);
+                        return result;
+                    }
                     // COMPLETE: Terminal state, return result
                     return result;
                 }

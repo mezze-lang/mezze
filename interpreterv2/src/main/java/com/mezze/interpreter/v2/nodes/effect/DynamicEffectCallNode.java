@@ -91,9 +91,15 @@ public final class DynamicEffectCallNode extends MezzeNode {
             throw new RuntimeException("Effect handler not found for: " + effectName);
         }
 
+        // Handler should be a record. If it's a function (parameterized impl), that's an error
+        // because parameterized impls should be invoked via ParameterizedHandleNode first.
+        // But for robustness, check if the DynamicHandleNode already invoked the function.
         if (!(handler instanceof MezzeRecord handlerRecord)) {
+            // If handler is a function, it's likely a parameterized impl that wasn't invoked
+            // This shouldn't normally happen if the perform expression was converted correctly
             throw new RuntimeException("Effect handler must be a record, got: " +
-                (handler == null ? "null" : handler.getClass().getSimpleName()));
+                (handler == null ? "null" : handler.getClass().getSimpleName()) +
+                ". For parameterized impls, use 'perform Handler {params} in ...'");
         }
 
         // Get the operation function from the handler record

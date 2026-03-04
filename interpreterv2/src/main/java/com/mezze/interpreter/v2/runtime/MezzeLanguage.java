@@ -457,6 +457,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                                 context.defineGlobal(internalQualifiedName, value);
                                 // Also register with just the name for direct lookup
                                 context.defineGlobal(name, value);
+                                // Register by content hash for content-addressable lookup
+                                String contentHash = letBinding.getContentHash();
+                                if (contentHash != null && !contentHash.isEmpty()) {
+                                    context.defineGlobal(contentHash, value);
+                                }
                             }
                         }
                     }
@@ -583,6 +588,16 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      */
     public static void clearLastContext() {
         lastContextStore.set(null);
+    }
+
+    /**
+     * Enable multi-threaded access for concurrency support.
+     * Required for Loom virtual threads and parallel execution.
+     */
+    @Override
+    protected boolean isThreadAccessAllowed(Thread thread, boolean singleThreaded) {
+        // Allow all threads to access this language
+        return true;
     }
 
     private static final LanguageReference<MezzeLanguage> REFERENCE =

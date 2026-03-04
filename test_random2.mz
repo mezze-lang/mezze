@@ -1,0 +1,39 @@
+# Demo 12: Random Effect with Seeded Implementation
+
+use std::effects::log::{Log, Console, println}
+use std::effects::random::{Random, SeededRandom, random_int, random_float}
+use std::collections::array
+use std::int
+use std::string
+
+let roll_dice = {} ->
+    random_int {min = 1, max = 6}
+
+let flip_coin = {} -> do
+    let rand =  random_float {}
+    if rand < 0.5 then "Heads" else "Tails"
+
+let game_demo = {} -> do
+    println {msg = "Rolling dice 5 times:"}
+    let r1 = roll_dice {}
+    let r2 = roll_dice {}
+    let r3 = roll_dice {}
+    let r4 = roll_dice {}
+    let r5 = roll_dice {}
+
+    println {msg = " $(array::map { xs = [r1, r2, r3, r4, r5], f = {x} -> int::to_string { n = x} } |> string::join { strings = @, separator = " ,"}) " }
+
+    println {msg = "Flipping coin 3 times:"}
+    let f1 = flip_coin {}
+    let f2 = flip_coin {}
+    let f3 = flip_coin {}
+    println {msg = " $(f1)  , $(f2) , $(f3)"}
+
+pub let main: {} -> {} <*> = {} ->
+    perform Console in do
+        println {msg = "Demo: Random Effect"}
+
+        println {msg = "With seed 42:"}
+        perform SeededRandom {seed = 42} in game_demo {}
+
+        println {msg = "Done!"}

@@ -232,9 +232,10 @@ class MezzeInterpreter {
     }
 
     private fun convertV2SortedMap(v2SortedMap: com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.MezzeSortedMap): MezzeSortedMap {
-        val keys = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.keys(v2SortedMap)
+        val keysList = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.keys(v2SortedMap)
         var treeMap = io.vavr.collection.TreeMap.empty<MezzeValue, MezzeValue>(MezzeValueComparator())
-        for (key in keys) {
+        for (i in 0 until keysList.size()) {
+            val key = keysList.get(i)
             val v2Result = com.mezze.interpreter.v2.nodes.builtin.collections.SortedMapNatives.get(v2SortedMap, key)
             if (v2Result is com.mezze.interpreter.v2.values.MezzeVariant && v2Result.isSome) {
                 val payload = v2Result.payloadValue as com.mezze.interpreter.v2.values.MezzeRecord

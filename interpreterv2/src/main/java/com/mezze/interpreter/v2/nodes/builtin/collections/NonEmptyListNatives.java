@@ -74,23 +74,23 @@ public final class NonEmptyListNatives {
     }
 
     @TruffleBoundary
-    public static MezzeVariant fromList(MezzeList list) {
+    public static MezzeNonEmptyList fromList(MezzeList list) {
         if (list.isEmpty()) {
-            return MezzeVariant.none();
+            throw new RuntimeException("Cannot create NonEmptyList from empty list");
         }
         Object[] elements = new Object[list.size()];
         for (int i = 0; i < list.size(); i++) {
             elements[i] = list.get(i);
         }
-        return MezzeVariant.some(new MezzeNonEmptyList(elements));
+        return new MezzeNonEmptyList(elements);
     }
 
     @TruffleBoundary
-    public static MezzeVariant fromArray(Object[] arr) {
+    public static MezzeNonEmptyList fromArray(Object[] arr) {
         if (arr.length == 0) {
-            return MezzeVariant.none();
+            throw new RuntimeException("Cannot create NonEmptyList from empty array");
         }
-        return MezzeVariant.some(new MezzeNonEmptyList(arr.clone()));
+        return new MezzeNonEmptyList(arr.clone());
     }
 
     // ==================== Basic Operations ====================
@@ -111,12 +111,12 @@ public final class NonEmptyListNatives {
         return list.last();
     }
 
-    public static MezzeVariant get(MezzeNonEmptyList list, long index) {
+    public static Object get(MezzeNonEmptyList list, long index) {
         int idx = (int) index;
         if (idx < 0 || idx >= list.size()) {
-            return MezzeVariant.none();
+            throw new RuntimeException("Index out of bounds: " + idx + " for NonEmptyList of size " + list.size());
         }
-        return MezzeVariant.some(list.get(idx));
+        return list.get(idx);
     }
 
     // ==================== Construct Operations ====================
@@ -130,10 +130,10 @@ public final class NonEmptyListNatives {
     }
 
     @TruffleBoundary
-    public static MezzeNonEmptyList append(MezzeNonEmptyList list, Object element) {
-        Object[] result = new Object[list.size() + 1];
-        System.arraycopy(list.getElements(), 0, result, 0, list.size());
-        result[list.size()] = element;
+    public static MezzeNonEmptyList append(MezzeNonEmptyList list1, MezzeNonEmptyList list2) {
+        Object[] result = new Object[list1.size() + list2.size()];
+        System.arraycopy(list1.getElements(), 0, result, 0, list1.size());
+        System.arraycopy(list2.getElements(), 0, result, list1.size(), list2.size());
         return new MezzeNonEmptyList(result);
     }
 
@@ -147,13 +147,18 @@ public final class NonEmptyListNatives {
         return new MezzeNonEmptyList(result);
     }
 
+    /**
+     * Prepend a list to an element to form a NonEmptyList.
+     * {xs: List 'a, y: 'a} -> NonEmptyList 'a
+     * Result: [xs[0], xs[1], ..., xs[n-1], y]
+     */
     @TruffleBoundary
-    public static MezzeNonEmptyList prependList(MezzeList other, MezzeNonEmptyList list) {
-        Object[] result = new Object[other.size() + list.size()];
-        for (int i = 0; i < other.size(); i++) {
-            result[i] = other.get(i);
+    public static MezzeNonEmptyList prependList(MezzeList list, Object element) {
+        Object[] result = new Object[list.size() + 1];
+        for (int i = 0; i < list.size(); i++) {
+            result[i] = list.get(i);
         }
-        System.arraycopy(list.getElements(), 0, result, other.size(), list.size());
+        result[list.size()] = element;
         return new MezzeNonEmptyList(result);
     }
 
@@ -294,7 +299,7 @@ public final class NonEmptyListNatives {
         Object[] result = new Object[len];
         for (int i = 0; i < len; i++) {
             result[i] = MezzeRecord.fromFields(
-                new String[]{"first", "second"},
+                new String[]{"fst", "snd"},
                 new Object[]{list1.get(i), list2.get(i)}
             );
         }
@@ -322,39 +327,24 @@ public final class NonEmptyListNatives {
         return new MezzeNonEmptyList(arr);
     }
 
+    /**
+     * Sort by comparator function: {l: 'a, r: 'a} -> Int
+     * Returns negative if l < r, 0 if equal, positive if l > r
+     */
     @TruffleBoundary
-    public static MezzeNonEmptyList sortBy(MezzeNonEmptyList list, MezzeFunction keyFn,
+    public static MezzeNonEmptyList sortBy(MezzeNonEmptyList list, MezzeFunction cmpFn,
                                                                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        // Extract keys first
-        Object[][] pairs = new Object[list.size()][2];
-        for (int i = 0; i < list.size(); i++) {
-            pairs[i][0] = list.get(i);
-            pairs[i][1] = callNode.call(keyFn.getCallTarget(),
-                prepareArgs(keyFn, list.get(i)));
-        }
-
-        // Sort by keys
-        java.util.Arrays.sort(pairs, (a, b) -> {
-            Object keyA = a[1];
-            Object keyB = b[1];
-            if (keyA instanceof Long && keyB instanceof Long) {
-                return Long.compare((Long) keyA, (Long) keyB);
-            }
-            if (keyA instanceof Double && keyB instanceof Double) {
-                return Double.compare((Double) keyA, (Double) keyB);
-            }
-            if (keyA instanceof String && keyB instanceof String) {
-                return ((String) keyA).compareTo((String) keyB);
+        Object[] arr = list.getElements().clone();
+        java.util.Arrays.sort(arr, (a, b) -> {
+            // Call the comparator function with {l, r}
+            Object result = callNode.call(cmpFn.getCallTarget(),
+                prepareArgsLR(cmpFn, a, b));
+            if (result instanceof Long) {
+                return ((Long) result).intValue();
             }
             return 0;
         });
-
-        // Extract sorted values
-        Object[] result = new Object[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            result[i] = pairs[i][0];
-        }
-        return new MezzeNonEmptyList(result);
+        return new MezzeNonEmptyList(arr);
     }
 
     // ==================== Conversion ====================
@@ -386,6 +376,16 @@ public final class NonEmptyListNatives {
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.fromFields(
             new String[]{"acc", "x"}, new Object[]{arg1, arg2}
+        );
+        return args;
+    }
+
+    private static Object[] prepareArgsLR(MezzeFunction fn, Object left, Object right) {
+        Object[] closureValues = fn.getClosureValues();
+        Object[] args = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
+        args[closureValues.length] = MezzeRecord.fromFields(
+            new String[]{"l", "r"}, new Object[]{left, right}
         );
         return args;
     }

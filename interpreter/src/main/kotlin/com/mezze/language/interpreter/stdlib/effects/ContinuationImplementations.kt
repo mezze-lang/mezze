@@ -53,6 +53,7 @@ object ContinuationImplementations {
     ) {
         registerDelimit(context)
         registerActivate(context)
+        registerDeactivate(context)
         registerCapture(context)
         registerSuspend(context)
         registerSuspendWith(context)
@@ -123,6 +124,35 @@ object ContinuationImplementations {
 
             // Push delimiter onto thread-local stack
             activeDelimiters.get().add(delim)
+
+            // Return unit
+            MezzeRecord(emptyMap())
+        }
+    }
+
+    /**
+     * __native_continuation_deactivate - Pops a delimiter from the thread-local stack.
+     *
+     * This should be called when done using a continuation to prevent stack leaks.
+     * It pops the topmost delimiter from the thread-local stack.
+     *
+     * Takes: { delim: MezzeCont }
+     * Returns: {} (unit value)
+     */
+    private fun registerDeactivate(context: MutableMap<String, MezzeValue>) {
+        context["__native_continuation_deactivate"] = NativeMezzeFunction("__native_continuation_deactivate") { args ->
+
+            val record = args.firstOrNull() as? MezzeRecord
+                ?: throw NativeFunctionException("__native_continuation_deactivate", "expects MezzeRecord")
+
+            val delim = record.fields["delim"] as? MezzeCont
+                ?: throw NativeFunctionException("__native_continuation_deactivate", "expects 'delim' field as MezzeCont")
+
+            // Pop delimiter from thread-local stack
+            val stack = activeDelimiters.get()
+            if (stack.isNotEmpty()) {
+                stack.removeAt(stack.size - 1)
+            }
 
             // Return unit
             MezzeRecord(emptyMap())

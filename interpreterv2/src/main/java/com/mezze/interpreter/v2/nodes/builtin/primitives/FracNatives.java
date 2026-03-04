@@ -158,13 +158,23 @@ public final class FracNatives {
         return ln * rd > rn * ld;
     }
 
+    /**
+     * Compare two fractions, returning an Ordering variant (LT, EQ, GT).
+     */
     @TruffleBoundary
-    public static long compare(MezzeRecord l, MezzeRecord r) {
+    public static MezzeVariant compare(MezzeRecord l, MezzeRecord r) {
         long ln = numerator(l);
         long ld = denominator(l);
         long rn = numerator(r);
         long rd = denominator(r);
-        return Long.signum(ln * rd - rn * ld);
+        long cmp = ln * rd - rn * ld;
+        if (cmp < 0) {
+            return MezzeVariant.lt();
+        } else if (cmp > 0) {
+            return MezzeVariant.gt();
+        } else {
+            return MezzeVariant.eq();
+        }
     }
 
     // ==================== Conversion ====================

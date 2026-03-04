@@ -673,7 +673,8 @@ class ConstraintSolver(
                                         val mergedRowVar = leftType.rowVar ?: rightType.rowVar
                                         val mergedVariant = MezzeType.VariantType(
                                             constructors = mergedConstructors,
-                                            rowVar = mergedRowVar
+                                            rowVar = mergedRowVar,
+                                            typeName = leftType.typeName ?: rightType.typeName
                                         )
 
                                         val updatedMappings = mutableMapOf<TypeVar, MezzeType>()
@@ -1825,7 +1826,16 @@ class ConstraintSolver(
      */
     private fun isBuiltInAbilityImplementation(abilityName: String, type: MezzeType): Boolean {
         // Unwrap SuspendedType to check the inner value type
-        val unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
+        var unwrappedType = if (type is MezzeType.SuspendedType) type.valueType else type
+
+        // Expand TypeApplication to VariantType if possible
+        // This allows deriving Eq/Ord for named variant types like Option, Result, etc.
+        if (unwrappedType is MezzeType.TypeApplication) {
+            val expanded = expandTypeApplicationToVariant(unwrappedType, typeDeclarations)
+            if (expanded != null) {
+                unwrappedType = expanded
+            }
+        }
 
         return when (abilityName) {
             // Numeric abilities that work with Nat
@@ -1853,6 +1863,8 @@ class ConstraintSolver(
                 unwrappedType is MezzeType.OrderingType ||
                 unwrappedType is MezzeType.BytesType ||
                 unwrappedType is MezzeType.ByteBufferType ||
+                // Type variables are assumed to have Eq - they're constrained at the call site
+                unwrappedType is MezzeType.VarType ||
                 isBoolVariant(unwrappedType) ||
                 // Derive Eq for records if all fields have Eq
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Eq", it) }) ||
@@ -1871,6 +1883,8 @@ class ConstraintSolver(
                 unwrappedType is MezzeType.StringType ||
                 unwrappedType is MezzeType.NatType ||
                 unwrappedType is MezzeType.FracType ||
+                // Type variables are assumed to have Ord - they're constrained at the call site
+                unwrappedType is MezzeType.VarType ||
                 // Derive Ord for records if all fields have Ord
                 (unwrappedType is MezzeType.RecordType && unwrappedType.fields.values.all { isBuiltInAbilityImplementation("Ord", it) }) ||
                 // Derive Ord for variants if all constructor payloads have Ord (or no payload)
@@ -2492,7 +2506,8 @@ class ConstraintSolver(
                     // Use the closed Bool variant type
                     val boolType = MezzeType.VariantType(
                         constructors = mapOf("True" to null, "False" to null),
-                        rowVar = null  // Bool is closed
+                        rowVar = null,  // Bool is closed
+                        typeName = "Bool"
                     )
                     return ConstraintResult.Success(
                         Substitution.single(variantType.variable, boolType)
@@ -2526,7 +2541,8 @@ class ConstraintSolver(
 
                     val declaredVariant = MezzeType.VariantType(
                         constructors = constructors,
-                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null  // Use declared openness
+                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null,  // Use declared openness
+                        typeName = declaringType.name  // Preserve type name for Eq derivation
                     )
 
                     // CRITICAL: Validate payload presence/absence and unify types
@@ -2606,7 +2622,8 @@ class ConstraintSolver(
             if (constructorName == "True" || constructorName == "False") {
                 val boolType = MezzeType.VariantType(
                     constructors = mapOf("True" to null, "False" to null),
-                    rowVar = null  // Bool is closed
+                    rowVar = null,  // Bool is closed
+                    typeName = "Bool"
                 )
                 return ConstraintResult.Success(
                     Substitution.single(variantType.variable, boolType)
@@ -2636,7 +2653,8 @@ class ConstraintSolver(
 
                     val declaredVariant = MezzeType.VariantType(
                         constructors = constructors,
-                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null
+                        rowVar = if (variantDef.isOpen) RowVar.fresh() else null,
+                        typeName = declaringTypeExpr.name
                     )
 
                     var resultSubst = Substitution.single(variantType.variable, declaredVariant)
@@ -2756,7 +2774,8 @@ class ConstraintSolver(
                                             "Ok" to MezzeType.RecordType(mapOf("val" to valTypeVar)),
                                             "Err" to MezzeType.RecordType(mapOf("error" to errTypeVar))
                                         ),
-                                        rowVar = null  // Closed
+                                        rowVar = null,  // Closed
+                                        typeName = "Result"
                                     )
                                 }
                                 "Option" -> {
@@ -2903,7 +2922,8 @@ class ConstraintSolver(
                     val newConstructors = variantType.constructors + (constructorName to expectedPayloadType)
                     val extendedVariant = MezzeType.VariantType(
                         constructors = newConstructors,
-                        rowVar = variantType.rowVar  // Keep the row variable
+                        rowVar = variantType.rowVar,  // Keep the row variable
+                        typeName = variantType.typeName  // Preserve type name
                     )
 
                     // Find the type variable that DIRECTLY maps to this variant (not through a chain)
@@ -3083,7 +3103,8 @@ class ConstraintSolver(
                     constructors = type.constructors.mapValues { (_, payloadType) ->
                         payloadType?.let { closeRowVarsInType(it, rowVarsToClose) }
                     },
-                    rowVar = if (shouldClose) null else type.rowVar
+                    rowVar = if (shouldClose) null else type.rowVar,
+                    typeName = type.typeName
                 )
             }
             is MezzeType.RecordType -> {
@@ -3368,7 +3389,8 @@ class ConstraintSolver(
                 constructors = type.constructors.mapValues { (_, dataType) ->
                     dataType?.let { applyVarSubstitution(it, substitution) }
                 },
-                rowVar = type.rowVar
+                rowVar = type.rowVar,
+                typeName = type.typeName
             )
             is MezzeType.TypeApplication -> MezzeType.TypeApplication(
                 constructor = type.constructor,
@@ -3473,7 +3495,8 @@ class ConstraintSolver(
                     "String" -> MezzeType.StringType
                     "Bool" -> MezzeType.VariantType(
                         constructors = mapOf("True" to null, "False" to null),
-                        rowVar = null
+                        rowVar = null,
+                        typeName = "Bool"
                     )
                     "Nat" -> MezzeType.NatType
                     "Frac" -> MezzeType.FracType

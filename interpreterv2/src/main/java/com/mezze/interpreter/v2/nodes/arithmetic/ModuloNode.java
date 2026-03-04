@@ -8,6 +8,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
  * Modulo node with proper Truffle DSL specializations.
+ * Nat is represented as primitive long for optimal JIT performance.
  */
 @NodeChild("left")
 @NodeChild("right")
@@ -15,7 +16,7 @@ import com.oracle.truffle.api.nodes.NodeInfo;
 public abstract class ModuloNode extends MezzeNode {
 
     /**
-     * Int % Int (unboxed longs).
+     * Int/Nat % Int/Nat (unboxed longs).
      */
     @Specialization
     protected long moduloLongs(long left, long right) {

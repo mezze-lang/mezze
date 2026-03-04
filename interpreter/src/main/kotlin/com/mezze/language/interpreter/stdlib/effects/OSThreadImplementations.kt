@@ -709,8 +709,8 @@ object OSThreadImplementations {
             val record = args.firstOrNull() as? MezzeRecord
                 ?: throw NativeFunctionException("__native_os_scope_spawn", "expects MezzeRecord")
 
-            val scopeVal = record.fields["scope"]
-                ?: throw NativeFunctionException("__native_os_scope_spawn", "expects 'scope' field")
+            val scopeVal = record.fields["sc"]
+                ?: throw NativeFunctionException("__native_os_scope_spawn", "expects 'sc' field")
 
             val fn = record.fields["f"]
                 ?: throw NativeFunctionException("__native_os_scope_spawn", "expects 'f' field")
@@ -730,8 +730,8 @@ object OSThreadImplementations {
             val record = args.firstOrNull() as? MezzeRecord
                 ?: throw NativeFunctionException("__native_os_scope_cancel_all", "expects MezzeRecord")
 
-            val scopeVal = record.fields["scope"]
-                ?: throw NativeFunctionException("__native_os_scope_cancel_all", "expects 'scope' field")
+            val scopeVal = record.fields["sc"]
+                ?: throw NativeFunctionException("__native_os_scope_cancel_all", "expects 'sc' field")
 
             val scope = scopeVal as? OSScope
                 ?: throw NativeFunctionException("__native_os_scope_cancel_all", "scope must be an OSScope")
@@ -747,7 +747,7 @@ object OSThreadImplementations {
      */
     @TruffleBoundary
     private fun callFunctionWithScopeArg(fn: MezzeValue, scope: OSScope): MezzeValue {
-        val recordArg = MezzeRecord(mapOf("scope" to scope))
+        val recordArg = MezzeRecord(mapOf("sc" to scope))
         return when (fn) {
             is MezzeTruffleFunction -> {
                 fn.callTarget.call(

@@ -68,6 +68,18 @@ public final class MatchBranchNode extends MezzeNode {
     @Child
     private MezzeNode bodyNode;
 
+    // Optional guard node - if present, must evaluate to true for match
+    @Child
+    private MezzeNode guardNode;
+
+    // Optional if-let bindings - all must match for pattern to succeed
+    @Children
+    private final com.mezze.interpreter.v2.nodes.control.IfLetBindingNode[] ifLetBindings;
+
+    // Pre-computed for @ExplodeLoop
+    @CompilationFinal
+    private final int ifLetBindingCount;
+
     // For variant patterns: field names to extract from payload record
     // (for patterns like `Some { val }`, this contains ["val"])
     @CompilationFinal(dimensions = 1)
@@ -147,6 +159,19 @@ public final class MatchBranchNode extends MezzeNode {
     }
 
     /**
+     * Create a string interpolation pattern branch with guard and if-let bindings.
+     * Tag = -4 indicates string pattern.
+     */
+    public static MatchBranchNode stringPatternWithGuard(
+            int[] partTypes, String[] literals, int[] captureSlots, MezzeNode bodyNode,
+            MezzeNode guardNode, com.mezze.interpreter.v2.nodes.control.IfLetBindingNode[] ifLetBindings) {
+        return new MatchBranchNode(-4, EMPTY_SLOTS, -1, null, bodyNode,
+                EMPTY_SLOTS, -1, false, 0,
+                partTypes, literals, captureSlots, null, false, null,
+                guardNode, ifLetBindings);
+    }
+
+    /**
      * Create a record pattern branch.
      * Tag = -5 indicates record pattern.
      *
@@ -160,6 +185,55 @@ public final class MatchBranchNode extends MezzeNode {
         return new MatchBranchNode(-5, EMPTY_SLOTS, -1, null, bodyNode,
                 EMPTY_SLOTS, -1, false, 0,
                 null, null, fieldSlots, fieldNames, isOpen, null);
+    }
+
+    // ===== FACTORY METHODS WITH GUARDS/IF-LET =====
+
+    /**
+     * Create a variant pattern branch with guard and if-let bindings.
+     */
+    public static MatchBranchNode variantPatternWithGuard(
+            int tag, String[] fieldNames, int[] fieldSlots, MezzeNode bodyNode,
+            MezzeNode guardNode, com.mezze.interpreter.v2.nodes.control.IfLetBindingNode[] ifLetBindings) {
+        return new MatchBranchNode(tag, fieldSlots != null && fieldSlots.length > 0 ? fieldSlots : EMPTY_SLOTS,
+                                   -1, null, bodyNode,
+                                   EMPTY_SLOTS, -1, false, 0,
+                                   null, null, null, null, false, fieldNames,
+                                   guardNode, ifLetBindings);
+    }
+
+    /**
+     * Create a wildcard branch with guard and if-let bindings.
+     */
+    public static MatchBranchNode wildcardWithGuard(int valueSlot, MezzeNode bodyNode,
+            MezzeNode guardNode, com.mezze.interpreter.v2.nodes.control.IfLetBindingNode[] ifLetBindings) {
+        return new MatchBranchNode(-1, EMPTY_SLOTS, valueSlot, null, bodyNode,
+                                   EMPTY_SLOTS, -1, false, 0,
+                                   null, null, null, null, false, null,
+                                   guardNode, ifLetBindings);
+    }
+
+    /**
+     * Create a literal pattern branch with guard.
+     */
+    public static MatchBranchNode literalPatternWithGuard(Object literalValue, MezzeNode bodyNode,
+            MezzeNode guardNode, com.mezze.interpreter.v2.nodes.control.IfLetBindingNode[] ifLetBindings) {
+        return new MatchBranchNode(-2, EMPTY_SLOTS, -1, literalValue, bodyNode,
+                                   EMPTY_SLOTS, -1, false, 0,
+                                   null, null, null, null, false, null,
+                                   guardNode, ifLetBindings);
+    }
+
+    /**
+     * Create a record pattern branch with guard and if-let bindings.
+     */
+    public static MatchBranchNode recordPatternWithGuard(
+            String[] fieldNames, int[] fieldSlots, boolean isOpen, MezzeNode bodyNode,
+            MezzeNode guardNode, com.mezze.interpreter.v2.nodes.control.IfLetBindingNode[] ifLetBindings) {
+        return new MatchBranchNode(-5, EMPTY_SLOTS, -1, null, bodyNode,
+                                   EMPTY_SLOTS, -1, false, 0,
+                                   null, null, fieldSlots, fieldNames, isOpen, null,
+                                   guardNode, ifLetBindings);
     }
 
     // ===== ARRAY PATTERN FIELDS =====
@@ -221,11 +295,15 @@ public final class MatchBranchNode extends MezzeNode {
     @CompilationFinal(dimensions = 1)
     private int[] cachedRecordFieldIndices;
 
+    // Empty if-let bindings array
+    private static final com.mezze.interpreter.v2.nodes.control.IfLetBindingNode[] EMPTY_IFLET = new com.mezze.interpreter.v2.nodes.control.IfLetBindingNode[0];
+
     private MatchBranchNode(int tag, int[] payloadSlots, int valueSlot,
                             Object literalValue, MezzeNode bodyNode, String[] variantPayloadFieldNames) {
         this(tag, payloadSlots, valueSlot, literalValue, bodyNode,
                 EMPTY_SLOTS, -1, false, 0,
-                null, null, null, null, false, variantPayloadFieldNames);
+                null, null, null, null, false, variantPayloadFieldNames,
+                null, EMPTY_IFLET);
     }
 
     private MatchBranchNode(int tag, int[] payloadSlots, int valueSlot,
@@ -234,7 +312,8 @@ public final class MatchBranchNode extends MezzeNode {
                             boolean arrayHasRest, int arrayRequiredLength) {
         this(tag, payloadSlots, valueSlot, literalValue, bodyNode,
                 arrayElementSlots, arrayRestSlot, arrayHasRest, arrayRequiredLength,
-                null, null, null, null, false, null);
+                null, null, null, null, false, null,
+                null, EMPTY_IFLET);
     }
 
     private MatchBranchNode(int tag, int[] payloadSlots, int valueSlot,
@@ -244,12 +323,31 @@ public final class MatchBranchNode extends MezzeNode {
                             int[] stringPartTypes, String[] stringLiterals, int[] captureOrFieldSlots,
                             String[] recordFieldNames, boolean recordIsOpen,
                             String[] variantPayloadFieldNames) {
+        this(tag, payloadSlots, valueSlot, literalValue, bodyNode,
+                arrayElementSlots, arrayRestSlot, arrayHasRest, arrayRequiredLength,
+                stringPartTypes, stringLiterals, captureOrFieldSlots,
+                recordFieldNames, recordIsOpen, variantPayloadFieldNames,
+                null, EMPTY_IFLET);
+    }
+
+    private MatchBranchNode(int tag, int[] payloadSlots, int valueSlot,
+                            Object literalValue, MezzeNode bodyNode,
+                            int[] arrayElementSlots, int arrayRestSlot,
+                            boolean arrayHasRest, int arrayRequiredLength,
+                            int[] stringPartTypes, String[] stringLiterals, int[] captureOrFieldSlots,
+                            String[] recordFieldNames, boolean recordIsOpen,
+                            String[] variantPayloadFieldNames,
+                            MezzeNode guardNode,
+                            com.mezze.interpreter.v2.nodes.control.IfLetBindingNode[] ifLetBindings) {
         this.tag = tag;
         this.payloadSlots = payloadSlots;
         this.payloadSlotCount = payloadSlots.length;
         this.valueSlot = valueSlot;
         this.bodyNode = bodyNode;
         this.variantPayloadFieldNames = variantPayloadFieldNames;
+        this.guardNode = guardNode;
+        this.ifLetBindings = ifLetBindings != null ? ifLetBindings : EMPTY_IFLET;
+        this.ifLetBindingCount = this.ifLetBindings.length;
 
         // Array pattern fields
         this.arrayElementSlots = arrayElementSlots;
@@ -365,9 +463,14 @@ public final class MatchBranchNode extends MezzeNode {
     /**
      * Check if this matches a literal value - OPTIMIZED.
      * Uses pre-computed typed values to avoid boxing overhead.
+     * Wildcards (tag == -1) match any value.
      */
     public boolean matchesLiteral(Object value) {
-        // Fast path: use pre-computed typed values
+        // Wildcards match any value - needed for guarded wildcards like "k if let ..."
+        if (tag == -1) {
+            return true;
+        }
+        // Fast path: use pre-computed typed values for literal patterns
         return switch (literalType) {
             case 0 -> value instanceof Long v && v == literalLong; // Long comparison (unboxed)
             case 1 -> value instanceof Double v && v == literalDouble; // Double comparison (unboxed)
@@ -860,9 +963,57 @@ public final class MatchBranchNode extends MezzeNode {
         }
     }
 
+    /**
+     * Execute the branch body after checking guards and if-let bindings.
+     * Returns null if guard/if-let fails (to signal match failure).
+     */
     @Override
     public Object execute(VirtualFrame frame) {
+        // Check if-let bindings first (they may add bindings used by guard)
+        if (!checkIfLetBindings(frame)) {
+            return null; // If-let binding failed
+        }
+
+        // Check guard condition if present
+        if (!checkGuard(frame)) {
+            return null; // Guard failed
+        }
+
         return bodyNode.execute(frame);
+    }
+
+    /**
+     * Check if this branch has guards or if-let bindings that could fail.
+     * Used by MatchNode to know if it needs to handle null returns.
+     */
+    public boolean hasGuardsOrIfLet() {
+        return guardNode != null || ifLetBindingCount > 0;
+    }
+
+    /**
+     * Check all if-let bindings.
+     * @return true if all bindings match, false if any fail
+     */
+    @ExplodeLoop
+    private boolean checkIfLetBindings(VirtualFrame frame) {
+        for (int i = 0; i < ifLetBindingCount; i++) {
+            if (!ifLetBindings[i].tryMatch(frame)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Check the guard condition.
+     * @return true if guard passes (or no guard), false if guard fails
+     */
+    private boolean checkGuard(VirtualFrame frame) {
+        if (guardNode == null) {
+            return true;
+        }
+        Object result = guardNode.execute(frame);
+        return result instanceof Boolean b && b;
     }
 
     // ===== CONS/NIL LIST PATTERN - PRECOMPUTED FOR PERFORMANCE =====

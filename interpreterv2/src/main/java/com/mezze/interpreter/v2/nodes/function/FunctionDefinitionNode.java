@@ -161,7 +161,7 @@ public final class FunctionDefinitionNode extends MezzeNode {
 
         // Fast path: no closure variables
         if (closureCount == 0) {
-            return new MezzeFunction(callTarget, name, EMPTY_CLOSURE);
+            return new MezzeFunction(callTarget, name, EMPTY_CLOSURE, parameterNames);
         }
 
         // Capture closure variables from current frame
@@ -172,7 +172,7 @@ public final class FunctionDefinitionNode extends MezzeNode {
             closureValues[i] = readSlotValue(frame, closureSlots[i]);
         }
 
-        return new MezzeFunction(callTarget, name, closureValues);
+        return new MezzeFunction(callTarget, name, closureValues, parameterNames);
     }
 
     private void createCallTarget() {

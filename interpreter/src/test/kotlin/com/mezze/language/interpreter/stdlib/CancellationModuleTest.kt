@@ -253,9 +253,9 @@ class CancellationModuleTest {
             use std::effects::concurrent::cancellation::{is_cancelled}
 
             perform LoomAsync in do
-                Async.scoped { f = { scope } -> do
-                    let token = scope_get_token { scope = scope }
-                    let scope_cancelled = scope_is_cancelled { scope = scope }
+                Async.scoped { f = { sc } -> do
+                    let token = scope_get_token { sc = sc }
+                    let scope_cancelled = scope_is_cancelled { sc = sc }
                     scope_cancelled
                 }
         """)
@@ -268,11 +268,11 @@ class CancellationModuleTest {
             use std::effects::async::{Async, LoomAsync, scope_spawn, scope_cancel_all, scope_is_cancelled}
 
             perform LoomAsync in do
-                Async.scoped { f = { scope } -> do
-                    let p = scope_spawn { scope = scope, f = {} -> 42 }
-                    let before = scope_is_cancelled { scope = scope }
-                    scope_cancel_all { scope = scope }
-                    let after = scope_is_cancelled { scope = scope }
+                Async.scoped { f = { sc } -> do
+                    let p = scope_spawn { sc = sc, f = {} -> 42 }
+                    let before = scope_is_cancelled { sc = sc }
+                    scope_cancel_all { sc = sc }
+                    let after = scope_is_cancelled { sc = sc }
                     { before = before, after = after }
                 }
         """)

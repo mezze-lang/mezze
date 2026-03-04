@@ -263,16 +263,16 @@ object LoomTypes {
         // Scope type - opaque wrapper for structured concurrency scopes
         val scopeType = MezzeType.TypeApplication("Scope", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))))
 
-        // Helper: Create an effect-polymorphic function type {scope: Scope 'a} -> 'a <...>
+        // Helper: Create an effect-polymorphic function type {sc: Scope 'a} -> 'a <...>
         fun effectPolymorphicScopedCallback(scopeType: MezzeType, returnType: MezzeType): MezzeType.FunctionType {
             return MezzeType.FunctionType(
-                MezzeType.RecordType(mapOf("scope" to scopeType)),
+                MezzeType.RecordType(mapOf("sc" to scopeType)),
                 returnType,
                 effects = MezzeType.EffectRow.simple(emptySet<String>(), RowVar.fresh(), performed = false)
             )
         }
 
-        // __native_loom_scoped: {f: {scope: Scope 'a} -> 'a <...>} -> 'a
+        // __native_loom_scoped: {f: {sc: Scope 'a} -> 'a <...>} -> 'a
         // The callback f can have any effects (<...>)
         context["__native_loom_scoped"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
@@ -281,38 +281,38 @@ object LoomTypes {
             MezzeType.VarType(com.mezze.language.ast.TypeVar("a"))
         )
 
-        // __native_loom_scope_spawn: {scope: Scope 'a, f: {} -> 'b <...>} -> Promise 'b
+        // __native_loom_scope_spawn: {sc: Scope 'a, f: {} -> 'b <...>} -> Promise 'b
         // The f parameter can have any effects (<...>)
         val scopeSpawnPromiseType = MezzeType.TypeApplication("Promise", listOf(MezzeType.VarType(com.mezze.language.ast.TypeVar("b"))))
         context["__native_loom_scope_spawn"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "scope" to scopeType,
+                "sc" to scopeType,
                 "f" to effectPolymorphicThunk(MezzeType.VarType(com.mezze.language.ast.TypeVar("b")))
             )),
             scopeSpawnPromiseType
         )
 
-        // __native_loom_scope_cancel_all: {scope: Scope 'a} -> {}
+        // __native_loom_scope_cancel_all: {sc: Scope 'a} -> {}
         context["__native_loom_scope_cancel_all"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "scope" to scopeType
+                "sc" to scopeType
             )),
             MezzeType.RecordType(emptyMap())
         )
 
-        // __native_loom_scope_get_token: {scope: Scope 'a} -> CancellationToken
+        // __native_loom_scope_get_token: {sc: Scope 'a} -> CancellationToken
         val cancellationTokenType = MezzeType.TypeApplication("CancellationToken", emptyList())
         context["__native_loom_scope_get_token"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "scope" to scopeType
+                "sc" to scopeType
             )),
             cancellationTokenType
         )
 
-        // __native_loom_scope_is_cancelled: {scope: Scope 'a} -> Bool
+        // __native_loom_scope_is_cancelled: {sc: Scope 'a} -> Bool
         context["__native_loom_scope_is_cancelled"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
-                "scope" to scopeType
+                "sc" to scopeType
             )),
             MezzeType.BooleanType
         )

@@ -4,6 +4,8 @@ import com.mezze.interpreter.v2.nodes.MezzeNode
 import com.mezze.interpreter.v2.values.MezzeUnit
 import com.mezze.interpreter.v2.values.MezzeRecord
 import com.mezze.interpreter.v2.values.MezzeList
+import com.mezze.interpreter.v2.values.MezzeVariant
+import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended
 import com.mezze.interpreter.v2.runtime.MezzeLanguage
 import com.mezze.interpreter.v2.runtime.MezzeContext
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
@@ -373,6 +375,11 @@ class EffectImplStorageNode(
         val context = MezzeContext.get(this)
         context.defineGlobal(contentHash, value)
         context.defineLocal(performerName, value)
+        // Also store under effect name for DynamicEffectCallNode to find when no explicit perform block.
+        // Only do this for non-parameterized impls (this class is for non-parameterized),
+        // since parameterized impls require the function to be called first.
+        context.defineGlobal(effectName, value)
+        context.defineLocal(effectName, value)
     }
 }
 
@@ -413,7 +420,10 @@ class ParameterizedImplDefinitionNode(
     private val operationParamNames: List<List<String>>,
     private val operationFrameDescriptors: List<FrameDescriptor>,
     private val operationClosureVarSlots: List<IntArray>,
-    private val implFrameDescriptor: FrameDescriptor
+    private val implFrameDescriptor: FrameDescriptor,
+    // Optional scoped effect nodes - executed when impl is instantiated
+    private val initializeScopeNode: MezzeNode? = null,
+    private val initializeScopeClosureSlots: IntArray = intArrayOf()
 ) : MezzeNode() {
 
     @CompilationFinal
@@ -440,7 +450,9 @@ class ParameterizedImplDefinitionNode(
                 operationParamNamesList = operationParamNames.map { it.toTypedArray() }.toTypedArray(),
                 operationFrameDescriptors = operationFrameDescriptors.toTypedArray(),
                 operationClosureVarSlots = operationClosureVarSlots.toTypedArray(),
-                frameDescriptor = implFrameDescriptor
+                frameDescriptor = implFrameDescriptor,
+                initializeScopeNode = initializeScopeNode,
+                initializeScopeClosureSlots = initializeScopeClosureSlots
             )
             _callTarget = rootNode.callTarget
         }
@@ -461,7 +473,11 @@ class ParameterizedImplRootNode(
     private val operationParamNamesList: Array<Array<String>>,  // Actual param names, not counts
     private val operationFrameDescriptors: Array<FrameDescriptor>,
     private val operationClosureVarSlots: Array<IntArray>,
-    frameDescriptor: FrameDescriptor
+    frameDescriptor: FrameDescriptor,
+    // Optional scoped effect - executed when impl is instantiated (e.g., reset random state)
+    @field:Child private var initializeScopeNode: MezzeNode? = null,
+    @CompilationFinal(dimensions = 1)
+    private val initializeScopeClosureSlots: IntArray = intArrayOf()
 ) : RootNode(language, frameDescriptor) {
 
     @CompilationFinal(dimensions = 1)
@@ -484,6 +500,23 @@ class ParameterizedImplRootNode(
             if (slot >= 0) {
                 frame.setObject(slot, paramValues[index])
             }
+        }
+
+        // Execute initialize_scope if present (e.g., reset random state for SeededRandom)
+        // This runs BEFORE creating operation functions, so it happens at the start of each perform block
+        if (initializeScopeNode != null) {
+            // Create a frame for the initialize_scope with closure values bound
+            val initFrame = com.oracle.truffle.api.Truffle.getRuntime().createVirtualFrame(arrayOf<Any>(), frameDescriptor)
+            for (i in initializeScopeClosureSlots.indices) {
+                val srcSlot = initializeScopeClosureSlots[i]
+                if (srcSlot >= 0 && srcSlot < implParamSlotIndices.size) {
+                    val paramSlot = implParamSlotIndices[srcSlot]
+                    if (paramSlot >= 0) {
+                        initFrame.setObject(i, frame.getObject(paramSlot))
+                    }
+                }
+            }
+            initializeScopeNode!!.execute(initFrame)
         }
 
         // Create operation functions
@@ -615,10 +648,35 @@ class DynamicHandleNode(
         }
 
         try {
-            return bodyChild.execute(frame)
+            val result = bodyChild.execute(frame)
+            return processResult(result)
         } finally {
             // Cleanup if needed
         }
+    }
+
+    /**
+     * Process the result:
+     * - For MezzeContinuationSuspended with Exception/Return effects, extract suspended value
+     * - For Exception effect, wrap successful results in Ok variant
+     */
+    @TruffleBoundary
+    private fun processResult(result: Any): Any {
+        // Handle suspended continuations (for early return/exception)
+        if (result is MezzeContinuationSuspended) {
+            // Exception and Return effects use suspend_with to return early
+            if (effectNames.contains("Exception") || effectNames.contains("Return")) {
+                return result.suspendedValue
+            }
+            return result
+        }
+
+        // Wrap successful results in Ok for Exception effect
+        if (effectNames.contains("Exception")) {
+            return MezzeVariant.ok(result)
+        }
+
+        return result
     }
 
     @TruffleBoundary
@@ -692,10 +750,35 @@ class ParameterizedHandleNode(
         }
 
         try {
-            return bodyChild.execute(frame)
+            val result = bodyChild.execute(frame)
+            return processResult(result)
         } finally {
             // Cleanup handled by context scope
         }
+    }
+
+    /**
+     * Process the result:
+     * - For MezzeContinuationSuspended with Exception/Return effects, extract suspended value
+     * - For Exception effect, wrap successful results in Ok variant
+     */
+    @TruffleBoundary
+    private fun processResult(result: Any): Any {
+        // Handle suspended continuations (for early return/exception)
+        if (result is MezzeContinuationSuspended) {
+            // Exception and Return effects use suspend_with to return early
+            if (effectNames.contains("Exception") || effectNames.contains("Return")) {
+                return result.suspendedValue
+            }
+            return result
+        }
+
+        // Wrap successful results in Ok for Exception effect
+        if (effectNames.contains("Exception")) {
+            return MezzeVariant.ok(result)
+        }
+
+        return result
     }
 
     @TruffleBoundary
@@ -715,7 +798,8 @@ class ParameterizedHandleNode(
                         if (i < closureValues.size) closureValues[i] else parameters
                     }
                 }
-                return callNode.call(implFunc.callTarget, arguments)
+                // Use spread operator to pass array elements as individual arguments
+                return callNode.call(implFunc.callTarget, *arguments)
             } else if (implFunc is MezzeRecord) {
                 // Already a record (non-parameterized), use directly
                 return implFunc
@@ -733,7 +817,8 @@ class ParameterizedHandleNode(
                     if (i < closureValues.size) closureValues[i] else parameters
                 }
             }
-            return callNode.call(implFunc.callTarget, arguments)
+            // Use spread operator to pass array elements as individual arguments
+            return callNode.call(implFunc.callTarget, *arguments)
         } else if (implFunc is MezzeRecord) {
             return implFunc
         }

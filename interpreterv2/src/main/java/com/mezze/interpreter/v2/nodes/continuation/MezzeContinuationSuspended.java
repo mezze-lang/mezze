@@ -1,4 +1,4 @@
-package com.mezze.interpreter.v2.values;
+package com.mezze.interpreter.v2.nodes.continuation;
 
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.interop.TruffleObject;

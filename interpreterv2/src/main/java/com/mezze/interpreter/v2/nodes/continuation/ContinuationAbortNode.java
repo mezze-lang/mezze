@@ -1,7 +1,6 @@
 package com.mezze.interpreter.v2.nodes.continuation;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
-import com.mezze.interpreter.v2.values.MezzeCont;
 import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.frame.VirtualFrame;

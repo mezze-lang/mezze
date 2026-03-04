@@ -107,13 +107,13 @@ effect Async where {
     # The callback can have any effects (<...>)
     #
     # Example:
-    #   Async.scoped {f = {scope} -> do
-    #       let p1 = Scope.spawn {scope = scope, f = {} -> task1 {}}
-    #       let p2 = Scope.spawn {scope = scope, f = {} -> task2 {}}
+    #   Async.scoped {f = {sc} -> do
+    #       let p1 = scope_spawn {sc = sc, f = {} -> task1 {}}
+    #       let p2 = scope_spawn {sc = sc, f = {} -> task2 {}}
     #       # Both p1 and p2 are awaited automatically before scoped returns
     #       process {p1 = p1, p2 = p2}
     #   }
-    scoped: {f: {scope: Scope 'a} -> 'a <...>} -> 'a <Async>
+    scoped: {f: {sc: Scope 'a} -> 'a <...>} -> 'a <Async>
 }
 
 # =============================================================================
@@ -321,9 +321,9 @@ pub let run_coop: {computation: {} -> 'a <Async>} -> 'a = {computation} ->
 #
 # Usage:
 #   perform LoomAsync in do
-#       Async.scoped {f = {scope} -> do
-#           let p1 = scope_spawn {scope = scope, f = {} -> task1 {}}
-#           let p2 = scope_spawn {scope = scope, f = {} -> task2 {}}
+#       Async.scoped {f = {sc} -> do
+#           let p1 = scope_spawn {sc = sc, f = {} -> task1 {}}
+#           let p2 = scope_spawn {sc = sc, f = {} -> task2 {}}
 #           # p1 and p2 are awaited automatically before scoped returns
 #           process {p1 = Async.await {p = p1}, p2 = Async.await {p = p2}}
 #       }
@@ -333,16 +333,16 @@ pub let run_coop: {computation: {} -> 'a <Async>} -> 'a = {computation} ->
 # Note: f accepts any effects (<...>) for effect polymorphism
 #
 # Example:
-#   scope_spawn {scope = scope, f = {} -> expensive_computation {}}
-pub let scope_spawn: {scope: Scope 'a, f: {} -> 'b <...>} -> Promise 'b =
-    {scope, f} -> __native_loom_scope_spawn {scope = scope, f = f}
+#   scope_spawn {sc = sc, f = {} -> expensive_computation {}}
+pub let scope_spawn: {sc: Scope 'a, f: {} -> 'b <...>} -> Promise 'b =
+    {sc, f} -> __native_loom_scope_spawn {sc = sc, f = f}
 
 # Cancel all tasks in the scope
 #
 # Example:
-#   scope_cancel_all {scope = scope}
-pub let scope_cancel_all: {scope: Scope 'a} -> {} =
-    {scope} -> __native_loom_scope_cancel_all {scope = scope}
+#   scope_cancel_all {sc = sc}
+pub let scope_cancel_all: {sc: Scope 'a} -> {} =
+    {sc} -> __native_loom_scope_cancel_all {sc = sc}
 
 # Get the CancellationToken for a scope
 #
@@ -350,23 +350,23 @@ pub let scope_cancel_all: {scope: Scope 'a} -> {} =
 # to check for cancellation or register cleanup callbacks.
 #
 # Example:
-#   Async.scoped {f = {scope} -> do
-#       let token = scope_get_token {scope = scope}
-#       scope_spawn {scope = scope, f = {} -> do
+#   Async.scoped {f = {sc} -> do
+#       let token = scope_get_token {sc = sc}
+#       scope_spawn {sc = sc, f = {} -> do
 #           # Periodically check for cancellation
 #           while not (Cancellation.is_cancelled {token = token}) do
 #               process_batch {}
 #       }
 #   }
-pub let scope_get_token: {scope: Scope 'a} -> CancellationToken =
-    {scope} -> __native_loom_scope_get_token {scope = scope}
+pub let scope_get_token: {sc: Scope 'a} -> CancellationToken =
+    {sc} -> __native_loom_scope_get_token {sc = sc}
 
 # Check if a scope has been cancelled
 #
 # Example:
-#   if scope_is_cancelled {scope = scope} then
+#   if scope_is_cancelled {sc = sc} then
 #       cleanup {}
 #   else
 #       continue_work {}
-pub let scope_is_cancelled: {scope: Scope 'a} -> Bool =
-    {scope} -> __native_loom_scope_is_cancelled {scope = scope}
+pub let scope_is_cancelled: {sc: Scope 'a} -> Bool =
+    {sc} -> __native_loom_scope_is_cancelled {sc = sc}

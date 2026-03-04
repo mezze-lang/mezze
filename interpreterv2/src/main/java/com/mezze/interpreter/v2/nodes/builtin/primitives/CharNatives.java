@@ -98,16 +98,30 @@ public final class CharNatives {
 
     // ==================== Digit Conversion ====================
 
+    /**
+     * Convert a character to its digit value in the given radix.
+     * Returns Some(value) if the character is a valid digit, None otherwise.
+     */
     @TruffleBoundary
-    public static MezzeVariant digitToInt(String c) {
+    public static MezzeVariant digitToInt(String c, long radix) {
         if (c == null || c.isEmpty()) {
             return MezzeVariant.none();
         }
         char ch = c.charAt(0);
-        if (ch >= '0' && ch <= '9') {
-            return MezzeVariant.some((long) (ch - '0'));
+        int digit = Character.digit(ch, (int) radix);
+        if (digit >= 0) {
+            return MezzeVariant.some((long) digit);
         }
         return MezzeVariant.none();
+    }
+
+    /**
+     * Convert a character to its digit value in base 10.
+     * Legacy overload for backward compatibility.
+     */
+    @TruffleBoundary
+    public static MezzeVariant digitToInt(String c) {
+        return digitToInt(c, 10);
     }
 
     // ==================== Comparison ====================
@@ -118,10 +132,28 @@ public final class CharNatives {
         return c1.equals(c2);
     }
 
+    /**
+     * Compare two characters, returning an Ordering variant (LT, EQ, GT).
+     * This matches the expected Mezze Ordering type.
+     */
     @TruffleBoundary
-    public static long compare(String c1, String c2) {
-        if (c1 == null || c1.isEmpty()) return c2 == null || c2.isEmpty() ? 0 : -1;
-        if (c2 == null || c2.isEmpty()) return 1;
-        return Long.signum(c1.charAt(0) - c2.charAt(0));
+    public static MezzeVariant compare(String c1, String c2) {
+        if (c1 == null || c1.isEmpty()) {
+            if (c2 == null || c2.isEmpty()) {
+                return MezzeVariant.eq();
+            }
+            return MezzeVariant.lt();
+        }
+        if (c2 == null || c2.isEmpty()) {
+            return MezzeVariant.gt();
+        }
+        int cmp = c1.charAt(0) - c2.charAt(0);
+        if (cmp < 0) {
+            return MezzeVariant.lt();
+        } else if (cmp > 0) {
+            return MezzeVariant.gt();
+        } else {
+            return MezzeVariant.eq();
+        }
     }
 }

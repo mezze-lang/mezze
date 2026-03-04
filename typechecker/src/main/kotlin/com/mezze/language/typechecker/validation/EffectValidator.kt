@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.validation
 
 import com.mezze.language.ast.*
 import com.mezze.language.typechecker.context.TypingContext
+import com.mezze.language.typechecker.scope.ScopedEffectConstants
 
 /**
  * Effect validator - checks that effects are properly handled.
@@ -336,7 +337,9 @@ class EffectValidator(
         }
 
         // Check for extra operations (not in effect declaration)
-        val extraOps = implementedOps - requiredOps
+        // Note: initialize_scope and finalize_scope are special scoped effect members, not regular operations
+        val scopedEffectNames = setOf(ScopedEffectConstants.INITIALIZE_SCOPE, ScopedEffectConstants.FINALIZE_SCOPE)
+        val extraOps = (implementedOps - requiredOps) - scopedEffectNames
         if (extraOps.isNotEmpty()) {
             val extra = extraOps.joinToString(", ")
             errors.add(

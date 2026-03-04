@@ -22,8 +22,10 @@ import com.mezze.interpreter.v2.nodes.record.RecordFieldAccessNode
 import com.mezze.interpreter.v2.nodes.variant.VariantConstructNode
 import com.mezze.interpreter.v2.nodes.variant.MatchNode
 import com.mezze.interpreter.v2.nodes.variant.MatchBranchNode
+import com.mezze.interpreter.v2.nodes.control.IfLetBindingNode
 import com.mezze.interpreter.v2.nodes.array.ArrayAccessNode
 import com.mezze.interpreter.v2.nodes.array.ArrayLiteralNode as OptimizedArrayLiteralNode
+import com.mezze.interpreter.v2.nodes.array.ArraySliceNode
 import com.mezze.interpreter.v2.nodes.array.ArraySpreadNode
 import com.mezze.interpreter.v2.nodes.effect.HandleNode
 import com.mezze.interpreter.v2.nodes.effect.DynamicEffectCallNode
@@ -34,6 +36,8 @@ import com.mezze.interpreter.v2.nodes.ability.ResolvedAbilityCallNode as Optimiz
 import com.mezze.interpreter.v2.nodes.continuation.*
 import com.mezze.interpreter.v2.nodes.statemachine.StateMachineNode
 import com.mezze.interpreter.v2.runtime.MezzeContext
+import com.mezze.language.typechecker.scope.detectScopedEffectMembers
+import com.mezze.language.typechecker.scope.ScopedEffectConstants
 
 /**
  * Converts Mezze AST to optimized Truffle V2 nodes.
@@ -53,10 +57,19 @@ class ASTToTruffleConverterV2(
     private var frameDescriptorBuilder = FrameDescriptor.newBuilder()
 
     /**
-     * Combined slot info - stores slot index, kind, and closure flag in a single lookup.
-     * Reduces 3 map lookups to 1 for each variable access.
+     * Combined slot info - stores slot index, kind, and various flags in a single lookup.
+     * Reduces multiple map lookups to 1 for each variable access.
+     *
+     * needsFallback: Set for variables that need fallback global lookup because they're
+     * from an outer scope (module level, or referenced before being defined in current scope)
      */
-    data class SlotInfo(val slot: Int, val kind: Int, val isClosure: Boolean = false)
+    data class SlotInfo(
+        val slot: Int,
+        val kind: Int,
+        val isClosure: Boolean = false,
+        val isTopLevel: Boolean = false,
+        val needsFallback: Boolean = false
+    )
 
     private val variableInfo = mutableMapOf<String, SlotInfo>()
 
@@ -65,6 +78,18 @@ class ASTToTruffleConverterV2(
     }
 
     private val contentHashToSlot = mutableMapOf<String, Int>()
+
+    /**
+     * Tracks scoped effect info for impls by content hash.
+     * Maps contentHash -> ScopedImplInfo
+     */
+    data class ScopedImplInfo(
+        val isScopedEffect: Boolean,
+        val initializeScopeNode: MezzeNode?,
+        val finalizeScopeNode: MezzeNode?,
+        val scopeSlot: Int
+    )
+    private val scopedEffectInfo = mutableMapOf<String, ScopedImplInfo>()
 
     /**
      * Convert a program to a Truffle node.
@@ -120,10 +145,14 @@ class ASTToTruffleConverterV2(
             return convertParameterizedImplDeclaration(impl)
         }
 
+        // Detect scoped effects (initialize_scope / finalize_scope)
+        val scopedInfo = detectScopedEffectMembers(impl)
+
         val fieldNames = mutableListOf<String>()
         val fieldValueNodes = mutableListOf<MezzeNode>()
 
-        for (op in impl.operations) {
+        // Convert regular operations (excluding initialize_scope and finalize_scope)
+        for (op in scopedInfo.regularOperations) {
             fieldNames.add(op.name)
             fieldValueNodes.add(convertExpression(op.implementation))
         }
@@ -141,6 +170,20 @@ class ASTToTruffleConverterV2(
         val hashSlot = getOrCreateSlot(contentHash)
         contentHashToSlot[contentHash] = hashSlot
         val performerSlot = getOrCreateSlot(impl.performerName)
+
+        // Track scoped effect info for use in convertPerformExpression
+        if (scopedInfo.isScopedEffect) {
+            val scopeSlot = getOrCreateSlot("__scope_${contentHash}__")
+            val initNode = scopedInfo.initializeScope?.let { convertExpression(it.implementation) }
+            val finalizeNode = scopedInfo.finalizeScope?.let { convertExpression(it.implementation) }
+
+            scopedEffectInfo[contentHash] = ScopedImplInfo(
+                isScopedEffect = true,
+                initializeScopeNode = initNode,
+                finalizeScopeNode = finalizeNode,
+                scopeSlot = scopeSlot
+            )
+        }
 
         return EffectImplStorageNode(
             recordChild = recordNode,
@@ -169,13 +212,17 @@ class ASTToTruffleConverterV2(
         }
         val implFrameDescriptor = implFrameBuilder.build()
 
+        // Detect scoped effects (initialize_scope / finalize_scope)
+        val scopedInfo = detectScopedEffectMembers(impl)
+
         val operationNames = mutableListOf<String>()
         val operationBodyNodes = mutableListOf<MezzeNode>()
         val operationParamNamesList = mutableListOf<List<String>>()
         val operationFrameDescriptors = mutableListOf<FrameDescriptor>()
         val operationClosureVarSlots = mutableListOf<IntArray>()
 
-        for (op in impl.operations) {
+        // Process regular operations only (excluding initialize_scope and finalize_scope)
+        for (op in scopedInfo.regularOperations) {
             val opExpr = op.implementation
             if (opExpr !is LambdaExpression) {
                 throw RuntimeException("Operation implementation must be a lambda for parameterized impl")
@@ -222,6 +269,38 @@ class ASTToTruffleConverterV2(
             operationClosureVarSlots.add(closureSlots)
         }
 
+        // Convert initialize_scope for scoped effects (runs when impl is instantiated)
+        var initializeScopeNode: MezzeNode? = null
+        var initializeScopeClosureSlots = intArrayOf()
+
+        if (scopedInfo.isScopedEffect) {
+            val initOp = scopedInfo.initializeScope
+            if (initOp != null) {
+                val initExpr = initOp.implementation
+                if (initExpr is LambdaExpression) {
+                    // Create converter with impl params available
+                    val initConverter = ASTToTruffleConverterV2(
+                        context = this.context,
+                        parentHandlerMapping = this.handlerToEffectMapping,
+                        parentVariableSlots = implParamSlots.toMap()
+                    )
+                    // Add impl params as closure vars for the lambda body
+                    val allVars = collectVariableReferences(initExpr.body)
+                    val closureVars = allVars.filter { it in implParamSlots.keys }.distinct()
+                    closureVars.forEach { varName ->
+                        initConverter.getOrCreateSlot(varName)
+                    }
+                    initializeScopeNode = initConverter.convertExpression(initExpr.body)
+                    // Map closure var names to their indices in implParamNames
+                    initializeScopeClosureSlots = closureVars.mapNotNull { varName ->
+                        implParamNames.indexOf(varName).takeIf { it >= 0 }
+                    }.toIntArray()
+                } else {
+                    initializeScopeNode = convertExpression(initExpr)
+                }
+            }
+        }
+
         val implDefinitionNode = ParameterizedImplDefinitionNode(
             implName = impl.performerName,
             implParamNames = implParamNames,
@@ -231,12 +310,46 @@ class ASTToTruffleConverterV2(
             operationParamNames = operationParamNamesList,
             operationFrameDescriptors = operationFrameDescriptors,
             operationClosureVarSlots = operationClosureVarSlots,
-            implFrameDescriptor = implFrameDescriptor
+            implFrameDescriptor = implFrameDescriptor,
+            initializeScopeNode = initializeScopeNode,
+            initializeScopeClosureSlots = initializeScopeClosureSlots
         )
 
         val hashSlot = getOrCreateSlot(contentHash)
         contentHashToSlot[contentHash] = hashSlot
         val performerSlot = getOrCreateSlot(impl.performerName)
+
+        // Track scoped effect info for use in convertPerformExpression (for non-parameterized effects)
+        if (scopedInfo.isScopedEffect) {
+            val scopeSlot = getOrCreateSlot("__scope_${contentHash}__")
+
+            // Convert finalize_scope (not currently used for parameterized impls, but track for consistency)
+            val finalizeNode = scopedInfo.finalizeScope?.let { finalOp ->
+                val finalExpr = finalOp.implementation
+                if (finalExpr is LambdaExpression) {
+                    val finalConverter = ASTToTruffleConverterV2(
+                        context = this.context,
+                        parentHandlerMapping = this.handlerToEffectMapping,
+                        parentVariableSlots = implParamSlots.toMap()
+                    )
+                    val allVars = collectVariableReferences(finalExpr.body)
+                    val closureVars = allVars.filter { it in implParamSlots.keys }.distinct()
+                    closureVars.forEach { varName ->
+                        finalConverter.getOrCreateSlot(varName)
+                    }
+                    finalConverter.convertExpression(finalExpr.body)
+                } else {
+                    convertExpression(finalExpr)
+                }
+            }
+
+            scopedEffectInfo[contentHash] = ScopedImplInfo(
+                isScopedEffect = true,
+                initializeScopeNode = initializeScopeNode,
+                finalizeScopeNode = finalizeNode,
+                scopeSlot = scopeSlot
+            )
+        }
 
         return ParameterizedImplStorageNode(
             implDefChild = implDefinitionNode,
@@ -275,6 +388,13 @@ class ASTToTruffleConverterV2(
         )
     }
 
+    /**
+     * True if this converter is at the top level (not inside a function).
+     * Top-level bindings must be registered in the global context so they
+     * can be accessed by nested functions via ReadLocalWithFallbackNode.
+     */
+    private val isTopLevel: Boolean = parentVariableSlots == null
+
     private fun convertLetBinding(letBinding: LetBinding): MezzeNode {
         return when (val pattern = letBinding.pattern) {
             is VariablePattern -> {
@@ -290,11 +410,13 @@ class ASTToTruffleConverterV2(
                 } else {
                     convertExpression(letBinding.expression)
                 }
-                // Use WriteLocalWithContextNode for function bindings to support recursion.
-                // When a function references itself (recursive call), the frame slot may not
-                // be written yet, but the fallback lookup will find it in the global context.
-                if (letBinding.expression is LambdaExpression) {
-                    WriteLocalWithContextNode.create(valueNode, slot, pattern.name, letBinding.contentHash)
+                // Use WriteLocalWithContextNode for:
+                // 1. Function bindings to support recursion (function references itself)
+                // 2. ALL top-level bindings so nested functions can access them via fallback lookup
+                // When a nested function references a top-level variable, the frame slot may be
+                // empty, but the fallback lookup will find it in the global context.
+                if (letBinding.expression is LambdaExpression || isTopLevel) {
+                    WriteLocalWithContextNode.create(valueNode, slot, kind, pattern.name, letBinding.contentHash)
                 } else {
                     WriteLocalNode.create(valueNode, slot, kind)
                 }
@@ -310,7 +432,8 @@ class ASTToTruffleConverterV2(
         val bindings = collectRecordPatternBindings(pattern)
 
         val writeNodes = mutableListOf<MezzeNode>()
-        val tempSlot = getOrCreateSlot("__temp_record_${System.nanoTime()}")
+        // Allocate anonymous slot for temp record (no string name needed)
+        val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
 
         writeNodes.add(WriteLocalNode.createObject(valueNode, tempSlot))
 
@@ -361,9 +484,9 @@ class ASTToTruffleConverterV2(
     fun convertExpression(expr: Expression): MezzeNode {
         return when (expr) {
             is IntLiteral -> IntLiteralNode(expr.value)
-            is NatLiteral -> IntLiteralNode(expr.value.toLong())
+            is NatLiteral -> com.mezze.interpreter.v2.nodes.literal.NatLiteralNode(expr.value.toLong())
             is FloatLiteral -> FloatLiteralNode(expr.value)
-            is FractionLiteral -> FloatLiteralNode(expr.numerator.toDouble() / expr.denominator.toDouble())
+            is FractionLiteral -> FracLiteralNode(expr.numerator, expr.denominator)
             is StringLiteral -> convertStringLiteral(expr)
             is BooleanLiteral -> BoolLiteralNode(expr.value)
             is Identifier -> convertIdentifier(expr)
@@ -421,6 +544,18 @@ class ASTToTruffleConverterV2(
                 return ReadLocalWithFallbackNode.create(info.slot, identifier.name)
             }
 
+            // Top-level (module-level) variables need fallback lookup because they may be
+            // referenced from nested scopes (like inside function bodies or state machines)
+            // where the frame slot would be null.
+            if (info.isTopLevel) {
+                return ReadLocalWithFallbackNode.create(info.slot, identifier.name)
+            }
+
+            // Variables that need fallback (created from outer scope reference)
+            if (info.needsFallback) {
+                return ReadLocalWithFallbackNode.create(info.slot, identifier.name, contentHash)
+            }
+
             return ReadLocalNode(info.slot, info.kind)
         }
 
@@ -436,13 +571,14 @@ class ASTToTruffleConverterV2(
             )
         }
 
-        // Variable not found in local slots - module-level function or import
-        // If it has content hash, use strict lookup; otherwise it's a local recursive reference
-        val slot = getOrCreateSlot(identifier.name)
-        if (contentHash != null) {
-            return ReadLocalWithFallbackNode.create(slot, identifier.name, contentHash)
-        }
-        return ReadLocalWithFallbackNode.create(slot, identifier.name)
+        // Variable not found in local variableInfo - it's from an outer scope (module level or parent function)
+        // Create a slot and mark it as needing fallback lookup.
+        // This handles:
+        // 1. Module-level functions referenced from function bodies
+        // 2. Module-level constants referenced from function bodies
+        // 3. Any other outer-scope references
+        val slot = getOrCreateSlotWithFallback(identifier.name)
+        return ReadLocalWithFallbackNode.create(slot, identifier.name, contentHash)
     }
 
     private fun isBuiltinFunction(name: String): Boolean {
@@ -469,23 +605,41 @@ class ASTToTruffleConverterV2(
         var wildcardIndex = -1
 
         for ((index, case) in matchExpr.cases.withIndex()) {
-            val pattern = case.patterns.firstOrNull() ?: continue
+            // IMPORTANT: Pre-create slots for pattern variables BEFORE converting guards/if-let bindings.
+            // This ensures that expressions like `lookup {key = k}` in if-let bindings
+            // can find the slot for `k` from the main pattern.
+            preCreatePatternSlots(case.patterns)
 
+            // Now convert guard and if-let bindings (they can reference pattern variables)
+            val guardNode = case.guard?.let { convertExpression(it) }
+            val ifLetNodes = convertIfLetBindings(case.ifLetBindings)
+            val hasGuardsOrIfLet = guardNode != null || ifLetNodes.isNotEmpty()
+
+            // Handle or-patterns: all patterns in case.patterns share the same body
+            for (pattern in case.patterns) {
             when (pattern) {
                 is ConstructorPattern -> {
                     // Special case: True and False are boolean patterns, not variant patterns
                     // This matches how V2 converts True/False constructors to boolean literals
                     if (pattern.constructor == "True" && pattern.recordPattern == null) {
                         val bodyNode = convertExpression(case.expression)
-                        branches.add(MatchBranchNode.literalPattern(true, bodyNode))
+                        if (hasGuardsOrIfLet) {
+                            branches.add(MatchBranchNode.literalPatternWithGuard(true, bodyNode, guardNode, ifLetNodes))
+                        } else {
+                            branches.add(MatchBranchNode.literalPattern(true, bodyNode))
+                        }
                     } else if (pattern.constructor == "False" && pattern.recordPattern == null) {
                         val bodyNode = convertExpression(case.expression)
-                        branches.add(MatchBranchNode.literalPattern(false, bodyNode))
+                        if (hasGuardsOrIfLet) {
+                            branches.add(MatchBranchNode.literalPatternWithGuard(false, bodyNode, guardNode, ifLetNodes))
+                        } else {
+                            branches.add(MatchBranchNode.literalPattern(false, bodyNode))
+                        }
                     } else {
                         val tag = getTagForConstructor(pattern.constructor)
                         // Collect both field names and slots for proper record extraction
                         // Also collect nested pattern info for wrapped body generation
-                        val nestedPatterns = mutableListOf<Pair<String, RecordPattern>>() // (tempSlotName, nestedPattern)
+                        val nestedPatterns = mutableListOf<Pair<Int, RecordPattern>>() // (tempSlot, nestedPattern)
 
                         val fieldNames = pattern.recordPattern?.let { recordPattern ->
                             recordPattern.entries.map { it.name }.toTypedArray()
@@ -496,11 +650,9 @@ class ASTToTruffleConverterV2(
                                     is VariablePattern -> getOrCreateSlot(fp.name)
                                     null -> getOrCreateSlot(entry.name)
                                     is RecordPattern -> {
-                                        // Nested record pattern: bind intermediate value to temp slot
-                                        // and record it for body wrapping
-                                        val tempName = "__nested_${entry.name}_$entryIdx"
-                                        val tempSlot = getOrCreateSlot(tempName)
-                                        nestedPatterns.add(tempName to fp)
+                                        // Nested record pattern: allocate anonymous slot by index
+                                        val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+                                        nestedPatterns.add(tempSlot to fp)
                                         tempSlot
                                     }
                                     else -> -1
@@ -512,22 +664,34 @@ class ASTToTruffleConverterV2(
                         var bodyNode = convertExpression(case.expression)
 
                         // Wrap body with nested record field extractions (in reverse order)
-                        for ((tempName, nestedPattern) in nestedPatterns.reversed()) {
-                            bodyNode = wrapBodyWithNestedRecordExtraction(tempName, nestedPattern, bodyNode)
+                        for ((tempSlot, nestedPattern) in nestedPatterns.reversed()) {
+                            bodyNode = wrapBodyWithNestedRecordExtraction(tempSlot, nestedPattern, bodyNode)
                         }
 
-                        branches.add(MatchBranchNode.variantPatternWithFieldNames(tag, fieldNames, fieldSlots, bodyNode))
+                        if (hasGuardsOrIfLet) {
+                            branches.add(MatchBranchNode.variantPatternWithGuard(tag, fieldNames, fieldSlots, bodyNode, guardNode, ifLetNodes))
+                        } else {
+                            branches.add(MatchBranchNode.variantPatternWithFieldNames(tag, fieldNames, fieldSlots, bodyNode))
+                        }
                     }
                 }
                 is VariablePattern -> {
                     val slot = getOrCreateSlot(pattern.name)
                     val bodyNode = convertExpression(case.expression)
-                    branches.add(MatchBranchNode.wildcard(slot, bodyNode))
+                    if (hasGuardsOrIfLet) {
+                        branches.add(MatchBranchNode.wildcardWithGuard(slot, bodyNode, guardNode, ifLetNodes))
+                    } else {
+                        branches.add(MatchBranchNode.wildcard(slot, bodyNode))
+                    }
                     wildcardIndex = index
                 }
                 is WildcardPattern -> {
                     val bodyNode = convertExpression(case.expression)
-                    branches.add(MatchBranchNode.wildcardNoBinding(bodyNode))
+                    if (hasGuardsOrIfLet) {
+                        branches.add(MatchBranchNode.wildcardWithGuard(-1, bodyNode, guardNode, ifLetNodes))
+                    } else {
+                        branches.add(MatchBranchNode.wildcardNoBinding(bodyNode))
+                    }
                     wildcardIndex = index
                 }
                 is LiteralPattern -> {
@@ -539,22 +703,41 @@ class ASTToTruffleConverterV2(
                         is BooleanLiteralValue -> lit.value
                     }
                     val bodyNode = convertExpression(case.expression)
-                    branches.add(MatchBranchNode.literalPattern(litValue, bodyNode))
+                    if (hasGuardsOrIfLet) {
+                        branches.add(MatchBranchNode.literalPatternWithGuard(litValue, bodyNode, guardNode, ifLetNodes))
+                    } else {
+                        branches.add(MatchBranchNode.literalPattern(litValue, bodyNode))
+                    }
                 }
                 is ArrayPattern -> {
-                    // Array pattern: [x, y], [head, ...tail], [], etc.
-                    val elementSlots = pattern.elements.mapNotNull { elemPattern ->
+                    // Array pattern: [x, y], [head, ...tail], [], [[nested]], etc.
+                    // Track nested array patterns: (elementIndex, tempSlot, nestedPattern)
+                    val nestedArrayPatterns = mutableListOf<Triple<Int, Int, ArrayPattern>>()
+
+                    val elementSlots = pattern.elements.mapIndexed { idx, elemPattern ->
                         when (elemPattern) {
                             is VariablePattern -> getOrCreateSlot(elemPattern.name)
                             is WildcardPattern -> -1 // No binding needed
-                            else -> -1 // For now, only support variable patterns
+                            is ArrayPattern -> {
+                                // Nested array pattern - allocate temp slot for intermediate array
+                                val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+                                nestedArrayPatterns.add(Triple(idx, tempSlot, elemPattern))
+                                tempSlot
+                            }
+                            else -> -1
                         }
                     }.toIntArray()
 
                     val hasRestPattern = pattern.restPattern != null
                     val restSlot = pattern.restPattern?.let { getOrCreateSlot(it) } ?: -1
 
-                    val bodyNode = convertExpression(case.expression)
+                    var bodyNode = convertExpression(case.expression)
+
+                    // Wrap body with nested array pattern extraction (in reverse order)
+                    for ((_, tempSlot, nestedPattern) in nestedArrayPatterns.reversed()) {
+                        bodyNode = wrapBodyWithNestedArrayExtraction(tempSlot, nestedPattern, bodyNode)
+                    }
+
                     branches.add(MatchBranchNode.arrayPattern(elementSlots, restSlot, hasRestPattern, bodyNode))
                 }
                 is RecordPattern -> {
@@ -596,13 +779,67 @@ class ASTToTruffleConverterV2(
                     }.toIntArray()
 
                     val bodyNode = convertExpression(case.expression)
-                    branches.add(MatchBranchNode.stringPattern(partTypes, literals, captureSlots, bodyNode))
+                    if (hasGuardsOrIfLet) {
+                        branches.add(MatchBranchNode.stringPatternWithGuard(partTypes, literals, captureSlots, bodyNode, guardNode, ifLetNodes))
+                    } else {
+                        branches.add(MatchBranchNode.stringPattern(partTypes, literals, captureSlots, bodyNode))
+                    }
                 }
                 else -> throw RuntimeException("Unsupported pattern: ${pattern::class.simpleName}")
             }
+            } // end of inner for loop over case.patterns
         }
 
         return MatchNode(valueNode, branches.toTypedArray(), wildcardIndex)
+    }
+
+    /**
+     * Pre-create frame slots for all variables bound by match patterns.
+     * This must be done BEFORE converting guards/if-let bindings so that
+     * expressions like `lookup {key = k}` can reference pattern variable `k`.
+     */
+    private fun preCreatePatternSlots(patterns: List<Pattern>) {
+        for (pattern in patterns) {
+            preCreatePatternSlotsRecursive(pattern)
+        }
+    }
+
+    private fun preCreatePatternSlotsRecursive(pattern: Pattern) {
+        when (pattern) {
+            is VariablePattern -> getOrCreateSlot(pattern.name)
+            is ConstructorPattern -> {
+                pattern.recordPattern?.let { preCreatePatternSlotsRecursive(it) }
+            }
+            is RecordPattern -> {
+                for (entry in pattern.entries) {
+                    when (val p = entry.pattern) {
+                        is VariablePattern -> getOrCreateSlot(p.name)
+                        is RecordPattern -> preCreatePatternSlotsRecursive(p)
+                        null -> getOrCreateSlot(entry.name) // shorthand {x} = {x = x}
+                        else -> {} // WildcardPattern etc - no slot needed
+                    }
+                }
+            }
+            is ArrayPattern -> {
+                for (elemPattern in pattern.elements) {
+                    when (elemPattern) {
+                        is VariablePattern -> getOrCreateSlot(elemPattern.name)
+                        is ArrayPattern -> preCreatePatternSlotsRecursive(elemPattern) // Nested array pattern
+                        else -> {} // WildcardPattern etc
+                    }
+                }
+                pattern.restPattern?.let { getOrCreateSlot(it) }
+            }
+            is StringInterpolationPattern -> {
+                for (part in pattern.parts) {
+                    if (part is StringPatternCapture) {
+                        getOrCreateSlot(part.variableName)
+                    }
+                }
+            }
+            // LiteralPattern, WildcardPattern - no slots needed
+            else -> {}
+        }
     }
 
     private fun getTagForConstructor(constructor: String): Int {
@@ -765,6 +1002,116 @@ class ASTToTruffleConverterV2(
             abilityName == "LogicalNot" && operationName == "not" -> BuiltinNotNode.create(argsNode)
             abilityName == "Inspect" && operationName == "to_str" -> BuiltinInspectToStrNode.create(argsNode)
             else -> throw RuntimeException("Unknown builtin: $abilityName.$operationName")
+        }
+    }
+
+    // ===== IF-LET GUARD CONVERSION =====
+
+    /**
+     * Convert if-let bindings from AST to IfLetBindingNode array.
+     * Handles nested patterns by generating multiple sequential IfLetBindingNodes.
+     */
+    private fun convertIfLetBindings(ifLetGuards: List<IfLetGuard>): Array<IfLetBindingNode> {
+        if (ifLetGuards.isEmpty()) {
+            return emptyArray()
+        }
+        val allNodes = mutableListOf<IfLetBindingNode>()
+        for (guard in ifLetGuards) {
+            convertIfLetBindingWithNested(guard, allNodes)
+        }
+        return allNodes.toTypedArray()
+    }
+
+    /**
+     * Convert a single if-let binding, potentially generating multiple nodes for nested patterns.
+     * Adds all generated nodes to the provided list.
+     */
+    private fun convertIfLetBindingWithNested(binding: IfLetGuard, nodes: MutableList<IfLetBindingNode>) {
+        val expressionNode = convertExpression(binding.expression)
+        when (val pattern = binding.pattern) {
+            is ConstructorPattern -> {
+                val tag = getTagForConstructor(pattern.constructor)
+                val (fieldNames, fieldSlots, nestedSlots) = extractPatternFieldsAndSlotsWithNested(pattern.recordPattern)
+                nodes.add(IfLetBindingNode.variantPattern(expressionNode, tag, fieldNames, fieldSlots))
+                // Generate additional nodes for nested record patterns
+                addNestedRecordBindings(pattern.recordPattern, nestedSlots, nodes)
+            }
+            is RecordPattern -> {
+                val (fieldNames, fieldSlots, nestedSlots) = extractPatternFieldsAndSlotsWithNested(pattern)
+                nodes.add(IfLetBindingNode.recordPattern(expressionNode, fieldNames, fieldSlots))
+                addNestedRecordBindings(pattern, nestedSlots, nodes)
+            }
+            is VariablePattern -> {
+                val slot = getOrCreateSlot(pattern.name)
+                nodes.add(IfLetBindingNode.wildcardPattern(expressionNode, slot))
+            }
+            is WildcardPattern -> {
+                nodes.add(IfLetBindingNode.wildcardPattern(expressionNode, -1))
+            }
+            else -> throw RuntimeException("Unsupported if-let pattern type: ${pattern::class.simpleName}")
+        }
+    }
+
+    /**
+     * Extract field names and slots from a record pattern.
+     * For nested record patterns, allocates intermediate slots and returns them separately.
+     * Returns (fieldNames, fieldSlots, nestedSlotIndices) where nestedSlotIndices[i] is the
+     * slot allocated for a nested pattern at entry i, or -1 if entry i is not a nested pattern.
+     */
+    private fun extractPatternFieldsAndSlotsWithNested(recordPattern: RecordPattern?): Triple<Array<String>, IntArray, IntArray> {
+        if (recordPattern == null) {
+            return Triple(emptyArray(), intArrayOf(), intArrayOf())
+        }
+        val fieldNames = recordPattern.entries.map { it.name }.toTypedArray()
+        val fieldSlots = IntArray(recordPattern.entries.size)
+        val nestedSlots = IntArray(recordPattern.entries.size) { -1 }
+
+        recordPattern.entries.forEachIndexed { idx, entry ->
+            when (val p = entry.pattern) {
+                is VariablePattern -> {
+                    fieldSlots[idx] = getOrCreateSlot(p.name)
+                }
+                null -> {
+                    // shorthand: {x} = {x = x}
+                    fieldSlots[idx] = getOrCreateSlot(entry.name)
+                }
+                is RecordPattern -> {
+                    // Nested record pattern - allocate slot by index, not name
+                    val slot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+                    fieldSlots[idx] = slot
+                    nestedSlots[idx] = slot
+                }
+                else -> {
+                    // WildcardPattern etc - no binding needed
+                    fieldSlots[idx] = -1
+                }
+            }
+        }
+        return Triple(fieldNames, fieldSlots, nestedSlots)
+    }
+
+    /**
+     * Generate IfLetBindingNodes for nested record patterns.
+     * Reads from the intermediate slots and extracts nested fields.
+     */
+    private fun addNestedRecordBindings(
+        recordPattern: RecordPattern?,
+        nestedSlots: IntArray,
+        nodes: MutableList<IfLetBindingNode>
+    ) {
+        if (recordPattern == null) return
+        recordPattern.entries.forEachIndexed { idx, entry ->
+            val slot = nestedSlots[idx]
+            if (slot >= 0 && entry.pattern is RecordPattern) {
+                val nestedPattern = entry.pattern as RecordPattern
+                // Create a ReadLocalNode to read the intermediate slot
+                val readNode = ReadLocalNode.createObject(slot)
+                val (nestedFieldNames, nestedFieldSlots, furtherNestedSlots) =
+                    extractPatternFieldsAndSlotsWithNested(nestedPattern)
+                nodes.add(IfLetBindingNode.recordPattern(readNode, nestedFieldNames, nestedFieldSlots))
+                // Recursively handle further nesting
+                addNestedRecordBindings(nestedPattern, furtherNestedSlots, nodes)
+            }
         }
     }
 
@@ -1116,6 +1463,22 @@ class ASTToTruffleConverterV2(
                 val bodyNode = convertExpression(performExpr.expression)
                 val localSlot = contentHashToSlot[contentHash]
 
+                // Check if this is a scoped effect
+                val scopedInfo = scopedEffectInfo[contentHash]
+                if (scopedInfo != null && scopedInfo.isScopedEffect) {
+                    // Use HandleNode.createScoped for scoped effects
+                    return HandleNode.createScoped(
+                        localSlot ?: -1,
+                        contentHash,
+                        arrayOf(effectName),
+                        firstHandler.name,
+                        bodyNode,
+                        scopedInfo.scopeSlot,
+                        scopedInfo.initializeScopeNode,
+                        scopedInfo.finalizeScopeNode
+                    )
+                }
+
                 // Pass effect names so HandleNode can register in context
                 return HandleNode.create(
                     localSlot ?: -1,
@@ -1133,6 +1496,25 @@ class ASTToTruffleConverterV2(
         // Build arrays of effect names and content hashes from resolvedHandlers
         val effectNames = performExpr.resolvedHandlers.keys.toTypedArray()
         val contentHashes = performExpr.resolvedHandlers.values.mapNotNull { it.implDeclarationHash }.toTypedArray()
+
+        // Check if any of the resolved handlers is a scoped effect
+        for ((_, handler) in performExpr.resolvedHandlers) {
+            val hash = handler.implDeclarationHash ?: continue
+            val scopedInfo = scopedEffectInfo[hash]
+            if (scopedInfo != null && scopedInfo.isScopedEffect) {
+                val localSlot = contentHashToSlot[hash] ?: -1
+                return HandleNode.createScoped(
+                    localSlot,
+                    hash,
+                    effectNames,
+                    handler.performerName,
+                    bodyNode,
+                    scopedInfo.scopeSlot,
+                    scopedInfo.initializeScopeNode,
+                    scopedInfo.finalizeScopeNode
+                )
+            }
+        }
 
         // Check if this is a parameterized impl (has parameters)
         if (firstHandler?.parameters != null) {
@@ -1210,7 +1592,18 @@ class ASTToTruffleConverterV2(
     fun getOrCreateSlot(name: String): Int {
         variableInfo[name]?.let { return it.slot }
         val slot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, name, null)
-        variableInfo[name] = SlotInfo(slot, ReadLocalNode.KIND_OBJECT)
+        variableInfo[name] = SlotInfo(slot, ReadLocalNode.KIND_OBJECT, isClosure = false, isTopLevel = isTopLevel)
+        return slot
+    }
+
+    /**
+     * Create a slot for a variable that needs fallback global lookup.
+     * Used for variables from outer scopes (module level, parent functions).
+     */
+    private fun getOrCreateSlotWithFallback(name: String): Int {
+        variableInfo[name]?.let { return it.slot }
+        val slot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, name, null)
+        variableInfo[name] = SlotInfo(slot, ReadLocalNode.KIND_OBJECT, isClosure = false, isTopLevel = false, needsFallback = true)
         return slot
     }
 
@@ -1230,7 +1623,7 @@ class ASTToTruffleConverterV2(
             else -> FrameSlotKind.Object
         }
         val slot = frameDescriptorBuilder.addSlot(frameKind, name, null)
-        variableInfo[name] = SlotInfo(slot, kind)
+        variableInfo[name] = SlotInfo(slot, kind, isClosure = false, isTopLevel = isTopLevel)
         return slot
     }
 
@@ -1238,6 +1631,7 @@ class ASTToTruffleConverterV2(
         val inferredType = expr.inferredType
         if (inferredType != null) {
             // Use proper sealed class matching instead of toString() comparison
+            // NatType uses KIND_LONG for optimal JIT performance (unboxed)
             return when (inferredType) {
                 is MezzeType.IntType -> ReadLocalNode.KIND_LONG
                 is MezzeType.NatType -> ReadLocalNode.KIND_LONG
@@ -1286,6 +1680,10 @@ class ASTToTruffleConverterV2(
             "__native_continuation_fork" -> ContinuationForkNode.create(convertExpression(args))
             "__native_continuation_abort" -> ContinuationAbortNode.create(convertExpression(args))
             "__native_continuation_extract_suspended" -> ContinuationExtractSuspendedNode.create(convertExpression(args))
+            "__native_continuation_deactivate" -> ContinuationDeactivateNode.create(convertExpression(args))
+
+            // Built-in crash function for program termination with error
+            "crash" -> com.mezze.interpreter.v2.nodes.builtin.NativeDispatch.create("crash", convertExpression(args))
 
             // All other native functions use the dispatch node
             else -> {
@@ -1311,21 +1709,22 @@ class ASTToTruffleConverterV2(
      * Wraps a body node with nested record field extraction.
      *
      * For a pattern like `Some { val = { value, cont = k } }`:
-     * 1. The variant pattern binds `val` to a temp slot
+     * 1. The variant pattern binds `val` to a temp slot (by index, not name)
      * 2. This method wraps the body with code to extract `value` and `k` from the temp slot
      *
-     * @param tempName The name of the temp variable holding the intermediate record
+     * @param tempSlot The slot index holding the intermediate record
      * @param nestedPattern The nested RecordPattern to extract fields from
      * @param bodyNode The original body node to wrap
      * @return A BlockNode that extracts fields then executes the body
      */
     private fun wrapBodyWithNestedRecordExtraction(
-        tempName: String,
+        tempSlot: Int,
         nestedPattern: RecordPattern,
         bodyNode: MezzeNode
     ): MezzeNode {
         val statements = mutableListOf<MezzeNode>()
-        val tempSlot = getOrCreateSlot(tempName)
+        // Track further nested patterns: (slot, pattern)
+        val furtherNested = mutableListOf<Pair<Int, RecordPattern>>()
 
         // For each entry in the nested pattern, create a field access and write
         for (entry in nestedPattern.entries) {
@@ -1336,20 +1735,18 @@ class ASTToTruffleConverterV2(
                 is VariablePattern -> p.name
                 null -> entry.name // shorthand: { x } means x = x
                 is RecordPattern -> {
-                    // Doubly-nested patterns - create a temp for this level
-                    val nestedTempName = "__nested_${fieldName}_${entry.hashCode()}"
-                    val nestedTempSlot = getOrCreateSlot(nestedTempName)
+                    // Doubly-nested patterns - allocate anonymous slot
+                    val nestedTempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
 
-                    // Read the field and write to nested temp
+                    // Read the field and write to nested temp slot
                     val fieldAccessNode = RecordFieldAccessNode.createByName(
                         ReadLocalNode.createObject(tempSlot),
                         fieldName
                     )
                     statements.add(WriteLocalNode.createObject(fieldAccessNode, nestedTempSlot))
 
-                    // Recursively wrap the body with extraction for this nested pattern
-                    // Note: We only wrap once at the end, so track this for now
-                    // For now, just bind to a temp - deeper nesting would need more work
+                    // Track for recursive processing
+                    furtherNested.add(nestedTempSlot to p)
                     continue
                 }
                 else -> continue // Skip unsupported nested patterns
@@ -1367,8 +1764,89 @@ class ASTToTruffleConverterV2(
             statements.add(WriteLocalNode.createObject(fieldAccessNode, targetSlot))
         }
 
-        // Add the original body as the final statement
-        statements.add(bodyNode)
+        // Recursively wrap body with further nested extractions
+        var wrappedBody = bodyNode
+        for ((nestedSlot, nestedPattern) in furtherNested.reversed()) {
+            wrappedBody = wrapBodyWithNestedRecordExtraction(nestedSlot, nestedPattern, wrappedBody)
+        }
+
+        // Add the wrapped body as the final statement
+        statements.add(wrappedBody)
+
+        return BlockNode(statements.toTypedArray())
+    }
+
+    /**
+     * Wraps a body node with nested array pattern extraction.
+     *
+     * For a pattern like `[[x, ...rest], ...rows]`:
+     * 1. The outer array pattern binds element 0 to a temp slot (the inner array)
+     * 2. This method extracts `x` and `rest` from that inner array
+     *
+     * @param tempSlot The slot holding the intermediate array
+     * @param nestedPattern The nested ArrayPattern to match against
+     * @param bodyNode The original body node to wrap
+     * @return A BlockNode that extracts elements then executes the body
+     */
+    private fun wrapBodyWithNestedArrayExtraction(
+        tempSlot: Int,
+        nestedPattern: ArrayPattern,
+        bodyNode: MezzeNode
+    ): MezzeNode {
+        val statements = mutableListOf<MezzeNode>()
+        // Track further nested array patterns: (tempSlot, pattern)
+        val furtherNested = mutableListOf<Pair<Int, ArrayPattern>>()
+
+        // For each element in the nested pattern, extract from array and bind
+        nestedPattern.elements.forEachIndexed { idx, elemPattern ->
+            when (elemPattern) {
+                is VariablePattern -> {
+                    val targetSlot = getOrCreateSlot(elemPattern.name)
+                    // array[idx] -> targetSlot
+                    val accessNode = ArrayAccessNode.create(
+                        ReadLocalNode.createObject(tempSlot),
+                        IntLiteralNode(idx.toLong())
+                    )
+                    statements.add(WriteLocalNode.createObject(accessNode, targetSlot))
+                }
+                is ArrayPattern -> {
+                    // Further nested array - allocate temp slot
+                    val nestedTempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+                    val accessNode = ArrayAccessNode.create(
+                        ReadLocalNode.createObject(tempSlot),
+                        IntLiteralNode(idx.toLong())
+                    )
+                    statements.add(WriteLocalNode.createObject(accessNode, nestedTempSlot))
+                    furtherNested.add(nestedTempSlot to elemPattern)
+                }
+                is WildcardPattern -> {
+                    // No binding needed
+                }
+                else -> {
+                    // Other patterns not supported yet
+                }
+            }
+        }
+
+        // Handle rest pattern: ...rest
+        nestedPattern.restPattern?.let { restName ->
+            val restSlot = getOrCreateSlot(restName)
+            // Create a slice from index=elements.size to end
+            val sliceNode = ArraySliceNode.create(
+                ReadLocalNode.createObject(tempSlot),
+                IntLiteralNode(nestedPattern.elements.size.toLong())
+            )
+            statements.add(WriteLocalNode.createObject(sliceNode, restSlot))
+        }
+
+        // Recursively wrap body with further nested extractions
+        var wrappedBody = bodyNode
+        for ((nestedSlot, nestedPat) in furtherNested.reversed()) {
+            wrappedBody = wrapBodyWithNestedArrayExtraction(nestedSlot, nestedPat, wrappedBody)
+        }
+
+        // Add the wrapped body as the final statement
+        statements.add(wrappedBody)
 
         return BlockNode(statements.toTypedArray())
     }

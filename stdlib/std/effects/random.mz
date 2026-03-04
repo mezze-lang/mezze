@@ -8,11 +8,19 @@ effect Random where {
     random_float: {} -> Float <Random>,
     random_int: { min: Int, max: Int } -> Int <Random>,
     random_nat: { max: Nat } -> Nat <Random>,
-    seed: { seed: Int } -> {} <Random>
+    seed: { new_seed: Int } -> {} <Random>
 }
 
 # Seeded random implementation with deterministic behavior
+# Uses scoped effects to reset the random state at the start of each perform block,
+# ensuring that the same seed always produces the same sequence.
 pub impl Random for SeededRandom { seed: Int } where {
+    initialize_scope = {} -> do
+        # Reset the seeded random to ensure deterministic behavior
+        # Each perform block with the same seed will produce identical sequences
+        __native_reset_seeded_random { seed = seed }
+        {},
+    finalize_scope = {} -> {},
     random_float = { } -> __native_seeded_random_float { seed = seed },
     random_int = { min, max } -> __native_seeded_random_int { seed = seed, min = min, max = max },
     random_nat = { max } -> __native_seeded_random_nat { seed = seed, max = max },
@@ -34,7 +42,7 @@ pub let random_range: { min: Float, max: Float } -> Float <Random> = { min, max 
     let rand = Random.random_float {}
     min + (rand * (max - min))
 
-pub let seed_random: { seed: Int } -> {} <Random> = { seed } -> Random.seed { seed = seed }
+pub let seed_random: { seed: Int } -> {} <Random> = { seed } -> Random.seed { new_seed = seed }
 
 # Distribution functions using the Random effect
 pub let uniform: { min: Float, max: Float } -> Float <Random> = { min, max } -> random_range { min = min, max = max }
