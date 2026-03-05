@@ -380,8 +380,12 @@ public final class HandleNode extends MezzeNode {
     /**
      * Process the result:
      * - For MezzeSuspended (lazy effects), try to execute with our handlers
-     * - For MezzeContinuationSuspended with Exception/Return effects, extract suspended value
-     * - For Exception effect, wrap successful results in Ok variant
+     * - For MezzeContinuationSuspended, extract the suspended value (this is how
+     *   continuation-based effects like Exception.throw and Return.return work)
+     *
+     * NOTE: We do NOT wrap results in Ok - the user code is responsible for
+     * wrapping success values explicitly. This keeps effects as pure userland
+     * constructs without hardcoded effect names in the interpreter.
      */
     @TruffleBoundary
     private Object processResult(Object result) {
@@ -390,18 +394,11 @@ public final class HandleNode extends MezzeNode {
             return processSuspended(suspended);
         }
 
-        // Handle suspended continuations (for early return/exception)
+        // Handle suspended continuations - extract the suspended value.
+        // This is how continuation-based effects (Exception, Return, etc.) work:
+        // the handler calls suspend_with {value = ...} and we extract that value.
         if (result instanceof MezzeContinuationSuspended suspended) {
-            // Exception and Return effects use suspend_with to return early
-            if (hasEffect("Exception") || hasEffect("Return")) {
-                return suspended.getSuspendedValue();
-            }
-            return result;
-        }
-
-        // Wrap successful results in Ok for Exception effect
-        if (hasEffect("Exception")) {
-            return MezzeVariant.ok(result);
+            return suspended.getSuspendedValue();
         }
 
         return result;
@@ -444,25 +441,8 @@ public final class HandleNode extends MezzeNode {
 
         Object executedResult = suspended.executeWith(handlers, context, indirectCallNode);
 
-        // If still suspended, return it
-        if (executedResult instanceof MezzeSuspended) {
-            return executedResult;
-        }
-
-        // Process the executed result (may need Ok wrapping for Exception effect)
-        if (hasEffect("Exception")) {
-            return MezzeVariant.ok(executedResult);
-        }
-
+        // Return the executed result (may still be suspended or a final value)
         return executedResult;
-    }
-
-    private boolean hasEffect(String effectName) {
-        if (effectNames == null) return false;
-        for (String name : effectNames) {
-            if (effectName.equals(name)) return true;
-        }
-        return false;
     }
 
     @TruffleBoundary

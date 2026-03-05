@@ -470,7 +470,7 @@ public final class IONatives {
         try {
             return parseJson(s.trim());
         } catch (Exception e) {
-            return createErr("Parse error: " + e.getMessage());
+            return createErr("JSON parse error: " + e.getMessage());
         }
     }
 
@@ -1013,7 +1013,17 @@ public final class IONatives {
     }
 
     private static MezzeVariant createErr(String message) {
-        return MezzeVariant.err(message);
+        // Create a DecodeError record: {path = [], message = "...", expected = "JSON", found = None}
+        MezzeRecord error = MezzeRecord.fromFields(
+            new String[]{"path", "message", "expected", "found"},
+            new Object[]{
+                MezzeList.empty(),
+                message,
+                "JSON",
+                MezzeVariant.none()
+            }
+        );
+        return MezzeVariant.err(error);
     }
 
     private static Object getField(MezzeRecord r, String name) {

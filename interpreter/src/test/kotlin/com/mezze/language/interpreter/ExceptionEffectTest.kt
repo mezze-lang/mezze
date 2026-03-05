@@ -57,7 +57,7 @@ class ExceptionEffectTest {
                 if b == 0 then
                     Exception.throw {error = "Division by zero"}
                 else
-                    a / b
+                    Ok {val = a / b}
 
             perform ToResult {cont = continuation::new {}} in divide {a = 10, b = 2}
         """.trimIndent()
@@ -81,7 +81,7 @@ class ExceptionEffectTest {
                 if b == 0 then
                     Exception.throw {error = "Division by zero"}
                 else
-                    a / b
+                    Ok {val = a / b}
 
             perform ToResult {cont = continuation::new {}} in divide {a = 10, b = 0}
         """.trimIndent()
@@ -108,7 +108,7 @@ class ExceptionEffectTest {
                 if b == 0 then
                     Exception.throw {error = "Division by zero"}
                 else
-                    a / b
+                    Some {val = a / b}
 
             perform ToOption {cont = continuation::new {}} in divide {a = 10, b = 0}
         """.trimIndent()
@@ -132,7 +132,7 @@ class ExceptionEffectTest {
                 if x == 0 then
                     Exception.throw {error = "Failed!"}
                 else
-                    x
+                    {}
 
             perform Ignore {cont = continuation::new {}} in may_fail {x = 0}
         """.trimIndent()
@@ -156,7 +156,7 @@ class ExceptionEffectTest {
                 if x < 0 then
                     throw {error = "negative"}
                 else
-                    x
+                    Ok {val = x}
 
             perform ToResult {cont = continuation::new {}} in check {x = -5}
         """.trimIndent()
@@ -183,7 +183,7 @@ class ExceptionEffectTest {
                 if x > 10 then
                     Exception.throw {error = "Too large"}
                 else
-                    x
+                    Ok {val = x}
 
             perform ToResult {cont = continuation::new {}} in check_value {x = 15}
         """.trimIndent()
@@ -206,7 +206,7 @@ class ExceptionEffectTest {
             let multi_throw = {} -> do
                 Exception.throw {error = "First error"}
                 Exception.throw {error = "Second error"}
-                "unreachable"
+                Ok {val = "unreachable"}
 
             perform ToResult {cont = continuation::new {}} in multi_throw {}
         """.trimIndent()
@@ -229,7 +229,7 @@ class ExceptionEffectTest {
             use std::control::continuation
 
             let good_result = Ok {val = 42}
-            perform ToResult {cont = continuation::new {}} in unwrap {result = good_result}
+            perform ToResult {cont = continuation::new {}} in Ok {val = unwrap {result = good_result}}
         """.trimIndent()
 
         val result = executeProgram(source)
@@ -243,12 +243,19 @@ class ExceptionEffectTest {
 
     @Test
     fun `test unwrap with Err throws exception`() {
+        // Test that unwrap throws when given Err, and ToResult catches it
+        // Note: We use a let binding because unwrap can throw, and we need the throw
+        // to happen at the top-level of the perform body, not nested in a variant constructor
         val source = """
             use std::effects::exception::{unwrap, ToResult}
             use std::control::continuation
 
             let bad_result = Err {error = "Something failed"}
-            perform ToResult {cont = continuation::new {}} in unwrap {result = bad_result}
+            let try_unwrap = {} ->
+                perform ToResult {cont = continuation::new {}} in do
+                    let val = unwrap {result = bad_result}
+                    Ok {val = val}
+            try_unwrap {}
         """.trimIndent()
 
         val result = executeProgram(source)

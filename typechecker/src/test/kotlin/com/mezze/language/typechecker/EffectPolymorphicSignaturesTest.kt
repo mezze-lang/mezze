@@ -236,17 +236,11 @@ class EffectPolymorphicSignaturesTest {
     // ========================================================================
     // TYPE ERRORS - Missing Ok/Some wrapper
     // ========================================================================
-    // TODO: These tests are disabled because suspension type inference is incomplete.
-    // The constraint that enforces Result/Option return types was causing valid code
-    // (like `perform ToResult in divide {a=10, b=2}`) to fail.
-    // Once proper suspension type transformation is implemented (tracking both success
-    // and error paths), these tests should be re-enabled.
 
     @Nested
     @DisplayName("Type Errors for Missing Wrapper")
     inner class TypeErrorsMissingWrapper {
 
-        @org.junit.jupiter.api.Disabled("Suspension type inference is incomplete - see ExpressionConstraints.kt TODO")
         @Test
         fun `ToResult without Ok wrapper produces type error`() {
             val error = assertThrows<TypeCheckError> {
@@ -271,7 +265,6 @@ class EffectPolymorphicSignaturesTest {
             assertTrue(error.message?.contains("Result") == true || error.message?.contains("mismatch") == true)
         }
 
-        @org.junit.jupiter.api.Disabled("Suspension type inference is incomplete - see ExpressionConstraints.kt TODO")
         @Test
         fun `ToOption without Some wrapper produces type error`() {
             val error = assertThrows<TypeCheckError> {
@@ -296,7 +289,6 @@ class EffectPolymorphicSignaturesTest {
             assertTrue(error.message?.contains("Option") == true || error.message?.contains("mismatch") == true)
         }
 
-        @org.junit.jupiter.api.Disabled("Suspension type inference is incomplete - see ExpressionConstraints.kt TODO")
         @Test
         fun `direct ToResult without Ok wrapper produces type error`() {
             val error = assertThrows<TypeCheckError> {

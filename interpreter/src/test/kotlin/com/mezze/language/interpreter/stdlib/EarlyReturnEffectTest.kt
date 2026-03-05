@@ -279,46 +279,4 @@ class EarlyReturnEffectTest {
         assertTrue(result is MezzeInt)
         assertEquals(42L, (result as MezzeInt).value)
     }
-
-    // === WithSome Handler Tests ===
-
-    @Test
-    fun `test WithSome wraps return in Some`() {
-        val result = eval("""
-            use std::effects::early_return::{Return, WithSome}
-            use std::control::continuation
-
-            let check = {x} ->
-                perform WithSome { cont = continuation::new {} } in do
-                    if x < 0 then
-                        Return.return {val = "found negative"}
-                    else {}
-                    "all positive"
-
-            check {x = -5}
-        """)
-        assertTrue(result is MezzeVariant)
-        assertEquals("Some", (result as MezzeVariant).constructor)
-    }
-
-    @Test
-    fun `test WithSome normal path returns value directly`() {
-        val result = eval("""
-            use std::effects::early_return::{Return, WithSome}
-            use std::control::continuation
-
-            let check = {x} ->
-                perform WithSome { cont = continuation::new {} } in do
-                    if x < 0 then
-                        Return.return {val = "found negative"}
-                    else {}
-                    "all positive"
-
-            check {x = 5}
-        """)
-        // Normal path returns the value directly (not wrapped in Some)
-        assertTrue(result is MezzeString)
-        assertEquals("all positive", (result as MezzeString).value)
-    }
-
 }

@@ -148,11 +148,6 @@ class ScopedEffectsIntegrationTest {
         typeCheck(source)
     }
 
-    // NOTE: This test is disabled because type mismatches inside effect impl bodies
-    // are not currently validated. This is a general typechecker limitation, not
-    // specific to scoped effects. See: `let s: String = 42` inside any impl body
-    // is not caught as a type error.
-    @org.junit.jupiter.api.Disabled("Type mismatches in effect impl bodies not validated - existing limitation")
     @Test
     fun `scope field type mismatch produces error`() {
         val source = """

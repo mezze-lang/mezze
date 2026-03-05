@@ -3274,30 +3274,26 @@ class ExpressionConstraintGenerator {
                     )
                 }
 
-                // NOTE: Suspension type inference is incomplete.
-                // The constraint below is WRONG because it requires body type = suspension type.
-                // For ToResult, body returns Int but suspension type is Result.
-                // The correct behavior requires understanding that suspend_with transforms
-                // the result type, not constrains it.
+                // SUSPENSION TYPE VALIDATION:
+                // The body of a perform expression must return the same type that
+                // the handler's suspend_with produces. For example:
+                // - perform ToResult in <body> requires body to return Result type
+                // - perform ToOption in <body> requires body to return Option type
                 //
-                // TODO: Implement proper suspension type transformation:
-                // - Track both success path (body type) and error path (suspension type)
-                // - Unify them into the final result type (e.g., Result success error)
-                //
-                // For now, skip this constraint to maintain backward compatibility.
-                // The runtime handles the type transformation correctly.
-                //
-                // continuationConstraints.add(
-                //     Constraint.Equality(
-                //         left = performResultType,
-                //         right = resolvedSuspensionType,
-                //         context = "Perform result type must match handler suspension type",
-                //         sourceLocation = expr.sourceLocation
-                //     )
-                // )
+                // This ensures type safety: both the success path (body returns Ok/Some)
+                // and the error path (handler calls suspend_with with Err/None) produce
+                // compatible types.
+                continuationConstraints.add(
+                    Constraint.Equality(
+                        left = performResultType,
+                        right = resolvedSuspensionType,
+                        context = "perform body must return the same type that handler '${handler.name}' produces (e.g., wrap with Ok/Some)",
+                        sourceLocation = expr.sourceLocation
+                    )
+                )
 
-                // Don't update performResultType - let the body type flow through
-                // performResultType = resolvedSuspensionType
+                // Update performResultType to use the resolved suspension type
+                performResultType = resolvedSuspensionType
             }
         }
 

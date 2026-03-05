@@ -11,21 +11,11 @@ effect Return having 'result where {
 # Built-in Handlers
 # =============================================================================
 
-# Returns the value immediately (RECOMMENDED)
+# Returns the value immediately
 # Uses suspend_with to package the return value, signaling early return
 # NOTE: Requires a continuation to be passed as parameter
 pub impl Return for WithReturn { cont: Continuation 'a 'b 'c } having 'result = 'r where {
     return = {val} -> cont.suspend_with {value = val}
-}
-
-# Wraps the return value in Some (for optional early returns)
-pub impl Return for WithSome { cont: Continuation 'a 'b 'c } having 'result = 'r where {
-    return = {val} -> cont.suspend_with {value = Some {val = val}}
-}
-
-# Aborts computation, discarding return value
-pub impl Return for DiscardReturn { cont: Continuation 'a 'b 'c } having 'result = 'r where {
-    return = {val} -> cont.abort {}
 }
 
 # =============================================================================

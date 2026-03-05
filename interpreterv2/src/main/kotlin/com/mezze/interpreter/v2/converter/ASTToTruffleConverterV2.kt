@@ -767,9 +767,13 @@ class ASTToTruffleConverterV2(
                     }
                 }
                 is ArrayPattern -> {
-                    // Array pattern: [x, y], [head, ...tail], [], [[nested]], etc.
+                    // Array pattern: [x, y], [head, ...tail], [], [[nested]], [Ok {val}], [True, False], etc.
                     // Track nested array patterns: (elementIndex, tempSlot, nestedPattern)
                     val nestedArrayPatterns = mutableListOf<Triple<Int, Int, ArrayPattern>>()
+                    // Track nested constructor patterns: (elementIndex, tempSlot, nestedPattern)
+                    val nestedConstructorPatterns = mutableListOf<Triple<Int, Int, ConstructorPattern>>()
+                    // Track nested literal patterns: (elementIndex, tempSlot, nestedPattern)
+                    val nestedLiteralPatterns = mutableListOf<Triple<Int, Int, LiteralPattern>>()
 
                     val elementSlots = pattern.elements.mapIndexed { idx, elemPattern ->
                         when (elemPattern) {
@@ -779,6 +783,30 @@ class ASTToTruffleConverterV2(
                                 // Nested array pattern - allocate temp slot for intermediate array
                                 val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
                                 nestedArrayPatterns.add(Triple(idx, tempSlot, elemPattern))
+                                tempSlot
+                            }
+                            is ConstructorPattern -> {
+                                // Check for True/False constructor patterns - these are boolean literals
+                                // In Mezze, True and False are variant constructors that represent booleans
+                                if ((elemPattern.constructor == "True" || elemPattern.constructor == "False")
+                                    && elemPattern.recordPattern == null) {
+                                    // Treat True/False as literal boolean patterns
+                                    val boolValue = elemPattern.constructor == "True"
+                                    val literalPattern = LiteralPattern(BooleanLiteralValue(boolValue))
+                                    val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+                                    nestedLiteralPatterns.add(Triple(idx, tempSlot, literalPattern))
+                                    tempSlot
+                                } else {
+                                    // Nested constructor pattern - allocate temp slot for intermediate variant
+                                    val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+                                    nestedConstructorPatterns.add(Triple(idx, tempSlot, elemPattern))
+                                    tempSlot
+                                }
+                            }
+                            is LiteralPattern -> {
+                                // Nested literal pattern - allocate temp slot for element value
+                                val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+                                nestedLiteralPatterns.add(Triple(idx, tempSlot, elemPattern))
                                 tempSlot
                             }
                             else -> -1
@@ -793,6 +821,16 @@ class ASTToTruffleConverterV2(
                     // Wrap body with nested array pattern extraction (in reverse order)
                     for ((_, tempSlot, nestedPattern) in nestedArrayPatterns.reversed()) {
                         bodyNode = wrapBodyWithNestedArrayExtraction(tempSlot, nestedPattern, bodyNode)
+                    }
+
+                    // Wrap body with nested constructor pattern extraction (in reverse order)
+                    for ((_, tempSlot, nestedPattern) in nestedConstructorPatterns.reversed()) {
+                        bodyNode = wrapBodyWithNestedConstructorExtraction(tempSlot, nestedPattern, bodyNode)
+                    }
+
+                    // Wrap body with nested literal pattern checks (in reverse order)
+                    for ((_, tempSlot, nestedPattern) in nestedLiteralPatterns.reversed()) {
+                        bodyNode = wrapBodyWithNestedLiteralCheck(tempSlot, nestedPattern, bodyNode)
                     }
 
                     branches.add(MatchBranchNode.arrayPattern(elementSlots, restSlot, hasRestPattern, bodyNode))
@@ -882,6 +920,7 @@ class ASTToTruffleConverterV2(
                     when (elemPattern) {
                         is VariablePattern -> getOrCreateSlot(elemPattern.name)
                         is ArrayPattern -> preCreatePatternSlotsRecursive(elemPattern) // Nested array pattern
+                        is ConstructorPattern -> preCreatePatternSlotsRecursive(elemPattern) // Nested constructor pattern
                         else -> {} // WildcardPattern etc
                     }
                 }
@@ -937,15 +976,12 @@ class ASTToTruffleConverterV2(
 
             if (receiverName != null) {
                 val operationName = memberAccess.member
-                val isBuiltinAbility = receiverName in listOf(
-                    "NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod",
-                    "Eq", "Ord", "LogicalAnd", "LogicalOr", "LogicalNot",
-                    "Inspect"
-                )
 
-                if (isBuiltinAbility) {
-                    val argsNode = convertExpression(funcCall.arguments)
-                    return createBuiltinBinaryOp(receiverName, operationName, argsNode)
+                // Check if this is a known builtin ability+operation combination
+                // Only use builtin path if we have a matching builtin operation
+                val builtinNode = tryCreateBuiltinOp(receiverName, operationName, funcCall)
+                if (builtinNode != null) {
+                    return builtinNode
                 }
 
                 // CRITICAL: Check resolvedAbilities FIRST before falling back to effect dispatch
@@ -1052,6 +1088,35 @@ class ASTToTruffleConverterV2(
         val functionNode = convertExpression(funcCall.function)
         val argumentsNode = convertExpression(funcCall.arguments)
         return InvokeNode.create(functionNode, arrayOf(argumentsNode))
+    }
+
+    /**
+     * Try to create a builtin operation node.
+     * Returns null if this is not a known builtin combination.
+     * This allows user-defined abilities with builtin names (like Eq) to use regular ability dispatch
+     * if they have different operation names than the builtins.
+     */
+    private fun tryCreateBuiltinOp(abilityName: String, operationName: String, funcCall: FunctionCall): MezzeNode? {
+        // Check if this is a known builtin combination
+        val isBuiltin = when {
+            abilityName == "NumAdd" && operationName == "add" -> true
+            abilityName == "NumSub" && operationName in listOf("sub", "neg") -> true
+            abilityName == "NumMul" && operationName == "mul" -> true
+            abilityName == "NumDiv" && operationName == "div" -> true
+            abilityName == "NumMod" && operationName == "mod" -> true
+            abilityName == "Eq" && operationName in listOf("eq", "neq") -> true
+            abilityName == "Ord" && operationName in listOf("lt", "gt", "le", "ge") -> true
+            abilityName == "LogicalAnd" && operationName == "and" -> true
+            abilityName == "LogicalOr" && operationName == "or" -> true
+            abilityName == "LogicalNot" && operationName == "not" -> true
+            abilityName == "Inspect" && operationName == "to_str" -> true
+            else -> false
+        }
+
+        if (!isBuiltin) return null
+
+        val argsNode = convertExpression(funcCall.arguments)
+        return createBuiltinBinaryOp(abilityName, operationName, argsNode)
     }
 
     private fun createBuiltinBinaryOp(abilityName: String, operationName: String, argsNode: MezzeNode): MezzeNode {
@@ -1335,12 +1400,17 @@ class ASTToTruffleConverterV2(
                     variables.addAll(nestedFreeVars)
                 }
                 is RecordLiteral -> {
+                    // Visit field entries
                     e.getFieldEntries().forEach { entry ->
                         if (entry.value != null) {
                             visit(entry.value!!)
                         } else {
                             variables.add(entry.name)
                         }
+                    }
+                    // Visit spread entries (e.g., {...point} captures 'point')
+                    e.getSpreadEntries().forEach { spread ->
+                        visit(spread.expression)
                     }
                 }
                 is ArrayLiteral -> {
@@ -1976,7 +2046,9 @@ class ASTToTruffleConverterV2(
     ): MezzeNode {
         val statements = mutableListOf<MezzeNode>()
         // Track further nested array patterns: (tempSlot, pattern)
-        val furtherNested = mutableListOf<Pair<Int, ArrayPattern>>()
+        val furtherNestedArrays = mutableListOf<Pair<Int, ArrayPattern>>()
+        // Track further nested constructor patterns: (tempSlot, pattern)
+        val furtherNestedConstructors = mutableListOf<Pair<Int, ConstructorPattern>>()
 
         // For each element in the nested pattern, extract from array and bind
         nestedPattern.elements.forEachIndexed { idx, elemPattern ->
@@ -1998,7 +2070,17 @@ class ASTToTruffleConverterV2(
                         IntLiteralNode(idx.toLong())
                     )
                     statements.add(WriteLocalNode.createObject(accessNode, nestedTempSlot))
-                    furtherNested.add(nestedTempSlot to elemPattern)
+                    furtherNestedArrays.add(nestedTempSlot to elemPattern)
+                }
+                is ConstructorPattern -> {
+                    // Further nested constructor - allocate temp slot
+                    val nestedTempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+                    val accessNode = ArrayAccessNode.create(
+                        ReadLocalNode.createObject(tempSlot),
+                        IntLiteralNode(idx.toLong())
+                    )
+                    statements.add(WriteLocalNode.createObject(accessNode, nestedTempSlot))
+                    furtherNestedConstructors.add(nestedTempSlot to elemPattern)
                 }
                 is WildcardPattern -> {
                     // No binding needed
@@ -2022,13 +2104,98 @@ class ASTToTruffleConverterV2(
 
         // Recursively wrap body with further nested extractions
         var wrappedBody = bodyNode
-        for ((nestedSlot, nestedPat) in furtherNested.reversed()) {
+        for ((nestedSlot, nestedPat) in furtherNestedArrays.reversed()) {
             wrappedBody = wrapBodyWithNestedArrayExtraction(nestedSlot, nestedPat, wrappedBody)
+        }
+        for ((nestedSlot, nestedPat) in furtherNestedConstructors.reversed()) {
+            wrappedBody = wrapBodyWithNestedConstructorExtraction(nestedSlot, nestedPat, wrappedBody)
         }
 
         // Add the wrapped body as the final statement
         statements.add(wrappedBody)
 
         return BlockNode(statements.toTypedArray())
+    }
+
+    /**
+     * Wraps a body node with nested constructor pattern extraction.
+     *
+     * For a pattern like `[Ok {val}]`:
+     * 1. The outer array pattern binds element 0 to a temp slot (the variant)
+     * 2. This method extracts `val` from the variant's payload record
+     *
+     * This creates a nested match expression that:
+     * - Checks if the variant has the expected tag
+     * - Extracts fields from the payload record if matched
+     * - Returns null if the variant tag doesn't match (pattern fails)
+     *
+     * @param tempSlot The slot holding the intermediate variant
+     * @param nestedPattern The nested ConstructorPattern to match against
+     * @param bodyNode The original body node to wrap
+     * @return A MatchNode that checks the variant and extracts fields
+     */
+    private fun wrapBodyWithNestedConstructorExtraction(
+        tempSlot: Int,
+        nestedPattern: ConstructorPattern,
+        bodyNode: MezzeNode
+    ): MezzeNode {
+        // Read the variant from temp slot
+        val valueNode = ReadLocalNode.createObject(tempSlot)
+
+        // Create the branch that matches the expected constructor
+        val tag = getTagForConstructor(nestedPattern.constructor)
+        val fieldNames = nestedPattern.recordPattern?.let { recordPattern ->
+            recordPattern.entries.map { it.name }.toTypedArray()
+        } ?: arrayOf()
+        val fieldSlots = nestedPattern.recordPattern?.let { recordPattern ->
+            recordPattern.entries.map { entry ->
+                when (val fp = entry.pattern) {
+                    is VariablePattern -> getOrCreateSlot(fp.name)
+                    null -> getOrCreateSlot(entry.name)
+                    else -> -1
+                }
+            }.toIntArray()
+        } ?: intArrayOf()
+
+        val matchBranch = MatchBranchNode.variantPatternWithFieldNames(tag, fieldNames, fieldSlots, bodyNode)
+
+        // Create match node with just this branch (no wildcard - pattern match will fail if wrong variant)
+        return MatchNode(valueNode, arrayOf(matchBranch), -1)
+    }
+
+    /**
+     * Wrap a body node with a literal pattern check for nested literal patterns inside array patterns.
+     *
+     * For a pattern like `[True, False]`:
+     * 1. The outer array pattern binds elements to temp slots
+     * 2. This method creates a match that checks the element value equals the literal
+     *
+     * @param tempSlot The slot holding the element value to check
+     * @param nestedPattern The nested LiteralPattern to match against
+     * @param bodyNode The original body node to wrap
+     * @return A MatchNode that checks the literal value
+     */
+    private fun wrapBodyWithNestedLiteralCheck(
+        tempSlot: Int,
+        nestedPattern: LiteralPattern,
+        bodyNode: MezzeNode
+    ): MezzeNode {
+        // Read the element value from temp slot
+        val valueNode = ReadLocalNode.createObject(tempSlot)
+
+        // Convert AST LiteralValue to runtime value
+        val literalValue: Any = when (val lit = nestedPattern.value) {
+            is BooleanLiteralValue -> lit.value
+            is IntLiteralValue -> lit.value
+            is NatLiteralValue -> lit.value
+            is FloatLiteralValue -> lit.value
+            is StringLiteralValue -> lit.value
+        }
+
+        // Create a match branch for this literal
+        val literalBranch = MatchBranchNode.literalPattern(literalValue, bodyNode)
+
+        // Create match node - if the literal doesn't match, execute returns null
+        return MatchNode(valueNode, arrayOf(literalBranch), -1)
     }
 }

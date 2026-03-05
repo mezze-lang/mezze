@@ -505,6 +505,12 @@ public final class AsyncNatives {
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
 
+        // Build argument array: closure values + empty record argument
+        // Thunk functions expect {} as argument
+        Object[] fullArgs = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
+        fullArgs[closureValues.length] = MezzeRecord.empty();
+
         // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
         java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
@@ -520,7 +526,7 @@ public final class AsyncNatives {
                 }
 
                 try {
-                    Object result = callNode.call(callTarget, closureValues);
+                    Object result = callNode.call(callTarget, fullArgs);
                     promise.complete(result);
                 } finally {
                     // LAZY EFFECTS: Pop handlers when thread completes
@@ -671,7 +677,8 @@ public final class AsyncNatives {
     }
 
     /**
-     * Spawn all functions in parallel and return list of promises.
+     * Spawn all functions in parallel, await all, and return list of results.
+     * This is the semantics expected by std::effects::concurrency::all.
      */
     @TruffleBoundary
     public static MezzeList loomSpawnAll(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
@@ -692,6 +699,12 @@ public final class AsyncNatives {
             Object[] closureValues = f.getClosureValues();
             var callTarget = f.getCallTarget();
 
+            // Build argument array: closure values + empty record argument
+            // Thunk functions expect {} as argument
+            Object[] fullArgs = new Object[closureValues.length + 1];
+            System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
+            fullArgs[closureValues.length] = MezzeRecord.empty();
+
             MezzePromise promise = new MezzePromise(null, null);
 
             Thread vThread = env.newTruffleThreadBuilder(() -> {
@@ -703,7 +716,7 @@ public final class AsyncNatives {
                     }
 
                     try {
-                        Object result = callNode.call(callTarget, closureValues);
+                        Object result = callNode.call(callTarget, fullArgs);
                         promise.complete(result);
                     } finally {
                         // LAZY EFFECTS: Pop handlers when thread completes
@@ -720,7 +733,18 @@ public final class AsyncNatives {
             promises.add(new MezzePromise(vThread, null, promise));
         }
 
-        return MezzeList.fromArray(promises.toArray());
+        // Await all promises and collect results
+        List<Object> results = new ArrayList<>();
+        for (MezzePromise promise : promises) {
+            try {
+                results.add(promise.await());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted while awaiting promise", e);
+            }
+        }
+
+        return MezzeList.fromArray(results.toArray());
     }
 
     @TruffleBoundary
@@ -1002,7 +1026,21 @@ public final class AsyncNatives {
         var leftTarget = left.getCallTarget();
         var rightTarget = right.getCallTarget();
 
-        Env env = MezzeContext.get(node).getEnv();
+        // Build argument arrays: closure values + empty record argument
+        // Thunk functions expect {} as argument
+        Object[] leftArgs = new Object[leftClosure.length + 1];
+        System.arraycopy(leftClosure, 0, leftArgs, 0, leftClosure.length);
+        leftArgs[leftClosure.length] = MezzeRecord.empty();
+
+        Object[] rightArgs = new Object[rightClosure.length + 1];
+        System.arraycopy(rightClosure, 0, rightArgs, 0, rightClosure.length);
+        rightArgs[rightClosure.length] = MezzeRecord.empty();
+
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
         // Use CompletableFuture for result coordination
         CompletableFuture<Object> leftFuture = new CompletableFuture<>();
@@ -1011,7 +1049,18 @@ public final class AsyncNatives {
         // Spawn Truffle-aware threads for both computations
         Thread leftThread = env.newTruffleThreadBuilder(() -> {
             try {
-                leftFuture.complete(callNode.call(leftTarget, leftClosure));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    leftFuture.complete(callNode.call(leftTarget, leftArgs));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 leftFuture.completeExceptionally(e);
             }
@@ -1019,7 +1068,18 @@ public final class AsyncNatives {
 
         Thread rightThread = env.newTruffleThreadBuilder(() -> {
             try {
-                rightFuture.complete(callNode.call(rightTarget, rightClosure));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    rightFuture.complete(callNode.call(rightTarget, rightArgs));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 rightFuture.completeExceptionally(e);
             }
@@ -1052,7 +1112,11 @@ public final class AsyncNatives {
         MezzeFunction b = getFunction(args, "b");
         MezzeFunction c = getFunction(args, "c");
 
-        Env env = MezzeContext.get(node).getEnv();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
         CompletableFuture<Object> aFuture = new CompletableFuture<>();
         CompletableFuture<Object> bFuture = new CompletableFuture<>();
@@ -1060,7 +1124,18 @@ public final class AsyncNatives {
 
         Thread aThread = env.newTruffleThreadBuilder(() -> {
             try {
-                aFuture.complete(callThunkFunction(a, callNode));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    aFuture.complete(callThunkFunction(a, callNode));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 aFuture.completeExceptionally(e);
             }
@@ -1068,7 +1143,18 @@ public final class AsyncNatives {
 
         Thread bThread = env.newTruffleThreadBuilder(() -> {
             try {
-                bFuture.complete(callThunkFunction(b, callNode));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    bFuture.complete(callThunkFunction(b, callNode));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 bFuture.completeExceptionally(e);
             }
@@ -1076,7 +1162,18 @@ public final class AsyncNatives {
 
         Thread cThread = env.newTruffleThreadBuilder(() -> {
             try {
-                cFuture.complete(callThunkFunction(c, callNode));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    cFuture.complete(callThunkFunction(c, callNode));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 cFuture.completeExceptionally(e);
             }
@@ -1625,7 +1722,13 @@ public final class AsyncNatives {
         long poolSize = getLong(args, "pool_size");
 
         var callTarget = f.getCallTarget();
-        Object[] closure = f.getClosureValues();
+        Object[] closureValues = f.getClosureValues();
+
+        // Build argument array: closure values + empty record argument
+        // Thunk functions expect {} as argument
+        Object[] fullArgs = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
+        fullArgs[closureValues.length] = MezzeRecord.empty();
 
         MezzeContext context = MezzeContext.get(node);
         Env env = context.getEnv();
@@ -1646,7 +1749,7 @@ public final class AsyncNatives {
                 }
 
                 try {
-                    Object result = callNode.call(callTarget, closure);
+                    Object result = callNode.call(callTarget, fullArgs);
                     promise.complete(result);
                 } finally {
                     // LAZY EFFECTS: Pop handlers when thread completes
@@ -1717,14 +1820,29 @@ public final class AsyncNatives {
         MezzeFunction left = getFunction(args, "left");
         MezzeFunction right = getFunction(args, "right");
 
-        Env env = MezzeContext.get(node).getEnv();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
         CompletableFuture<Object> leftFuture = new CompletableFuture<>();
         CompletableFuture<Object> rightFuture = new CompletableFuture<>();
 
         Thread leftThread = env.newTruffleThreadBuilder(() -> {
             try {
-                leftFuture.complete(callThunkFunction(left, callNode));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    leftFuture.complete(callThunkFunction(left, callNode));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 leftFuture.completeExceptionally(e);
             }
@@ -1732,7 +1850,18 @@ public final class AsyncNatives {
 
         Thread rightThread = env.newTruffleThreadBuilder(() -> {
             try {
-                rightFuture.complete(callThunkFunction(right, callNode));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    rightFuture.complete(callThunkFunction(right, callNode));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 rightFuture.completeExceptionally(e);
             }
@@ -1764,7 +1893,11 @@ public final class AsyncNatives {
         MezzeFunction b = getFunction(args, "b");
         MezzeFunction c = getFunction(args, "c");
 
-        Env env = MezzeContext.get(node).getEnv();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
         CompletableFuture<Object> aFuture = new CompletableFuture<>();
         CompletableFuture<Object> bFuture = new CompletableFuture<>();
@@ -1772,7 +1905,18 @@ public final class AsyncNatives {
 
         Thread aThread = env.newTruffleThreadBuilder(() -> {
             try {
-                aFuture.complete(callThunkFunction(a, callNode));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    aFuture.complete(callThunkFunction(a, callNode));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 aFuture.completeExceptionally(e);
             }
@@ -1780,7 +1924,18 @@ public final class AsyncNatives {
 
         Thread bThread = env.newTruffleThreadBuilder(() -> {
             try {
-                bFuture.complete(callThunkFunction(b, callNode));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    bFuture.complete(callThunkFunction(b, callNode));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 bFuture.completeExceptionally(e);
             }
@@ -1788,7 +1943,18 @@ public final class AsyncNatives {
 
         Thread cThread = env.newTruffleThreadBuilder(() -> {
             try {
-                cFuture.complete(callThunkFunction(c, callNode));
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+                try {
+                    cFuture.complete(callThunkFunction(c, callNode));
+                } finally {
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 cFuture.completeExceptionally(e);
             }

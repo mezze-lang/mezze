@@ -174,7 +174,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
     fun testNestedEffectPropagationExecution() {
         val source = """
             effect Auth where {
-              authenticate : {token: String} -> Boolean <Auth>
+              authenticate : {token: String} -> Bool <Auth>
             }
 
             effect Database where {
@@ -190,7 +190,7 @@ class ComprehensiveAbilitiesAndEffectsInterpreterTest {
             }
 
             impl Auth for MockAuth where {
-              authenticate : {token: String} -> Boolean = {token} -> True
+              authenticate : {token: String} -> Bool = {token} -> True
             }
             
             impl Database for MockDB where {

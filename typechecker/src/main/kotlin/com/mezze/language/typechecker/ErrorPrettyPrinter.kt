@@ -217,6 +217,16 @@ object ErrorPrettyPrinter {
                         sb.appendLine("   - For custom types, you need to provide implementations")
                     }
 
+                    message.contains("expected Option") && !message.contains("got Option") -> {
+                        sb.appendLine()
+                        sb.appendLine("💡 Wrap your value with Some { val = ... }")
+                    }
+
+                    message.contains("expected Result") && !message.contains("got Result") -> {
+                        sb.appendLine()
+                        sb.appendLine("💡 Wrap your value with Ok { val = ... }")
+                    }
+
                     message.contains("Type mismatch") || message.contains("not compatible") -> {
                         sb.appendLine()
                         sb.appendLine("💡 Type Compatibility Help:")

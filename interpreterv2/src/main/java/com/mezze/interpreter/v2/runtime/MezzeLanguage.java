@@ -574,6 +574,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         lastResultStore.set(null);
         // Clear delimiter stack to ensure clean state between tests
         com.mezze.interpreter.v2.nodes.continuation.DelimiterStack.clear();
+        // Clear state machine context to prevent stale continuation state between tests
+        com.mezze.interpreter.v2.nodes.statemachine.StateMachineContext.clearCurrentContext();
     }
 
     /**

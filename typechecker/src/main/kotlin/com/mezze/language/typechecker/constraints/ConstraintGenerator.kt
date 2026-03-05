@@ -1479,8 +1479,29 @@ class ConstraintGenerator(
 
                 when (solveResult) {
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Failure -> {
-                        // Solver failures might be due to external references
-                        // Skip validation - let the normal type-checking catch errors later
+                        // Only report clear type mismatches between concrete scalar types
+                        // Skip errors involving: effects, type variables, generics, collections
+                        // These may be handled by native functions with different semantics
+                        val firstError = solveResult.errors.firstOrNull()
+                        if (firstError != null) {
+                            val msg = firstError.message
+                            // Only report mismatches between concrete scalar types (String vs Int, etc.)
+                            // Skip if message involves: effects, type variables ('a, 'b, etc.), generics, collections
+                            // Type variables are 'letter patterns, not quoted field names like 'fieldName'
+                            val hasTypeVar = Regex("'[a-z]\\b").containsMatchIn(msg)
+                            val hasEffects = msg.contains("effectful") || msg.contains("<") && msg.contains(">")
+                            val hasCollections = msg.contains("List") || msg.contains("Array") ||
+                                msg.contains("[") || msg.contains("Set") || msg.contains("Map")
+                            val isClearTypeMismatch = msg.contains("Type mismatch") &&
+                                !hasTypeVar && !hasEffects && !hasCollections
+
+                            if (isClearTypeMismatch) {
+                                throw com.mezze.language.typechecker.TypeCheckError(
+                                    "Type error in impl '${impl.performerName}' operation '${implOp.name}': ${firstError.message}",
+                                    firstError.constraint.sourceLocation ?: implOp.implementation.sourceLocation
+                                )
+                            }
+                        }
                         continue
                     }
                     is com.mezze.language.typechecker.solving.ConstraintSolver.SolveResult.Success -> {

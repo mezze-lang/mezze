@@ -116,6 +116,8 @@ class EffectHandlerRulesTest {
     @Test
     fun `test handler can use other effects`() {
         val source = """
+            use std::collections::array
+
             effect Database where {
               query: { sql: String } -> [String] <Database>
             }
@@ -131,7 +133,7 @@ class EffectHandlerRulesTest {
             impl Auth for DatabaseAuth where {
               check: { token: String } -> Boolean <Database> = { token } -> do
                 let results = Database.query { sql = "SELECT * FROM tokens" }
-                results.length > 0
+                array::length {xs = results} > 0
             }
 
             let authenticate = { token } -> Auth.check { token = token }

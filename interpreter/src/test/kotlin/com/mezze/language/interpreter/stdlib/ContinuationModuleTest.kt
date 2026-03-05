@@ -81,7 +81,6 @@ class ContinuationModuleTest {
     // === capture and resume Tests ===
 
     @Test
-    @org.junit.jupiter.api.Disabled("Skipped due to test isolation issue - passes when run alone, fails with other tests")
     fun `test capture and resume basic`() {
         val result = eval("""
             use std::control::continuation
@@ -207,7 +206,7 @@ class ContinuationModuleTest {
                 if b == 0 then
                     Exception.throw {error = "div by zero"}
                 else
-                    a / b
+                    Ok { val = a / b }
 
             perform ToResult {cont = continuation::new {}} in divide {a = 10, b = 0}
         """)
