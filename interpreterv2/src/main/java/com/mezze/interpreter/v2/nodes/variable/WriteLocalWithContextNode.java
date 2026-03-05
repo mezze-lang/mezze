@@ -1,7 +1,9 @@
 package com.mezze.interpreter.v2.nodes.variable;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.VirtualFrame;
@@ -95,6 +97,12 @@ public final class WriteLocalWithContextNode extends MezzeNode {
             defineGlobalOnce(value);
         }
 
+        // Return MezzeUnit for suspended continuations to prevent early return in BlockNode
+        // This allows suspended continuations to be stored in variables without triggering
+        // BlockNode's early return mechanism.
+        if (value instanceof MezzeContinuationSuspended) {
+            return MezzeUnit.INSTANCE;
+        }
         return value;
     }
 

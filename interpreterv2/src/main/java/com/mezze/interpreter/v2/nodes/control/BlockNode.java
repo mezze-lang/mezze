@@ -54,7 +54,10 @@ public final class BlockNode extends MezzeNode {
                 return handleSuspendedEffect(suspended, i, frame.materialize());
             }
 
-            // Handle continuation suspended (for early return/exception)
+            // EARLY RETURN: MezzeContinuationSuspended causes early return from block.
+            // This is essential for Exception.throw and Return.return to work correctly.
+            // When throw/return is NOT the last statement, remaining statements must be skipped.
+            // The handler (perform ToResult...) will detect the suspended continuation and extract the value.
             if (result instanceof MezzeContinuationSuspended) {
                 return result;
             }

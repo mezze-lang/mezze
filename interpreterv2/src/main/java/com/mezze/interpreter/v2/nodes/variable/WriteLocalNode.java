@@ -1,6 +1,8 @@
 package com.mezze.interpreter.v2.nodes.variable;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
+import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.NodeField;
 import com.oracle.truffle.api.dsl.Specialization;
@@ -60,10 +62,17 @@ public abstract class WriteLocalNode extends MezzeNode {
 
     /**
      * General path: Write Object (any other type).
+     * Returns MezzeUnit for MezzeContinuationSuspended to prevent propagation as early return.
+     * This allows suspended continuations to be stored in variables without triggering
+     * BlockNode's early return mechanism.
      */
     @Specialization(guards = "kind == 3")
     protected Object writeObject(VirtualFrame frame, Object value) {
         frame.setObject(getSlot(), value);
+        // Return MezzeUnit for suspended continuations to prevent early return in BlockNode
+        if (value instanceof MezzeContinuationSuspended) {
+            return MezzeUnit.INSTANCE;
+        }
         return value;
     }
 

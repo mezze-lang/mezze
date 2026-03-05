@@ -109,13 +109,13 @@ public final class TimeNatives {
     // ==================== Parsing ====================
 
     @TruffleBoundary
-    public static MezzeVariant parse(String dateStr, String pattern) {
+    public static long parse(String dateStr, String pattern) {
         try {
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
             LocalDateTime dt = LocalDateTime.parse(dateStr, formatter);
-            return MezzeVariant.some(dt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli());
+            return dt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
         } catch (DateTimeParseException e) {
-            return MezzeVariant.none();
+            throw new RuntimeException("Failed to parse date string: " + e.getMessage(), e);
         }
     }
 
