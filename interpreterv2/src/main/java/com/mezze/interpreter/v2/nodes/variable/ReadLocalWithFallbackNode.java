@@ -105,12 +105,22 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
             );
         }
 
-        // No content hash - use variable name lookup (for local recursive functions)
+        // No content hash - first try local lookup (for scoped effects like 'scope')
+        // Note: Don't cache local lookups since they're dynamic (scoped)
+        Object localValue = context.lookupLocal(variableName);
+        if (localValue != null) {
+            return localValue;
+        }
+
+        // Then try global lookup (for module-level definitions)
         Object value = context.lookupGlobal(variableName);
 
         // Cache for next time (even null result to avoid repeated lookups)
-        CompilerDirectives.transferToInterpreterAndInvalidate();
-        cachedGlobal = value != null ? value : NOT_FOUND_SENTINEL;
+        // Only cache globals, not locals (which are dynamic)
+        if (value != null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            cachedGlobal = value;
+        }
 
         return value;
     }

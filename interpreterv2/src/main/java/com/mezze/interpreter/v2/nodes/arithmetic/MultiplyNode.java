@@ -54,9 +54,10 @@ public abstract class MultiplyNode extends MezzeNode {
      */
     @Fallback
     protected Object typeError(Object left, Object right) {
+        String leftDesc = left == null ? "null" : left.getClass().getSimpleName();
+        String rightDesc = right == null ? "null" : right.getClass().getSimpleName();
         throw new MezzeArithmeticException(
-            "Cannot multiply " + left.getClass().getSimpleName() +
-            " and " + right.getClass().getSimpleName()
+            "Cannot multiply " + leftDesc + " and " + rightDesc
         );
     }
 }

@@ -65,11 +65,8 @@ public final class V2AdapterNode extends MezzeNode {
         if (value instanceof com.mezze.interpreter.v2.values.MezzeList v2List) {
             return convertV2List(v2List);
         }
-        if (value instanceof com.mezze.interpreter.v2.values.MezzeIntArray v2IntArray) {
-            return convertV2IntArray(v2IntArray);
-        }
-        if (value instanceof com.mezze.interpreter.v2.values.MezzeFloatArray v2FloatArray) {
-            return convertV2FloatArray(v2FloatArray);
+        if (value instanceof com.mezze.interpreter.v2.values.MezzeSeq v2Seq) {
+            return convertV2Seq(v2Seq);
         }
         if (value instanceof com.mezze.interpreter.v2.values.MezzeUnit) {
             return MezzeNull.INSTANCE;
@@ -137,21 +134,11 @@ public final class V2AdapterNode extends MezzeNode {
     }
 
     @TruffleBoundary
-    private MezzeValue convertV2IntArray(com.mezze.interpreter.v2.values.MezzeIntArray v2IntArray) {
-        int size = v2IntArray.length();
+    private MezzeValue convertV2Seq(com.mezze.interpreter.v2.values.MezzeSeq v2Seq) {
+        int size = v2Seq.size();
         java.util.List<MezzeValue> elements = new java.util.ArrayList<>(size);
         for (int i = 0; i < size; i++) {
-            elements.add(new MezzeInt(v2IntArray.getLong(i)));
-        }
-        return new MezzeArrayList(elements);
-    }
-
-    @TruffleBoundary
-    private MezzeValue convertV2FloatArray(com.mezze.interpreter.v2.values.MezzeFloatArray v2FloatArray) {
-        int size = v2FloatArray.length();
-        java.util.List<MezzeValue> elements = new java.util.ArrayList<>(size);
-        for (int i = 0; i < size; i++) {
-            elements.add(new MezzeFloat(v2FloatArray.getDouble(i)));
+            elements.add(convertToMezzeValue(v2Seq.get(i)));
         }
         return new MezzeArrayList(elements);
     }

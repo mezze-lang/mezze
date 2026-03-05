@@ -4,6 +4,8 @@ import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
 import com.mezze.interpreter.v2.values.MezzeFunction;
 import com.mezze.interpreter.v2.values.MezzeRecord;
+import com.mezze.interpreter.v2.values.MezzeSuspended;
+import com.mezze.interpreter.v2.values.MezzeThunk;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -12,6 +14,8 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
+
+import java.util.Collections;
 
 /**
  * Dynamic effect/ability call node - handles effect operations at runtime.
@@ -65,10 +69,11 @@ public final class DynamicEffectCallNode extends MezzeNode {
         // Evaluate argument first
         Object argument = argumentNode.execute(frame);
 
-        // Fast path: cached handler
-        if (cacheValid && cachedOperation != null) {
-            return callOperation(cachedOperation, argument);
-        }
+        // Fast path: cached handler (only for monomorphic call sites with same handler)
+        // Note: caching is NOT correct for lazy effects since handlers change dynamically!
+        // The handler stack is context-dependent, so we can't cache handler lookups.
+        // Always go through slow path for now.
+        // TODO: Consider caching based on handler stack depth/identity for performance
 
         // Slow path: lookup handler
         return executeSlowPath(argument);
@@ -79,16 +84,15 @@ public final class DynamicEffectCallNode extends MezzeNode {
         // Look up handler from context
         MezzeContext context = MezzeContext.get(this);
 
-        // Try multiple lookup strategies:
-        // 1. Look up by effect name directly (e.g., "Log")
-        // 2. Look up by handler name (e.g., "Console")
-        Object handler = context.lookupLocal(effectName);
-        if (handler == null) {
-            handler = context.lookupGlobal(effectName);
-        }
+        // LAZY EFFECTS: ONLY check the handler stack
+        // The handler stack is the source of truth for active handlers.
+        // Handlers registered in locals/globals are NOT automatically active -
+        // they must be explicitly installed via perform.
+        Object handler = context.getHandlerFor(effectName);
 
+        // NO HANDLER AVAILABLE - Create suspended computation (LAZY EFFECTS)
         if (handler == null) {
-            throw new RuntimeException("Effect handler not found for: " + effectName);
+            return createSuspendedEffectCall(argument);
         }
 
         // Handler should be a record. If it's a function (parameterized impl), that's an error
@@ -110,13 +114,23 @@ public final class DynamicEffectCallNode extends MezzeNode {
                 ", got: " + (operation == null ? "null" : operation.getClass().getSimpleName()));
         }
 
-        // Cache for next time
-        CompilerDirectives.transferToInterpreterAndInvalidate();
-        cachedHandler = handler;
-        cachedOperation = opFunc;
-        cacheValid = true;
-
         return callOperation(opFunc, argument);
+    }
+
+    /**
+     * Create a suspended effect call when no handler is available.
+     * This implements the lazy effects model.
+     */
+    @TruffleBoundary
+    private MezzeSuspended createSuspendedEffectCall(Object argument) {
+        // Create a thunk for the deferred effect operation
+        MezzeThunk thunk = new MezzeThunk(effectName, operationName, argument);
+
+        // Wrap in MezzeSuspended with this effect as unhandled
+        return new MezzeSuspended(
+            thunk,
+            Collections.singleton(effectName)
+        );
     }
 
     private Object callOperation(MezzeFunction operation, Object argument) {

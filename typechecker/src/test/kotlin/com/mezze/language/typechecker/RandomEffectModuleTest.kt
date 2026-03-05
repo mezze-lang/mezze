@@ -78,7 +78,7 @@ class RandomEffectModuleTest {
         val source = """
             use std::effects::random::{Random, SeededRandom}
             let main = {} ->
-                perform SeededRandom { seed = 42 } in Random.seed { seed = 100 }
+                perform SeededRandom { seed = 42 } in Random.seed { new_seed = 100 }
         """.trimIndent()
 
         val typed = parseAndTypeCheck(source)

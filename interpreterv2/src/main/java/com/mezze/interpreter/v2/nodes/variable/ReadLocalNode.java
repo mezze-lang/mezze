@@ -47,8 +47,34 @@ public final class ReadLocalNode extends MezzeNode {
             case KIND_LONG -> frame.getLong(slot);
             case KIND_DOUBLE -> frame.getDouble(slot);
             case KIND_BOOLEAN -> frame.getBoolean(slot);
-            default -> frame.getObject(slot);
+            default -> readObjectOrPrimitive(frame);
         };
+    }
+
+    /**
+     * Read as Object, with fallback to primitives if slot type doesn't match.
+     * This handles cases where state machines restore typed values into slots
+     * that are being read as Object.
+     */
+    private Object readObjectOrPrimitive(VirtualFrame frame) {
+        try {
+            return frame.getObject(slot);
+        } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e) {
+            // Slot contains a primitive - try each type
+            try {
+                return frame.getLong(slot);
+            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e1) {
+                try {
+                    return frame.getDouble(slot);
+                } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e2) {
+                    try {
+                        return frame.getBoolean(slot);
+                    } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e3) {
+                        return null;
+                    }
+                }
+            }
+        }
     }
 
     @Override

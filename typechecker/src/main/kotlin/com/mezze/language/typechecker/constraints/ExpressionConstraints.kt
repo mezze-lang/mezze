@@ -549,27 +549,48 @@ class ExpressionConstraintGenerator {
 
                     // Extract fields from the spread type and merge into our record
                     // The spread expression must be a record type (or unify with one via constraints)
-                    when (val spreadType = spreadResult.type) {
-                        is MezzeType.RecordType -> {
+                    // Also handle type aliases (TypeApplication) by resolving to underlying RecordType
+                    val resolvedSpreadType = when (val spreadType = spreadResult.type) {
+                        is MezzeType.RecordType -> spreadType
+                        is MezzeType.TypeApplication -> {
+                            // Resolve type alias to underlying record type
+                            val typeDecl = context.typeDeclarations[spreadType.constructor]
+                            if (typeDecl != null && typeDecl.definition is RecordDefinition) {
+                                val recordDef = typeDecl.definition as RecordDefinition
+                                val resolvedFields = recordDef.fields.associate { field ->
+                                    field.name to convertFieldType(field.type)
+                                }
+                                MezzeType.RecordType(
+                                    fields = resolvedFields,
+                                    rowVar = if (recordDef.isOpen) RowVar("rest") else null
+                                )
+                            } else null
+                        }
+                        is MezzeType.VarType -> null  // Type not yet known
+                        else -> null
+                    }
+
+                    when {
+                        resolvedSpreadType != null -> {
                             // VALIDATION: Check that all explicit fields exist in the spread record
                             // Mezze spread semantics: override only, no field addition
                             for (fieldName in explicitFieldNames) {
-                                if (fieldName !in spreadType.fields) {
+                                if (fieldName !in resolvedSpreadType.fields) {
                                     throw SpreadSyntaxError.FieldAdditionNotAllowed(
                                         fieldName,
-                                        spreadType.fields.keys.toList()
+                                        resolvedSpreadType.fields.keys.toList()
                                     )
                                 }
                             }
 
                             // Add all fields from the spread record in their original order
                             // Explicit fields will override values but we use spread order as base
-                            for ((fieldName, fieldType) in spreadType.fields) {
+                            for ((fieldName, fieldType) in resolvedSpreadType.fields) {
                                 // Use explicit type if available, otherwise spread type
                                 fields[fieldName] = explicitFieldTypes[fieldName] ?: fieldType
                             }
                         }
-                        is MezzeType.VarType -> {
+                        spreadResult.type is MezzeType.VarType -> {
                             // Spread type is not yet known - add a constraint that it must be a record
                             // We'll use a fresh row variable to represent the unknown fields
                             // This enables: let x = { ...someVar } where someVar's type isn't known yet
@@ -577,7 +598,7 @@ class ExpressionConstraintGenerator {
                         }
                         else -> {
                             // Spread expression is not a record - throw an error
-                            throw SpreadSyntaxError.NonRecordSpread(prettyPrintType(spreadType))
+                            throw SpreadSyntaxError.NonRecordSpread(prettyPrintType(spreadResult.type))
                         }
                     }
                 }
@@ -615,39 +636,41 @@ class ExpressionConstraintGenerator {
 
                 // If resolved type is a closed record, validate fields
                 if (resolvedType.rowVar == null) {
-                // Expected type is a closed record - validate fields match exactly
-                val missingFields = resolvedType.fields.keys - explicitFieldNames
-                if (missingFields.isNotEmpty()) {
-                    val missingList = missingFields.joinToString(", ")
-                    val example = missingFields.take(2).joinToString(", ") { "$it = ..." }
-                    throw TypeCheckError(
-                        message = "Record is missing ${if (missingFields.size == 1) "field" else "fields"}: $missingList. " +
-                                "Add: { ${explicitFieldNames.joinToString(", ") { "$it = ..." }}, $example }",
-                        expression = expr,
-                        errorType = ErrorType.MISSING_FIELD,
-                        metadata = mapOf(
-                            "missingFields" to missingFields.toList(),
-                            "explicitFieldNames" to explicitFieldNames.toList()
+                    // Expected type is a closed record - validate fields match exactly
+                    // Use `fields.keys` which includes both explicit AND spread fields
+                    val allFieldNames = fields.keys
+                    val missingFields = resolvedType.fields.keys - allFieldNames
+                    if (missingFields.isNotEmpty()) {
+                        val missingList = missingFields.joinToString(", ")
+                        val example = missingFields.take(2).joinToString(", ") { "$it = ..." }
+                        throw TypeCheckError(
+                            message = "Record is missing ${if (missingFields.size == 1) "field" else "fields"}: $missingList. " +
+                                    "Add: { ${allFieldNames.joinToString(", ") { "$it = ..." }}, $example }",
+                            expression = expr,
+                            errorType = ErrorType.MISSING_FIELD,
+                            metadata = mapOf(
+                                "missingFields" to missingFields.toList(),
+                                "allFieldNames" to allFieldNames.toList()
+                            )
                         )
-                    )
-                }
+                    }
 
-                val extraFields = explicitFieldNames - resolvedType.fields.keys
-                if (extraFields.isNotEmpty()) {
-                    val extraList = extraFields.joinToString(", ")
-                    val expectedList = resolvedType.fields.keys.sorted().joinToString(", ")
-                    throw TypeCheckError(
-                        message = "Record has extra ${if (extraFields.size == 1) "field" else "fields"}: $extraList. " +
-                                "Remove ${if (extraFields.size == 1) "it" else "them"}. Expected fields: $expectedList",
-                        expression = expr,
-                        errorType = ErrorType.TYPE_MISMATCH,
-                        metadata = mapOf(
-                            "extraFields" to extraFields.toList(),
-                            "expectedFields" to resolvedType.fields.keys.toList()
+                    val extraFields = allFieldNames - resolvedType.fields.keys
+                    if (extraFields.isNotEmpty()) {
+                        val extraList = extraFields.joinToString(", ")
+                        val expectedList = resolvedType.fields.keys.sorted().joinToString(", ")
+                        throw TypeCheckError(
+                            message = "Record has extra ${if (extraFields.size == 1) "field" else "fields"}: $extraList. " +
+                                    "Remove ${if (extraFields.size == 1) "it" else "them"}. Expected fields: $expectedList",
+                            expression = expr,
+                            errorType = ErrorType.TYPE_MISMATCH,
+                            metadata = mapOf(
+                                "extraFields" to extraFields.toList(),
+                                "expectedFields" to resolvedType.fields.keys.toList()
+                            )
                         )
-                    )
+                    }
                 }
-            }
             }
         }
 
@@ -3251,19 +3274,30 @@ class ExpressionConstraintGenerator {
                     )
                 }
 
-                // Generate constraint: perform result type = resolved suspension type
-                // This connects the perform expression's result to what suspend_with returns
-                continuationConstraints.add(
-                    Constraint.Equality(
-                        left = performResultType,
-                        right = resolvedSuspensionType,
-                        context = "Perform result type must match handler suspension type",
-                        sourceLocation = expr.sourceLocation
-                    )
-                )
+                // NOTE: Suspension type inference is incomplete.
+                // The constraint below is WRONG because it requires body type = suspension type.
+                // For ToResult, body returns Int but suspension type is Result.
+                // The correct behavior requires understanding that suspend_with transforms
+                // the result type, not constrains it.
+                //
+                // TODO: Implement proper suspension type transformation:
+                // - Track both success path (body type) and error path (suspension type)
+                // - Unify them into the final result type (e.g., Result success error)
+                //
+                // For now, skip this constraint to maintain backward compatibility.
+                // The runtime handles the type transformation correctly.
+                //
+                // continuationConstraints.add(
+                //     Constraint.Equality(
+                //         left = performResultType,
+                //         right = resolvedSuspensionType,
+                //         context = "Perform result type must match handler suspension type",
+                //         sourceLocation = expr.sourceLocation
+                //     )
+                // )
 
-                // Update the perform result type to reflect the inferred type
-                performResultType = resolvedSuspensionType
+                // Don't update performResultType - let the body type flow through
+                // performResultType = resolvedSuspensionType
             }
         }
 

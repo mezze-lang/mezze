@@ -238,7 +238,7 @@ public final class MemoryFilesystemNatives {
         if (children != null) {
             entries.addAll(children);
         }
-        return createOk(MezzeList.fromObjects(entries.toArray()));
+        return createOk(MezzeList.fromArray(entries.toArray()));
     }
 
     // ============== Delete Operations ==============

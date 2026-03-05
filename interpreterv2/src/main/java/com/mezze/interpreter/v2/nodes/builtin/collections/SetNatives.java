@@ -211,7 +211,7 @@ public final class SetNatives {
 
     @TruffleBoundary
     public static MezzeList toList(MezzeSet set) {
-        return MezzeList.fromObjects(set.toArray());
+        return MezzeList.fromArray(set.toArray());
     }
 
     // ==================== Helper Methods ====================

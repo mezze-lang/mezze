@@ -28,7 +28,7 @@ public final class MezzeTestHelper {
     private static final MezzeParser parser = new MezzeParser();
     private static final TypeChecker typeChecker = new TypeChecker();
 
-    // Shared engine for all test executions
+    // Shared engine for test execution performance
     private static final Engine sharedEngine = Engine.newBuilder()
         .option("engine.WarnInterpreterOnly", "false")
         .build();

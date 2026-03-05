@@ -8,7 +8,7 @@ import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 
 /**
- * Tests for CoopAsync (Cooperative Async) using delimited continuations.
+ * Tests for CoopAsync (Cooperative Async) using scoped effects.
  *
  * Tests cover:
  * - Spawning computations that execute cooperatively
@@ -17,14 +17,12 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * - Closures in cooperative contexts
  * - Extended async functions (race, all, timeout, sleep, is_done)
  *
- * The CoopAsync implementation uses native scheduler with continuation support.
- * This makes it suitable for single-threaded environments like a future
- * JavaScript compile target, and enables workflow orchestration with
- * serializable state.
+ * The CoopAsync implementation uses scoped effects with initialize_scope/finalize_scope
+ * to manage the continuation lifecycle automatically.
  *
  * CoopAsync has the same API as LoomAsync - just swap the handler:
  *   perform LoomAsync in do ...
- *   perform CoopAsync {cont = continuation::new {}} in do ...
+ *   perform CoopAsync in do ...
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class CoopConcurrencyTest {
@@ -55,7 +53,6 @@ class CoopConcurrencyTest {
 
     private val setupCode = """
         use std::effects::async::{Async, CoopAsync}
-        use std::control::continuation
     """.trimIndent()
 
     // =============================================================================
@@ -64,11 +61,10 @@ class CoopConcurrencyTest {
 
     @Test
     fun testSimpleSpawnAndAwait() {
-        // Same API as Loom - just swap the handler!
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 5 + 10}
                 Async.await {p = p}
         """
@@ -81,8 +77,25 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
+                Async.await {p = p}
+        """
+        val result = eval(code)
+        assertEquals(MezzeInt(42), result)
+    }
+
+    @Test
+    fun testSpawnWithDoBlock() {
+        // Test that do block with let binding works inside spawn
+        val code = """
+            $setupCode
+
+            perform CoopAsync in do
+                let p = Async.spawn {f = {} -> do
+                    let x = 42
+                    x
+                }
                 Async.await {p = p}
         """
         val result = eval(code)
@@ -94,7 +107,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
@@ -115,7 +128,7 @@ class CoopConcurrencyTest {
             $setupCode
 
             let test = {} ->
-                perform CoopAsync {cont = continuation::new {}} in do
+                perform CoopAsync in do
                     let x = 100
                     let p = Async.spawn {f = {} -> x * 2}
                     Async.await {p = p}
@@ -131,7 +144,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> do
                     let a = 5
                     let b = 7
@@ -149,9 +162,9 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let outer = Async.spawn {f = {} ->
-                    perform CoopAsync {cont = continuation::new {}} in do
+                    perform CoopAsync in do
                         let inner = Async.spawn {f = {} -> 42}
                         Async.await {p = inner}
                 }
@@ -166,7 +179,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 5 * 2}
                 let p2 = Async.spawn {f = {} -> 10 + 3}
                 let p3 = Async.spawn {f = {} -> 7 * 3}
@@ -190,7 +203,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let stage1 = Async.spawn {f = {} -> 10}
                 let result1 = Async.await {p = stage1}
 
@@ -212,7 +225,7 @@ class CoopConcurrencyTest {
             let spawn_workers: {remaining: Int, acc: Int} -> Int = {remaining, acc} ->
                 if remaining <= 0
                 then acc
-                else perform CoopAsync {cont = continuation::new {}} in do
+                else perform CoopAsync in do
                     let p = Async.spawn {f = {} -> remaining * 2}
                     let result = Async.await {p = p}
                     spawn_workers {remaining = remaining - 1, acc = acc + result}
@@ -235,7 +248,7 @@ class CoopConcurrencyTest {
             let recursive_spawn: {n: Int} -> Int = {n} ->
                 if n <= 0
                 then 0
-                else perform CoopAsync {cont = continuation::new {}} in do
+                else perform CoopAsync in do
                     let p = Async.spawn {f = {} -> recursive_spawn {n = n - 1}}
                     let result = Async.await {p = p}
                     n + result
@@ -254,7 +267,7 @@ class CoopConcurrencyTest {
             let parallel_sum: {n: Int, acc: Int} -> Int = {n, acc} ->
                 if n <= 0
                 then acc
-                else perform CoopAsync {cont = continuation::new {}} in do
+                else perform CoopAsync in do
                     let p = Async.spawn {f = {} -> n}
                     let result = Async.await {p = p}
                     parallel_sum {n = n - 1, acc = acc + result}
@@ -275,7 +288,7 @@ class CoopConcurrencyTest {
             $setupCode
 
             let test = {} ->
-                perform CoopAsync {cont = continuation::new {}} in do
+                perform CoopAsync in do
                     let a = 10
                     let b = 20
 
@@ -301,7 +314,7 @@ class CoopConcurrencyTest {
             let makeAdder = {x} -> {y} -> x + y
 
             let test = {} ->
-                perform CoopAsync {cont = continuation::new {}} in do
+                perform CoopAsync in do
                     let add10 = makeAdder {x = 10}
 
                     let p1 = Async.spawn {f = {} -> add10 {y = 5}}
@@ -325,7 +338,7 @@ class CoopConcurrencyTest {
 
             let conditional: {use_async: Bool} -> Int = {use_async} ->
                 if use_async
-                then perform CoopAsync {cont = continuation::new {}} in do
+                then perform CoopAsync in do
                     let p = Async.spawn {f = {} -> 100}
                     Async.await {p = p}
                 else 50
@@ -347,7 +360,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
@@ -367,7 +380,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
@@ -391,7 +404,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 1}
                 let p2 = Async.spawn {f = {} -> 2}
                 let p3 = Async.spawn {f = {} -> 3}
@@ -412,7 +425,7 @@ class CoopConcurrencyTest {
                     [] -> 0
                     [h, ...t] -> h + sum {xs = t}
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p1 = Async.spawn {f = {} -> 10}
                 let p2 = Async.spawn {f = {} -> 20}
                 let p3 = Async.spawn {f = {} -> 30}
@@ -428,7 +441,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let _ = Async.sleep {ms = 10}
                 42
         """
@@ -441,7 +454,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 let _ = Async.await {p = p}
                 Async.is_done {p = p}
@@ -456,7 +469,7 @@ class CoopConcurrencyTest {
         val code = """
             $setupCode
 
-            perform CoopAsync {cont = continuation::new {}} in do
+            perform CoopAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 let result = Async.timeout {ms = 5000, p = p}
                 match result is

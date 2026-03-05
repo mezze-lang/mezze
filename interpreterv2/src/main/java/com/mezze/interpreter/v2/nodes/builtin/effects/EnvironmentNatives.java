@@ -60,7 +60,7 @@ public final class EnvironmentNatives {
                 new Object[]{entry.getKey(), entry.getValue()}
             );
         }
-        return MezzeList.fromObjects(entries);
+        return MezzeList.fromArray(entries);
     }
 
     @TruffleBoundary
@@ -100,7 +100,7 @@ public final class EnvironmentNatives {
     @TruffleBoundary
     public static Object processArgs(MezzeRecord args) {
         String[] procArgs = ProcessHandle.current().info().arguments().orElse(new String[0]);
-        return MezzeList.fromObjects(procArgs);
+        return MezzeList.fromArray(procArgs);
     }
 
     @TruffleBoundary

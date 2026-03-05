@@ -48,12 +48,18 @@ data class ResolvedAbility(
  * @property effectName The name of the effect being handled (e.g., "Console")
  * @property performerName The name of the performer/handler (e.g., "NativeConsole")
  * @property implDeclarationHash Content-addressable hash of the handler implementation for runtime lookup
+ * @property isScopedEffect Whether this impl has initialize_scope/finalize_scope
+ * @property initializeScopeExpr The initialize_scope expression (AST) for scoped effects
+ * @property finalizeScopeExpr The finalize_scope expression (AST) for scoped effects
  */
 @Serializable
 data class ResolvedEffectHandler(
     val effectName: String,
     val performerName: String,
-    val implDeclarationHash: String? = null
+    val implDeclarationHash: String? = null,
+    val isScopedEffect: Boolean = false,
+    val initializeScopeExpr: Expression? = null,
+    val finalizeScopeExpr: Expression? = null
 )
 
 // ============================================================================

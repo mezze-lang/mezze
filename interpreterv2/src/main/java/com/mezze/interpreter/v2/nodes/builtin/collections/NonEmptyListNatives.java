@@ -48,7 +48,7 @@ public final class NonEmptyListNatives {
             }
             Object[] tail = new Object[elements.length - 1];
             System.arraycopy(elements, 1, tail, 0, elements.length - 1);
-            return MezzeList.fromObjects(tail);
+            return MezzeList.fromArray(tail);
         }
 
         public Object get(int index) {
@@ -351,7 +351,7 @@ public final class NonEmptyListNatives {
 
     @TruffleBoundary
     public static MezzeList toList(MezzeNonEmptyList list) {
-        return MezzeList.fromObjects(list.getElements());
+        return MezzeList.fromArray(list.getElements());
     }
 
     public static Object[] toArray(MezzeNonEmptyList list) {

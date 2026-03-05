@@ -6,6 +6,12 @@ import com.oracle.truffle.api.TruffleLanguage.Env;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.nodes.Node;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -170,11 +176,187 @@ public final class MezzeContext {
     }
 
     // ========================
-    // Effect Handler
+    // Ability Implementations
     // ========================
 
-    // Placeholder for effect handler - to be implemented
-    public final Object effectHandler = null;
+    // Ability name → impl record (for runtime ability lookups)
+    private final ConcurrentHashMap<String, Object> abilityImpls = new ConcurrentHashMap<>();
+
+    @TruffleBoundary
+    public void registerAbilityImpl(String abilityName, Object implRecord) {
+        abilityImpls.put(abilityName, implRecord);
+    }
+
+    @TruffleBoundary
+    public Object lookupAbilityImpl(String abilityName) {
+        return abilityImpls.get(abilityName);
+    }
+
+    @TruffleBoundary
+    public String getRegisteredAbilityNames() {
+        return abilityImpls.keySet().toString();
+    }
+
+    // ========================
+    // Effect Handler Stack (for lazy effects)
+    // ========================
+
+    // Thread-local handler stack for nested perform expressions
+    private final ThreadLocal<Deque<Map<String, Object>>> handlerStack =
+        ThreadLocal.withInitial(ArrayDeque::new);
+
+    // Effect name → set of performer names that handle it
+    // e.g., "Log" → {"Console", "FileLogger"}
+    private final ConcurrentHashMap<String, Set<String>> effectToPerformers = new ConcurrentHashMap<>();
+
+    // Global effects registry (effect name → effect record)
+    private final ConcurrentHashMap<String, Object> globalEffects = new ConcurrentHashMap<>();
+
+    /**
+     * Push a set of handlers onto the handler stack.
+     * Called by perform expressions before executing their body.
+     */
+    @TruffleBoundary
+    public void pushHandlers(Map<String, Object> handlers) {
+        handlerStack.get().push(new HashMap<>(handlers));
+    }
+
+    /**
+     * Pop handlers from the stack.
+     * Called when a perform expression completes.
+     */
+    @TruffleBoundary
+    public void popHandlers() {
+        Deque<Map<String, Object>> stack = handlerStack.get();
+        if (!stack.isEmpty()) {
+            stack.pop();
+        }
+    }
+
+    /**
+     * Get the current handlers from the top of the stack.
+     * Returns null if no handlers are active.
+     */
+    @TruffleBoundary
+    public Map<String, Object> getCurrentHandlers() {
+        Deque<Map<String, Object>> stack = handlerStack.get();
+        return stack.isEmpty() ? null : stack.peek();
+    }
+
+    /**
+     * Check if a handler is currently available for the given effect.
+     */
+    @TruffleBoundary
+    public boolean hasHandlerFor(String effectName) {
+        Map<String, Object> handlers = getCurrentHandlers();
+        if (handlers == null) return false;
+
+        // Direct lookup
+        if (handlers.containsKey(effectName)) return true;
+
+        // Check performers that handle this effect
+        Set<String> performers = effectToPerformers.get(effectName);
+        if (performers != null) {
+            for (String performer : performers) {
+                if (handlers.containsKey(performer)) return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Get the handler for an effect from the current handler stack.
+     * Searches the ENTIRE stack from top to bottom (innermost to outermost handler).
+     */
+    @TruffleBoundary
+    public Object getHandlerFor(String effectName) {
+        Deque<Map<String, Object>> stack = handlerStack.get();
+        if (stack.isEmpty()) return null;
+
+        // Search the entire stack (top to bottom)
+        for (Map<String, Object> handlers : stack) {
+            // Direct lookup
+            Object handler = handlers.get(effectName);
+            if (handler != null) return handler;
+
+            // Check performers that handle this effect
+            Set<String> performers = effectToPerformers.get(effectName);
+            if (performers != null) {
+                for (String performer : performers) {
+                    handler = handlers.get(performer);
+                    if (handler != null) return handler;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get all current handlers from the handler stack.
+     * Returns a flattened map of all handler entries from all stack frames.
+     * Used for capturing handlers to propagate to spawned threads.
+     */
+    @TruffleBoundary
+    public Map<String, Object> getAllCurrentHandlers() {
+        Deque<Map<String, Object>> stack = handlerStack.get();
+        if (stack.isEmpty()) return null;
+
+        // Flatten all stack frames into a single map
+        // Later entries (inner scopes) override earlier entries (outer scopes)
+        Map<String, Object> allHandlers = new HashMap<>();
+        // Iterate from bottom to top so inner scopes override outer
+        var list = new java.util.ArrayList<>(stack);
+        java.util.Collections.reverse(list);
+        for (Map<String, Object> handlers : list) {
+            allHandlers.putAll(handlers);
+        }
+        return allHandlers;
+    }
+
+    /**
+     * Register a performer as handling an effect.
+     * e.g., registerPerformer("Console", "Log")
+     */
+    @TruffleBoundary
+    public void registerPerformer(String performerName, String effectName) {
+        effectToPerformers.computeIfAbsent(effectName, k -> ConcurrentHashMap.newKeySet())
+            .add(performerName);
+    }
+
+    /**
+     * Check if a performer handles a specific effect.
+     */
+    @TruffleBoundary
+    public boolean performerHandlesEffect(String performerName, String effectName) {
+        Set<String> performers = effectToPerformers.get(effectName);
+        return performers != null && performers.contains(performerName);
+    }
+
+    /**
+     * Register a global effect declaration.
+     */
+    @TruffleBoundary
+    public void registerEffect(String effectName, Object effectRecord) {
+        globalEffects.put(effectName, effectRecord);
+    }
+
+    /**
+     * Get a global effect declaration.
+     */
+    @TruffleBoundary
+    public Object getEffect(String effectName) {
+        return globalEffects.get(effectName);
+    }
+
+    /**
+     * Check if an effect is registered.
+     */
+    @TruffleBoundary
+    public boolean hasEffect(String effectName) {
+        return globalEffects.containsKey(effectName);
+    }
 
     // ========================
     // Polyglot support

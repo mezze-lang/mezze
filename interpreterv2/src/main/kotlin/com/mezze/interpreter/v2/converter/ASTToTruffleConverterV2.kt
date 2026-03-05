@@ -33,6 +33,7 @@ import com.mezze.interpreter.v2.nodes.builtin.BuiltinBinaryNodes.*
 import com.mezze.interpreter.v2.nodes.builtin.BuiltinUnaryNodes.*
 import com.mezze.interpreter.v2.nodes.builtin.NativeFunctions
 import com.mezze.interpreter.v2.nodes.ability.ResolvedAbilityCallNode as OptimizedAbilityCallNode
+import com.mezze.interpreter.v2.nodes.function.RuntimeAbilityCallNode
 import com.mezze.interpreter.v2.nodes.continuation.*
 import com.mezze.interpreter.v2.nodes.statemachine.StateMachineNode
 import com.mezze.interpreter.v2.runtime.MezzeContext
@@ -51,7 +52,8 @@ import com.mezze.language.typechecker.scope.ScopedEffectConstants
 class ASTToTruffleConverterV2(
     private val context: MezzeContext? = null,
     parentHandlerMapping: Map<String, Pair<String, String>>? = null,
-    private val parentVariableSlots: Map<String, Int>? = null
+    private val parentVariableSlots: Map<String, Int>? = null,
+    parentScopedEffectInfo: Map<String, ScopedImplInfo>? = null
 ) {
 
     private var frameDescriptorBuilder = FrameDescriptor.newBuilder()
@@ -89,7 +91,9 @@ class ASTToTruffleConverterV2(
         val finalizeScopeNode: MezzeNode?,
         val scopeSlot: Int
     )
-    private val scopedEffectInfo = mutableMapOf<String, ScopedImplInfo>()
+    private val scopedEffectInfo = mutableMapOf<String, ScopedImplInfo>().apply {
+        parentScopedEffectInfo?.let { putAll(it) }
+    }
 
     /**
      * Convert a program to a Truffle node.
@@ -174,8 +178,19 @@ class ASTToTruffleConverterV2(
         // Track scoped effect info for use in convertPerformExpression
         if (scopedInfo.isScopedEffect) {
             val scopeSlot = getOrCreateSlot("__scope_${contentHash}__")
-            val initNode = scopedInfo.initializeScope?.let { convertExpression(it.implementation) }
-            val finalizeNode = scopedInfo.finalizeScope?.let { convertExpression(it.implementation) }
+
+            // initialize_scope and finalize_scope are lambdas: {} -> ...
+            // We need to invoke them with {} as argument to get the actual scope/unit
+            val initNode = scopedInfo.initializeScope?.let { op ->
+                val lambdaNode = convertExpression(op.implementation)
+                val emptyRecordArg = RecordLiteralNode.allObjects(emptyArray(), emptyArray())
+                InvokeNode.create(lambdaNode, arrayOf(emptyRecordArg))
+            }
+            val finalizeNode = scopedInfo.finalizeScope?.let { op ->
+                val lambdaNode = convertExpression(op.implementation)
+                val emptyRecordArg = RecordLiteralNode.allObjects(emptyArray(), emptyArray())
+                InvokeNode.create(lambdaNode, arrayOf(emptyRecordArg))
+            }
 
             scopedEffectInfo[contentHash] = ScopedImplInfo(
                 isScopedEffect = true,
@@ -242,7 +257,8 @@ class ASTToTruffleConverterV2(
             val opConverter = ASTToTruffleConverterV2(
                 context = this.context,
                 parentHandlerMapping = this.handlerToEffectMapping,
-                parentVariableSlots = implParamSlots.toMap()
+                parentVariableSlots = implParamSlots.toMap(),
+                parentScopedEffectInfo = this.scopedEffectInfo.toMap()
             )
 
             // IMPORTANT: Closure vars FIRST (slots 0..closureCount-1), then params (closureCount..)
@@ -272,31 +288,86 @@ class ASTToTruffleConverterV2(
         // Convert initialize_scope for scoped effects (runs when impl is instantiated)
         var initializeScopeNode: MezzeNode? = null
         var initializeScopeClosureSlots = intArrayOf()
+        var initializeScopeFrameDescriptor: FrameDescriptor? = null
+
+        // Convert finalize_scope for scoped effects
+        var finalizeScopeNode: MezzeNode? = null
+        var finalizeScopeClosureSlots = intArrayOf()
+        var finalizeScopeFrameDescriptor: FrameDescriptor? = null
 
         if (scopedInfo.isScopedEffect) {
             val initOp = scopedInfo.initializeScope
             if (initOp != null) {
                 val initExpr = initOp.implementation
                 if (initExpr is LambdaExpression) {
+                    // Add impl params as closure vars for the lambda body
+                    val allVars = collectVariableReferences(initExpr.body)
+                    val closureVars = allVars.filter { it in implParamSlots.keys }.distinct()
+
                     // Create converter with impl params available
                     val initConverter = ASTToTruffleConverterV2(
                         context = this.context,
                         parentHandlerMapping = this.handlerToEffectMapping,
-                        parentVariableSlots = implParamSlots.toMap()
+                        parentVariableSlots = implParamSlots.toMap(),
+                        parentScopedEffectInfo = this.scopedEffectInfo.toMap()
                     )
-                    // Add impl params as closure vars for the lambda body
-                    val allVars = collectVariableReferences(initExpr.body)
-                    val closureVars = allVars.filter { it in implParamSlots.keys }.distinct()
+
+                    // First, create slots for closure vars (they come first in the frame)
                     closureVars.forEach { varName ->
                         initConverter.getOrCreateSlot(varName)
                     }
+
+                    // Convert the expression body - this may add additional slots for other vars
                     initializeScopeNode = initConverter.convertExpression(initExpr.body)
-                    // Map closure var names to their indices in implParamNames
+
+                    // Map closure var names to their slot indices in implParamSlots (source slots)
                     initializeScopeClosureSlots = closureVars.mapNotNull { varName ->
-                        implParamNames.indexOf(varName).takeIf { it >= 0 }
+                        implParamSlots[varName]
                     }.toIntArray()
+
+                    // Use the converter's frame descriptor which includes ALL slots
+                    initializeScopeFrameDescriptor = initConverter.getFrameDescriptor()
                 } else {
                     initializeScopeNode = convertExpression(initExpr)
+                }
+            }
+
+            // Convert finalize_scope
+            // NOTE: finalize_scope can reference "scope" which is provided at runtime via context
+            // We need to ensure "scope" references use context lookup, not local slot lookup
+            val finalOp = scopedInfo.finalizeScope
+            if (finalOp != null) {
+                val finalExpr = finalOp.implementation
+                if (finalExpr is LambdaExpression) {
+                    val allVars = collectVariableReferences(finalExpr.body)
+                    // Filter out "scope" from closure vars - it will be looked up from context
+                    val closureVars = allVars.filter { it in implParamSlots.keys && it != "scope" }.distinct()
+
+                    val finalConverter = ASTToTruffleConverterV2(
+                        context = this.context,
+                        parentHandlerMapping = this.handlerToEffectMapping,
+                        parentVariableSlots = implParamSlots.toMap(),
+                        parentScopedEffectInfo = this.scopedEffectInfo.toMap()
+                    )
+
+                    // First, create slots for closure vars (they come first in the frame)
+                    closureVars.forEach { varName ->
+                        finalConverter.getOrCreateSlot(varName)
+                    }
+
+                    // Convert the expression body - this may add additional slots for fallback vars like "scope"
+                    finalizeScopeNode = finalConverter.convertExpression(finalExpr.body)
+
+                    // Map closure var names to their slot indices in implParamSlots (source slots)
+                    finalizeScopeClosureSlots = closureVars.mapNotNull { varName ->
+                        implParamSlots[varName]
+                    }.toIntArray()
+
+                    // Use the converter's frame descriptor which includes ALL slots
+                    // (both closure vars and fallback vars like "scope")
+                    finalizeScopeFrameDescriptor = finalConverter.getFrameDescriptor()
+                } else {
+                    finalizeScopeNode = convertExpression(finalExpr)
                 }
             }
         }
@@ -312,7 +383,11 @@ class ASTToTruffleConverterV2(
             operationClosureVarSlots = operationClosureVarSlots,
             implFrameDescriptor = implFrameDescriptor,
             initializeScopeNode = initializeScopeNode,
-            initializeScopeClosureSlots = initializeScopeClosureSlots
+            initializeScopeClosureSlots = initializeScopeClosureSlots,
+            initializeScopeFrameDescriptor = initializeScopeFrameDescriptor,
+            finalizeScopeNode = finalizeScopeNode,
+            finalizeScopeClosureSlots = finalizeScopeClosureSlots,
+            finalizeScopeFrameDescriptor = finalizeScopeFrameDescriptor
         )
 
         val hashSlot = getOrCreateSlot(contentHash)
@@ -323,30 +398,11 @@ class ASTToTruffleConverterV2(
         if (scopedInfo.isScopedEffect) {
             val scopeSlot = getOrCreateSlot("__scope_${contentHash}__")
 
-            // Convert finalize_scope (not currently used for parameterized impls, but track for consistency)
-            val finalizeNode = scopedInfo.finalizeScope?.let { finalOp ->
-                val finalExpr = finalOp.implementation
-                if (finalExpr is LambdaExpression) {
-                    val finalConverter = ASTToTruffleConverterV2(
-                        context = this.context,
-                        parentHandlerMapping = this.handlerToEffectMapping,
-                        parentVariableSlots = implParamSlots.toMap()
-                    )
-                    val allVars = collectVariableReferences(finalExpr.body)
-                    val closureVars = allVars.filter { it in implParamSlots.keys }.distinct()
-                    closureVars.forEach { varName ->
-                        finalConverter.getOrCreateSlot(varName)
-                    }
-                    finalConverter.convertExpression(finalExpr.body)
-                } else {
-                    convertExpression(finalExpr)
-                }
-            }
-
+            // Use the already-converted finalizeScopeNode from above
             scopedEffectInfo[contentHash] = ScopedImplInfo(
                 isScopedEffect = true,
                 initializeScopeNode = initializeScopeNode,
-                finalizeScopeNode = finalizeNode,
+                finalizeScopeNode = finalizeScopeNode,
                 scopeSlot = scopeSlot
             )
         }
@@ -384,7 +440,8 @@ class ASTToTruffleConverterV2(
         return AbilityImplStorageNode(
             recordChild = recordNode,
             hashSlot = hashSlot,
-            contentHash = contentHash
+            contentHash = contentHash,
+            abilityName = impl.abilityName
         )
     }
 
@@ -898,6 +955,21 @@ class ASTToTruffleConverterV2(
                     return convertResolvedAbilityCall(funcCall)
                 }
 
+                // Check if this is a codec ability call that needs runtime lookup
+                // These abilities (Encode, Decode, EncodeFormat, DecodeFormat) have auto-generated
+                // implementations that may not have resolvedAbilities populated yet
+                val isCodecAbility = receiverName in listOf(
+                    "Encode", "Decode",
+                    "EncodeFormat", "DecodeFormat",
+                    "StreamEncodeFormat", "StreamDecodeFormat"
+                )
+                if (isCodecAbility) {
+                    // For codec abilities, we need to do a runtime lookup by ability name
+                    // because the typechecker generates impls dynamically
+                    val argsNode = convertExpression(funcCall.arguments)
+                    return RuntimeAbilityCallNode.create(receiverName, operationName, argsNode)
+                }
+
                 // If the receiver is a VariantConstruction (like Log, FileSystem), it's an effect call
                 // Even if the effect name is in variableInfo (from use declarations), we need dynamic dispatch
                 // because the actual handler is determined by the enclosing perform block
@@ -1146,7 +1218,8 @@ class ASTToTruffleConverterV2(
         val functionConverter = ASTToTruffleConverterV2(
             context = this.context,
             parentHandlerMapping = this.handlerToEffectMapping,
-            parentVariableSlots = this.getVariableSlots()
+            parentVariableSlots = this.getVariableSlots(),
+            parentScopedEffectInfo = this.scopedEffectInfo.toMap()
         )
 
         // Closure slots come first (only for capturable vars), then parameter slots
@@ -1307,6 +1380,19 @@ class ASTToTruffleConverterV2(
                     visit(e.result)
                 }
                 is PerformExpression -> visit(e.expression)
+                is StateMachineExpression -> {
+                    // Visit all expressions within state machine states
+                    for (state in e.states) {
+                        when (state) {
+                            is ComputeState -> visit(state.computation)
+                            is YieldState -> visit(state.valueExpression)
+                            is CompleteState -> visit(state.resultExpression)
+                        }
+                    }
+                    // Also include captured variables directly - they represent
+                    // free variables computed during continuation transformation
+                    variables.addAll(e.capturedVariables)
+                }
                 else -> Unit
             }
         }
@@ -1453,25 +1539,55 @@ class ASTToTruffleConverterV2(
     }
 
     private fun convertPerformExpression(performExpr: PerformExpression): MezzeNode {
-        // PerformExpression has handlers list, get the first one
-        val firstHandler = performExpr.handlers.firstOrNull()
-        if (firstHandler != null) {
-            val mapping = handlerToEffectMapping[firstHandler.name]
+        val handlers = performExpr.handlers
+        if (handlers.isEmpty()) {
+            // No handlers, just convert the body
+            return convertExpression(performExpr.expression)
+        }
+
+        // Process handlers from right to left (innermost first) to create nested structure
+        // perform A, B in body  =>  perform A in (perform B in body)
+        // This ensures all handlers are properly installed before the body runs
+        var currentBody = convertExpression(performExpr.expression)
+
+        for (handler in handlers.reversed()) {
+            currentBody = convertSingleHandler(handler, performExpr.resolvedHandlers, currentBody)
+        }
+
+        return currentBody
+    }
+
+    /**
+     * Convert a single handler wrapping a body node.
+     * @param handler The handler to convert
+     * @param resolvedHandlers Map from the PerformExpression with resolved handler info from typechecker
+     * @param bodyNode The body to wrap
+     */
+    private fun convertSingleHandler(
+        handler: PerformHandler,
+        resolvedHandlers: Map<String, ResolvedEffectHandler>,
+        bodyNode: MezzeNode
+    ): MezzeNode {
+        val mapping = handlerToEffectMapping[handler.name]
+
+        // Also check resolved handlers from typechecker for cross-module impls
+        val resolvedInfo = resolvedHandlers.values.find { it.performerName == handler.name }
+
+        // Check for parameterized impl (has parameters)
+        if (handler.parameters != null) {
+            val parametersNode = convertExpression(handler.parameters!!)
 
             if (mapping != null) {
                 val (effectName, contentHash) = mapping
-                val bodyNode = convertExpression(performExpr.expression)
-                val localSlot = contentHashToSlot[contentHash]
 
-                // Check if this is a scoped effect
+                // Check if this is a scoped parameterized effect
                 val scopedInfo = scopedEffectInfo[contentHash]
                 if (scopedInfo != null && scopedInfo.isScopedEffect) {
-                    // Use HandleNode.createScoped for scoped effects
-                    return HandleNode.createScoped(
-                        localSlot ?: -1,
-                        contentHash,
+                    return ParameterizedScopedHandleNode(
+                        handler.name,
                         arrayOf(effectName),
-                        firstHandler.name,
+                        arrayOf(contentHash),
+                        parametersNode,
                         bodyNode,
                         scopedInfo.scopeSlot,
                         scopedInfo.initializeScopeNode,
@@ -1479,59 +1595,124 @@ class ASTToTruffleConverterV2(
                     )
                 }
 
-                // Pass effect names so HandleNode can register in context
-                return HandleNode.create(
-                    localSlot ?: -1,
-                    contentHash,
+                return ParameterizedHandleNode(
+                    handler.name,
                     arrayOf(effectName),
-                    firstHandler.name,
+                    arrayOf(contentHash),
+                    parametersNode,
                     bodyNode
                 )
             }
+
+            // Use resolved info from typechecker for cross-module impls
+            val effectName = resolvedInfo?.effectName ?: handler.name
+            val contentHash = resolvedInfo?.implDeclarationHash ?: ""
+
+            // Check if resolved info indicates a scoped parameterized effect (for stdlib imports)
+            if (resolvedInfo != null && resolvedInfo.isScopedEffect) {
+                val scopeSlot = getOrCreateSlot("__scope_${contentHash.ifEmpty { handler.name }}__")
+
+                // initialize_scope and finalize_scope are lambdas: {} -> ...
+                // We need to invoke them with {} as argument
+                val initNode = resolvedInfo.initializeScopeExpr?.let { expr ->
+                    val lambdaNode = convertExpression(expr)
+                    val emptyRecordArg = RecordLiteralNode.allObjects(emptyArray(), emptyArray())
+                    InvokeNode.create(lambdaNode, arrayOf(emptyRecordArg))
+                }
+                val finalizeNode = resolvedInfo.finalizeScopeExpr?.let { expr ->
+                    val lambdaNode = convertExpression(expr)
+                    val emptyRecordArg = RecordLiteralNode.allObjects(emptyArray(), emptyArray())
+                    InvokeNode.create(lambdaNode, arrayOf(emptyRecordArg))
+                }
+
+                return ParameterizedScopedHandleNode(
+                    handler.name,
+                    arrayOf(effectName),
+                    if (contentHash.isNotEmpty()) arrayOf(contentHash) else emptyArray(),
+                    parametersNode,
+                    bodyNode,
+                    scopeSlot,
+                    initNode,
+                    finalizeNode
+                )
+            }
+
+            return ParameterizedHandleNode(
+                handler.name,
+                arrayOf(effectName),
+                if (contentHash.isNotEmpty()) arrayOf(contentHash) else emptyArray(),
+                parametersNode,
+                bodyNode
+            )
         }
 
-        // Dynamic handler lookup using resolved handler info from typechecker
-        val bodyNode = convertExpression(performExpr.expression)
+        // Non-parameterized handler
+        if (mapping != null) {
+            val (effectName, contentHash) = mapping
+            val localSlot = contentHashToSlot[contentHash]
 
-        // Build arrays of effect names and content hashes from resolvedHandlers
-        val effectNames = performExpr.resolvedHandlers.keys.toTypedArray()
-        val contentHashes = performExpr.resolvedHandlers.values.mapNotNull { it.implDeclarationHash }.toTypedArray()
-
-        // Check if any of the resolved handlers is a scoped effect
-        for ((_, handler) in performExpr.resolvedHandlers) {
-            val hash = handler.implDeclarationHash ?: continue
-            val scopedInfo = scopedEffectInfo[hash]
+            // Check if this is a scoped effect
+            val scopedInfo = scopedEffectInfo[contentHash]
             if (scopedInfo != null && scopedInfo.isScopedEffect) {
-                val localSlot = contentHashToSlot[hash] ?: -1
                 return HandleNode.createScoped(
-                    localSlot,
-                    hash,
-                    effectNames,
-                    handler.performerName,
+                    localSlot ?: -1,
+                    contentHash,
+                    arrayOf(effectName),
+                    handler.name,
                     bodyNode,
                     scopedInfo.scopeSlot,
                     scopedInfo.initializeScopeNode,
                     scopedInfo.finalizeScopeNode
                 )
             }
-        }
 
-        // Check if this is a parameterized impl (has parameters)
-        if (firstHandler?.parameters != null) {
-            val parametersNode = convertExpression(firstHandler.parameters!!)
-            return ParameterizedHandleNode(
-                firstHandler.name,
-                effectNames,
-                contentHashes,
-                parametersNode,
+            return HandleNode.create(
+                localSlot ?: -1,
+                contentHash,
+                arrayOf(effectName),
+                handler.name,
                 bodyNode
             )
         }
 
+        // Use resolved info from typechecker for cross-module impls
+        val effectName = resolvedInfo?.effectName ?: handler.name
+        val contentHash = resolvedInfo?.implDeclarationHash
+
+        // Check if resolved info indicates a scoped effect (for stdlib imports)
+        if (resolvedInfo != null && resolvedInfo.isScopedEffect) {
+            val scopeSlot = getOrCreateSlot("__scope_${contentHash ?: handler.name}__")
+
+            // initialize_scope and finalize_scope are lambdas: {} -> ...
+            // We need to invoke them with {} as argument
+            // Convert the lambda expressions then wrap in InvokeNode
+            val initNode = resolvedInfo.initializeScopeExpr?.let { expr ->
+                val lambdaNode = convertExpression(expr)
+                val emptyRecordArg = RecordLiteralNode.allObjects(emptyArray(), emptyArray())
+                InvokeNode.create(lambdaNode, arrayOf(emptyRecordArg))
+            }
+            val finalizeNode = resolvedInfo.finalizeScopeExpr?.let { expr ->
+                val lambdaNode = convertExpression(expr)
+                val emptyRecordArg = RecordLiteralNode.allObjects(emptyArray(), emptyArray())
+                InvokeNode.create(lambdaNode, arrayOf(emptyRecordArg))
+            }
+
+            return HandleNode.createScoped(
+                -1,  // No local slot for cross-module impls
+                contentHash ?: "",
+                arrayOf(effectName),
+                handler.name,
+                bodyNode,
+                scopeSlot,
+                initNode,
+                finalizeNode
+            )
+        }
+
         return DynamicHandleNode(
-            firstHandler?.name ?: "unknown",
-            effectNames,
-            contentHashes,
+            handler.name,
+            arrayOf(effectName),
+            if (contentHash != null) arrayOf(contentHash) else emptyArray(),
             bodyNode
         )
     }

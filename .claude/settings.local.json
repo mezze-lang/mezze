@@ -134,7 +134,15 @@
       "Bash(git grep:*)",
       "Bash(javac:*)",
       "Bash(gsed:*)",
-      "Bash(./mz run:*)"
+      "Bash(./mz run:*)",
+      "WebFetch(domain:chrisseaton.com)",
+      "WebFetch(domain:www.endoflineblog.com)",
+      "WebFetch(domain:pypy.org)",
+      "WebFetch(domain:matt.might.net)",
+      "WebFetch(domain:mullr.github.io)",
+      "WebFetch(domain:docs.servant.dev)",
+      "WebFetch(domain:tapir.softwaremill.com)",
+      "WebFetch(domain:hono.dev)"
     ],
     "deny": [],
     "ask": []

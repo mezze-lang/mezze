@@ -5,6 +5,7 @@ import com.mezze.interpreter.v2.values.MezzeUnit
 import com.mezze.interpreter.v2.values.MezzeRecord
 import com.mezze.interpreter.v2.values.MezzeList
 import com.mezze.interpreter.v2.values.MezzeVariant
+import com.mezze.interpreter.v2.nodes.continuation.ForkedExecutionException
 import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended
 import com.mezze.interpreter.v2.runtime.MezzeLanguage
 import com.mezze.interpreter.v2.runtime.MezzeContext
@@ -153,7 +154,7 @@ class ArrayLiteralNode(
     @TruffleBoundary
     private fun createList(values: Array<Any?>): MezzeList {
         @Suppress("UNCHECKED_CAST")
-        return MezzeList(values as Array<Any>)
+        return MezzeList.fromArray(values as Array<Any>)
     }
 }
 
@@ -390,7 +391,8 @@ class EffectImplStorageNode(
 class AbilityImplStorageNode(
     @field:Child private var recordChild: MezzeNode,
     private val hashSlot: Int,
-    private val contentHash: String
+    private val contentHash: String,
+    private val abilityName: String
 ) : MezzeNode() {
 
     override fun execute(frame: VirtualFrame): Any {
@@ -404,6 +406,8 @@ class AbilityImplStorageNode(
     private fun storeInContext(value: Any) {
         val context = MezzeContext.get(this)
         context.defineGlobal(contentHash, value)
+        // Also register by ability name for runtime ability lookups
+        context.registerAbilityImpl(abilityName, value)
     }
 }
 
@@ -423,7 +427,11 @@ class ParameterizedImplDefinitionNode(
     private val implFrameDescriptor: FrameDescriptor,
     // Optional scoped effect nodes - executed when impl is instantiated
     private val initializeScopeNode: MezzeNode? = null,
-    private val initializeScopeClosureSlots: IntArray = intArrayOf()
+    private val initializeScopeClosureSlots: IntArray = intArrayOf(),
+    private val initializeScopeFrameDescriptor: FrameDescriptor? = null,
+    private val finalizeScopeNode: MezzeNode? = null,
+    private val finalizeScopeClosureSlots: IntArray = intArrayOf(),
+    private val finalizeScopeFrameDescriptor: FrameDescriptor? = null
 ) : MezzeNode() {
 
     @CompilationFinal
@@ -452,7 +460,11 @@ class ParameterizedImplDefinitionNode(
                 operationClosureVarSlots = operationClosureVarSlots.toTypedArray(),
                 frameDescriptor = implFrameDescriptor,
                 initializeScopeNode = initializeScopeNode,
-                initializeScopeClosureSlots = initializeScopeClosureSlots
+                initializeScopeClosureSlots = initializeScopeClosureSlots,
+                initializeScopeFrameDescriptor = initializeScopeFrameDescriptor,
+                finalizeScopeNode = finalizeScopeNode,
+                finalizeScopeClosureSlots = finalizeScopeClosureSlots,
+                finalizeScopeFrameDescriptor = finalizeScopeFrameDescriptor
             )
             _callTarget = rootNode.callTarget
         }
@@ -474,16 +486,27 @@ class ParameterizedImplRootNode(
     private val operationFrameDescriptors: Array<FrameDescriptor>,
     private val operationClosureVarSlots: Array<IntArray>,
     frameDescriptor: FrameDescriptor,
-    // Optional scoped effect - executed when impl is instantiated (e.g., reset random state)
+    // Optional scoped effect nodes - wrapped into callable functions in the handler record
     @field:Child private var initializeScopeNode: MezzeNode? = null,
     @CompilationFinal(dimensions = 1)
-    private val initializeScopeClosureSlots: IntArray = intArrayOf()
+    private val initializeScopeClosureSlots: IntArray = intArrayOf(),
+    private val initializeScopeFrameDescriptor: FrameDescriptor? = null,
+    @field:Child private var finalizeScopeNode: MezzeNode? = null,
+    @CompilationFinal(dimensions = 1)
+    private val finalizeScopeClosureSlots: IntArray = intArrayOf(),
+    private val finalizeScopeFrameDescriptor: FrameDescriptor? = null
 ) : RootNode(language, frameDescriptor) {
 
     @CompilationFinal(dimensions = 1)
     private val implParamSlotIndices: IntArray = implParamNames.map { paramName ->
         implParamSlots[paramName] ?: -1
     }.toIntArray()
+
+    @CompilationFinal
+    private var initializeScopeCallTarget: CallTarget? = null
+
+    @CompilationFinal
+    private var finalizeScopeCallTarget: CallTarget? = null
 
     override fun execute(frame: VirtualFrame): Any {
         val arguments = frame.arguments
@@ -502,23 +525,6 @@ class ParameterizedImplRootNode(
             }
         }
 
-        // Execute initialize_scope if present (e.g., reset random state for SeededRandom)
-        // This runs BEFORE creating operation functions, so it happens at the start of each perform block
-        if (initializeScopeNode != null) {
-            // Create a frame for the initialize_scope with closure values bound
-            val initFrame = com.oracle.truffle.api.Truffle.getRuntime().createVirtualFrame(arrayOf<Any>(), frameDescriptor)
-            for (i in initializeScopeClosureSlots.indices) {
-                val srcSlot = initializeScopeClosureSlots[i]
-                if (srcSlot >= 0 && srcSlot < implParamSlotIndices.size) {
-                    val paramSlot = implParamSlotIndices[srcSlot]
-                    if (paramSlot >= 0) {
-                        initFrame.setObject(i, frame.getObject(paramSlot))
-                    }
-                }
-            }
-            initializeScopeNode!!.execute(initFrame)
-        }
-
         // Create operation functions
         val operationFunctions = Array(operationNames.size) { index ->
             val closureValues = Array(operationClosureVarSlots[index].size) { i ->
@@ -532,7 +538,31 @@ class ParameterizedImplRootNode(
             )
         }
 
-        return buildOperationRecord(operationFunctions)
+        // Create initialize_scope function if present
+        val initScopeFunc: MezzeFunction? = if (initializeScopeNode != null) {
+            val closureValues = Array(initializeScopeClosureSlots.size) { i ->
+                frame.getObject(initializeScopeClosureSlots[i])
+            }
+            MezzeFunction(
+                getOrCreateInitScopeCallTarget(),
+                "${implName}__initialize_scope",
+                closureValues
+            )
+        } else null
+
+        // Create finalize_scope function if present
+        val finalizeScopeFunc: MezzeFunction? = if (finalizeScopeNode != null) {
+            val closureValues = Array(finalizeScopeClosureSlots.size) { i ->
+                frame.getObject(finalizeScopeClosureSlots[i])
+            }
+            MezzeFunction(
+                getOrCreateFinalizeScopeCallTarget(),
+                "${implName}__finalize_scope",
+                closureValues
+            )
+        } else null
+
+        return buildOperationRecord(operationFunctions, initScopeFunc, finalizeScopeFunc)
     }
 
     @TruffleBoundary
@@ -562,10 +592,75 @@ class ParameterizedImplRootNode(
     }
 
     @TruffleBoundary
-    private fun buildOperationRecord(operationFunctions: Array<MezzeFunction>): MezzeRecord {
-        val fieldNames = operationNames.toList().toTypedArray()
-        @Suppress("UNCHECKED_CAST")
-        return MezzeRecord.fromFields(fieldNames, operationFunctions as Array<Any>)
+    private fun getOrCreateInitScopeCallTarget(): CallTarget {
+        if (initializeScopeCallTarget == null && initializeScopeNode != null) {
+            val closureCount = initializeScopeClosureSlots.size
+            val frameDesc = initializeScopeFrameDescriptor ?: run {
+                val builder = FrameDescriptor.newBuilder()
+                for (i in 0 until closureCount) {
+                    builder.addSlot(com.oracle.truffle.api.frame.FrameSlotKind.Object, "closure_$i", null)
+                }
+                builder.build()
+            }
+            val rootNode = MezzeFunctionRootNode(
+                MezzeLanguage.get(this),
+                frameDesc,
+                initializeScopeNode!!,
+                "${implName}__initialize_scope",
+                emptyArray(),  // No parameters - takes {}
+                IntArray(closureCount) { it },
+                null
+            )
+            initializeScopeCallTarget = rootNode.callTarget
+        }
+        return initializeScopeCallTarget!!
+    }
+
+    @TruffleBoundary
+    private fun getOrCreateFinalizeScopeCallTarget(): CallTarget {
+        if (finalizeScopeCallTarget == null && finalizeScopeNode != null) {
+            val closureCount = finalizeScopeClosureSlots.size
+            val frameDesc = finalizeScopeFrameDescriptor ?: run {
+                val builder = FrameDescriptor.newBuilder()
+                for (i in 0 until closureCount) {
+                    builder.addSlot(com.oracle.truffle.api.frame.FrameSlotKind.Object, "closure_$i", null)
+                }
+                builder.build()
+            }
+            val rootNode = MezzeFunctionRootNode(
+                MezzeLanguage.get(this),
+                frameDesc,
+                finalizeScopeNode!!,
+                "${implName}__finalize_scope",
+                emptyArray(),  // No parameters - takes {}
+                IntArray(closureCount) { it },
+                null
+            )
+            finalizeScopeCallTarget = rootNode.callTarget
+        }
+        return finalizeScopeCallTarget!!
+    }
+
+    @TruffleBoundary
+    private fun buildOperationRecord(
+        operationFunctions: Array<MezzeFunction>,
+        initScopeFunc: MezzeFunction?,
+        finalizeScopeFunc: MezzeFunction?
+    ): MezzeRecord {
+        val fieldNamesList = operationNames.toMutableList()
+        val valuesList = operationFunctions.toMutableList<Any>()
+
+        // Add scope lifecycle functions under special names
+        if (initScopeFunc != null) {
+            fieldNamesList.add("__initialize_scope__")
+            valuesList.add(initScopeFunc)
+        }
+        if (finalizeScopeFunc != null) {
+            fieldNamesList.add("__finalize_scope__")
+            valuesList.add(finalizeScopeFunc)
+        }
+
+        return MezzeRecord.fromFields(fieldNamesList.toTypedArray(), valuesList.toTypedArray())
     }
 
     override fun getName(): String = "impl_$implName"
@@ -645,14 +740,43 @@ class DynamicHandleNode(
             for (effectName in effectNames) {
                 context.defineLocal(effectName, handler)
             }
+
+            // LAZY EFFECTS: Push handlers onto handler stack for lazy effects
+            pushHandlersToStack(handler)
         }
 
         try {
             val result = bodyChild.execute(frame)
             return processResult(result)
         } finally {
-            // Cleanup if needed
+            // LAZY EFFECTS: Pop handlers from stack
+            if (handler != null) {
+                popHandlersFromStack()
+            }
         }
+    }
+
+    /**
+     * Push handlers onto the context's handler stack for lazy effects.
+     */
+    @TruffleBoundary
+    private fun pushHandlersToStack(handler: Any) {
+        val context = MezzeContext.get(this)
+        val handlers = mutableMapOf<String, Any>()
+        handlers[handlerName] = handler
+        for (effectName in effectNames) {
+            handlers[effectName] = handler
+        }
+        context.pushHandlers(handlers)
+    }
+
+    /**
+     * Pop handlers from the context's handler stack.
+     */
+    @TruffleBoundary
+    private fun popHandlersFromStack() {
+        val context = MezzeContext.get(this)
+        context.popHandlers()
     }
 
     /**
@@ -747,14 +871,46 @@ class ParameterizedHandleNode(
             for (effectName in effectNames) {
                 context.defineLocal(effectName, handler)
             }
+
+            // LAZY EFFECTS: Push handlers onto handler stack
+            pushHandlersToStack(handler)
         }
 
         try {
             val result = bodyChild.execute(frame)
             return processResult(result)
+        } catch (e: ForkedExecutionException) {
+            // Fork completed - return the forked values as the result
+            return e.values
         } finally {
-            // Cleanup handled by context scope
+            // LAZY EFFECTS: Pop handlers from stack
+            if (handler != null) {
+                popHandlersFromStack()
+            }
         }
+    }
+
+    /**
+     * Push handlers onto the context's handler stack for lazy effects.
+     */
+    @TruffleBoundary
+    private fun pushHandlersToStack(handler: Any) {
+        val context = MezzeContext.get(this)
+        val handlers = mutableMapOf<String, Any>()
+        handlers[handlerName] = handler
+        for (effectName in effectNames) {
+            handlers[effectName] = handler
+        }
+        context.pushHandlers(handlers)
+    }
+
+    /**
+     * Pop handlers from the context's handler stack.
+     */
+    @TruffleBoundary
+    private fun popHandlersFromStack() {
+        val context = MezzeContext.get(this)
+        context.popHandlers()
     }
 
     /**
@@ -824,6 +980,308 @@ class ParameterizedHandleNode(
         }
 
         throw RuntimeException("Parameterized impl not found for: $handlerName")
+    }
+}
+
+/**
+ * Handle node for parameterized effect impls with scoped effects (initialize_scope/finalize_scope).
+ *
+ * Combines parameterized impl invocation with scoped effect lifecycle:
+ * 1. Evaluate parameters
+ * 2. Call parameterized impl function to get handler record (which includes __initialize_scope__ and __finalize_scope__)
+ * 3. Call __initialize_scope__ from handler record
+ * 4. Execute body
+ * 5. Call __finalize_scope__ from handler record (in finally block)
+ *
+ * If finalize_scope throws RetryingScopeException, the entire block is retried
+ * (steps 3-5) up to maxRetries times. This enables STM-style automatic retry.
+ *
+ * The key insight is that initialize_scope and finalize_scope are included in the handler record
+ * as callable MezzeFunctions with the impl parameters captured in their closures. This ensures
+ * they have access to the impl parameters (like `seed` in SeededRandom).
+ */
+@NodeInfo(shortName = "parameterized-scoped-handle")
+class ParameterizedScopedHandleNode(
+    private val handlerName: String,
+    private val effectNames: Array<String>,
+    private val contentHashes: Array<String>,
+    @field:Child private var parametersNode: MezzeNode,
+    @field:Child private var bodyChild: MezzeNode,
+    private val scopeSlot: Int,
+    // These nodes are kept for backward compatibility but won't be used
+    // when handler record contains __initialize_scope__ and __finalize_scope__
+    @field:Child private var initializeScopeNode: MezzeNode?,
+    @field:Child private var finalizeScopeNode: MezzeNode?
+) : MezzeNode() {
+
+    @field:Child private var callNode: com.oracle.truffle.api.nodes.IndirectCallNode =
+        com.oracle.truffle.api.nodes.IndirectCallNode.create()
+
+    @field:Child private var initScopeCallNode: com.oracle.truffle.api.nodes.IndirectCallNode =
+        com.oracle.truffle.api.nodes.IndirectCallNode.create()
+
+    @field:Child private var finalizeScopeCallNode: com.oracle.truffle.api.nodes.IndirectCallNode =
+        com.oracle.truffle.api.nodes.IndirectCallNode.create()
+
+    override fun execute(frame: VirtualFrame): Any {
+        // Evaluate parameters first (only once, not on retry)
+        val parameters = parametersNode.execute(frame)
+
+        // Get the impl function and call it with parameters (only once, not on retry)
+        // The handler record now includes __initialize_scope__ and __finalize_scope__ functions
+        val handler = getAndCallImplFunction(parameters)
+        val handlerRecord = handler as? MezzeRecord
+
+        // Extract scope lifecycle functions from handler record (if present)
+        val initScopeFunc = handlerRecord?.getField("__initialize_scope__") as? MezzeFunction
+        val finalizeScopeFunc = handlerRecord?.getField("__finalize_scope__") as? MezzeFunction
+
+        if (handler != null) {
+            // Install handler by name and effect names
+            val context = MezzeContext.get(this)
+            context.defineLocal(handlerName, handler)
+
+            for (effectName in effectNames) {
+                context.defineLocal(effectName, handler)
+            }
+
+            // LAZY EFFECTS: Push handlers onto handler stack
+            pushHandlersToStack(handler)
+        }
+
+        try {
+            return executeWithRetry(frame, handler, handlerRecord, initScopeFunc, finalizeScopeFunc)
+        } finally {
+            // LAZY EFFECTS: Pop handlers from stack
+            if (handler != null) {
+                popHandlersFromStack()
+            }
+        }
+    }
+
+    private fun executeWithRetry(
+        frame: VirtualFrame,
+        handler: Any?,
+        handlerRecord: MezzeRecord?,
+        initScopeFunc: MezzeFunction?,
+        finalizeScopeFunc: MezzeFunction?
+    ): Any {
+        // Retry loop for scoped effects that need retry (e.g., STM)
+        var retryCount = 0
+        var maxRetries = 100 // Default max retries
+        val random = java.util.concurrent.ThreadLocalRandom.current()
+
+        while (true) {
+            // Execute initialize_scope if present
+            var scope: Any? = null
+
+            // Prefer calling from handler record (has impl params in closure)
+            if (initScopeFunc != null) {
+                scope = callScopeFunction(initScopeCallNode, initScopeFunc)
+            } else if (initializeScopeNode != null) {
+                // Fallback to direct node execution (for backward compatibility)
+                scope = initializeScopeNode!!.execute(frame)
+            }
+
+            if (scope != null) {
+                // Store scope in frame slot so operations can access it
+                if (scopeSlot >= 0 && scopeSlot < frame.frameDescriptor.numberOfSlots) {
+                    frame.setObject(scopeSlot, scope)
+                }
+
+                // Also register scope in context under both names:
+                // - "scope" for user code references
+                // - "__scope__" for internal use
+                val context = MezzeContext.get(this)
+                context.defineLocal("scope", scope)
+                context.defineLocal("__scope__", scope)
+            }
+
+            var bodyException: Throwable? = null
+            var result: Any? = null
+            var needsRetry = false
+
+            try {
+                result = bodyChild.execute(frame)
+            } catch (t: Throwable) {
+                bodyException = t
+            } finally {
+                // Execute finalize_scope in finally block
+                var finalizeException: Throwable? = null
+
+                // Prefer calling from handler record (has impl params in closure)
+                if (finalizeScopeFunc != null) {
+                    try {
+                        callScopeFunction(finalizeScopeCallNode, finalizeScopeFunc)
+                    } catch (retry: com.mezze.interpreter.v2.nodes.effect.RetryingScopeException) {
+                        if (bodyException == null) {
+                            needsRetry = true
+                            maxRetries = if (retry.maxRetries > 0) retry.maxRetries else maxRetries
+                        }
+                    } catch (t: Throwable) {
+                        finalizeException = t
+                    }
+                } else if (finalizeScopeNode != null) {
+                    // Fallback to direct node execution
+                    try {
+                        finalizeScopeNode!!.execute(frame)
+                    } catch (retry: com.mezze.interpreter.v2.nodes.effect.RetryingScopeException) {
+                        if (bodyException == null) {
+                            needsRetry = true
+                            maxRetries = if (retry.maxRetries > 0) retry.maxRetries else maxRetries
+                        }
+                    } catch (t: Throwable) {
+                        finalizeException = t
+                    }
+                }
+
+                // Clear scope from frame
+                if (scopeSlot >= 0 && scopeSlot < frame.frameDescriptor.numberOfSlots) {
+                    frame.setObject(scopeSlot, null)
+                }
+
+                // Handle exceptions (only if not retrying)
+                if (!needsRetry) {
+                    if (bodyException != null) {
+                        if (finalizeException != null && finalizeException !== bodyException) {
+                            bodyException.addSuppressed(finalizeException)
+                        }
+                        when (bodyException) {
+                            is RuntimeException -> throw bodyException
+                            is Error -> throw bodyException
+                            else -> throw RuntimeException(bodyException)
+                        }
+                    } else if (finalizeException != null) {
+                        when (finalizeException) {
+                            is RuntimeException -> throw finalizeException
+                            is Error -> throw finalizeException
+                            else -> throw RuntimeException(finalizeException)
+                        }
+                    }
+                }
+            }
+
+            // Check if we need to retry
+            if (needsRetry) {
+                retryCount++
+                if (maxRetries > 0 && retryCount >= maxRetries) {
+                    throw RuntimeException("Scoped effect retry limit exceeded ($maxRetries retries)")
+                }
+                // Exponential backoff with jitter to reduce contention
+                // Base: 10 microseconds, doubles each retry, capped at 10ms
+                // Jitter: random factor 0.5-1.5 to prevent thundering herd
+                if (retryCount > 3) {
+                    val baseDelayMicros = 10L * (1L shl minOf(retryCount - 3, 10)) // 10us * 2^n, capped
+                    val maxDelayMicros = minOf(baseDelayMicros, 10_000L) // Cap at 10ms
+                    val jitter = 0.5 + random.nextDouble() // 0.5 to 1.5
+                    val delayNanos = (maxDelayMicros * jitter * 1000).toLong()
+                    java.util.concurrent.locks.LockSupport.parkNanos(delayNanos)
+                } else {
+                    // First few retries: just yield to let other threads proceed
+                    Thread.yield()
+                }
+                // Continue the loop to retry
+                continue
+            }
+
+            // Success - return the result
+            return processResult(result!!)
+        }
+    }
+
+    @TruffleBoundary
+    private fun callScopeFunction(
+        scopeCallNode: com.oracle.truffle.api.nodes.IndirectCallNode,
+        func: MezzeFunction
+    ): Any {
+        val closureValues = func.closureValues
+        val emptyRecord = MezzeRecord.empty()
+        val arguments = if (closureValues.isEmpty()) {
+            arrayOf(emptyRecord)
+        } else {
+            Array(closureValues.size + 1) { i ->
+                if (i < closureValues.size) closureValues[i] else emptyRecord
+            }
+        }
+        return scopeCallNode.call(func.callTarget, *arguments)
+    }
+
+    @TruffleBoundary
+    private fun processResult(result: Any): Any {
+        if (result is MezzeContinuationSuspended) {
+            if (effectNames.contains("Exception") || effectNames.contains("Return")) {
+                return result.suspendedValue
+            }
+            return result
+        }
+
+        if (effectNames.contains("Exception")) {
+            return MezzeVariant.ok(result)
+        }
+
+        return result
+    }
+
+    @TruffleBoundary
+    private fun getAndCallImplFunction(parameters: Any): Any? {
+        val context = MezzeContext.get(this)
+
+        for (hash in contentHashes) {
+            val implFunc = context.lookupGlobal(hash)
+            if (implFunc is MezzeFunction) {
+                val closureValues = implFunc.closureValues
+                val arguments = if (closureValues.isEmpty()) {
+                    arrayOf(parameters)
+                } else {
+                    Array(closureValues.size + 1) { i ->
+                        if (i < closureValues.size) closureValues[i] else parameters
+                    }
+                }
+                return callNode.call(implFunc.callTarget, *arguments)
+            } else if (implFunc is MezzeRecord) {
+                return implFunc
+            }
+        }
+
+        val implFunc = context.lookupLocal(handlerName) ?: context.lookupGlobal(handlerName)
+        if (implFunc is MezzeFunction) {
+            val closureValues = implFunc.closureValues
+            val arguments = if (closureValues.isEmpty()) {
+                arrayOf(parameters)
+            } else {
+                Array(closureValues.size + 1) { i ->
+                    if (i < closureValues.size) closureValues[i] else parameters
+                }
+            }
+            return callNode.call(implFunc.callTarget, *arguments)
+        } else if (implFunc is MezzeRecord) {
+            return implFunc
+        }
+
+        throw RuntimeException("Parameterized impl not found for: $handlerName")
+    }
+
+    /**
+     * Push handlers onto the context's handler stack for lazy effects.
+     */
+    @TruffleBoundary
+    private fun pushHandlersToStack(handler: Any) {
+        val context = MezzeContext.get(this)
+        val handlers = mutableMapOf<String, Any>()
+        handlers[handlerName] = handler
+        for (effectName in effectNames) {
+            handlers[effectName] = handler
+        }
+        context.pushHandlers(handlers)
+    }
+
+    /**
+     * Pop handlers from the context's handler stack.
+     */
+    @TruffleBoundary
+    private fun popHandlersFromStack() {
+        val context = MezzeContext.get(this)
+        context.popHandlers()
     }
 }
 

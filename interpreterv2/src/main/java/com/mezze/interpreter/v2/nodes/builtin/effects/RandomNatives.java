@@ -51,6 +51,16 @@ public final class RandomNatives {
         return ThreadLocalRandom.current().nextLong(0, max + 1);
     }
 
+    /**
+     * Legacy random function - takes only {max} and returns [0, max].
+     * Used for backward compatibility with V1 tests.
+     */
+    @TruffleBoundary
+    public static long legacyRandom(MezzeRecord args) {
+        long max = getLong(args, "max");
+        return ThreadLocalRandom.current().nextLong(0, max + 1);
+    }
+
     @TruffleBoundary
     public static Object randomSeed(MezzeRecord args) {
         long seed = getLong(args, "seed");

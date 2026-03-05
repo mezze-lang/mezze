@@ -166,7 +166,7 @@ public final class SortedSetNatives {
 
     @TruffleBoundary
     public static MezzeList toList(MezzeSortedSet set) {
-        return MezzeList.fromObjects(set.toArray());
+        return MezzeList.fromArray(set.toArray());
     }
 
     @TruffleBoundary

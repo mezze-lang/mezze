@@ -133,8 +133,14 @@ effect Async where {
 #       results
 
 # Default handler - unbounded virtual threads
+# Uses scoped effects to track all spawned promises and ensure cleanup
 pub impl Async for LoomAsync where {
-    spawn = {f} -> __native_loom_spawn_cfg {f = f, max_concurrent = 0},
+    # Create a tracker for all spawned promises in this handler scope
+    initialize_scope = {} -> __native_loom_init_scope {},
+    # Await any unawaited promises (structured concurrency at handler level)
+    finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
+
+    spawn = {f} -> __native_loom_spawn_tracked {f = f, max_concurrent = 0, tracker = scope},
     await = {p} -> __native_loom_await {p = p},
     race = {ps} -> __native_loom_race {ps = ps},
     all = {ps} -> __native_loom_all {ps = ps},
@@ -162,7 +168,10 @@ pub impl Async for LoomAsync where {
 #   perform LoomAsyncWith {max_concurrent = 100} in do
 #       Async.spawn {f = ...}
 pub impl Async for LoomAsyncWith { max_concurrent: Int } where {
-    spawn = {f} -> __native_loom_spawn_cfg {f = f, max_concurrent = max_concurrent},
+    initialize_scope = {} -> __native_loom_init_scope {},
+    finalize_scope = {} -> __native_loom_finalize_scope { tracker = scope },
+
+    spawn = {f} -> __native_loom_spawn_tracked {f = f, max_concurrent = max_concurrent, tracker = scope},
     await = {p} -> __native_loom_await {p = p},
     race = {ps} -> __native_loom_race {ps = ps},
     all = {ps} -> __native_loom_all {ps = ps},
@@ -198,8 +207,14 @@ pub impl Async for LoomAsyncWith { max_concurrent: Int } where {
 #       Async.await {p = p}
 
 # Default handler - unbounded OS threads
+# Uses scoped effects for thread tracking and cleanup
 pub impl Async for OSThreadAsync where {
-    spawn = {f} -> __native_os_spawn_cfg {f = f, pool_size = 0},
+    # Create thread tracker for cleanup
+    initialize_scope = {} -> __native_os_init_scope {},
+    # Join all spawned threads, cleanup resources
+    finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
+
+    spawn = {f} -> __native_os_spawn_tracked {f = f, pool_size = 0, tracker = scope},
     await = {p} -> __native_os_await {p = p},
     race = {ps} -> __native_os_race {ps = ps},
     all = {ps} -> __native_os_all {ps = ps},
@@ -227,7 +242,10 @@ pub impl Async for OSThreadAsync where {
 #   perform OSThreadAsyncWith {pool_size = 4} in do
 #       Async.spawn {f = ...}
 pub impl Async for OSThreadAsyncWith { pool_size: Int } where {
-    spawn = {f} -> __native_os_spawn_cfg {f = f, pool_size = pool_size},
+    initialize_scope = {} -> __native_os_init_scope {},
+    finalize_scope = {} -> __native_os_finalize_scope { tracker = scope },
+
+    spawn = {f} -> __native_os_spawn_tracked {f = f, pool_size = pool_size, tracker = scope},
     await = {p} -> __native_os_await {p = p},
     race = {ps} -> __native_os_race {ps = ps},
     all = {ps} -> __native_os_all {ps = ps},
@@ -261,31 +279,35 @@ pub impl Async for OSThreadAsyncWith { pool_size: Int } where {
 # - Supports serialization/checkpointing via continuation
 #
 # Usage:
-#   perform iCoopAsync {cont = continuation::new {}} n do
+#   perform CoopAsync in do
 #       let p = Async.spawn {f = {} -> 42}
 #       Async.await {p = p}
 
-pub impl Async for CoopAsync { cont: Continuation 'a 'b 'c } where {
-    spawn = {f} -> __native_coop_spawn { f = f, cont = cont },
-    await = {p} -> __native_coop_await { p = p, cont = cont },
-    race = {ps} -> __native_coop_race { ps = ps, cont = cont },
-    all = {ps} -> __native_coop_all { ps = ps, cont = cont },
-    timeout = {ms, p} -> __native_coop_timeout { ms = ms, p = p, cont = cont },
+pub impl Async for CoopAsync where {
+    # Continuation is created internally via scoped effects
+    initialize_scope = {} -> { cont = continuation::new {} },
+    finalize_scope = {} -> scope.cont.reset {},
+
+    spawn = {f} -> __native_coop_spawn { f = f, cont = scope.cont },
+    await = {p} -> __native_coop_await { p = p, cont = scope.cont },
+    race = {ps} -> __native_coop_race { ps = ps, cont = scope.cont },
+    all = {ps} -> __native_coop_all { ps = ps, cont = scope.cont },
+    timeout = {ms, p} -> __native_coop_timeout { ms = ms, p = p, cont = scope.cont },
     cancel = {p} -> {},
-    sleep = {ms} -> __native_coop_sleep { ms = ms, cont = cont },
+    sleep = {ms} -> __native_coop_sleep { ms = ms, cont = scope.cont },
     is_done = {p} -> __native_coop_is_done { p = p },
     is_cancelled = {} -> False,
     check = {} -> {},
-    join = {left, right} -> __native_coop_join { left = left, right = right, cont = cont },
-    join3 = {a, b, c} -> __native_coop_join3 { a = a, b = b, c = c, cont = cont },
-    map = {xs, f} -> __native_coop_map { xs = xs, f = f, cont = cont },
-    for_each = {xs, f} -> __native_coop_for_each { xs = xs, f = f, cont = cont },
-    filter = {xs, f} -> __native_coop_filter { xs = xs, f = f, cont = cont },
-    any = {ps} -> __native_coop_any { ps = ps, cont = cont },
-    settle = {ps} -> __native_coop_settle { ps = ps, cont = cont },
+    join = {left, right} -> __native_coop_join { left = left, right = right, cont = scope.cont },
+    join3 = {a, b, c} -> __native_coop_join3 { a = a, b = b, c = c, cont = scope.cont },
+    map = {xs, f} -> __native_coop_map { xs = xs, f = f, cont = scope.cont },
+    for_each = {xs, f} -> __native_coop_for_each { xs = xs, f = f, cont = scope.cont },
+    filter = {xs, f} -> __native_coop_filter { xs = xs, f = f, cont = scope.cont },
+    any = {ps} -> __native_coop_any { ps = ps, cont = scope.cont },
+    settle = {ps} -> __native_coop_settle { ps = ps, cont = scope.cont },
     # For cooperative async, scoped is a no-op since there's no parallelism
     # The function just runs with an empty scope
-    scoped = {f} -> __native_coop_scoped { f = f, cont = cont }
+    scoped = {f} -> __native_coop_scoped { f = f, cont = scope.cont }
 }
 
 # =============================================================================
@@ -307,9 +329,9 @@ pub let go: {f: {} -> 'a} -> {} <Async> = {f} -> do
 # =============================================================================
 
 # Run computation with CoopAsync handler (cooperative scheduling)
-# Equivalent to: perform CoopAsync {cont = continuation::new {}} in computation {}
+# Equivalent to: perform CoopAsync in computation {}
 pub let run_coop: {computation: {} -> 'a <Async>} -> 'a = {computation} ->
-    perform CoopAsync {cont = continuation::new {}} in computation {}
+    perform CoopAsync in computation {}
 
 # =============================================================================
 # Scope Functions - Helpers for Structured Concurrency Scopes

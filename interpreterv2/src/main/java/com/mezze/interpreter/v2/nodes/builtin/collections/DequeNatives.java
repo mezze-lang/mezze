@@ -249,7 +249,7 @@ public final class DequeNatives {
 
     @TruffleBoundary
     public static MezzeList toList(MezzeDeque deque) {
-        return MezzeList.fromObjects(deque.toArray());
+        return MezzeList.fromArray(deque.toArray());
     }
 
     public static Object[] toArray(MezzeDeque deque) {

@@ -36,8 +36,8 @@ object MezzeTestHelper {
     // Use V2's language ID
     private const val LANGUAGE_ID = "mezze"
 
-    // Shared engine for all test executions to avoid sharing layer violations
-    private val sharedEngine = org.graalvm.polyglot.Engine.newBuilder()
+    // Create a fresh engine for each test to ensure complete isolation
+    private fun createFreshEngine() = org.graalvm.polyglot.Engine.newBuilder()
         .option("engine.WarnInterpreterOnly", "false")
         .build()
 
@@ -52,9 +52,10 @@ object MezzeTestHelper {
         com.mezze.language.typechecker.ModuleResolver.clearCache()
         com.mezze.interpreter.v2.runtime.MezzeLanguage.clearLastResult()
 
-        // Create polyglot context with multi-threading enabled for Loom concurrency
+        // Create polyglot context with fresh engine for test isolation
+        val engine = createFreshEngine()
         Context.newBuilder(LANGUAGE_ID)
-            .engine(sharedEngine)
+            .engine(engine)
             .allowAllAccess(true)
             .allowCreateThread(true)
             .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
@@ -87,8 +88,9 @@ object MezzeTestHelper {
 
         com.mezze.interpreter.v2.runtime.MezzeLanguage.clearLastResult()
 
+        val engine = createFreshEngine()
         val context = Context.newBuilder(LANGUAGE_ID)
-            .engine(sharedEngine)
+            .engine(engine)
             .allowAllAccess(true)
             .allowCreateThread(true)
             .allowPolyglotAccess(org.graalvm.polyglot.PolyglotAccess.ALL)
@@ -102,7 +104,9 @@ object MezzeTestHelper {
                 com.mezze.interpreter.v2.runtime.MezzeLanguage.setMonomorphicInstances(monomorphicInstances)
             }
 
-            val source = Source.newBuilder(LANGUAGE_ID, "# DIRECT_AST_EXECUTION", "__direct_execution__.mz")
+            // Use unique source name per execution to prevent CallTarget caching
+            val uniqueId = System.nanoTime()
+            val source = Source.newBuilder(LANGUAGE_ID, "# DIRECT_AST_EXECUTION_$uniqueId", "__direct_execution_$uniqueId.mz")
                 .buildLiteral()
             context.eval(source)
 
@@ -199,7 +203,8 @@ object MezzeTestHelper {
             is Double -> MezzeFloat(v2Value)
             is String -> MezzeString(v2Value)
             is Boolean -> MezzeBool(v2Value)
-            is com.mezze.interpreter.v2.values.MezzeUnit -> MezzeUnit
+            // V2 uses MezzeUnit for empty records {}, convert to V1's empty record for backward compatibility
+            is com.mezze.interpreter.v2.values.MezzeUnit -> MezzeRecord(emptyMap())
             is com.mezze.interpreter.v2.values.MezzeRecord -> convertV2Record(v2Value)
             is com.mezze.interpreter.v2.values.MezzeVariant -> convertV2Variant(v2Value)
             is com.mezze.interpreter.v2.values.MezzeList -> convertV2List(v2Value)
@@ -224,6 +229,21 @@ object MezzeTestHelper {
                     capturePoint = "v2-continuation"
                 )
                 MezzeContinuationSuspended(v1Continuation, v1SuspendedValue)
+            }
+            // Handle MezzeSuspended (lazy effects) - convert to V1's MezzeSuspended
+            is com.mezze.interpreter.v2.values.MezzeSuspended -> {
+                // Convert V2's MezzeSuspended to V1's MezzeSuspended
+                val unhandledEffects = v2Value.unhandledEffects
+                // Create a placeholder thunk
+                val placeholderThunk = MezzeThunk(
+                    function = NativeMezzeFunction("<v2-suspended-thunk>") { MezzeNull },
+                    arguments = MezzeRecord(emptyMap())
+                )
+                MezzeSuspended(
+                    computation = placeholderThunk,
+                    unhandledEffects = unhandledEffects,
+                    capturedHandlers = emptyMap()
+                )
             }
             else -> {
                 // Fallback: try to convert unknown types

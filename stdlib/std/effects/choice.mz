@@ -15,24 +15,20 @@ effect Choice where {
 }
 
 # AllPaths performer - explores all possible paths through choices
-# Takes a Continuation record parameter created at the perform boundary
-pub impl Choice for AllPaths { cont: Continuation 'a 'b 'c } where {
-    choose = { options } -> do
-        # Capture the current continuation
-        let k = cont.capture {}
+# Uses scoped effects to manage continuation lifecycle internally
+pub impl Choice for AllPaths where {
+    initialize_scope = {} -> { cont = continuation::new {} },
 
-        # Use fork to resume continuation once for each option (multishot!)
-        # This is the key to nondeterministic choice
-        # Fork will handle empty arrays by returning empty results
-        cont.fork { cont = k, values = options },
+    finalize_scope = {} -> scope.cont.reset {},
 
-    fail = {} ->
-        cont.abort {}
+    choose = { options } ->
+        # Capture then fork - multishot continuation resumes for each option
+        scope.cont.fork { cont = scope.cont.capture {}, values = options },
+
+    fail = {} -> scope.cont.abort {}
 }
 
 # Helper function to run a computation that uses Choice effect
 # Returns an array with results from all successful paths
-pub let run_all_paths: { computation: {} -> 'a <Choice> } -> ['a] = { computation } -> do
-    # continuation::new {} is called here to capture at the perform boundary
-    perform AllPaths {cont = continuation::new {}} in do
-        computation {}
+pub let run_all_paths: { computation: {} -> 'a <Choice> } -> ['a] = { computation } ->
+    perform AllPaths in computation {}

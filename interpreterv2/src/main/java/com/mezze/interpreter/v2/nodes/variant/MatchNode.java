@@ -6,11 +6,15 @@ import com.mezze.interpreter.v2.values.MezzeRecord;
 import com.mezze.interpreter.v2.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.CountingConditionProfile;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Pattern match node for variants - AGGRESSIVELY OPTIMIZED.
@@ -22,11 +26,16 @@ import com.oracle.truffle.api.profiles.CountingConditionProfile;
  * 4. Pre-computed branch count for @ExplodeLoop
  * 5. Separate variant vs literal matching paths
  * 6. Direct array indexing when tags are 0..N contiguous
+ * 7. LITERAL CACHE for O(1) literal pattern matching
  *
  * Jump table architecture:
  * - If all variant branches have tags 0..maxTag with no gaps, use array indexing
  * - tagToIndex[tag] = branch index (or -1 for wildcard)
  * - Eliminates the linear search completely
+ *
+ * Literal cache architecture:
+ * - Pre-computes map from literal values to branch indices
+ * - Enables O(1) lookup for common literal patterns (integers, strings, booleans)
  */
 @NodeInfo(shortName = "match")
 public final class MatchNode extends MezzeNode {
@@ -84,6 +93,19 @@ public final class MatchNode extends MezzeNode {
     @CompilationFinal
     private final int nilBranchIndex;
 
+    // ===== LITERAL CACHE OPTIMIZATION =====
+    // Pre-computed map from literal values to branch indices for O(1) lookup
+    // Only built if there are literal pattern branches
+
+    // True if this match has literal patterns that can be cached
+    @CompilationFinal
+    private final boolean hasLiteralCache;
+
+    // Cache from literal value -> branch index (null if no literals)
+    // Uses HashMap for O(1) lookup instead of O(N) linear scan
+    @CompilationFinal
+    private final Map<Object, Integer> literalToBranchIndex;
+
     public MatchNode(MezzeNode valueNode, MatchBranchNode[] branches, int wildcardBranchIndex) {
         this.valueNode = valueNode;
         this.branches = branches;
@@ -115,6 +137,32 @@ public final class MatchNode extends MezzeNode {
         this.consBranchIndex = consIdx;
         this.nilBranchIndex = nilIdx;
         this.hasListPatterns = (consIdx >= 0 || nilIdx >= 0);
+
+        // Build literal cache for O(1) literal pattern matching
+        Map<Object, Integer> literalCache = buildLiteralCache(branches);
+        this.literalToBranchIndex = literalCache;
+        this.hasLiteralCache = literalCache != null && !literalCache.isEmpty();
+    }
+
+    /**
+     * Build a cache from literal values to branch indices.
+     * Only caches branches with simple literal patterns (no guards/if-let).
+     */
+    @TruffleBoundary
+    private static Map<Object, Integer> buildLiteralCache(MatchBranchNode[] branches) {
+        Map<Object, Integer> cache = new HashMap<>();
+        for (int i = 0; i < branches.length; i++) {
+            MatchBranchNode branch = branches[i];
+            // Only cache literal patterns without guards (fast path only)
+            if (branch.isLiteralPattern() && !branch.hasGuardsOrIfLet()) {
+                Object literal = branch.getLiteralValue();
+                if (literal != null && !cache.containsKey(literal)) {
+                    // First branch wins for duplicate literals
+                    cache.put(literal, i);
+                }
+            }
+        }
+        return cache.isEmpty() ? null : cache;
     }
 
     /**
@@ -316,7 +364,18 @@ public final class MatchNode extends MezzeNode {
 
     @ExplodeLoop
     private Object executeLiteralMatch(VirtualFrame frame, Object value) {
-        // Try each branch for literal pattern matching
+        // FAST PATH: Use literal cache for O(1) lookup if available
+        if (hasLiteralCache) {
+            Integer cachedIndex = lookupLiteralCache(value);
+            if (cachedIndex != null) {
+                MatchBranchNode branch = branches[cachedIndex];
+                // Cached branches have no guards/if-let, so just execute
+                return branch.execute(frame);
+            }
+            // Not in cache - fall through to linear scan for guarded branches
+        }
+
+        // SLOW PATH: Linear scan for branches with guards or uncached literals
         for (int i = 0; i < branchCount; i++) {
             MatchBranchNode branch = branches[i];
             if (branchProfiles[i].profile(branch.matchesLiteral(value))) {
@@ -345,6 +404,15 @@ public final class MatchNode extends MezzeNode {
         noMatchProfile.enter();
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("No matching pattern for value: " + value);
+    }
+
+    /**
+     * Look up a literal value in the cache. Must be @TruffleBoundary because
+     * HashMap.get() is polymorphic and can cause deoptimization.
+     */
+    @TruffleBoundary
+    private Integer lookupLiteralCache(Object value) {
+        return literalToBranchIndex.get(value);
     }
 
     /**

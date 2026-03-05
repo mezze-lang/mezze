@@ -35,6 +35,20 @@ import java.util.concurrent.locks.LockSupport;
  */
 public final class AsyncNatives {
 
+    // ==================== Helper Functions ====================
+
+    /**
+     * Call a MezzeFunction that takes an empty record argument.
+     * Builds the proper argument array: [closure0, closure1, ..., emptyRecord]
+     */
+    private static Object callThunkFunction(MezzeFunction f, IndirectCallNode callNode) {
+        Object[] closureValues = f.getClosureValues();
+        Object[] fullArgs = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
+        fullArgs[closureValues.length] = MezzeRecord.empty();
+        return callNode.call(f.getCallTarget(), fullArgs);
+    }
+
     // ==================== Promise Implementation ====================
 
     /**
@@ -148,18 +162,26 @@ public final class AsyncNatives {
         }
 
         boolean isCompleted() {
+            MezzePromise d = delegate;
+            if (d != null) return d.isCompleted();
             return state == COMPLETED;
         }
 
         boolean isFailed() {
+            MezzePromise d = delegate;
+            if (d != null) return d.isFailed();
             return state == FAILED;
         }
 
         boolean isCancelled() {
+            MezzePromise d = delegate;
+            if (d != null) return d.isCancelled();
             return state == CANCELLED;
         }
 
         Object getResult() {
+            MezzePromise d = delegate;
+            if (d != null) return d.getResult();
             return result;
         }
 
@@ -250,8 +272,11 @@ public final class AsyncNatives {
             return switch (state) {
                 case COMPLETED -> result;
                 case FAILED -> {
-                    Throwable t = (Throwable) result;
-                    throw new RuntimeException("Task failed: " + t.getMessage(), t);
+                    if (result instanceof Throwable t) {
+                        throw new RuntimeException("Task failed: " + t.getMessage(), t);
+                    } else {
+                        throw new RuntimeException("Task failed with unknown error: " + result);
+                    }
                 }
                 case CANCELLED -> throw new CancellationException("Task was cancelled");
                 default -> throw new IllegalStateException("Promise in unexpected state: " + state);
@@ -308,6 +333,215 @@ public final class AsyncNatives {
                 }
             }
         }
+    }
+
+    // ==================== Promise Tracker (for scoped effects) ====================
+
+    /**
+     * Tracks all promises spawned within an effect handler scope.
+     * Used by initialize_scope/finalize_scope to ensure cleanup.
+     */
+    public static final class PromiseTracker {
+        private final ConcurrentLinkedQueue<MezzePromise> promises = new ConcurrentLinkedQueue<>();
+        private final AtomicBoolean finalized = new AtomicBoolean(false);
+
+        public void track(MezzePromise promise) {
+            if (!finalized.get()) {
+                promises.add(promise);
+            }
+        }
+
+        /**
+         * Await all unawaited promises. Called by finalize_scope.
+         * This ensures no promises are leaked even if user forgot to await.
+         */
+        public void awaitAllUnawaited() {
+            finalized.set(true);
+            for (MezzePromise p : promises) {
+                if (!p.isDone()) {
+                    try {
+                        p.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        // Cancel remaining on interrupt
+                        for (MezzePromise remaining : promises) {
+                            if (!remaining.isDone()) {
+                                remaining.cancel();
+                            }
+                        }
+                        break;
+                    } catch (RuntimeException e) {
+                        // Continue awaiting others even if one failed/cancelled
+                        // (includes CancellationException which is a subclass)
+                    }
+                }
+            }
+        }
+
+        /**
+         * Cancel all pending promises. Called on error.
+         */
+        public void cancelAll() {
+            finalized.set(true);
+            for (MezzePromise p : promises) {
+                if (!p.isDone()) {
+                    p.cancel();
+                }
+            }
+        }
+    }
+
+    // ==================== Loom Scope Lifecycle (scoped effects) ====================
+
+    /**
+     * Initialize scope - creates a promise tracker for this handler.
+     */
+    @TruffleBoundary
+    public static PromiseTracker loomInitScope(MezzeRecord args) {
+        return new PromiseTracker();
+    }
+
+    /**
+     * Finalize scope - await all unawaited promises.
+     */
+    @TruffleBoundary
+    public static MezzeUnit loomFinalizeScope(MezzeRecord args) {
+        Object trackerObj = getFieldValue(args, "tracker");
+        if (trackerObj instanceof PromiseTracker tracker) {
+            tracker.awaitAllUnawaited();
+        }
+        return MezzeUnit.INSTANCE;
+    }
+
+    /**
+     * Spawn with tracking - registers promise with tracker for cleanup.
+     */
+    @TruffleBoundary
+    public static MezzePromise loomSpawnTracked(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+        MezzeFunction f = getFunction(args, "f");
+        long maxConcurrent = getLong(args, "max_concurrent");
+        Object trackerObj = getFieldValue(args, "tracker");
+
+        Semaphore semaphore = maxConcurrent > 0
+            ? SEMAPHORE_CACHE.computeIfAbsent((int) maxConcurrent, Semaphore::new)
+            : null;
+
+        Object[] closureValues = f.getClosureValues();
+        var callTarget = f.getCallTarget();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+
+        MezzePromise promise = new MezzePromise(null, semaphore);
+
+        Thread vThread = env.newTruffleThreadBuilder(() -> {
+            try {
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+
+                try {
+                    if (semaphore != null) {
+                        semaphore.acquireUninterruptibly();
+                    }
+                    try {
+                        Object result = callNode.call(callTarget, closureValues);
+                        promise.complete(result);
+                    } finally {
+                        if (semaphore != null) {
+                            semaphore.release();
+                        }
+                    }
+                } finally {
+                    // LAZY EFFECTS: Pop handlers when thread completes
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
+            } catch (Throwable e) {
+                promise.fail(e);
+            }
+        }).virtual(true).build();
+
+        vThread.start();
+
+        MezzePromise tracked = new MezzePromise(vThread, semaphore, promise);
+
+        // Track for cleanup
+        if (trackerObj instanceof PromiseTracker tracker) {
+            tracker.track(tracked);
+        }
+
+        return tracked;
+    }
+
+    // ==================== OS Thread Scope Lifecycle ====================
+
+    @TruffleBoundary
+    public static PromiseTracker osInitScope(MezzeRecord args) {
+        return new PromiseTracker();
+    }
+
+    @TruffleBoundary
+    public static MezzeUnit osFinalizeScope(MezzeRecord args) {
+        Object trackerObj = getFieldValue(args, "tracker");
+        if (trackerObj instanceof PromiseTracker tracker) {
+            tracker.awaitAllUnawaited();
+        }
+        return MezzeUnit.INSTANCE;
+    }
+
+    @TruffleBoundary
+    public static MezzePromise osSpawnTracked(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+        MezzeFunction f = getFunction(args, "f");
+        Object trackerObj = getFieldValue(args, "tracker");
+
+        Object[] closureValues = f.getClosureValues();
+        var callTarget = f.getCallTarget();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+
+        MezzePromise promise = new MezzePromise(null, null);
+
+        // Platform thread (not virtual)
+        Thread thread = env.newTruffleThreadBuilder(() -> {
+            try {
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+
+                try {
+                    Object result = callNode.call(callTarget, closureValues);
+                    promise.complete(result);
+                } finally {
+                    // LAZY EFFECTS: Pop handlers when thread completes
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
+            } catch (Throwable e) {
+                promise.fail(e);
+            }
+        }).build();
+
+        thread.start();
+
+        MezzePromise tracked = new MezzePromise(thread, null, promise);
+
+        if (trackerObj instanceof PromiseTracker tracker) {
+            tracker.track(tracked);
+        }
+
+        return tracked;
     }
 
     // ==================== Executors ====================
@@ -396,14 +630,37 @@ public final class AsyncNatives {
 
         Object[] closureValues = f.getClosureValues();
         var callTarget = f.getCallTarget();
-        Env env = MezzeContext.get(node).getEnv();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // Build argument array: closure values + empty record argument
+        // Thunk functions expect {} as argument
+        Object[] fullArgs = new Object[closureValues.length + 1];
+        System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
+        fullArgs[closureValues.length] = MezzeRecord.empty();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
         MezzePromise promise = new MezzePromise(null, null);
 
         Thread vThread = env.newTruffleThreadBuilder(() -> {
             try {
-                Object result = callNode.call(callTarget, closureValues);
-                promise.complete(result);
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+
+                try {
+                    Object result = callNode.call(callTarget, fullArgs);
+                    promise.complete(result);
+                } finally {
+                    // LAZY EFFECTS: Pop handlers when thread completes
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 promise.fail(e);
             }
@@ -419,7 +676,11 @@ public final class AsyncNatives {
     @TruffleBoundary
     public static MezzeList loomSpawnAll(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         Object[] functions = getArray(args, "fs");
-        Env env = MezzeContext.get(node).getEnv();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned threads
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
         List<MezzePromise> promises = new ArrayList<>();
 
@@ -435,8 +696,21 @@ public final class AsyncNatives {
 
             Thread vThread = env.newTruffleThreadBuilder(() -> {
                 try {
-                    Object result = callNode.call(callTarget, closureValues);
-                    promise.complete(result);
+                    // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                    MezzeContext threadContext = MezzeContext.get(node);
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.pushHandlers(parentHandlers);
+                    }
+
+                    try {
+                        Object result = callNode.call(callTarget, closureValues);
+                        promise.complete(result);
+                    } finally {
+                        // LAZY EFFECTS: Pop handlers when thread completes
+                        if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                            threadContext.popHandlers();
+                        }
+                    }
                 } catch (Throwable e) {
                     promise.fail(e);
                 }
@@ -446,7 +720,7 @@ public final class AsyncNatives {
             promises.add(new MezzePromise(vThread, null, promise));
         }
 
-        return MezzeList.fromObjects(promises.toArray());
+        return MezzeList.fromArray(promises.toArray());
     }
 
     @TruffleBoundary
@@ -463,7 +737,11 @@ public final class AsyncNatives {
         var callTarget = f.getCallTarget();
 
         // Get Truffle environment for proper thread creation
-        Env env = MezzeContext.get(node).getEnv();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
         // Create promise first with placeholder thread
         MezzePromise promise = new MezzePromise(null, semaphore);
@@ -472,15 +750,28 @@ public final class AsyncNatives {
         // This avoids "Invalid sharing of AST nodes detected" errors
         Thread vThread = env.newTruffleThreadBuilder(() -> {
             try {
-                if (semaphore != null) {
-                    semaphore.acquireUninterruptibly();
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
                 }
+
                 try {
-                    Object result = callNode.call(callTarget, closureValues);
-                    promise.complete(result);
-                } finally {
                     if (semaphore != null) {
-                        semaphore.release();
+                        semaphore.acquireUninterruptibly();
+                    }
+                    try {
+                        Object result = callNode.call(callTarget, closureValues);
+                        promise.complete(result);
+                    } finally {
+                        if (semaphore != null) {
+                            semaphore.release();
+                        }
+                    }
+                } finally {
+                    // LAZY EFFECTS: Pop handlers when thread completes
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
                     }
                 }
             } catch (Throwable e) {
@@ -582,15 +873,70 @@ public final class AsyncNatives {
         // Fast path: single promise
         if (promises.length == 1) {
             results[0] = loomAwaitPromise((MezzePromise) promises[0]);
-            return MezzeList.fromObjects(results);
+            return MezzeList.fromArray(results);
         }
 
-        // Await all in order (preserves result ordering)
+        // OPTIMIZATION: For many promises, use batched polling instead of serial await
+        // This allows us to quickly collect already-completed promises
+        if (promises.length > 8) {
+            return batchedAll(promises, results);
+        }
+
+        // Small number of promises: simple sequential await
         for (int i = 0; i < promises.length; i++) {
             results[i] = loomAwaitPromise((MezzePromise) promises[i]);
         }
 
-        return MezzeList.fromObjects(results);
+        return MezzeList.fromArray(results);
+    }
+
+    /**
+     * OPTIMIZATION: Batched await for many promises.
+     * First collects all already-done promises, then awaits remaining.
+     * This avoids blocking on one slow promise when others are ready.
+     */
+    private static MezzeList batchedAll(Object[] promises, Object[] results) {
+        int remaining = promises.length;
+        boolean[] collected = new boolean[promises.length];
+
+        // Phase 1: Quick spin to collect already-done promises
+        for (int spin = 0; spin < 32 && remaining > 0; spin++) {
+            for (int i = 0; i < promises.length; i++) {
+                if (!collected[i]) {
+                    MezzePromise p = (MezzePromise) promises[i];
+                    if (p.isDone()) {
+                        results[i] = getPromiseResult(p);
+                        collected[i] = true;
+                        remaining--;
+                    }
+                }
+            }
+            if (remaining > 0) {
+                Thread.onSpinWait();
+            }
+        }
+
+        // Phase 2: Await any remaining promises
+        for (int i = 0; i < promises.length; i++) {
+            if (!collected[i]) {
+                results[i] = loomAwaitPromise((MezzePromise) promises[i]);
+            }
+        }
+
+        return MezzeList.fromArray(results);
+    }
+
+    /**
+     * Gets result from a done promise, throwing on failure.
+     */
+    private static Object getPromiseResult(MezzePromise promise) {
+        if (promise.isCompleted()) {
+            return promise.getResult();
+        } else if (promise.isFailed()) {
+            throw new RuntimeException("Task failed: " + promise.getResult());
+        } else {
+            throw new CancellationException("Task was cancelled");
+        }
     }
 
     @TruffleBoundary
@@ -714,7 +1060,7 @@ public final class AsyncNatives {
 
         Thread aThread = env.newTruffleThreadBuilder(() -> {
             try {
-                aFuture.complete(callNode.call(a.getCallTarget(), a.getClosureValues()));
+                aFuture.complete(callThunkFunction(a, callNode));
             } catch (Throwable e) {
                 aFuture.completeExceptionally(e);
             }
@@ -722,7 +1068,7 @@ public final class AsyncNatives {
 
         Thread bThread = env.newTruffleThreadBuilder(() -> {
             try {
-                bFuture.complete(callNode.call(b.getCallTarget(), b.getClosureValues()));
+                bFuture.complete(callThunkFunction(b, callNode));
             } catch (Throwable e) {
                 bFuture.completeExceptionally(e);
             }
@@ -730,7 +1076,7 @@ public final class AsyncNatives {
 
         Thread cThread = env.newTruffleThreadBuilder(() -> {
             try {
-                cFuture.complete(callNode.call(c.getCallTarget(), c.getClosureValues()));
+                cFuture.complete(callThunkFunction(c, callNode));
             } catch (Throwable e) {
                 cFuture.completeExceptionally(e);
             }
@@ -784,8 +1130,8 @@ public final class AsyncNatives {
     }
 
     /**
-     * OPTIMIZATION: Batched parallel map using ForkJoin work-stealing.
-     * Uses thread-local argument buffers to eliminate per-iteration allocation.
+     * Batched parallel map using Truffle virtual threads.
+     * Uses virtual threads to ensure proper Truffle context propagation.
      */
     private static MezzeList batchedMapWithForkJoin(Object[] xs, MezzeFunction f,
                                                      IndirectCallNode callNode, MezzeNode node) {
@@ -794,22 +1140,26 @@ public final class AsyncNatives {
         final int closureLen = closure.length;
         Object[] results = new Object[xs.length];
 
+        // Get Truffle environment for creating proper threads
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
         // Calculate number of batches - use more batches for better parallelism
         int numCores = Runtime.getRuntime().availableProcessors();
         int batchSize = Math.max(1, xs.length / (numCores * 2)); // At least 2 batches per core
         batchSize = Math.min(batchSize, BATCH_SIZE); // But not larger than BATCH_SIZE
         int numBatches = (xs.length + batchSize - 1) / batchSize;
 
-        // Use ForkJoin for work-stealing across batches
-        ForkJoinTask<?>[] tasks = new ForkJoinTask[numBatches];
+        // Use Truffle virtual threads for proper context handling
+        Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
         for (int b = 0; b < numBatches; b++) {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, xs.length);
 
-            tasks[b] = OS_EXECUTOR.submit(() -> {
-                // OPTIMIZATION: Use thread-local buffer instead of allocating
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                // Use thread-local buffer instead of allocating
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
 
@@ -819,15 +1169,21 @@ public final class AsyncNatives {
                     callArgs[closureLen] = arg;
                     results[i] = callNode.call(callTarget, callArgs);
                 }
-            });
+            }).virtual(true).build();
+            threads[b].start();
         }
 
-        // Wait for all batches with work-stealing
-        for (ForkJoinTask<?> task : tasks) {
-            task.join();
+        // Wait for all batches
+        for (Thread thread : threads) {
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Map interrupted", e);
+            }
         }
 
-        return MezzeList.fromObjects(results);
+        return MezzeList.fromArray(results);
     }
 
     // Fast sequential map for small arrays - uses thread-local buffer
@@ -847,7 +1203,7 @@ public final class AsyncNatives {
             results[i] = callNode.call(callTarget, callArgs);
         }
 
-        return MezzeList.fromObjects(results);
+        return MezzeList.fromArray(results);
     }
 
     /**
@@ -869,19 +1225,22 @@ public final class AsyncNatives {
             return sequentialForEachInternal(xs, f, callNode);
         }
 
-        // OPTIMIZATION: ALL parallel operations use batching now
-        // No more 1-thread-per-element which has high overhead
-        return batchedForEachWithForkJoin(xs, f, callNode);
+        // Use Truffle threads for proper context propagation
+        return batchedForEachWithTruffleThreads(xs, f, callNode, node);
     }
 
     /**
-     * OPTIMIZATION: Batched forEach using ForkJoin work-stealing.
-     * Uses thread-local argument buffers to eliminate per-iteration allocation.
+     * Batched forEach using Truffle virtual threads.
+     * Uses virtual threads to ensure proper Truffle context propagation.
      */
-    private static MezzeUnit batchedForEachWithForkJoin(Object[] xs, MezzeFunction f, IndirectCallNode callNode) {
+    private static MezzeUnit batchedForEachWithTruffleThreads(Object[] xs, MezzeFunction f, IndirectCallNode callNode, MezzeNode node) {
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
         final int closureLen = closure.length;
+
+        // Get Truffle environment for creating proper threads
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
 
         // Calculate number of batches - use more batches for better parallelism
         int numCores = Runtime.getRuntime().availableProcessors();
@@ -889,15 +1248,15 @@ public final class AsyncNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE); // But not larger than BATCH_SIZE
         int numBatches = (xs.length + batchSize - 1) / batchSize;
 
-        ForkJoinTask<?>[] tasks = new ForkJoinTask[numBatches];
+        Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
         for (int b = 0; b < numBatches; b++) {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, xs.length);
 
-            tasks[b] = OS_EXECUTOR.submit(() -> {
-                // OPTIMIZATION: Use thread-local buffer instead of allocating
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                // Use thread-local buffer instead of allocating
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
 
@@ -907,11 +1266,18 @@ public final class AsyncNatives {
                     callArgs[closureLen] = arg;
                     callNode.call(callTarget, callArgs);
                 }
-            });
+            }).virtual(true).build();
+            threads[b].start();
         }
 
-        for (ForkJoinTask<?> task : tasks) {
-            task.join();
+        // Wait for all batches
+        for (Thread thread : threads) {
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("ForEach interrupted", e);
+            }
         }
 
         return MezzeUnit.INSTANCE;
@@ -954,19 +1320,22 @@ public final class AsyncNatives {
             return sequentialFilterInternal(xs, f, callNode);
         }
 
-        // OPTIMIZATION: ALL parallel operations use batching now
-        // No more 1-thread-per-element which has high overhead
-        return batchedFilterWithForkJoin(xs, f, callNode);
+        // Use Truffle threads for proper context propagation
+        return batchedFilterWithTruffleThreads(xs, f, callNode, node);
     }
 
     /**
-     * OPTIMIZATION: Batched filter using ForkJoin work-stealing.
-     * Uses thread-local argument buffers to eliminate per-iteration allocation.
+     * Batched filter using Truffle virtual threads.
+     * Uses virtual threads to ensure proper Truffle context propagation.
      */
-    private static MezzeList batchedFilterWithForkJoin(Object[] xs, MezzeFunction f, IndirectCallNode callNode) {
+    private static MezzeList batchedFilterWithTruffleThreads(Object[] xs, MezzeFunction f, IndirectCallNode callNode, MezzeNode node) {
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
         final int closureLen = closure.length;
+
+        // Get Truffle environment for creating proper threads
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
 
         // Use array of booleans to track which elements pass the filter
         boolean[] passed = new boolean[xs.length];
@@ -977,15 +1346,15 @@ public final class AsyncNatives {
         batchSize = Math.min(batchSize, BATCH_SIZE); // But not larger than BATCH_SIZE
         int numBatches = (xs.length + batchSize - 1) / batchSize;
 
-        ForkJoinTask<?>[] tasks = new ForkJoinTask[numBatches];
+        Thread[] threads = new Thread[numBatches];
         final int finalBatchSize = batchSize;
 
         for (int b = 0; b < numBatches; b++) {
             final int batchStart = b * finalBatchSize;
             final int batchEnd = Math.min(batchStart + finalBatchSize, xs.length);
 
-            tasks[b] = OS_EXECUTOR.submit(() -> {
-                // OPTIMIZATION: Use thread-local buffer instead of allocating
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                // Use thread-local buffer instead of allocating
                 Object[] callArgs = getCallArgsBuffer(closureLen + 1);
                 System.arraycopy(closure, 0, callArgs, 0, closureLen);
 
@@ -996,11 +1365,18 @@ public final class AsyncNatives {
                     Object result = callNode.call(callTarget, callArgs);
                     passed[i] = result instanceof Boolean && (Boolean) result;
                 }
-            });
+            }).virtual(true).build();
+            threads[b].start();
         }
 
-        for (ForkJoinTask<?> task : tasks) {
-            task.join();
+        // Wait for all threads
+        for (Thread thread : threads) {
+            try {
+                thread.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Filter interrupted", e);
+            }
         }
 
         // Collect results
@@ -1010,7 +1386,7 @@ public final class AsyncNatives {
                 results.add(xs[i]);
             }
         }
-        return MezzeList.fromObjects(results.toArray());
+        return MezzeList.fromArray(results.toArray());
     }
 
     // Fast sequential filter for small arrays - uses thread-local buffer
@@ -1032,9 +1408,14 @@ public final class AsyncNatives {
                 results.add(x);
             }
         }
-        return MezzeList.fromObjects(results.toArray());
+        return MezzeList.fromArray(results.toArray());
     }
 
+    /**
+     * OPTIMIZATION: Returns first successfully completed promise.
+     * Uses polling-based approach to avoid blocking on a slow promise
+     * when a fast one completes.
+     */
     @TruffleBoundary
     public static Object loomAny(MezzeRecord args) {
         Object[] promises = getArray(args, "ps");
@@ -1042,21 +1423,68 @@ public final class AsyncNatives {
             throw new RuntimeException("any requires at least one promise");
         }
 
-        List<Throwable> failures = new ArrayList<>();
-
-        for (Object p : promises) {
-            MezzePromise promise = (MezzePromise) p;
-            try {
-                return promise.await();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Interrupted during any", e);
-            } catch (RuntimeException e) {
-                failures.add(e);
-            }
+        // Fast path: single promise
+        if (promises.length == 1) {
+            return loomAwaitPromise((MezzePromise) promises[0]);
         }
 
-        throw new RuntimeException("All tasks failed. First: " + failures.get(0).getMessage());
+        List<Throwable> failures = new ArrayList<>();
+        boolean[] failed = new boolean[promises.length];
+        int failedCount = 0;
+
+        // Phase 1: Quick spin to find already-done promises
+        for (int spin = 0; spin < 64; spin++) {
+            for (int i = 0; i < promises.length; i++) {
+                if (failed[i]) continue;
+                MezzePromise promise = (MezzePromise) promises[i];
+                if (promise.isDone()) {
+                    if (promise.isCompleted()) {
+                        return promise.getResult();
+                    } else if (promise.isFailed()) {
+                        failures.add((Throwable) promise.getResult());
+                        failed[i] = true;
+                        failedCount++;
+                    }
+                    // Cancelled - keep checking others
+                }
+            }
+            if (failedCount == promises.length) {
+                throw new RuntimeException("All tasks failed. First: " + failures.get(0).getMessage());
+            }
+            Thread.onSpinWait();
+        }
+
+        // Phase 2: Park with periodic wake-up
+        long parkNanos = 100_000; // 100us
+        final long maxParkNanos = 10_000_000; // 10ms
+
+        while (true) {
+            for (int i = 0; i < promises.length; i++) {
+                if (failed[i]) continue;
+                MezzePromise promise = (MezzePromise) promises[i];
+                if (promise.isDone()) {
+                    if (promise.isCompleted()) {
+                        return promise.getResult();
+                    } else if (promise.isFailed()) {
+                        failures.add((Throwable) promise.getResult());
+                        failed[i] = true;
+                        failedCount++;
+                    }
+                }
+            }
+
+            if (failedCount == promises.length) {
+                throw new RuntimeException("All tasks failed. First: " + failures.get(0).getMessage());
+            }
+
+            if (Thread.interrupted()) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted during any");
+            }
+
+            LockSupport.parkNanos(parkNanos);
+            parkNanos = Math.min(parkNanos * 2, maxParkNanos);
+        }
     }
 
     @TruffleBoundary
@@ -1079,7 +1507,7 @@ public final class AsyncNatives {
             }
         }
 
-        return MezzeList.fromObjects(results);
+        return MezzeList.fromArray(results);
     }
 
     @TruffleBoundary
@@ -1127,19 +1555,36 @@ public final class AsyncNatives {
         Object[] closure = f.getClosureValues();
 
         // Use env from scope or from node
-        Env env = scope.env != null ? scope.env : MezzeContext.get(node).getEnv();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = scope.env != null ? scope.env : context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
 
         MezzePromise promise = new MezzePromise(null, null);
         scope.addChild(promise);
 
         Thread vThread = env.newTruffleThreadBuilder(() -> {
             try {
-                if (scope.isCancelled()) {
-                    promise.cancel();
-                    return;
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
                 }
-                Object result = callNode.call(callTarget, closure);
-                promise.complete(result);
+
+                try {
+                    if (scope.isCancelled()) {
+                        promise.cancel();
+                        return;
+                    }
+                    Object result = callNode.call(callTarget, closure);
+                    promise.complete(result);
+                } finally {
+                    // LAZY EFFECTS: Pop handlers when thread completes
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 promise.fail(e);
             } finally {
@@ -1182,15 +1627,33 @@ public final class AsyncNatives {
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
 
-        Env env = MezzeContext.get(node).getEnv();
+        MezzeContext context = MezzeContext.get(node);
+        Env env = context.getEnv();
+
+        // LAZY EFFECTS: Capture parent's handlers to propagate to spawned thread
+        java.util.Map<String, Object> parentHandlers = context.getAllCurrentHandlers();
+
         MezzePromise promise = new MezzePromise(null, null);
 
         // Use TruffleThreadBuilder for proper context handling
         // Note: .virtual(false) for OS threads (platform threads)
         Thread thread = env.newTruffleThreadBuilder(() -> {
             try {
-                Object result = callNode.call(callTarget, closure);
-                promise.complete(result);
+                // LAZY EFFECTS: Push parent handlers onto this thread's stack
+                MezzeContext threadContext = MezzeContext.get(node);
+                if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                    threadContext.pushHandlers(parentHandlers);
+                }
+
+                try {
+                    Object result = callNode.call(callTarget, closure);
+                    promise.complete(result);
+                } finally {
+                    // LAZY EFFECTS: Pop handlers when thread completes
+                    if (parentHandlers != null && !parentHandlers.isEmpty()) {
+                        threadContext.popHandlers();
+                    }
+                }
             } catch (Throwable e) {
                 promise.fail(e);
             }
@@ -1261,7 +1724,7 @@ public final class AsyncNatives {
 
         Thread leftThread = env.newTruffleThreadBuilder(() -> {
             try {
-                leftFuture.complete(callNode.call(left.getCallTarget(), left.getClosureValues()));
+                leftFuture.complete(callThunkFunction(left, callNode));
             } catch (Throwable e) {
                 leftFuture.completeExceptionally(e);
             }
@@ -1269,7 +1732,7 @@ public final class AsyncNatives {
 
         Thread rightThread = env.newTruffleThreadBuilder(() -> {
             try {
-                rightFuture.complete(callNode.call(right.getCallTarget(), right.getClosureValues()));
+                rightFuture.complete(callThunkFunction(right, callNode));
             } catch (Throwable e) {
                 rightFuture.completeExceptionally(e);
             }
@@ -1309,7 +1772,7 @@ public final class AsyncNatives {
 
         Thread aThread = env.newTruffleThreadBuilder(() -> {
             try {
-                aFuture.complete(callNode.call(a.getCallTarget(), a.getClosureValues()));
+                aFuture.complete(callThunkFunction(a, callNode));
             } catch (Throwable e) {
                 aFuture.completeExceptionally(e);
             }
@@ -1317,7 +1780,7 @@ public final class AsyncNatives {
 
         Thread bThread = env.newTruffleThreadBuilder(() -> {
             try {
-                bFuture.complete(callNode.call(b.getCallTarget(), b.getClosureValues()));
+                bFuture.complete(callThunkFunction(b, callNode));
             } catch (Throwable e) {
                 bFuture.completeExceptionally(e);
             }
@@ -1325,7 +1788,7 @@ public final class AsyncNatives {
 
         Thread cThread = env.newTruffleThreadBuilder(() -> {
             try {
-                cFuture.complete(callNode.call(c.getCallTarget(), c.getClosureValues()));
+                cFuture.complete(callThunkFunction(c, callNode));
             } catch (Throwable e) {
                 cFuture.completeExceptionally(e);
             }
@@ -1348,6 +1811,11 @@ public final class AsyncNatives {
         }
     }
 
+    /**
+     * OPTIMIZATION: OS thread map now uses batched execution with bounded thread pool.
+     * Instead of creating 1 thread per element (1.3MB each!), we batch elements
+     * and use a bounded pool of platform threads.
+     */
     @TruffleBoundary
     public static MezzeList osMap(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         Object[] xs = getArray(args, "xs");
@@ -1357,42 +1825,62 @@ public final class AsyncNatives {
             return MezzeList.empty();
         }
 
+        // Sequential fallback for small arrays
+        if (xs.length < PARALLEL_THRESHOLD) {
+            return sequentialMapInternal(xs, f, callNode);
+        }
+
+        // OPTIMIZATION: Use batched execution with Truffle threads
+        // This reduces thread creation from N to ~numCores threads
         Env env = MezzeContext.get(node).getEnv();
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
-
-        @SuppressWarnings("unchecked")
-        CompletableFuture<Object>[] futures = new CompletableFuture[xs.length];
-        Thread[] threads = new Thread[xs.length];
-
-        for (int i = 0; i < xs.length; i++) {
-            final Object x = xs[i];
-            final int idx = i;
-            futures[i] = new CompletableFuture<>();
-            threads[i] = env.newTruffleThreadBuilder(() -> {
-                try {
-                    MezzeRecord arg = MezzeRecord.fromFields(new String[]{"x"}, new Object[]{x});
-                    futures[idx].complete(callNode.call(callTarget, appendArg(closure, arg)));
-                } catch (Throwable e) {
-                    futures[idx].completeExceptionally(e);
-                }
-            }).build();
-            threads[i].start();
-        }
-
+        final int closureLen = closure.length;
         Object[] results = new Object[xs.length];
-        try {
-            for (int i = 0; i < futures.length; i++) {
-                results[i] = futures[i].get();
-            }
-        } catch (InterruptedException | ExecutionException e) {
-            for (Thread t : threads) t.interrupt();
-            throw new RuntimeException("Map failed", e);
+
+        // Calculate batches - use numCores threads
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, xs.length / numCores);
+        int numBatches = (xs.length + batchSize - 1) / batchSize;
+
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int b = 0; b < numBatches; b++) {
+            final int batchStart = b * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, xs.length);
+
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                // Thread-local buffer for this batch
+                Object[] callArgs = getCallArgsBuffer(closureLen + 1);
+                System.arraycopy(closure, 0, callArgs, 0, closureLen);
+
+                for (int i = batchStart; i < batchEnd; i++) {
+                    MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{xs[i]});
+                    callArgs[closureLen] = arg;
+                    results[i] = callNode.call(callTarget, callArgs);
+                }
+            }).build();  // Platform thread (not virtual)
+            threads[b].start();
         }
 
-        return MezzeList.fromObjects(results);
+        // Wait for all batches
+        try {
+            for (Thread t : threads) {
+                t.join();
+            }
+        } catch (InterruptedException e) {
+            for (Thread t : threads) t.interrupt();
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Map interrupted", e);
+        }
+
+        return MezzeList.fromArray(results);
     }
 
+    /**
+     * OPTIMIZATION: OS thread forEach now uses batched execution.
+     */
     @TruffleBoundary
     public static MezzeUnit osForEach(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         Object[] xs = getArray(args, "xs");
@@ -1402,40 +1890,57 @@ public final class AsyncNatives {
             return MezzeUnit.INSTANCE;
         }
 
+        // Sequential fallback for small arrays
+        if (xs.length < PARALLEL_THRESHOLD) {
+            return sequentialForEachInternal(xs, f, callNode);
+        }
+
+        // OPTIMIZATION: Batched execution with Truffle threads
         Env env = MezzeContext.get(node).getEnv();
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
+        final int closureLen = closure.length;
 
-        @SuppressWarnings("unchecked")
-        CompletableFuture<Void>[] futures = new CompletableFuture[xs.length];
-        Thread[] threads = new Thread[xs.length];
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, xs.length / numCores);
+        int numBatches = (xs.length + batchSize - 1) / batchSize;
 
-        for (int i = 0; i < xs.length; i++) {
-            final Object x = xs[i];
-            final int idx = i;
-            futures[i] = new CompletableFuture<>();
-            threads[i] = env.newTruffleThreadBuilder(() -> {
-                try {
-                    MezzeRecord arg = MezzeRecord.fromFields(new String[]{"x"}, new Object[]{x});
-                    callNode.call(callTarget, appendArg(closure, arg));
-                    futures[idx].complete(null);
-                } catch (Throwable e) {
-                    futures[idx].completeExceptionally(e);
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int b = 0; b < numBatches; b++) {
+            final int batchStart = b * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, xs.length);
+
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                Object[] callArgs = getCallArgsBuffer(closureLen + 1);
+                System.arraycopy(closure, 0, callArgs, 0, closureLen);
+
+                for (int i = batchStart; i < batchEnd; i++) {
+                    MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{xs[i]});
+                    callArgs[closureLen] = arg;
+                    callNode.call(callTarget, callArgs);
                 }
             }).build();
-            threads[i].start();
+            threads[b].start();
         }
 
         try {
-            CompletableFuture.allOf(futures).get();
-        } catch (InterruptedException | ExecutionException e) {
+            for (Thread t : threads) {
+                t.join();
+            }
+        } catch (InterruptedException e) {
             for (Thread t : threads) t.interrupt();
-            throw new RuntimeException("ForEach failed", e);
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("ForEach interrupted", e);
         }
 
         return MezzeUnit.INSTANCE;
     }
 
+    /**
+     * OPTIMIZATION: OS thread filter now uses batched execution.
+     */
     @TruffleBoundary
     public static MezzeList osFilter(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         Object[] xs = getArray(args, "xs");
@@ -1445,43 +1950,64 @@ public final class AsyncNatives {
             return MezzeList.empty();
         }
 
+        // Sequential fallback for small arrays
+        if (xs.length < PARALLEL_THRESHOLD) {
+            return sequentialFilterInternal(xs, f, callNode);
+        }
+
+        // OPTIMIZATION: Batched execution with Truffle threads
         Env env = MezzeContext.get(node).getEnv();
         var callTarget = f.getCallTarget();
         Object[] closure = f.getClosureValues();
+        final int closureLen = closure.length;
 
-        @SuppressWarnings("unchecked")
-        CompletableFuture<Boolean>[] futures = new CompletableFuture[xs.length];
-        Thread[] threads = new Thread[xs.length];
+        // Use boolean array for thread-safe results
+        boolean[] keep = new boolean[xs.length];
 
-        for (int i = 0; i < xs.length; i++) {
-            final Object x = xs[i];
-            final int idx = i;
-            futures[i] = new CompletableFuture<>();
-            threads[i] = env.newTruffleThreadBuilder(() -> {
-                try {
-                    MezzeRecord arg = MezzeRecord.fromFields(new String[]{"x"}, new Object[]{x});
-                    Object result = callNode.call(callTarget, appendArg(closure, arg));
-                    futures[idx].complete(result instanceof Boolean && (Boolean) result);
-                } catch (Throwable e) {
-                    futures[idx].completeExceptionally(e);
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, xs.length / numCores);
+        int numBatches = (xs.length + batchSize - 1) / batchSize;
+
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int b = 0; b < numBatches; b++) {
+            final int batchStart = b * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, xs.length);
+
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                Object[] callArgs = getCallArgsBuffer(closureLen + 1);
+                System.arraycopy(closure, 0, callArgs, 0, closureLen);
+
+                for (int i = batchStart; i < batchEnd; i++) {
+                    MezzeRecord arg = MezzeRecord.fromFields(X_FIELD, new Object[]{xs[i]});
+                    callArgs[closureLen] = arg;
+                    Object result = callNode.call(callTarget, callArgs);
+                    keep[i] = result instanceof Boolean && (Boolean) result;
                 }
             }).build();
-            threads[i].start();
+            threads[b].start();
         }
 
-        List<Object> results = new ArrayList<>();
         try {
-            for (int i = 0; i < futures.length; i++) {
-                if (futures[i].get()) {
-                    results.add(xs[i]);
-                }
+            for (Thread t : threads) {
+                t.join();
             }
-        } catch (InterruptedException | ExecutionException e) {
+        } catch (InterruptedException e) {
             for (Thread t : threads) t.interrupt();
-            throw new RuntimeException("Filter failed", e);
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Filter interrupted", e);
         }
 
-        return MezzeList.fromObjects(results.toArray());
+        // Collect results
+        List<Object> results = new ArrayList<>();
+        for (int i = 0; i < xs.length; i++) {
+            if (keep[i]) {
+                results.add(xs[i]);
+            }
+        }
+
+        return MezzeList.fromArray(results.toArray());
     }
 
     @TruffleBoundary
@@ -1520,7 +2046,13 @@ public final class AsyncNatives {
 
         // In coop mode, we execute immediately (cooperative = no true parallelism)
         try {
-            promise.result = callNode.call(f.getCallTarget(), f.getClosureValues());
+            // Build argument array: closure values + empty record argument
+            Object[] closureValues = f.getClosureValues();
+            Object[] fullArgs = new Object[closureValues.length + 1];
+            System.arraycopy(closureValues, 0, fullArgs, 0, closureValues.length);
+            fullArgs[closureValues.length] = MezzeRecord.empty();
+
+            promise.result = callNode.call(f.getCallTarget(), fullArgs);
             promise.completed = true;
         } catch (Throwable e) {
             promise.result = e;
@@ -1573,7 +2105,7 @@ public final class AsyncNatives {
             results[i] = p.result;
         }
 
-        return MezzeList.fromObjects(results);
+        return MezzeList.fromArray(results);
     }
 
     @TruffleBoundary
@@ -1602,8 +2134,8 @@ public final class AsyncNatives {
         MezzeFunction left = getFunction(args, "left");
         MezzeFunction right = getFunction(args, "right");
 
-        Object leftResult = callNode.call(left.getCallTarget(), left.getClosureValues());
-        Object rightResult = callNode.call(right.getCallTarget(), right.getClosureValues());
+        Object leftResult = callThunkFunction(left, callNode);
+        Object rightResult = callThunkFunction(right, callNode);
 
         return MezzeRecord.fromFields(
             LEFT_RIGHT_FIELDS,
@@ -1620,9 +2152,9 @@ public final class AsyncNatives {
         return MezzeRecord.fromFields(
             ABC_FIELDS,
             new Object[]{
-                callNode.call(a.getCallTarget(), a.getClosureValues()),
-                callNode.call(b.getCallTarget(), b.getClosureValues()),
-                callNode.call(c.getCallTarget(), c.getClosureValues())
+                callThunkFunction(a, callNode),
+                callThunkFunction(b, callNode),
+                callThunkFunction(c, callNode)
             }
         );
     }
@@ -1641,7 +2173,7 @@ public final class AsyncNatives {
             results[i] = callNode.call(callTarget, appendArg(closure, arg));
         }
 
-        return MezzeList.fromObjects(results);
+        return MezzeList.fromArray(results);
     }
 
     @TruffleBoundary
@@ -1677,7 +2209,7 @@ public final class AsyncNatives {
             }
         }
 
-        return MezzeList.fromObjects(results.toArray());
+        return MezzeList.fromArray(results.toArray());
     }
 
     @TruffleBoundary
@@ -1713,7 +2245,7 @@ public final class AsyncNatives {
             }
         }
 
-        return MezzeList.fromObjects(results);
+        return MezzeList.fromArray(results);
     }
 
     @TruffleBoundary
@@ -1763,6 +2295,12 @@ public final class AsyncNatives {
         return result;
     }
 
+    private static Object getFieldValue(MezzeRecord r, String name) {
+        int idx = r.getFieldIndex(name);
+        if (idx < 0) throw new RuntimeException("Missing field '" + name + "' in record: " + r);
+        return r.getField(idx);
+    }
+
     private static MezzeFunction getFunction(MezzeRecord r, String name) {
         int idx = r.getFieldIndex(name);
         if (idx < 0) throw new RuntimeException("Missing field '" + name + "' in record: " + r);
@@ -1786,7 +2324,7 @@ public final class AsyncNatives {
         if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         if (val instanceof Object[] arr) return arr;
-        if (val instanceof MezzeList list) return list.getObjectStore();
+        if (val instanceof MezzeList list) return list.toArray();
         throw new RuntimeException("Expected array for '" + name + "'");
     }
 
@@ -1795,7 +2333,7 @@ public final class AsyncNatives {
         if (idx < 0) throw new RuntimeException("Missing field '" + name + "'");
         Object val = r.getField(idx);
         if (val instanceof MezzeList list) return list;
-        if (val instanceof Object[] arr) return MezzeList.fromObjects(arr);
+        if (val instanceof Object[] arr) return MezzeList.fromArray(arr);
         throw new RuntimeException("Expected list for '" + name + "'");
     }
 

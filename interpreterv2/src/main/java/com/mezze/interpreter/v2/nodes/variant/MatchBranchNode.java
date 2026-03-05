@@ -461,6 +461,29 @@ public final class MatchBranchNode extends MezzeNode {
     }
 
     /**
+     * Check if this is a literal pattern branch.
+     */
+    public boolean isLiteralPattern() {
+        return tag == -2;
+    }
+
+    /**
+     * Get the literal value for this branch (for cache building).
+     * Returns the typed literal value or null if not a literal pattern.
+     */
+    public Object getLiteralValue() {
+        if (tag != -2) return null;
+        // Return the typed value for cache lookup
+        return switch (literalType) {
+            case 0 -> literalLong;      // Long
+            case 1 -> literalDouble;    // Double
+            case 2 -> literalBoolean;   // Boolean
+            case 3, 4 -> literalValue;  // String or Object
+            default -> null;
+        };
+    }
+
+    /**
      * Check if this matches a literal value - OPTIMIZED.
      * Uses pre-computed typed values to avoid boxing overhead.
      * Wildcards (tag == -1) match any value.
@@ -621,21 +644,11 @@ public final class MatchBranchNode extends MezzeNode {
             return; // Fast path for empty pattern []
         }
 
-        MezzeList.Strategy strategy = list.getStrategy();
-
-        // Bind each element position
+        // Bind each element position - Vavr List is always boxed, no strategy needed
         for (int i = 0; i < elementCount; i++) {
             int slot = arrayElementSlots[i];
             if (slot >= 0) {
-                // Use strategy-aware access for best performance
-                Object elem = switch (strategy) {
-                    case LONG -> list.getLong(i);
-                    case DOUBLE -> list.getDouble(i);
-                    case BOOLEAN -> list.getBoolean(i);
-                    case OBJECT -> list.getObject(i);
-                    case EMPTY -> null; // Can't happen if elementCount > 0
-                };
-                frame.setObject(slot, elem);
+                frame.setObject(slot, list.get(i));
             }
         }
 

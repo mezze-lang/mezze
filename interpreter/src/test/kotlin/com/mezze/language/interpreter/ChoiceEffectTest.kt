@@ -43,7 +43,7 @@ class ChoiceEffectTest {
             use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let result = Choice.choose { options = [1, 2] }
                 result
 
@@ -67,7 +67,7 @@ class ChoiceEffectTest {
             use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let x = Choice.choose { options = [1, 2] }
                 let y = Choice.choose { options = [10, 20] }
                 x + y
@@ -93,7 +93,7 @@ class ChoiceEffectTest {
             use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let x = Choice.choose { options = [1, 2, 3] }
                 # Filter out even numbers by failing
                 match x % 2 is
@@ -120,7 +120,7 @@ class ChoiceEffectTest {
             use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 Choice.choose { options = [] }
 
             computation {}
@@ -151,7 +151,7 @@ class ChoiceEffectTest {
             use std::effects::choice::{Choice, AllPaths}
 
             # Fully inline the computation in the perform block
-            let getResult = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let getResult = {} -> perform AllPaths in do
                 let x = Choice.choose { options = [1, 2, 3] }
                 let y = Choice.choose { options = [4, 5] }
                 {first = x, second = y}
@@ -183,7 +183,7 @@ class ChoiceEffectTest {
 
             let pureFunc = {x} -> x * 2
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let choice = Choice.choose { options = [5, 10] }
                 pureFunc { x = choice }
 
@@ -206,11 +206,11 @@ class ChoiceEffectTest {
             use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let inner = {x} -> perform AllPaths {cont = continuation::new {}} in do
+            let inner = {x} -> perform AllPaths in do
                 let y = Choice.choose { options = [1, 2] }
                 x + y
 
-            let outer = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let outer = {} -> perform AllPaths in do
                 let x = Choice.choose { options = [10, 20] }
                 inner { x = x }
 
@@ -234,7 +234,7 @@ class ChoiceEffectTest {
             use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let x = Choice.choose { options = [1, 2, 3, 4, 5] }
                 # Only keep values greater than 2
                 match x > 2 is
@@ -259,7 +259,7 @@ class ChoiceEffectTest {
             use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let color = Choice.choose { options = ["red", "blue"] }
                 let size = Choice.choose { options = [1, 2] }
                 {color = color, size = size}

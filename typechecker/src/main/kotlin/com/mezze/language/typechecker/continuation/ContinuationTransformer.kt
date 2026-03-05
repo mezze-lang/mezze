@@ -72,13 +72,43 @@ class ContinuationTransformer {
         // Transform statements into states
         transformStatements(doExpr.statements, doExpr.result, states, liveVars)
 
-        // Extract all captured variables
-        val allCapturedVars = states.flatMap { state ->
+        // Extract all captured variables - from yield states AND all live variables across states
+        // This is critical for multi-shot continuations (fork) where we need to restore
+        // all variables that are live at the point of capture
+        val yieldCapturedVars = states.flatMap { state ->
             when (state) {
                 is YieldState -> state.capturedVariables
                 else -> emptyList()
             }
-        }.distinct()
+        }
+        val allLiveVars = liveVars.values.flatten()
+
+        // Also collect FREE variables - variables that are used but not defined in the do block
+        // These are closure variables from the enclosing scope that need to be captured
+        val definedVars = mutableSetOf<String>()
+        for (stmt in doExpr.statements) {
+            when (stmt) {
+                is LetStatement -> {
+                    if (stmt.isSimpleBinding) {
+                        definedVars.add(stmt.variableName)
+                    } else {
+                        definedVars.addAll(stmt.pattern.extractBindings())
+                    }
+                }
+                else -> {}
+            }
+        }
+        val usedVars = mutableSetOf<String>()
+        for (stmt in doExpr.statements) {
+            when (stmt) {
+                is LetStatement -> usedVars.addAll(collectUsedVariables(stmt.expression))
+                is ExpressionStatement -> usedVars.addAll(collectUsedVariables(stmt.expression))
+            }
+        }
+        usedVars.addAll(collectUsedVariables(doExpr.result))
+        val freeVars = usedVars - definedVars
+
+        val allCapturedVars = (yieldCapturedVars + allLiveVars + freeVars).distinct()
 
         return StateMachineExpression(
             states = states,
@@ -490,7 +520,20 @@ class ContinuationTransformer {
                 }
             }
             is LambdaExpression -> {
-                collectUsedVariablesRecursive(expr.body, collector)
+                // Lambda bodies encapsulate their own scope.
+                // Only collect FREE variables of the lambda (used but not defined inside).
+                val lambdaParams = when (val params = expr.parameters) {
+                    is UntypedParameters -> params.names.toSet()
+                    is TypedParameters -> params.recordType.entries.map { it.name }.toSet()
+                }
+                // Collect variables from lambda body
+                val bodyVars = mutableSetOf<String>()
+                collectUsedVariablesRecursive(expr.body, bodyVars)
+                // Collect variables defined inside the lambda body (let bindings in do blocks)
+                val definedInBody = collectDefinedVariables(expr.body)
+                // Only include FREE variables (not lambda params, not defined inside)
+                val freeVars = bodyVars - lambdaParams - definedInBody
+                collector.addAll(freeVars)
             }
             is VariantConstruction -> {
                 expr.value?.let { collectUsedVariablesRecursive(it, collector) }
@@ -545,6 +588,70 @@ class ContinuationTransformer {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Collect all variables defined (bound) within an expression.
+     * This includes let bindings in do blocks, match pattern bindings, etc.
+     */
+    private fun collectDefinedVariables(expr: Expression): Set<String> {
+        val defined = mutableSetOf<String>()
+        collectDefinedVariablesRecursive(expr, defined)
+        return defined
+    }
+
+    private fun collectDefinedVariablesRecursive(expr: Expression, collector: MutableSet<String>) {
+        when (expr) {
+            is DoExpression -> {
+                for (stmt in expr.statements) {
+                    when (stmt) {
+                        is LetStatement -> {
+                            // Add variables bound by this let
+                            collector.addAll(stmt.pattern.extractBindings())
+                            // Also recurse into the expression (might have nested do blocks)
+                            collectDefinedVariablesRecursive(stmt.expression, collector)
+                        }
+                        is ExpressionStatement -> {
+                            collectDefinedVariablesRecursive(stmt.expression, collector)
+                        }
+                    }
+                }
+                collectDefinedVariablesRecursive(expr.result, collector)
+            }
+            is IfExpression -> {
+                collectDefinedVariablesRecursive(expr.thenBranch, collector)
+                collectDefinedVariablesRecursive(expr.elseBranch, collector)
+            }
+            is MatchExpression -> {
+                expr.cases.forEach { case ->
+                    // Match patterns bind variables in each branch
+                    case.patterns.forEach { pattern ->
+                        collector.addAll(pattern.extractBindings())
+                    }
+                    collectDefinedVariablesRecursive(case.expression, collector)
+                }
+            }
+            is LambdaExpression -> {
+                // Don't recurse into nested lambdas - their bindings are their own scope
+            }
+            is FunctionCall -> {
+                collectDefinedVariablesRecursive(expr.arguments, collector)
+            }
+            is RecordLiteral -> {
+                expr.getFieldEntries().forEach { entry ->
+                    entry.value?.let { collectDefinedVariablesRecursive(it, collector) }
+                }
+            }
+            is ArrayLiteral -> {
+                expr.elements.forEach { element ->
+                    when (element) {
+                        is ArrayRegularElement -> collectDefinedVariablesRecursive(element.expression, collector)
+                        is ArraySpreadElement -> collectDefinedVariablesRecursive(element.expression, collector)
+                    }
+                }
+            }
+            else -> {} // Other expressions don't define variables
         }
     }
 

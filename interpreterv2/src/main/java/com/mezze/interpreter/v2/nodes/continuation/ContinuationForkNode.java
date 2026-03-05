@@ -12,8 +12,6 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.NodeInfo;
 import com.oracle.truffle.api.profiles.InlinedBranchProfile;
 
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * __native_continuation_fork - Multi-shot continuation resume.
@@ -38,6 +36,10 @@ public final class ContinuationForkNode extends MezzeNode {
     private final InlinedBranchProfile errorProfile = InlinedBranchProfile.getUncached();
     private final InlinedBranchProfile emptyProfile = InlinedBranchProfile.getUncached();
     private final InlinedBranchProfile nestedForkProfile = InlinedBranchProfile.getUncached();
+
+    // Pre-computed field name array for value records - shared across all instances
+    // Avoids repeated array allocation for every resume call
+    private static final String[] VALUE_FIELD_NAMES = new String[]{"value"};
 
     public ContinuationForkNode(MezzeNode argsNode) {
         this.argsNode = argsNode;
@@ -68,7 +70,7 @@ public final class ContinuationForkNode extends MezzeNode {
         if (valuesObj instanceof MezzeList ml) {
             values = ml;
         } else if (valuesObj instanceof Object[] arr) {
-            values = new MezzeList(arr);
+            values = MezzeList.fromArray(arr);
         } else {
             errorProfile.enter(this);
             CompilerDirectives.transferToInterpreterAndInvalidate();
@@ -90,15 +92,24 @@ public final class ContinuationForkNode extends MezzeNode {
         }
 
         // Top-level fork - execute continuation with each value
-        return executeFork(contObj, values);
+        // After collecting all results, throw ForkedExecutionException so the effect handler
+        // can catch it and return the results. We don't return directly because that would
+        // assign the result list to the variable at the fork call site.
+        MezzeList results = executeFork(contObj, values);
+        throw new ForkedExecutionException(contObj, results);
     }
 
     /**
-     * Execute the fork operation.
+     * Execute the fork operation - OPTIMIZED.
+     *
+     * Uses pre-allocated result array instead of ArrayList to reduce allocations.
+     * Array grows 2x when needed (amortized O(1) append).
      */
     @TruffleBoundary
     private MezzeList executeFork(Object cont, MezzeList values) {
-        List<Object> results = new ArrayList<>();
+        // Pre-allocate with extra space for nested forks (common in Choice effect)
+        Object[] results = new Object[values.size() * 2];
+        int resultCount = 0;
         boolean wasInsideFork = DelimiterStack.isInsideFork();
 
         for (int i = 0; i < values.size(); i++) {
@@ -107,42 +118,61 @@ public final class ContinuationForkNode extends MezzeNode {
             try {
                 DelimiterStack.setInsideFork(true);
                 Object result = resumeContinuation(cont, value);
-                results.add(result);
+                // Ensure capacity
+                if (resultCount >= results.length) {
+                    results = growArray(results);
+                }
+                results[resultCount++] = result;
             } catch (ForkedExecutionException e) {
                 // Nested fork - recursively fork with nested values
                 MezzeList nestedResults = executeFork(e.continuation, e.values);
                 // Add all nested results (cartesian product)
                 for (int j = 0; j < nestedResults.size(); j++) {
-                    results.add(nestedResults.get(j));
+                    if (resultCount >= results.length) {
+                        results = growArray(results);
+                    }
+                    results[resultCount++] = nestedResults.get(j);
                 }
             } catch (ContinuationAbortedException e) {
-                // This path aborted - skip it
+                // This path aborted - skip it (no result added)
             } finally {
                 DelimiterStack.setInsideFork(wasInsideFork);
             }
         }
 
-        return new MezzeList(results.toArray());
+        // Trim to actual size if needed
+        if (resultCount < results.length) {
+            Object[] trimmed = new Object[resultCount];
+            System.arraycopy(results, 0, trimmed, 0, resultCount);
+            return MezzeList.fromArray(trimmed);
+        }
+        return MezzeList.fromArray(results);
     }
 
     /**
-     * Resume a continuation with a value.
+     * Grow array by 2x - standard doubling strategy.
+     */
+    private static Object[] growArray(Object[] arr) {
+        Object[] newArr = new Object[arr.length * 2];
+        System.arraycopy(arr, 0, newArr, 0, arr.length);
+        return newArr;
+    }
+
+    /**
+     * Resume a continuation with a value - OPTIMIZED.
+     *
+     * Uses cached field names and specialized call paths for small closures.
      */
     @TruffleBoundary
     private Object resumeContinuation(Object cont, Object value) {
+        // Use cached field names - avoids repeated array allocation
         MezzeRecord valueRecord = MezzeRecord.fromFields(
-                new String[]{"value"},
+                VALUE_FIELD_NAMES,
                 new Object[]{value}
         );
 
         if (cont instanceof MezzeFunction func) {
-            CallTarget callTarget = func.getCallTarget();
-            Object[] closureValues = func.getClosureValues();
-            int closureLen = closureValues.length;
-            Object[] callArgs = new Object[closureLen + 1];
-            System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
-            callArgs[closureLen] = valueRecord;
-            return callTarget.call(callArgs);
+            return callFunctionFast(func, valueRecord);
         }
 
         if (cont instanceof MezzeContinuation c) {
@@ -150,6 +180,33 @@ public final class ContinuationForkNode extends MezzeNode {
         }
 
         throw new RuntimeException("Invalid continuation type: " + cont.getClass().getName());
+    }
+
+    /**
+     * Call function with closure values + argument - OPTIMIZED.
+     *
+     * Specialized paths for common closure sizes (0, 1, 2, 3) avoid
+     * array allocation overhead. JIT can inline these hot paths.
+     */
+    private Object callFunctionFast(MezzeFunction func, MezzeRecord arg) {
+        CallTarget callTarget = func.getCallTarget();
+        Object[] closureValues = func.getClosureValues();
+        int closureLen = closureValues.length;
+
+        // Specialized paths for common closure sizes - avoids array allocation
+        return switch (closureLen) {
+            case 0 -> callTarget.call(arg);
+            case 1 -> callTarget.call(closureValues[0], arg);
+            case 2 -> callTarget.call(closureValues[0], closureValues[1], arg);
+            case 3 -> callTarget.call(closureValues[0], closureValues[1], closureValues[2], arg);
+            default -> {
+                // General case: allocate array
+                Object[] callArgs = new Object[closureLen + 1];
+                System.arraycopy(closureValues, 0, callArgs, 0, closureLen);
+                callArgs[closureLen] = arg;
+                yield callTarget.call(callArgs);
+            }
+        };
     }
 
     public static ContinuationForkNode create(MezzeNode argsNode) {

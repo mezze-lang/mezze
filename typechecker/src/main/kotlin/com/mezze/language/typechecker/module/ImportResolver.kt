@@ -435,6 +435,24 @@ class ImportResolver(
             }
         }
 
+        // CRITICAL: Auto-import type declarations for types referenced by imported values.
+        // When a user imports `default_http_config` which has type `HttpConfig`, they need
+        // the HttpConfig type declaration available for spread operations and type inference.
+        // This extracts TypeApplication constructors from all imported binding types.
+        if (module != null) {
+            val referencedTypes = mutableSetOf<String>()
+            for ((_, binding) in bindings) {
+                collectTypeApplicationConstructors(binding.type, referencedTypes)
+            }
+            for (typeName in referencedTypes) {
+                if (typeName !in types) {
+                    module.index.typeDeclarations[typeName]?.let { typeDecl ->
+                        types[typeName] = typeDecl
+                    }
+                }
+            }
+        }
+
         // CRITICAL: Extract ALL impl declarations and ability impls from the module
         // These are always imported along with their effects/abilities
         // O(1) via index instead of O(N) filterIsInstance scans
@@ -573,6 +591,21 @@ class ImportResolver(
             // impl Show Int in impls/show_impls.mz).
             // O(1) access via index instead of filterIsInstance scan
             abilityImpls.putAll(index.abilityImplsByHash)
+
+            // CRITICAL: Auto-import type declarations for types referenced by imported values.
+            // When a user imports `default_http_config` which has type `HttpConfig`, they need
+            // the HttpConfig type declaration available for spread operations and type inference.
+            val referencedTypes = mutableSetOf<String>()
+            for ((_, binding) in bindings) {
+                collectTypeApplicationConstructors(binding.type, referencedTypes)
+            }
+            for (typeName in referencedTypes) {
+                if (typeName !in types) {
+                    index.typeDeclarations[typeName]?.let { typeDecl ->
+                        types[typeName] = typeDecl
+                    }
+                }
+            }
         }
 
         return ModuleImportContext(
@@ -621,6 +654,70 @@ class ImportResolver(
 
         // Item not found at all
         return false
+    }
+
+    /**
+     * Recursively collect all TypeApplication constructor names from a MezzeType.
+     *
+     * This is used to auto-import type declarations for types referenced by imported values.
+     * For example, if a value has type `Result HttpConfig Error`, we collect "Result", "HttpConfig", "Error".
+     */
+    private fun collectTypeApplicationConstructors(type: MezzeType?, result: MutableSet<String>) {
+        when (type) {
+            null -> {}
+            is MezzeType.TypeApplication -> {
+                result.add(type.constructor)
+                type.args.forEach { collectTypeApplicationConstructors(it, result) }
+            }
+            is MezzeType.FunctionType -> {
+                collectTypeApplicationConstructors(type.paramType, result)
+                collectTypeApplicationConstructors(type.returnType, result)
+            }
+            is MezzeType.RecordType -> {
+                type.fields.values.forEach { collectTypeApplicationConstructors(it, result) }
+            }
+            is MezzeType.VariantType -> {
+                type.constructors.values.forEach { collectTypeApplicationConstructors(it, result) }
+            }
+            is MezzeType.ArrayType -> {
+                collectTypeApplicationConstructors(type.elementType, result)
+            }
+            is MezzeType.ListType -> {
+                collectTypeApplicationConstructors(type.elementType, result)
+            }
+            is MezzeType.SetType -> {
+                collectTypeApplicationConstructors(type.elementType, result)
+            }
+            is MezzeType.MapType -> {
+                collectTypeApplicationConstructors(type.keyType, result)
+                collectTypeApplicationConstructors(type.valueType, result)
+            }
+            is MezzeType.SortedSetType -> {
+                collectTypeApplicationConstructors(type.elementType, result)
+            }
+            is MezzeType.SortedMapType -> {
+                collectTypeApplicationConstructors(type.keyType, result)
+                collectTypeApplicationConstructors(type.valueType, result)
+            }
+            is MezzeType.SuspendedType -> {
+                collectTypeApplicationConstructors(type.valueType, result)
+            }
+            is MezzeType.EffectRow -> {
+                // Effect rows don't contain type applications
+            }
+            // Simple types that don't contain other types
+            is MezzeType.VarType,
+            is MezzeType.IntType,
+            is MezzeType.NatType,
+            is MezzeType.FloatType,
+            is MezzeType.FracType,
+            is MezzeType.BooleanType,
+            is MezzeType.StringType,
+            is MezzeType.BytesType,
+            is MezzeType.ByteBufferType,
+            is MezzeType.CharType,
+            is MezzeType.OrderingType -> {}
+        }
     }
 
     // ========================================================================

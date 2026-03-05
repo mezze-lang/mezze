@@ -174,7 +174,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         List<String> importedModules = extractImportedModules(program);
 
         // Convert to optimized V2 nodes
-        ASTToTruffleConverterV2 converter = new ASTToTruffleConverterV2(null, null, null);
+        ASTToTruffleConverterV2 converter = new ASTToTruffleConverterV2(null, null, null, null);
         MezzeNode bodyNode = converter.convertProgram(program);
         FrameDescriptor frameDescriptor = converter.getFrameDescriptor();
         Map<String, Integer> variableSlots = converter.getVariableSlots();
@@ -402,7 +402,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
                 }
 
                 // Convert module to V2 nodes
-                ASTToTruffleConverterV2 moduleConverter = new ASTToTruffleConverterV2(context, null, null);
+                ASTToTruffleConverterV2 moduleConverter = new ASTToTruffleConverterV2(context, null, null, null);
                 MezzeNode moduleNode = moduleConverter.convertProgram(typedModule);
                 FrameDescriptor moduleFrameDescriptor = moduleConverter.getFrameDescriptor();
                 Map<String, Integer> variableSlots = moduleConverter.getVariableSlots();
@@ -568,10 +568,12 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     }
 
     /**
-     * Clear the last execution result.
+     * Clear the last execution result and any accumulated state.
      */
     public static void clearLastResult() {
         lastResultStore.set(null);
+        // Clear delimiter stack to ensure clean state between tests
+        com.mezze.interpreter.v2.nodes.continuation.DelimiterStack.clear();
     }
 
     /**

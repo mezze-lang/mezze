@@ -64,13 +64,35 @@ object HttpTypes {
         "response" to httpResultType
     ))
 
+    // HttpClient handle type (opaque type for the client handle)
+    // Using a TypeApplication with no args to represent an opaque external type
+    private val httpClientHandleType = MezzeType.TypeApplication("HttpClientHandle", emptyList())
+
+    // Unit type is represented as empty record
+    private val unitType = MezzeType.RecordType(emptyMap())
+
     fun registerAll(context: MutableMap<String, MezzeType>) {
-        // __native_http_request: {req: Request, config: HttpConfig} -> Result Response HttpError
-        // Used by HttpClient implementation
+        // __native_http_client_create: {} -> HttpClientHandle
+        // Creates a new HTTP client instance (WebClient wrapper)
+        context["__native_http_client_create"] = MezzeType.FunctionType(
+            MezzeType.RecordType(emptyMap()),
+            httpClientHandleType
+        )
+
+        // __native_http_client_close: {client: HttpClientHandle} -> {}
+        // Closes an HTTP client instance
+        context["__native_http_client_close"] = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("client" to httpClientHandleType)),
+            unitType
+        )
+
+        // __native_http_request: {req: Request, config: HttpConfig, client: HttpClientHandle} -> Result Response HttpError
+        // Used by HttpClient implementation with scoped effects
         context["__native_http_request"] = MezzeType.FunctionType(
             MezzeType.RecordType(mapOf(
                 "req" to requestType,
-                "config" to httpConfigType
+                "config" to httpConfigType,
+                "client" to httpClientHandleType
             )),
             httpResultType
         )

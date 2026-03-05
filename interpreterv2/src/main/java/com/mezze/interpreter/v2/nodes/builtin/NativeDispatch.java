@@ -896,7 +896,7 @@ public final class NativeDispatch extends MezzeNode {
         if (val instanceof MezzeList list) return list;
         // Handle array literals (Object[]) - convert to MezzeList
         if (val instanceof Object[] arr) {
-            return MezzeList.fromObjects(arr);
+            return MezzeList.fromArray(arr);
         }
         // Handle Cons/Nil linked list variants
         if (val instanceof MezzeVariant variant) {
@@ -926,7 +926,7 @@ public final class NativeDispatch extends MezzeNode {
             }
         }
 
-        return MezzeList.fromObjects(elements.toArray());
+        return MezzeList.fromArray(elements.toArray());
     }
 
     /**
@@ -1061,7 +1061,7 @@ public final class NativeDispatch extends MezzeNode {
         String[] lines = s.split("\n", -1);
         Object[] result = new Object[lines.length];
         System.arraycopy(lines, 0, result, 0, lines.length);
-        return MezzeList.fromObjects(result);
+        return MezzeList.fromArray(result);
     }
 
     @TruffleBoundary
@@ -1072,7 +1072,7 @@ public final class NativeDispatch extends MezzeNode {
         }
         Object[] result = new Object[words.length];
         System.arraycopy(words, 0, result, 0, words.length);
-        return MezzeList.fromObjects(result);
+        return MezzeList.fromArray(result);
     }
 
     @TruffleBoundary
@@ -1081,7 +1081,7 @@ public final class NativeDispatch extends MezzeNode {
         for (int i = 0; i < s.length(); i++) {
             result[i] = String.valueOf(s.charAt(i));
         }
-        return MezzeList.fromObjects(result);
+        return MezzeList.fromArray(result);
     }
 
     @TruffleBoundary
@@ -1222,6 +1222,8 @@ public final class NativeDispatch extends MezzeNode {
         // Legacy aliases without double underscore prefix (used by some tests)
         HANDLERS.put("native_random_int", (r, c) -> RandomNatives.randomInt(r));
         HANDLERS.put("native_random_double", (r, c) -> RandomNatives.randomFloat(r));
+        // Legacy alias used by RuntimeEffectValidationTest - takes only {max}
+        HANDLERS.put("native_random", (r, c) -> RandomNatives.legacyRandom(r));
     }
 
     // ==================== Filesystem ====================
@@ -1291,6 +1293,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS_WITH_NODE.put("__native_loom_spawn", (r, c, n) -> AsyncNatives.loomSpawn(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_spawn_cfg", (r, c, n) -> AsyncNatives.loomSpawnCfg(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_spawn_all", (r, c, n) -> AsyncNatives.loomSpawnAll(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_loom_spawn_tracked", (r, c, n) -> AsyncNatives.loomSpawnTracked(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_join", (r, c, n) -> AsyncNatives.loomJoin(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_join3", (r, c, n) -> AsyncNatives.loomJoin3(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_map", (r, c, n) -> AsyncNatives.loomMap(r, c, n));
@@ -1298,6 +1301,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS_WITH_NODE.put("__native_loom_filter", (r, c, n) -> AsyncNatives.loomFilter(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_scoped", (r, c, n) -> AsyncNatives.loomScoped(r, c, n));
         HANDLERS_WITH_NODE.put("__native_loom_scope_spawn", (r, c, n) -> AsyncNatives.loomScopeSpawn(r, c, n));
+
+        // Loom scope lifecycle (scoped effects)
+        HANDLERS.put("__native_loom_init_scope", (r, c) -> AsyncNatives.loomInitScope(r));
+        HANDLERS.put("__native_loom_finalize_scope", (r, c) -> AsyncNatives.loomFinalizeScope(r));
 
         // Simple operations that don't spawn threads use regular HANDLERS
         HANDLERS.put("__native_loom_await", (r, c) -> AsyncNatives.loomAwait(r));
@@ -1317,12 +1324,17 @@ public final class NativeDispatch extends MezzeNode {
 
         // === OS Threads - true parallelism, limited scale ===
         HANDLERS_WITH_NODE.put("__native_os_spawn_cfg", (r, c, n) -> AsyncNatives.osSpawnCfg(r, c, n));
+        HANDLERS_WITH_NODE.put("__native_os_spawn_tracked", (r, c, n) -> AsyncNatives.osSpawnTracked(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_join", (r, c, n) -> AsyncNatives.osJoin(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_join3", (r, c, n) -> AsyncNatives.osJoin3(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_map", (r, c, n) -> AsyncNatives.osMap(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_for_each", (r, c, n) -> AsyncNatives.osForEach(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_filter", (r, c, n) -> AsyncNatives.osFilter(r, c, n));
         HANDLERS_WITH_NODE.put("__native_os_scoped", (r, c, n) -> AsyncNatives.osScoped(r, c, n));
+
+        // OS thread scope lifecycle (scoped effects)
+        HANDLERS.put("__native_os_init_scope", (r, c) -> AsyncNatives.osInitScope(r));
+        HANDLERS.put("__native_os_finalize_scope", (r, c) -> AsyncNatives.osFinalizeScope(r));
 
         HANDLERS.put("__native_os_await", (r, c) -> AsyncNatives.osAwait(r));
         HANDLERS.put("__native_os_race", (r, c) -> AsyncNatives.osRace(r));
@@ -1423,7 +1435,7 @@ public final class NativeDispatch extends MezzeNode {
         // === Agent ===
         HANDLERS.put("__native_agent_new", (r, c) -> ConcurrencyNatives.agentNew(r));
         HANDLERS.put("__native_agent_deref", (r, c) -> ConcurrencyNatives.agentDeref(r));
-        HANDLERS.put("__native_agent_send", (r, c) -> ConcurrencyNatives.agentSend(r));
+        HANDLERS_WITH_NODE.put("__native_agent_send", (r, c, n) -> ConcurrencyNatives.agentSend(r, n));
         HANDLERS.put("__native_agent_await", (r, c) -> ConcurrencyNatives.agentAwait(r));
         HANDLERS.put("__native_agent_error", (r, c) -> ConcurrencyNatives.agentError(r));
 
@@ -1496,6 +1508,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_stm_check", (r, c) -> ConcurrencyNatives.stmCheck(r));
         HANDLERS.put("__native_stm_seq_check", (r, c) -> ConcurrencyNatives.stmSeqCheck(r));
         HANDLERS.put("__native_stm_modify_cfg", (r, c) -> ConcurrencyNatives.stmModifyCfg(r, c));
+        HANDLERS.put("__native_stm_begin_transaction", (r, c) -> ConcurrencyNatives.stmBeginTransaction(r));
+        HANDLERS.put("__native_stm_commit_transaction", (r, c) -> ConcurrencyNatives.stmCommitTransaction(r));
+        HANDLERS.put("__native_stm_commit_transaction_cfg", (r, c) -> ConcurrencyNatives.stmCommitTransactionCfg(r));
 
         // === Additional Atom ===
         HANDLERS.put("__native_atom_swap_with", (r, c) -> ConcurrencyNatives.atomSwapWith(r, c));
@@ -1581,6 +1596,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_http_mock_request", (r, c) -> IONatives.httpMockRequest(r));
         HANDLERS.put("__native_http_mock_set_response", (r, c) -> IONatives.httpMockSetResponse(r));
         HANDLERS.put("__native_http_mock_clear", (r, c) -> IONatives.httpMockClear(r));
+
+        // === HTTP Client ===
+        HANDLERS.put("__native_http_client_create", (r, c) -> IONatives.httpClientCreate(r));
+        HANDLERS.put("__native_http_client_close", (r, c) -> IONatives.httpClientClose(r));
+        HANDLERS.put("__native_http_request", (r, c) -> IONatives.httpRequest(r));
     }
 
     // ==================== Continuation Primitives ====================
@@ -1679,12 +1699,15 @@ public final class NativeDispatch extends MezzeNode {
             Object valuesObj = getField(r, "values");
 
             MezzeList values;
-            if (valuesObj instanceof MezzeList ml) {
+            if (valuesObj instanceof MezzeSeq seq) {
+                values = MezzeList.fromArray(seq.toJavaArray());
+            } else if (valuesObj instanceof MezzeList ml) {
                 values = ml;
             } else if (valuesObj instanceof Object[] arr) {
-                values = new MezzeList(arr);
+                values = MezzeList.fromArray(arr);
             } else {
-                throw new RuntimeException("__native_continuation_fork expects 'values' field as array");
+                throw new RuntimeException("__native_continuation_fork expects 'values' field as array, got: " +
+                    (valuesObj != null ? valuesObj.getClass().getSimpleName() : "null"));
             }
 
             if (values.size() == 0) {
@@ -1808,7 +1831,7 @@ public final class NativeDispatch extends MezzeNode {
             }
         }
 
-        return new MezzeList(results.toArray());
+        return MezzeList.fromArray(results.toArray());
     }
 
     // Resume a continuation with a value

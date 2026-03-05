@@ -133,15 +133,15 @@ public final class SortedMapNatives {
     }
 
     public static MezzeList keys(MezzeSortedMap map) {
-        return MezzeList.fromObjects(map.keys());
+        return MezzeList.fromArray(map.keys());
     }
 
     public static MezzeList values(MezzeSortedMap map) {
-        return MezzeList.fromObjects(map.values());
+        return MezzeList.fromArray(map.values());
     }
 
     public static MezzeList entries(MezzeSortedMap map) {
-        return MezzeList.fromObjects(map.entries());
+        return MezzeList.fromArray(map.entries());
     }
 
     // ==================== Additional Operations ====================

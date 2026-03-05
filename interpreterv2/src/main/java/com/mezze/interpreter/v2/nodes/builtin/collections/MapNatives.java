@@ -154,7 +154,7 @@ public final class MapNatives {
      * Returns MezzeList to match the type signature: (Map 'k 'v) -> (List 'k)
      */
     public static MezzeList keys(MezzeMap map) {
-        return MezzeList.fromObjects(map.keys());
+        return MezzeList.fromArray(map.keys());
     }
 
     /**
@@ -162,14 +162,14 @@ public final class MapNatives {
      * Returns MezzeList to match the type signature: (Map 'k 'v) -> (List 'v)
      */
     public static MezzeList values(MezzeMap map) {
-        return MezzeList.fromObjects(map.values());
+        return MezzeList.fromArray(map.values());
     }
 
     /**
      * Get all entries as a List (not Array).
      */
     public static MezzeList entries(MezzeMap map) {
-        return MezzeList.fromObjects(map.entries());
+        return MezzeList.fromArray(map.entries());
     }
 
     // ==================== Transform Operations ====================

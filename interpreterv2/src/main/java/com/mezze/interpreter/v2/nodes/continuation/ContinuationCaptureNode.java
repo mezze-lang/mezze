@@ -55,21 +55,31 @@ public final class ContinuationCaptureNode extends MezzeNode {
             throw new RuntimeException("__native_continuation_capture expects 'delim' field as MezzeCont");
         }
 
-        // Get the current delimiter entry
-        DelimiterStack.DelimiterEntry entry = DelimiterStack.find(delim.getId());
+        // Try to capture from state machine context first
+        return captureFromStateMachineContext(delim.getId());
+    }
 
-        if (entry == null) {
-            // No active delimiter - return trivial continuation
-            return createTrivialContinuation(delim.getId());
+    /**
+     * Capture continuation from the current state machine execution context.
+     */
+    @TruffleBoundary
+    private Object captureFromStateMachineContext(long delimiterId) {
+        com.mezze.interpreter.v2.nodes.statemachine.StateMachineContext.ExecutionSnapshot context =
+                com.mezze.interpreter.v2.nodes.statemachine.StateMachineContext.getCurrentContext();
+
+        if (context == null) {
+            // No state machine context - return trivial continuation
+            return createTrivialContinuation(delimiterId);
         }
 
-        // If there's a captured continuation in the entry, return it
-        if (entry.capturedContinuation != null) {
-            return wrapContinuationAsFunction(entry.capturedContinuation);
-        }
+        // Create a continuation that resumes the state machine from the next state
+        MezzeContinuation cont = MezzeContinuation.create(
+                context.stateMachine.createResumeCallTarget(),
+                context.capturedLocals,
+                delimiterId
+        );
 
-        // No continuation captured yet - return trivial continuation
-        return createTrivialContinuation(delim.getId());
+        return wrapContinuationAsFunction(cont);
     }
 
     /**

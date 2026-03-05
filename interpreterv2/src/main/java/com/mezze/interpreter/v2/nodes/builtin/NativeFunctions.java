@@ -766,7 +766,7 @@ public final class NativeFunctions extends MezzeNode {
         for (int i = 0; i < parts.length; i++) {
             result[i] = parts[i];
         }
-        return MezzeList.fromObjects(result);
+        return MezzeList.fromArray(result);
     }
 
     private String stringJoin(MezzeRecord record) {
@@ -1006,7 +1006,7 @@ public final class NativeFunctions extends MezzeNode {
         for (int i = 0; i < list.size(); i++) {
             arr[list.size() - 1 - i] = list.get(i);
         }
-        return MezzeList.fromObjects(arr);
+        return MezzeList.fromArray(arr);
     }
 
     private MezzeList listToArray(MezzeRecord record) {
@@ -1060,7 +1060,7 @@ public final class NativeFunctions extends MezzeNode {
                 new Object[]{xs.get(i), ys.get(i)}
             );
         }
-        return MezzeList.fromObjects(result);
+        return MezzeList.fromArray(result);
     }
 
     private MezzeRecord listUnzip(MezzeRecord record) {
@@ -1081,7 +1081,7 @@ public final class NativeFunctions extends MezzeNode {
         }
         return MezzeRecord.fromFields(
             new String[]{"fsts", "snds"},
-            new Object[]{MezzeList.fromObjects(fsts), MezzeList.fromObjects(snds)}
+            new Object[]{MezzeList.fromArray(fsts), MezzeList.fromArray(snds)}
         );
     }
 
@@ -1102,7 +1102,7 @@ public final class NativeFunctions extends MezzeNode {
             if (a instanceof String sa && b instanceof String sb) return sa.compareTo(sb);
             return 0;
         });
-        return MezzeList.fromObjects(arr);
+        return MezzeList.fromArray(arr);
     }
 
     private MezzeList listSortBy(MezzeRecord record) {
@@ -1126,7 +1126,7 @@ public final class NativeFunctions extends MezzeNode {
                 prepareArgsForFunction(cmp, arg));
             return ((Long) result).intValue();
         });
-        return MezzeList.fromObjects(arr);
+        return MezzeList.fromArray(arr);
     }
 
     private MezzeVariant listUncons(MezzeRecord record) {
@@ -1150,11 +1150,11 @@ public final class NativeFunctions extends MezzeNode {
     @TruffleBoundary
     private MezzeList listRangeImpl(long start, long end) {
         int size = (int) Math.max(0, end - start);
-        long[] arr = new long[size];
+        Object[] arr = new Object[size];
         for (int i = 0; i < size; i++) {
             arr[i] = start + i;
         }
-        return MezzeList.fromLongs(arr);
+        return MezzeList.fromArray(arr);
     }
 
     private MezzeList listRepeat(MezzeRecord record) {
@@ -1168,7 +1168,7 @@ public final class NativeFunctions extends MezzeNode {
         int size = (int) Math.max(0, n);
         Object[] arr = new Object[size];
         Arrays.fill(arr, x);
-        return MezzeList.fromObjects(arr);
+        return MezzeList.fromArray(arr);
     }
 
     private MezzeList listIntersperse(MezzeRecord record) {
@@ -1189,7 +1189,7 @@ public final class NativeFunctions extends MezzeNode {
                 arr[i * 2 + 1] = sep;
             }
         }
-        return MezzeList.fromObjects(arr);
+        return MezzeList.fromArray(arr);
     }
 
     // ===== Higher-Order List Functions =====
@@ -1211,7 +1211,7 @@ public final class NativeFunctions extends MezzeNode {
             result[i] = callNode.call(f.getCallTarget(),
                 prepareArgsForFunction(f, arg));
         }
-        return MezzeList.fromObjectsSmart(result);
+        return MezzeList.fromArray(result);
     }
 
     private MezzeList listFilter(MezzeRecord record) {
@@ -1235,7 +1235,7 @@ public final class NativeFunctions extends MezzeNode {
                 result.add(elem);
             }
         }
-        return MezzeList.fromObjects(result.toArray());
+        return MezzeList.fromArray(result.toArray());
     }
 
     private Object listFoldLeft(MezzeRecord record) {
@@ -1435,8 +1435,8 @@ public final class NativeFunctions extends MezzeNode {
         return MezzeRecord.fromFields(
             new String[]{"matching", "not_matching"},
             new Object[]{
-                MezzeList.fromObjects(matching.toArray()),
-                MezzeList.fromObjects(notMatching.toArray())
+                MezzeList.fromArray(matching.toArray()),
+                MezzeList.fromArray(notMatching.toArray())
             }
         );
     }
@@ -1462,7 +1462,7 @@ public final class NativeFunctions extends MezzeNode {
                 result.add(inner.get(j));
             }
         }
-        return MezzeList.fromObjects(result.toArray());
+        return MezzeList.fromArray(result.toArray());
     }
 
     private boolean listEquals(MezzeRecord record) {
@@ -1548,7 +1548,7 @@ public final class NativeFunctions extends MezzeNode {
         Object value = getField(record, fieldName);
         if (value instanceof MezzeList l) return l;
         // Also handle Object[] (V2 array literals return Object[])
-        if (value instanceof Object[] arr) return MezzeList.fromObjects(arr);
+        if (value instanceof Object[] arr) return MezzeList.fromArray(arr);
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException(functionName + " expects '" + fieldName + "' as List, got: " +
             (value == null ? "null" : value.getClass().getSimpleName()));

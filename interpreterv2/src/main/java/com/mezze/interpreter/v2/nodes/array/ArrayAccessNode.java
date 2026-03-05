@@ -1,8 +1,8 @@
 package com.mezze.interpreter.v2.nodes.array;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
-import com.mezze.interpreter.v2.values.MezzeIntArray;
-import com.mezze.interpreter.v2.values.MezzeFloatArray;
+import com.mezze.interpreter.v2.values.MezzeSeq;
+import com.mezze.interpreter.v2.values.MezzeList;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Cached.Shared;
 import com.oracle.truffle.api.dsl.NodeChild;
@@ -13,54 +13,49 @@ import com.oracle.truffle.api.nodes.UnexpectedResultException;
 import com.oracle.truffle.api.profiles.InlinedBranchProfile;
 
 /**
- * Array element access node - AGGRESSIVELY OPTIMIZED.
+ * Sequence/List element access node.
  *
- * Key optimizations:
- * 1. Type-specialized paths for MezzeIntArray and MezzeFloatArray (NO BOXING)
- * 2. InlinedBranchProfile for bounds check failure path
- * 3. Direct primitive return via executeLong/executeDouble
- *
- * After JIT: Direct array load, equivalent to Java array[index].
+ * Type-specialized for MezzeSeq (Vavr Vector) and MezzeList (Vavr List).
  */
 @NodeChild("arrayNode")
 @NodeChild("indexNode")
-@NodeInfo(shortName = "array-get")
+@NodeInfo(shortName = "seq-get")
 public abstract class ArrayAccessNode extends MezzeNode {
 
     /**
-     * FASTEST PATH: MezzeIntArray[long] - returns primitive long, NO BOXING.
+     * MezzeSeq (Vavr Vector) access - O(log32 n) ≈ O(1)
      */
     @Specialization
-    protected long accessIntArray(
+    protected Object accessSeq(
             VirtualFrame frame,
-            MezzeIntArray array,
+            MezzeSeq seq,
             long index,
             @Cached @Shared("boundsError") InlinedBranchProfile boundsErrorProfile
     ) {
         int idx = (int) index;
-        if (idx < 0 || idx >= array.length()) {
+        if (idx < 0 || idx >= seq.size()) {
             boundsErrorProfile.enter(this);
-            throw new ArrayIndexOutOfBoundsException("Index " + index + " out of bounds for array of length " + array.length());
+            throw new ArrayIndexOutOfBoundsException("Index " + index + " out of bounds for sequence of length " + seq.size());
         }
-        return array.getLong(idx);
+        return seq.get(idx);
     }
 
     /**
-     * FAST PATH: MezzeFloatArray[long] - returns primitive double, NO BOXING.
+     * MezzeList (Vavr List) access - O(n)
      */
     @Specialization
-    protected double accessFloatArray(
+    protected Object accessList(
             VirtualFrame frame,
-            MezzeFloatArray array,
+            MezzeList list,
             long index,
             @Cached @Shared("boundsError") InlinedBranchProfile boundsErrorProfile
     ) {
         int idx = (int) index;
-        if (idx < 0 || idx >= array.length()) {
+        if (idx < 0 || idx >= list.size()) {
             boundsErrorProfile.enter(this);
-            throw new ArrayIndexOutOfBoundsException("Index " + index + " out of bounds for array of length " + array.length());
+            throw new ArrayIndexOutOfBoundsException("Index " + index + " out of bounds for list of length " + list.size());
         }
-        return array.getDouble(idx);
+        return list.get(idx);
     }
 
     /**

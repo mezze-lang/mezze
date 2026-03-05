@@ -144,6 +144,10 @@ effect STM where {
 #       STM.write {var = account, val = balance + deposit}
 
 pub impl STM for OptimisticSTM where {
+    # Scoped effect: automatically begin transaction at start and commit at end
+    initialize_scope = {} -> __native_stm_begin_transaction {},
+    finalize_scope = {} -> __native_stm_commit_transaction {},
+
     read = {var} -> __native_stm_read {var = var},
     write = {var, val} -> __native_stm_write {var = var, val = val},
     modify = {var, f} -> __native_stm_modify {var = var, f = f},
@@ -170,14 +174,19 @@ pub impl STM for OptimisticSTM where {
 #       STM.read {var = account}
 
 pub impl STM for OptimisticSTMWith { max_retries: Int, spin_count: Int } where {
-    read = {var} -> __native_stm_read_cfg {var = var, max_retries = max_retries, spin_count = spin_count},
-    write = {var, val} -> __native_stm_write_cfg {var = var, val = val, max_retries = max_retries, spin_count = spin_count},
-    modify = {var, f} -> __native_stm_modify_cfg {var = var, f = f, max_retries = max_retries, spin_count = spin_count},
-    swap = {var, val} -> __native_stm_swap_cfg {var = var, val = val, max_retries = max_retries, spin_count = spin_count},
-    ensure = {var} -> __native_stm_ensure_cfg {var = var, max_retries = max_retries, spin_count = spin_count},
-    retry = {} -> __native_stm_retry_cfg {max_retries = max_retries, spin_count = spin_count},
-    or_else = {primary, fallback} -> __native_stm_or_else_cfg {primary = primary, fallback = fallback, max_retries = max_retries, spin_count = spin_count},
-    check = {cond} -> __native_stm_check_cfg {cond = cond, max_retries = max_retries, spin_count = spin_count},
+    # Scoped effect: automatically begin transaction at start and commit at end
+    # Pass max_retries to commit so it can signal to the scoped handler
+    initialize_scope = {} -> __native_stm_begin_transaction {},
+    finalize_scope = {} -> __native_stm_commit_transaction_cfg {max_retries = max_retries},
+
+    read = {var} -> __native_stm_read {var = var},
+    write = {var, val} -> __native_stm_write {var = var, val = val},
+    modify = {var, f} -> __native_stm_modify {var = var, f = f},
+    swap = {var, val} -> __native_stm_swap {var = var, val = val},
+    ensure = {var} -> __native_stm_ensure {var = var},
+    retry = {} -> __native_stm_retry {},
+    or_else = {primary, fallback} -> __native_stm_or_else {primary = primary, fallback = fallback},
+    check = {cond} -> __native_stm_check {cond = cond},
     atomically = {f} -> __native_stm_atomic {f = f}
 }
 
@@ -193,6 +202,10 @@ pub impl STM for OptimisticSTMWith { max_retries: Int, spin_count: Int } where {
 #       STM.read {var = account}
 
 pub impl STM for SequentialSTM where {
+    # Scoped effect: SequentialSTM writes directly, so initialize/finalize are no-ops
+    initialize_scope = {} -> {},
+    finalize_scope = {} -> {},
+
     read = {var} -> __native_stm_seq_read {var = var},
     write = {var, val} -> __native_stm_seq_write {var = var, val = val},
     modify = {var, f} -> __native_stm_seq_modify {var = var, f = f},

@@ -37,10 +37,9 @@ class ChoiceEffectTest {
     @Test
     fun `test basic choose from two options`() {
         val result = eval("""
-            use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 Choice.choose { options = [1, 2] }
 
             computation {}
@@ -55,10 +54,9 @@ class ChoiceEffectTest {
     @Test
     fun `test choose from three options`() {
         val result = eval("""
-            use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 Choice.choose { options = [10, 20, 30] }
 
             computation {}
@@ -73,10 +71,9 @@ class ChoiceEffectTest {
     @Test
     fun `test multiple choices produces cartesian product`() {
         val result = eval("""
-            use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let x = Choice.choose { options = [1, 2] }
                 let y = Choice.choose { options = [10, 20] }
                 x + y
@@ -95,10 +92,9 @@ class ChoiceEffectTest {
     @Test
     fun `test fail filters out paths`() {
         val result = eval("""
-            use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let x = Choice.choose { options = [1, 2, 3] }
                 match x % 2 is
                     0 -> Choice.fail {}
@@ -115,10 +111,9 @@ class ChoiceEffectTest {
     @Test
     fun `test fail with conditional guard`() {
         val result = eval("""
-            use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let x = Choice.choose { options = [1, 2, 3, 4, 5] }
                 match x > 2 is
                     True -> x
@@ -139,10 +134,9 @@ class ChoiceEffectTest {
         var exceptionThrown = false
         try {
             eval("""
-                use std::control::continuation
                 use std::effects::choice::{Choice, AllPaths}
 
-                let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+                let computation = {} -> perform AllPaths in do
                     Choice.choose { options = [] }
 
                 computation {}
@@ -158,10 +152,9 @@ class ChoiceEffectTest {
     @Test
     fun `test choice producing records`() {
         val result = eval("""
-            use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let color = Choice.choose { options = ["red", "blue"] }
                 let size = Choice.choose { options = [1, 2] }
                 {color = color, size = size}
@@ -204,12 +197,11 @@ class ChoiceEffectTest {
     @Test
     fun `test choice with pure function composition`() {
         val result = eval("""
-            use std::control::continuation
             use std::effects::choice::{Choice, AllPaths}
 
             let double = {x} -> x * 2
 
-            let computation = {} -> perform AllPaths {cont = continuation::new {}} in do
+            let computation = {} -> perform AllPaths in do
                 let choice = Choice.choose { options = [5, 10] }
                 double { x = choice }
 
@@ -220,5 +212,51 @@ class ChoiceEffectTest {
         assertEquals(2, array.size())
         val values = array.toList().map { (it as MezzeInt).value }.sorted()
         assertEquals(listOf(10L, 20L), values)
+    }
+
+    // === Additional Tests from Previous Session ===
+
+    @Test
+    fun testChoiceWithPureCode() {
+        // Test that choice doesn't affect pure computations
+        val result = eval("""
+            use std::effects::choice::{Choice, AllPaths}
+
+            let pureFunc = {x} -> x * 2
+
+            let computation = {} -> perform AllPaths in do
+                let choice = Choice.choose { options = [5, 10] }
+                pureFunc { x = choice }
+
+            computation {}
+        """)
+        assertTrue(result is MezzeArrayList)
+        val array = result as MezzeArrayList
+        assertEquals(2, array.size())
+
+        val values = array.toList().map { (it as MezzeInt).value }.sorted()
+        assertEquals(listOf(10L, 20L), values) // 5*2=10, 10*2=20
+    }
+
+    @Test
+    fun testNestedChoice() {
+        // Test choice in nested computations
+        val result = eval("""
+            use std::effects::choice::{Choice, AllPaths}
+
+            let inner = {x} -> perform AllPaths in do
+                let y = Choice.choose { options = [1, 2] }
+                x + y
+
+            let outer = {} -> perform AllPaths in do
+                let x = Choice.choose { options = [10, 20] }
+                inner { x = x }
+
+            outer {}
+        """)
+        assertTrue(result is MezzeArrayList)
+        // Results should be arrays of arrays: [[11, 12], [21, 22]]
+        val array = result as MezzeArrayList
+        assertEquals(2, array.size())
     }
 }

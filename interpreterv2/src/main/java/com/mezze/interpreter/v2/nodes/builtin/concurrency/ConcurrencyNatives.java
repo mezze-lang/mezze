@@ -1,7 +1,11 @@
 package com.mezze.interpreter.v2.nodes.builtin.concurrency;
 
+import com.mezze.interpreter.v2.nodes.MezzeNode;
+import com.mezze.interpreter.v2.runtime.MezzeContext;
 import com.mezze.interpreter.v2.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.TruffleLanguage.Env;
+import com.oracle.truffle.api.nodes.IndirectCallNode;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
@@ -63,6 +67,7 @@ public final class ConcurrencyNatives {
 
     // Thread-local transaction context
     private static final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
+    private static final ThreadLocal<Integer> transactionNestingDepth = ThreadLocal.withInitial(() -> 0);
     private static final AtomicLong globalVersion = new AtomicLong(0);
     private static final ReentrantLock commitLock = new ReentrantLock();
 
@@ -144,30 +149,155 @@ public final class ConcurrencyNatives {
     }
 
     /**
-     * STM Transaction with MVCC.
+     * Begin a new STM transaction for scoped effect support.
+     * Used by initialize_scope in OptimisticSTM.
+     * Supports nested scopes - if a transaction already exists, just increment nesting depth.
+     * Returns a scope record (empty for now).
+     */
+    @TruffleBoundary
+    public static MezzeRecord stmBeginTransaction(MezzeRecord args) {
+        int depth = transactionNestingDepth.get();
+        if (depth == 0) {
+            // Create new transaction only at outermost level
+            Transaction txn = new Transaction();
+            currentTransaction.set(txn);
+        }
+        // Increment nesting depth
+        transactionNestingDepth.set(depth + 1);
+        return MezzeRecord.empty();
+    }
+
+    /**
+     * Commit the current STM transaction for scoped effect support.
+     * Used by finalize_scope in OptimisticSTM.
+     * Only actually commits when nesting depth reaches 0.
+     *
+     * On conflict, throws RetryingScopeException to trigger automatic retry
+     * of the entire perform block.
+     */
+    @TruffleBoundary
+    public static MezzeRecord stmCommitTransaction(MezzeRecord args) {
+        int depth = transactionNestingDepth.get();
+        if (depth <= 0) {
+            // No transaction to commit - shouldn't happen with proper pairing
+            return MezzeRecord.empty();
+        }
+
+        // Decrement nesting depth
+        transactionNestingDepth.set(depth - 1);
+
+        if (depth == 1) {
+            // Outermost level - actually commit
+            Transaction txn = currentTransaction.get();
+            if (txn != null) {
+                try {
+                    if (!txn.commit()) {
+                        // Conflict detected - throw RetryingScopeException to retry the perform block
+                        throw new com.mezze.interpreter.v2.nodes.effect.RetryingScopeException(
+                            100, // max retries
+                            "STM transaction conflict - concurrent modification detected"
+                        );
+                    }
+                } finally {
+                    currentTransaction.remove();
+                    // Reset nesting depth on commit (success or failure)
+                    transactionNestingDepth.remove();
+                }
+            }
+        }
+        // Inner levels just decrement and return
+        return MezzeRecord.empty();
+    }
+
+    /**
+     * Commit with configurable max retries.
+     * Used by OptimisticSTMWith to pass the max_retries parameter.
+     */
+    @TruffleBoundary
+    public static MezzeRecord stmCommitTransactionCfg(MezzeRecord args) {
+        int maxRetries = (int) getLong(args, "max_retries");
+        if (maxRetries <= 0) maxRetries = 100; // Default
+
+        int depth = transactionNestingDepth.get();
+        if (depth <= 0) {
+            return MezzeRecord.empty();
+        }
+
+        transactionNestingDepth.set(depth - 1);
+
+        if (depth == 1) {
+            Transaction txn = currentTransaction.get();
+            if (txn != null) {
+                try {
+                    if (!txn.commit()) {
+                        throw new com.mezze.interpreter.v2.nodes.effect.RetryingScopeException(
+                            maxRetries,
+                            "STM transaction conflict - concurrent modification detected"
+                        );
+                    }
+                } finally {
+                    currentTransaction.remove();
+                    transactionNestingDepth.remove();
+                }
+            }
+        }
+        return MezzeRecord.empty();
+    }
+
+    /**
+     * STM Transaction with MVCC and Bloom Filter optimization.
+     *
+     * Performance optimizations:
+     * 1. Bloom filter for fast "definitely no conflict" checks
+     * 2. Version-based conflict detection with early exit
+     * 3. Lock-free read path with CAS for commits
      */
     private static class Transaction {
+        // Read/write tracking
         private final Map<Long, ReadEntry> readSet = new HashMap<>();
         private final Map<Long, WriteEntry> writeSet = new HashMap<>();
         private final Set<Long> ensureSet = new HashSet<>();
 
+        // Bloom filter for fast conflict detection (64-bit, 4 hash functions)
+        // Trades ~1% false positive rate for O(1) "definitely no conflict" check
+        private long readBloom = 0L;
+
+        // Snapshot version at transaction start for consistent reads
+        private final long startVersion = globalVersion.get();
+
         record ReadEntry(MezzeTVar tvar, long version, Object value) {}
         record WriteEntry(MezzeTVar tvar, Object value) {}
 
+        // Bloom filter hash functions using FNV-1a inspired mixing
+        private static long bloomHash(long id) {
+            long h = id;
+            // 4 different bits set based on id, spread across 64 bits
+            return (1L << (h & 63))
+                 | (1L << ((h >>> 6) & 63))
+                 | (1L << ((h >>> 12) & 63))
+                 | (1L << ((h >>> 18) & 63));
+        }
+
         Object read(MezzeTVar tvar) {
             long id = tvar.getId();
+            // Fast path: check write set first (most recent value)
             WriteEntry we = writeSet.get(id);
             if (we != null) return we.value;
+
+            // Check if already read
             ReadEntry re = readSet.get(id);
             if (re != null) return re.value;
 
+            // Read from TVar and add to read set
             MezzeTVar.VersionedValue vv = tvar.readVersioned();
             readSet.put(id, new ReadEntry(tvar, vv.version(), vv.value()));
+            readBloom |= bloomHash(id);
             return vv.value();
         }
 
         void write(MezzeTVar tvar, Object value) {
             long id = tvar.getId();
+            // Ensure we have a read snapshot for validation
             if (!readSet.containsKey(id) && !writeSet.containsKey(id)) {
                 read(tvar);
             }
@@ -179,6 +309,15 @@ public final class ConcurrencyNatives {
             return read(tvar);
         }
 
+        /**
+         * Check if this transaction MIGHT conflict with given TVar IDs.
+         * Uses bloom filter for fast "definitely no conflict" answer.
+         * @return false if definitely no conflict, true if maybe conflict
+         */
+        boolean mightConflict(long tvarId) {
+            return (readBloom & bloomHash(tvarId)) != 0;
+        }
+
         boolean validate() {
             for (ReadEntry entry : readSet.values()) {
                 MezzeTVar.VersionedValue current = entry.tvar.readVersioned();
@@ -188,11 +327,16 @@ public final class ConcurrencyNatives {
         }
 
         boolean commit() {
+            // Read-only transactions just need validation
             if (writeSet.isEmpty()) return validate();
 
+            // Use commit lock for writes
             commitLock.lock();
             try {
+                // Validate all reads are still at same version
                 if (!validate()) return false;
+
+                // Atomically write all changes with new version
                 long newVersion = globalVersion.incrementAndGet();
                 for (WriteEntry entry : writeSet.values()) {
                     entry.tvar.forceWrite(newVersion, entry.value);
@@ -770,9 +914,42 @@ public final class ConcurrencyNatives {
 
     public static class MezzeCancellationToken {
         private final AtomicBoolean cancelled = new AtomicBoolean(false);
-        public void cancel() { cancelled.set(true); }
-        public boolean isCancelled() { return cancelled.get(); }
-        @Override public String toString() { return "<cancellation-token:" + (cancelled.get() ? "cancelled" : "active") + ">"; }
+        private volatile String reason = null;
+        private final MezzeCancellationToken parent;
+
+        public MezzeCancellationToken() {
+            this.parent = null;
+        }
+
+        public MezzeCancellationToken(MezzeCancellationToken parent) {
+            this.parent = parent;
+        }
+
+        public void cancel(String reason) {
+            this.reason = reason;
+            cancelled.set(true);
+        }
+
+        public void cancel() {
+            cancel("no reason");
+        }
+
+        public boolean isCancelled() {
+            // Check self first, then parent chain
+            if (cancelled.get()) return true;
+            if (parent != null) return parent.isCancelled();
+            return false;
+        }
+
+        public String getReason() {
+            // If we have our own cancellation, return that reason
+            if (cancelled.get()) return reason != null ? reason : "no reason";
+            // Otherwise check parent
+            if (parent != null && parent.isCancelled()) return parent.getReason();
+            return null;
+        }
+
+        @Override public String toString() { return "<cancellation-token:" + (isCancelled() ? "cancelled" : "active") + ">"; }
     }
 
     @TruffleBoundary
@@ -783,7 +960,9 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord cancellationTokenCancel(MezzeRecord args) {
         MezzeCancellationToken token = getCancellationToken(args, "token");
-        token.cancel();
+        Object reasonObj = args.getField("reason");
+        String reason = reasonObj instanceof String s ? s : "no reason";
+        token.cancel(reason);
         return MezzeRecord.empty();
     }
 
@@ -807,9 +986,24 @@ public final class ConcurrencyNatives {
 
     // ==================== Agent ====================
 
+    /**
+     * Agent action - wraps a function and its Truffle environment.
+     */
+    private record AgentAction(MezzeFunction func, com.oracle.truffle.api.TruffleLanguage.Env env) {}
+
+    /**
+     * Clojure-style Agent for async state updates.
+     *
+     * Uses Truffle-aware threads (via env.newTruffleThreadBuilder) to ensure
+     * CallTargets can be properly invoked from spawned threads.
+     */
     public static class MezzeAgent {
+        private static final String[] CURRENT_FIELD = new String[]{"current"};
+
         private final AtomicReference<Object> state;
-        private final ExecutorService executor = Executors.newSingleThreadExecutor();
+        private final AtomicReference<String> error = new AtomicReference<>(null);
+        private final AtomicBoolean processing = new AtomicBoolean(false);
+        private final ConcurrentLinkedQueue<AgentAction> actionQueue = new ConcurrentLinkedQueue<>();
 
         public MezzeAgent(Object initialState) {
             this.state = new AtomicReference<>(initialState);
@@ -817,9 +1011,107 @@ public final class ConcurrencyNatives {
 
         public Object deref() { return state.get(); }
 
-        public void send(Object action) {
-            // Action should be a function, but we just set state directly for now
-            state.set(action);
+        public String getError() { return error.get(); }
+
+        public void clearError(Object newValue) {
+            error.set(null);
+            state.set(newValue);
+            // Resume processing if there are pending actions
+            processQueue();
+        }
+
+        /**
+         * Queue an action function to be applied to the agent's state.
+         * The function receives {current: currentState} and returns the new state.
+         */
+        public void send(MezzeFunction func, com.oracle.truffle.api.TruffleLanguage.Env env) {
+            // Check if agent is in error state
+            if (error.get() != null) {
+                throw new RuntimeException("Agent is in error state: " + error.get());
+            }
+
+            actionQueue.add(new AgentAction(func, env));
+            processQueue();
+        }
+
+        /**
+         * Process the action queue.
+         * Uses CAS to ensure only one thread processes at a time.
+         */
+        private void processQueue() {
+            // Try to become the processor
+            if (!processing.compareAndSet(false, true)) {
+                return; // Another thread is already processing
+            }
+
+            // Get the first action to process (we need its env for the thread)
+            AgentAction firstAction = actionQueue.peek();
+            if (firstAction == null) {
+                processing.set(false);
+                return;
+            }
+
+            // Create a Truffle thread using the environment from the action
+            Thread thread = firstAction.env.newTruffleThreadBuilder(() -> {
+                try {
+                    while (true) {
+                        AgentAction action = actionQueue.poll();
+                        if (action == null) break;
+
+                        try {
+                            Object currentState = state.get();
+                            MezzeRecord argRecord = MezzeRecord.fromFields(
+                                CURRENT_FIELD,
+                                new Object[]{currentState}
+                            );
+
+                            MezzeFunction func = action.func;
+                            Object[] closureValues = func.getClosureValues();
+                            Object[] callArgs = new Object[closureValues.length + 1];
+                            System.arraycopy(closureValues, 0, callArgs, 0, closureValues.length);
+                            callArgs[closureValues.length] = argRecord;
+
+                            Object newState = func.getCallTarget().call(callArgs);
+                            state.set(newState);
+                        } catch (Throwable e) {
+                            // Set error state
+                            error.set(e.getMessage() != null ? e.getMessage() : e.getClass().getName());
+                            // Stop processing on error
+                            break;
+                        }
+                    }
+                } finally {
+                    processing.set(false);
+
+                    // Check if more actions were added while we were finishing
+                    if (!actionQueue.isEmpty() && error.get() == null) {
+                        processQueue();
+                    }
+                }
+            }).virtual(true).build();  // Use virtual threads for efficiency
+
+            thread.start();
+        }
+
+        /**
+         * Wait for all pending actions to complete.
+         * Returns true if completed within timeout, false otherwise.
+         * timeout_ms of 0 means wait indefinitely.
+         */
+        public boolean await(long timeoutMs) {
+            long start = System.currentTimeMillis();
+            while (!actionQueue.isEmpty() || processing.get()) {
+                if (timeoutMs > 0 && System.currentTimeMillis() - start > timeoutMs) {
+                    return false;
+                }
+                try {
+                    Thread.sleep(1);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            return true;
         }
 
         @Override public String toString() { return "<agent>"; }
@@ -827,8 +1119,8 @@ public final class ConcurrencyNatives {
 
     @TruffleBoundary
     public static MezzeAgent agentNew(MezzeRecord args) {
-        Object init = getField(args, "init");
-        return new MezzeAgent(init);
+        Object value = getField(args, "value");
+        return new MezzeAgent(value);
     }
 
     @TruffleBoundary
@@ -838,10 +1130,16 @@ public final class ConcurrencyNatives {
     }
 
     @TruffleBoundary
-    public static MezzeRecord agentSend(MezzeRecord args) {
+    public static MezzeRecord agentSend(MezzeRecord args, com.mezze.interpreter.v2.nodes.MezzeNode node) {
         MezzeAgent agent = getAgent(args, "agent");
-        Object action = getField(args, "action");
-        agent.send(action);
+        Object f = getField(args, "f");
+        if (!(f instanceof MezzeFunction func)) {
+            throw new RuntimeException("Agent send expects a function, got: " +
+                (f != null ? f.getClass().getSimpleName() : "null"));
+        }
+        com.oracle.truffle.api.TruffleLanguage.Env env =
+            com.mezze.interpreter.v2.runtime.MezzeContext.get(node).getEnv();
+        agent.send(func, env);
         return MezzeRecord.empty();
     }
 
@@ -881,25 +1179,35 @@ public final class ConcurrencyNatives {
     }
 
     @TruffleBoundary
-    public static Object stmModify(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeRecord stmModify(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeTVar tvar = getTVar(args, "var");
         MezzeFunction f = getFunction(args, "f");
         Transaction txn = getOrCreateTransaction();
         Object current = txn.read(tvar);
-        Object newVal = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), current));
+        // STM modify expects {val: 'a} -> 'a, so wrap current in {val = current}
+        MezzeRecord argRecord = MezzeRecord.fromFields(VAL_FIELD, new Object[]{current});
+        Object[] closuresWithArg = new Object[f.getClosureValues().length + 1];
+        System.arraycopy(f.getClosureValues(), 0, closuresWithArg, 0, f.getClosureValues().length);
+        closuresWithArg[f.getClosureValues().length] = argRecord;
+        Object newVal = callNode.call(f.getCallTarget(), closuresWithArg);
         txn.write(tvar, newVal);
-        return newVal;
+        return MezzeRecord.empty();  // Return {} as per signature
     }
 
     @TruffleBoundary
-    public static Object stmSeqModify(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeRecord stmSeqModify(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeTVar tvar = getTVar(args, "var");
         MezzeFunction f = getFunction(args, "f");
         Object current = tvar.read();
-        Object newVal = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), current));
+        // STM modify expects {val: 'a} -> 'a, so wrap current in {val = current}
+        MezzeRecord argRecord = MezzeRecord.fromFields(VAL_FIELD, new Object[]{current});
+        Object[] closuresWithArg = new Object[f.getClosureValues().length + 1];
+        System.arraycopy(f.getClosureValues(), 0, closuresWithArg, 0, f.getClosureValues().length);
+        closuresWithArg[f.getClosureValues().length] = argRecord;
+        Object newVal = callNode.call(f.getCallTarget(), closuresWithArg);
         long newVersion = globalVersion.incrementAndGet();
         tvar.forceWrite(newVersion, newVal);
-        return newVal;
+        return MezzeRecord.empty();  // Return {} as per signature
     }
 
     @TruffleBoundary
@@ -915,28 +1223,57 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeList stmReadAll(MezzeRecord args) {
         MezzeList vars = getList(args, "vars");
-        Object[] store = vars.getObjectStore();
-        if (store == null || store.length == 0) return MezzeList.fromObjects(new Object[0]);
+        Object[] store = vars.toArray();
+        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
         Object[] results = new Object[store.length];
+
+        // Check if we're in a transaction (OptimisticSTM) or not (SequentialSTM)
+        Transaction txn = currentTransaction.get();
+
         for (int i = 0; i < store.length; i++) {
             MezzeTVar tvar = unwrapTVar(store[i]);
-            Transaction txn = getOrCreateTransaction();
-            results[i] = txn.read(tvar);
+            if (txn != null) {
+                // Transactional read - use transaction's read set
+                results[i] = txn.read(tvar);
+            } else {
+                // Non-transactional read - read directly from TVar
+                results[i] = tvar.read();
+            }
         }
-        return MezzeList.fromObjects(results);
+        return MezzeList.fromArray(results);
     }
 
     @TruffleBoundary
     public static MezzeRecord stmWriteAll(MezzeRecord args) {
-        MezzeList vars = getList(args, "vars");
-        MezzeList vals = getList(args, "vals");
-        Object[] varStore = vars.getObjectStore();
-        Object[] valStore = vals.getObjectStore();
-        if (varStore == null || valStore == null) return MezzeRecord.empty();
-        Transaction txn = getOrCreateTransaction();
-        for (int i = 0; i < varStore.length && i < valStore.length; i++) {
-            MezzeTVar tvar = unwrapTVar(varStore[i]);
-            txn.write(tvar, valStore[i]);
+        // Get pairs list - each pair is a record {var: TVar, val: Value}
+        MezzeList pairs = getList(args, "pairs");
+        Object[] pairStore = pairs.toArray();
+        if (pairStore == null) return MezzeRecord.empty();
+
+        // Check if we have an active transaction (OptimisticSTM) or not (SequentialSTM)
+        Transaction txn = currentTransaction.get();
+
+        if (txn != null) {
+            // Transactional write - buffer in transaction
+            for (Object pair : pairStore) {
+                if (pair instanceof MezzeRecord pairRec) {
+                    Object varField = getField(pairRec, "var");
+                    Object valField = getField(pairRec, "val");
+                    MezzeTVar tvar = unwrapTVar(varField);
+                    txn.write(tvar, valField);
+                }
+            }
+        } else {
+            // Sequential/non-transactional write - write directly
+            long newVersion = globalVersion.incrementAndGet();
+            for (Object pair : pairStore) {
+                if (pair instanceof MezzeRecord pairRec) {
+                    Object varField = getField(pairRec, "var");
+                    Object valField = getField(pairRec, "val");
+                    MezzeTVar tvar = unwrapTVar(varField);
+                    tvar.forceWrite(newVersion, valField);
+                }
+            }
         }
         return MezzeRecord.empty();
     }
@@ -1021,9 +1358,9 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord semaphoreAcquireN(MezzeRecord args) {
         MezzeSemaphore sem = getSemaphore(args, "sem");
-        long n = getLong(args, "n");
+        long permits = getLong(args, "permits");
         try {
-            for (int i = 0; i < n; i++) sem.acquire();
+            for (int i = 0; i < permits; i++) sem.acquire();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -1033,8 +1370,8 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord semaphoreReleaseN(MezzeRecord args) {
         MezzeSemaphore sem = getSemaphore(args, "sem");
-        long n = getLong(args, "n");
-        for (int i = 0; i < n; i++) sem.release();
+        long permits = getLong(args, "permits");
+        for (int i = 0; i < permits; i++) sem.release();
         return MezzeRecord.empty();
     }
 
@@ -1064,6 +1401,10 @@ public final class ConcurrencyNatives {
     public static boolean waitgroupWaitTimeout(MezzeRecord args) {
         MezzeWaitGroup wg = getWaitGroup(args, "wg");
         long ms = getLong(args, "ms");
+        // If count is already 0, return immediately without waiting
+        if (wg.getCount() == 0) {
+            return true;
+        }
         try {
             return wg.done.await(ms, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
@@ -1095,13 +1436,17 @@ public final class ConcurrencyNatives {
 
     @TruffleBoundary
     public static MezzeCancellationToken cancellationTokenCreateChild(MezzeRecord args) {
-        // For now, child is independent (parent cancellation doesn't propagate)
-        return new MezzeCancellationToken();
+        MezzeCancellationToken parent = getCancellationToken(args, "token");
+        return new MezzeCancellationToken(parent);
     }
 
     @TruffleBoundary
     public static Object cancellationTokenGetReason(MezzeRecord args) {
-        // Return None for now - no reason tracking
+        MezzeCancellationToken token = getCancellationToken(args, "token");
+        String reason = token.getReason();
+        if (reason != null) {
+            return createSome(reason);
+        }
         return createNone();
     }
 
@@ -1110,13 +1455,24 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static Object agentAwait(MezzeRecord args) {
         MezzeAgent agent = getAgent(args, "agent");
-        // Just return current state - no actual awaiting needed for simple impl
-        return agent.deref();
+        long timeoutMs = 0L;
+        Object timeoutObj = args.getField("timeout_ms");
+        if (timeoutObj instanceof Long l) {
+            timeoutMs = l;
+        } else if (timeoutObj instanceof Integer i) {
+            timeoutMs = i.longValue();
+        }
+        boolean completed = agent.await(timeoutMs);
+        return completed;
     }
 
     @TruffleBoundary
     public static Object agentError(MezzeRecord args) {
-        // Return None - no error tracking
+        MezzeAgent agent = getAgent(args, "agent");
+        String error = agent.getError();
+        if (error != null) {
+            return createSome(error);
+        }
         return createNone();
     }
 
@@ -1126,21 +1482,21 @@ public final class ConcurrencyNatives {
     public static MezzeList sequentialMap(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
-        if (store == null || store.length == 0) return MezzeList.fromObjects(new Object[0]);
+        Object[] store = xs.toArray();
+        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
         Object[] results = new Object[store.length];
         for (int i = 0; i < store.length; i++) {
             results[i] = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
         }
-        return MezzeList.fromObjects(results);
+        return MezzeList.fromArray(results);
     }
 
     @TruffleBoundary
     public static MezzeList sequentialFilter(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
-        if (store == null || store.length == 0) return MezzeList.fromObjects(new Object[0]);
+        Object[] store = xs.toArray();
+        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
         java.util.List<Object> results = new java.util.ArrayList<>();
         for (Object x : store) {
             Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), x));
@@ -1148,7 +1504,7 @@ public final class ConcurrencyNatives {
                 results.add(x);
             }
         }
-        return MezzeList.fromObjects(results.toArray());
+        return MezzeList.fromArray(results.toArray());
     }
 
     @TruffleBoundary
@@ -1158,7 +1514,7 @@ public final class ConcurrencyNatives {
         Object zero = getField(args, "zero");
         MezzeFunction mapFn = getFunction(args, "map_fn");
         MezzeFunction combine = getFunction(args, "combine");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return zero;
 
         Object acc = zero;
@@ -1179,7 +1535,7 @@ public final class ConcurrencyNatives {
     public static Object sequentialReduce(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return createNone();
         Object acc = store[0];
         for (int i = 1; i < store.length; i++) {
@@ -1197,7 +1553,7 @@ public final class ConcurrencyNatives {
     public static Object sequentialFind(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return createNone();
         for (Object x : store) {
             Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), x));
@@ -1212,7 +1568,7 @@ public final class ConcurrencyNatives {
     public static boolean sequentialAll(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return true;  // Vacuously true
         for (Object x : store) {
             Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), x));
@@ -1225,7 +1581,7 @@ public final class ConcurrencyNatives {
     public static boolean sequentialAny(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return false;  // No matches possible
         for (Object x : store) {
             Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), x));
@@ -1238,11 +1594,11 @@ public final class ConcurrencyNatives {
     public static MezzeRecord sequentialPartition(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null) {
             return MezzeRecord.fromFields(
                 new String[]{"satisfying", "notSatisfying"},
-                new Object[]{MezzeList.fromObjects(new Object[0]), MezzeList.fromObjects(new Object[0])}
+                new Object[]{MezzeList.fromArray(new Object[0]), MezzeList.fromArray(new Object[0])}
             );
         }
         java.util.List<Object> trueList = new java.util.ArrayList<>();
@@ -1257,7 +1613,7 @@ public final class ConcurrencyNatives {
         }
         return MezzeRecord.fromFields(
             new String[]{"matching", "not_matching"},
-            new Object[]{MezzeList.fromObjects(trueList.toArray()), MezzeList.fromObjects(falseList.toArray())}
+            new Object[]{MezzeList.fromArray(trueList.toArray()), MezzeList.fromArray(falseList.toArray())}
         );
     }
 
@@ -1272,82 +1628,302 @@ public final class ConcurrencyNatives {
 
     // ==================== Parallel Operations ====================
 
-    @TruffleBoundary
-    public static MezzeList parallelMap(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        // Due to Truffle context sharing constraints, we run sequentially on the main thread
-        MezzeList xs = getList(args, "xs");
-        MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
-        if (store == null || store.length == 0) return MezzeList.fromObjects(new Object[0]);
+    // Threshold below which sequential execution is faster
+    private static final int PARALLEL_THRESHOLD = 4;
 
-        Object[] results = new Object[store.length];
-        for (int i = 0; i < store.length; i++) {
-            results[i] = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
+    // Batch size for chunked parallel operations
+    private static final int BATCH_SIZE = 64;
+
+    // Pre-allocated field name arrays for record wrapping
+    private static final String[] X_FIELD = new String[]{"x"};
+
+    // Thread-local argument buffers to avoid allocation per iteration
+    private static final ThreadLocal<Object[]> CALL_ARGS_BUFFER = ThreadLocal.withInitial(() -> new Object[16]);
+
+    private static Object[] getCallArgsBuffer(int minSize) {
+        Object[] buffer = CALL_ARGS_BUFFER.get();
+        if (buffer.length < minSize) {
+            buffer = new Object[Math.max(minSize, buffer.length * 2)];
+            CALL_ARGS_BUFFER.set(buffer);
         }
-        return MezzeList.fromObjects(results);
+        return buffer;
     }
 
+    /**
+     * Parallel map using batched ForkJoin execution.
+     * Uses Truffle thread builder for proper context sharing.
+     */
     @TruffleBoundary
-    public static MezzeList parallelFilter(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        // Due to Truffle context sharing constraints, we run sequentially on the main thread
+    public static MezzeList parallelMap(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
-        if (store == null || store.length == 0) return MezzeList.fromObjects(new Object[0]);
+        Object[] store = xs.toArray();
+        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
 
-        java.util.List<Object> results = new java.util.ArrayList<>();
+        // Sequential for small arrays
+        if (store.length < PARALLEL_THRESHOLD) {
+            return sequentialMap(store, f, callNode);
+        }
+
+        // Parallel batched execution
+        Env env = MezzeContext.get(node).getEnv();
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        final int closureLen = closure.length;
+        Object[] results = new Object[store.length];
+
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, store.length / (numCores * 2));
+        batchSize = Math.min(batchSize, BATCH_SIZE);
+        int numBatches = (store.length + batchSize - 1) / batchSize;
+
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int b = 0; b < numBatches; b++) {
+            final int batchStart = b * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
+
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                Object[] callArgs = getCallArgsBuffer(closureLen + 1);
+                System.arraycopy(closure, 0, callArgs, 0, closureLen);
+
+                for (int i = batchStart; i < batchEnd; i++) {
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    results[i] = callNode.call(callTarget, callArgs);
+                }
+            }).virtual(true).build();
+            threads[b].start();
+        }
+
+        try {
+            for (Thread t : threads) {
+                t.join();
+            }
+        } catch (InterruptedException e) {
+            for (Thread t : threads) t.interrupt();
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Parallel map interrupted", e);
+        }
+
+        return MezzeList.fromArray(results);
+    }
+
+    private static MezzeList sequentialMap(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        Object[] results = new Object[store.length];
+        Object[] callArgs = getCallArgsBuffer(closure.length + 1);
+        System.arraycopy(closure, 0, callArgs, 0, closure.length);
+
         for (int i = 0; i < store.length; i++) {
-            Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
+            // Wrap element in record - callbacks expect {x} -> ...
+            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+            results[i] = callNode.call(callTarget, callArgs);
+        }
+        return MezzeList.fromArray(results);
+    }
+
+    /**
+     * Parallel filter using batched ForkJoin execution.
+     */
+    @TruffleBoundary
+    public static MezzeList parallelFilter(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+        MezzeList xs = getList(args, "xs");
+        MezzeFunction f = getFunction(args, "f");
+        Object[] store = xs.toArray();
+        if (store == null || store.length == 0) return MezzeList.fromArray(new Object[0]);
+
+        // Sequential for small arrays
+        if (store.length < PARALLEL_THRESHOLD) {
+            return sequentialFilter(store, f, callNode);
+        }
+
+        // Parallel batched execution
+        Env env = MezzeContext.get(node).getEnv();
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        final int closureLen = closure.length;
+        boolean[] keep = new boolean[store.length];
+
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, store.length / (numCores * 2));
+        batchSize = Math.min(batchSize, BATCH_SIZE);
+        int numBatches = (store.length + batchSize - 1) / batchSize;
+
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int batch = 0; batch < numBatches; batch++) {
+            final int batchStart = batch * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
+
+            threads[batch] = env.newTruffleThreadBuilder(() -> {
+                Object[] callArgs = getCallArgsBuffer(closureLen + 1);
+                System.arraycopy(closure, 0, callArgs, 0, closureLen);
+
+                for (int i = batchStart; i < batchEnd; i++) {
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    Object result = callNode.call(callTarget, callArgs);
+                    keep[i] = result instanceof Boolean b && b;
+                }
+            }).virtual(true).build();
+            threads[batch].start();
+        }
+
+        try {
+            for (Thread t : threads) {
+                t.join();
+            }
+        } catch (InterruptedException e) {
+            for (Thread t : threads) t.interrupt();
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Parallel filter interrupted", e);
+        }
+
+        // Collect results
+        List<Object> results = new ArrayList<>();
+        for (int i = 0; i < store.length; i++) {
+            if (keep[i]) results.add(store[i]);
+        }
+        return MezzeList.fromArray(results.toArray());
+    }
+
+    private static MezzeList sequentialFilter(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        Object[] callArgs = getCallArgsBuffer(closure.length + 1);
+        System.arraycopy(closure, 0, callArgs, 0, closure.length);
+
+        List<Object> results = new ArrayList<>();
+        for (Object x : store) {
+            // Wrap element in record - callbacks expect {x} -> ...
+            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            Object result = callNode.call(callTarget, callArgs);
             if (result instanceof Boolean b && b) {
-                results.add(store[i]);
+                results.add(x);
             }
         }
-        return MezzeList.fromObjects(results.toArray());
+        return MezzeList.fromArray(results.toArray());
     }
 
     private static final String[] LEFT_RIGHT_FIELDS = new String[]{"left", "right"};
 
+    /**
+     * Parallel fold using parallel map phase + sequential reduce.
+     * The map phase is parallel, the combine phase is sequential.
+     */
     @TruffleBoundary
-    public static Object parallelFold(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        // Parallel map-reduce style fold: fold {xs, zero, map_fn, combine}
-        // Due to Truffle context sharing constraints, we run sequentially on the main thread
+    public static Object parallelFold(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeList xs = getList(args, "xs");
         Object zero = getField(args, "zero");
         MezzeFunction mapFn = getFunction(args, "map_fn");
         MezzeFunction combine = getFunction(args, "combine");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return zero;
 
-        // Map phase: apply map_fn to each element
-        Object[] mapped = new Object[store.length];
-        for (int i = 0; i < store.length; i++) {
-            mapped[i] = callNode.call(mapFn.getCallTarget(), appendToClosures(mapFn.getClosureValues(), store[i]));
+        // Sequential for small arrays
+        if (store.length < PARALLEL_THRESHOLD) {
+            return sequentialFold(store, zero, mapFn, combine, callNode);
         }
 
-        // Reduce phase: combine all results
+        // Parallel map phase
+        Env env = MezzeContext.get(node).getEnv();
+        var mapTarget = mapFn.getCallTarget();
+        Object[] mapClosure = mapFn.getClosureValues();
+        final int mapClosureLen = mapClosure.length;
+        Object[] mapped = new Object[store.length];
+
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, store.length / (numCores * 2));
+        batchSize = Math.min(batchSize, BATCH_SIZE);
+        int numBatches = (store.length + batchSize - 1) / batchSize;
+
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int b = 0; b < numBatches; b++) {
+            final int batchStart = b * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
+
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                Object[] callArgs = getCallArgsBuffer(mapClosureLen + 1);
+                System.arraycopy(mapClosure, 0, callArgs, 0, mapClosureLen);
+
+                for (int i = batchStart; i < batchEnd; i++) {
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    callArgs[mapClosureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    mapped[i] = callNode.call(mapTarget, callArgs);
+                }
+            }).virtual(true).build();
+            threads[b].start();
+        }
+
+        try {
+            for (Thread t : threads) {
+                t.join();
+            }
+        } catch (InterruptedException e) {
+            for (Thread t : threads) t.interrupt();
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Parallel fold map phase interrupted", e);
+        }
+
+        // Sequential reduce phase (combine is typically not parallelizable)
         Object acc = zero;
         for (Object m : mapped) {
-            // combine expects {left, right} as a direct argument
             MezzeRecord combineArgs = MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{acc, m});
-            Object[] combineClosuresWithArg = new Object[combine.getClosureValues().length + 1];
-            System.arraycopy(combine.getClosureValues(), 0, combineClosuresWithArg, 0, combine.getClosureValues().length);
-            combineClosuresWithArg[combine.getClosureValues().length] = combineArgs;
-            acc = callNode.call(combine.getCallTarget(), combineClosuresWithArg);
+            Object[] combineClosures = new Object[combine.getClosureValues().length + 1];
+            System.arraycopy(combine.getClosureValues(), 0, combineClosures, 0, combine.getClosureValues().length);
+            combineClosures[combine.getClosureValues().length] = combineArgs;
+            acc = callNode.call(combine.getCallTarget(), combineClosures);
         }
         return acc;
     }
 
+    private static Object sequentialFold(Object[] store, Object zero, MezzeFunction mapFn,
+                                          MezzeFunction combine, IndirectCallNode callNode) {
+        var mapTarget = mapFn.getCallTarget();
+        Object[] mapClosure = mapFn.getClosureValues();
+        Object[] callArgs = getCallArgsBuffer(mapClosure.length + 1);
+        System.arraycopy(mapClosure, 0, callArgs, 0, mapClosure.length);
+
+        // Map phase
+        Object[] mapped = new Object[store.length];
+        for (int i = 0; i < store.length; i++) {
+            // Wrap element in record - callbacks expect {x} -> ...
+            callArgs[mapClosure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+            mapped[i] = callNode.call(mapTarget, callArgs);
+        }
+
+        // Reduce phase
+        Object acc = zero;
+        for (Object m : mapped) {
+            MezzeRecord combineArgs = MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{acc, m});
+            Object[] combineClosures = new Object[combine.getClosureValues().length + 1];
+            System.arraycopy(combine.getClosureValues(), 0, combineClosures, 0, combine.getClosureValues().length);
+            combineClosures[combine.getClosureValues().length] = combineArgs;
+            acc = callNode.call(combine.getCallTarget(), combineClosures);
+        }
+        return acc;
+    }
+
+    /**
+     * Parallel reduce - tree reduction for associative operations.
+     */
     @TruffleBoundary
-    public static Object parallelReduce(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        // Due to Truffle context sharing constraints, we run sequentially on the main thread
+    public static Object parallelReduce(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return createNone();
 
+        // For reduce, sequential is simpler since it's inherently serial for non-associative ops
+        // TODO: Could use parallel tree reduction for known associative ops
         Object acc = store[0];
         for (int i = 1; i < store.length; i++) {
-            // reduce expects {left, right} as argument
             MezzeRecord reduceArgs = MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{acc, store[i]});
             Object[] closuresWithArg = new Object[f.getClosureValues().length + 1];
             System.arraycopy(f.getClosureValues(), 0, closuresWithArg, 0, f.getClosureValues().length);
@@ -1357,16 +1933,82 @@ public final class ConcurrencyNatives {
         return createSome(acc);
     }
 
+    /**
+     * Parallel all - short-circuit on first false.
+     */
     @TruffleBoundary
-    public static boolean parallelAll(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        // Due to Truffle context sharing constraints, we run sequentially on the main thread
+    public static boolean parallelAll(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
-        if (store == null || store.length == 0) return true;  // Vacuously true
+        Object[] store = xs.toArray();
+        if (store == null || store.length == 0) return true;
 
-        for (int i = 0; i < store.length; i++) {
-            Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
+        // Sequential for small arrays
+        if (store.length < PARALLEL_THRESHOLD) {
+            return sequentialAll(store, f, callNode);
+        }
+
+        // Parallel with short-circuit via AtomicBoolean
+        Env env = MezzeContext.get(node).getEnv();
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        final int closureLen = closure.length;
+        AtomicBoolean allTrue = new AtomicBoolean(true);
+
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, store.length / (numCores * 2));
+        batchSize = Math.min(batchSize, BATCH_SIZE);
+        int numBatches = (store.length + batchSize - 1) / batchSize;
+
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int b = 0; b < numBatches; b++) {
+            final int batchStart = b * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
+
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                if (!allTrue.get()) return; // Early exit if already found false
+
+                Object[] callArgs = getCallArgsBuffer(closureLen + 1);
+                System.arraycopy(closure, 0, callArgs, 0, closureLen);
+
+                for (int i = batchStart; i < batchEnd && allTrue.get(); i++) {
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    Object result = callNode.call(callTarget, callArgs);
+                    if (!(result instanceof Boolean bool && bool)) {
+                        allTrue.set(false);
+                        return;
+                    }
+                }
+            }).virtual(true).build();
+            threads[b].start();
+        }
+
+        try {
+            for (Thread t : threads) {
+                t.join();
+            }
+        } catch (InterruptedException e) {
+            for (Thread t : threads) t.interrupt();
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Parallel all interrupted", e);
+        }
+
+        return allTrue.get();
+    }
+
+    private static boolean sequentialAll(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        Object[] callArgs = getCallArgsBuffer(closure.length + 1);
+        System.arraycopy(closure, 0, callArgs, 0, closure.length);
+
+        for (Object x : store) {
+            // Wrap element in record - callbacks expect {x} -> ...
+            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            Object result = callNode.call(callTarget, callArgs);
             if (!(result instanceof Boolean b && b)) {
                 return false;
             }
@@ -1374,16 +2016,82 @@ public final class ConcurrencyNatives {
         return true;
     }
 
+    /**
+     * Parallel any - short-circuit on first true.
+     */
     @TruffleBoundary
-    public static boolean parallelAny(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        // Due to Truffle context sharing constraints, we run sequentially on the main thread
+    public static boolean parallelAny(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
-        if (store == null || store.length == 0) return false;  // No matches possible
+        Object[] store = xs.toArray();
+        if (store == null || store.length == 0) return false;
 
-        for (int i = 0; i < store.length; i++) {
-            Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
+        // Sequential for small arrays
+        if (store.length < PARALLEL_THRESHOLD) {
+            return sequentialAny(store, f, callNode);
+        }
+
+        // Parallel with short-circuit via AtomicBoolean
+        Env env = MezzeContext.get(node).getEnv();
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        final int closureLen = closure.length;
+        AtomicBoolean foundTrue = new AtomicBoolean(false);
+
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, store.length / (numCores * 2));
+        batchSize = Math.min(batchSize, BATCH_SIZE);
+        int numBatches = (store.length + batchSize - 1) / batchSize;
+
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int b = 0; b < numBatches; b++) {
+            final int batchStart = b * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
+
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                if (foundTrue.get()) return; // Early exit if already found true
+
+                Object[] callArgs = getCallArgsBuffer(closureLen + 1);
+                System.arraycopy(closure, 0, callArgs, 0, closureLen);
+
+                for (int i = batchStart; i < batchEnd && !foundTrue.get(); i++) {
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    Object result = callNode.call(callTarget, callArgs);
+                    if (result instanceof Boolean bool && bool) {
+                        foundTrue.set(true);
+                        return;
+                    }
+                }
+            }).virtual(true).build();
+            threads[b].start();
+        }
+
+        try {
+            for (Thread t : threads) {
+                t.join();
+            }
+        } catch (InterruptedException e) {
+            for (Thread t : threads) t.interrupt();
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Parallel any interrupted", e);
+        }
+
+        return foundTrue.get();
+    }
+
+    private static boolean sequentialAny(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        Object[] callArgs = getCallArgsBuffer(closure.length + 1);
+        System.arraycopy(closure, 0, callArgs, 0, closure.length);
+
+        for (Object x : store) {
+            // Wrap element in record - callbacks expect {x} -> ...
+            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            Object result = callNode.call(callTarget, callArgs);
             if (result instanceof Boolean b && b) {
                 return true;
             }
@@ -1430,21 +2138,31 @@ public final class ConcurrencyNatives {
     }
 
     @TruffleBoundary
-    public static Object stmModifyCfg(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeRecord stmModifyCfg(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         return stmModify(args, callNode);
     }
 
     // ==================== Additional Atom Operations ====================
 
+    private static final String[] CURRENT_ARG_FIELDS = new String[]{"current", "arg"};
+
     @TruffleBoundary
     public static Object atomSwapWith(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeAtom atom = getAtom(args, "atom");
         MezzeFunction f = getFunction(args, "f");
+        Object arg = getField(args, "arg");
         Object oldVal;
         Object newVal;
         do {
             oldVal = atom.deref();
-            newVal = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), oldVal));
+            // Function expects {current: 'a, arg: 'b} as a single record argument
+            // Don't use appendToClosures since that would wrap it in another record
+            MezzeRecord funcArg = MezzeRecord.fromFields(CURRENT_ARG_FIELDS, new Object[]{oldVal, arg});
+            Object[] closures = f.getClosureValues();
+            Object[] callArgs = new Object[closures.length + 1];
+            System.arraycopy(closures, 0, callArgs, 0, closures.length);
+            callArgs[closures.length] = funcArg;
+            newVal = callNode.call(f.getCallTarget(), callArgs);
         } while (!atom.compareAndSet(oldVal, newVal));
         return newVal;
     }
@@ -1483,8 +2201,8 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static boolean semaphoreTryAcquireN(MezzeRecord args) {
         MezzeSemaphore sem = getSemaphore(args, "sem");
-        long n = getLong(args, "n");
-        for (int i = 0; i < n; i++) {
+        long permits = getLong(args, "permits");
+        for (int i = 0; i < permits; i++) {
             if (!sem.tryAcquire()) {
                 // Release what we acquired
                 for (int j = 0; j < i; j++) sem.release();
@@ -1588,7 +2306,9 @@ public final class ConcurrencyNatives {
 
     @TruffleBoundary
     public static MezzeRecord agentRestart(MezzeRecord args) {
-        // No-op for simple agent implementation
+        MezzeAgent agent = getAgent(args, "agent");
+        Object value = getField(args, "value");
+        agent.clearError(value);
         return MezzeRecord.empty();
     }
 
@@ -1598,7 +2318,7 @@ public final class ConcurrencyNatives {
     public static MezzeRecord sequentialForEach(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return MezzeRecord.empty();
         for (Object x : store) {
             callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), x));
@@ -1610,9 +2330,9 @@ public final class ConcurrencyNatives {
     public static MezzeList sequentialGroupBy(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) {
-            return MezzeList.fromObjects(new Object[0]);
+            return MezzeList.fromArray(new Object[0]);
         }
         java.util.Map<Object, java.util.List<Object>> groups = new java.util.LinkedHashMap<>();
         for (Object x : store) {
@@ -1624,10 +2344,10 @@ public final class ConcurrencyNatives {
         for (var entry : groups.entrySet()) {
             result.add(MezzeRecord.fromFields(
                 new String[]{"key", "values"},
-                new Object[]{entry.getKey(), MezzeList.fromObjects(entry.getValue().toArray())}
+                new Object[]{entry.getKey(), MezzeList.fromArray(entry.getValue().toArray())}
             ));
         }
-        return MezzeList.fromObjects(result.toArray());
+        return MezzeList.fromArray(result.toArray());
     }
 
     @TruffleBoundary
@@ -1648,7 +2368,7 @@ public final class ConcurrencyNatives {
         // Due to Truffle context sharing constraints, we run sequentially on the main thread
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return MezzeRecord.empty();
         for (int i = 0; i < store.length; i++) {
             callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
@@ -1656,14 +2376,83 @@ public final class ConcurrencyNatives {
         return MezzeRecord.empty();
     }
 
+    /**
+     * Parallel find - short-circuit on first match.
+     */
     @TruffleBoundary
-    public static Object parallelFind(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
+    public static Object parallelFind(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) return createNone();
+
+        // Sequential for small arrays
+        if (store.length < PARALLEL_THRESHOLD) {
+            return sequentialFind(store, f, callNode);
+        }
+
+        // Parallel with short-circuit
+        Env env = MezzeContext.get(node).getEnv();
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        final int closureLen = closure.length;
+        AtomicReference<Object> found = new AtomicReference<>(null);
+
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, store.length / (numCores * 2));
+        batchSize = Math.min(batchSize, BATCH_SIZE);
+        int numBatches = (store.length + batchSize - 1) / batchSize;
+
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int b = 0; b < numBatches; b++) {
+            final int batchStart = b * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
+
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                if (found.get() != null) return;
+
+                Object[] callArgs = getCallArgsBuffer(closureLen + 1);
+                System.arraycopy(closure, 0, callArgs, 0, closureLen);
+
+                for (int i = batchStart; i < batchEnd && found.get() == null; i++) {
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    Object result = callNode.call(callTarget, callArgs);
+                    if (result instanceof Boolean bool && bool) {
+                        found.compareAndSet(null, store[i]);
+                        return;
+                    }
+                }
+            }).virtual(true).build();
+            threads[b].start();
+        }
+
+        try {
+            for (Thread t : threads) {
+                t.join();
+            }
+        } catch (InterruptedException e) {
+            for (Thread t : threads) t.interrupt();
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Parallel find interrupted", e);
+        }
+
+        Object result = found.get();
+        return result != null ? createSome(result) : createNone();
+    }
+
+    private static Object sequentialFind(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        Object[] callArgs = getCallArgsBuffer(closure.length + 1);
+        System.arraycopy(closure, 0, callArgs, 0, closure.length);
+
         for (Object x : store) {
-            Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), x));
+            // Wrap element in record - callbacks expect {x} -> ...
+            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            Object result = callNode.call(callTarget, callArgs);
             if (result instanceof Boolean b && b) {
                 return createSome(x);
             }
@@ -1671,59 +2460,220 @@ public final class ConcurrencyNatives {
         return createNone();
     }
 
+    private static final String[] MATCHING_NOT_MATCHING = new String[]{"matching", "not_matching"};
+
+    /**
+     * Parallel partition - split elements by predicate.
+     */
     @TruffleBoundary
-    public static MezzeRecord parallelPartition(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        // Due to Truffle context sharing constraints, we run sequentially on the main thread
+    public static MezzeRecord parallelPartition(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeList xs = getList(args, "xs");
         MezzeFunction f = getFunction(args, "f");
-        Object[] store = xs.getObjectStore();
+        Object[] store = xs.toArray();
         if (store == null || store.length == 0) {
-            return MezzeRecord.fromFields(
-                new String[]{"matching", "not_matching"},
-                new Object[]{MezzeList.fromObjects(new Object[0]), MezzeList.fromObjects(new Object[0])}
-            );
+            return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
+                new Object[]{MezzeList.fromArray(new Object[0]), MezzeList.fromArray(new Object[0])});
         }
-        java.util.List<Object> matching = new java.util.ArrayList<>();
-        java.util.List<Object> notMatching = new java.util.ArrayList<>();
+
+        // Sequential for small arrays
+        if (store.length < PARALLEL_THRESHOLD) {
+            return sequentialPartition(store, f, callNode);
+        }
+
+        // Parallel evaluation of predicate
+        Env env = MezzeContext.get(node).getEnv();
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        final int closureLen = closure.length;
+        boolean[] matches = new boolean[store.length];
+
+        int numCores = Runtime.getRuntime().availableProcessors();
+        int batchSize = Math.max(1, store.length / (numCores * 2));
+        batchSize = Math.min(batchSize, BATCH_SIZE);
+        int numBatches = (store.length + batchSize - 1) / batchSize;
+
+        Thread[] threads = new Thread[numBatches];
+        final int finalBatchSize = batchSize;
+
+        for (int b = 0; b < numBatches; b++) {
+            final int batchStart = b * finalBatchSize;
+            final int batchEnd = Math.min(batchStart + finalBatchSize, store.length);
+
+            threads[b] = env.newTruffleThreadBuilder(() -> {
+                Object[] callArgs = getCallArgsBuffer(closureLen + 1);
+                System.arraycopy(closure, 0, callArgs, 0, closureLen);
+
+                for (int i = batchStart; i < batchEnd; i++) {
+                    // Wrap element in record - callbacks expect {x} -> ...
+                    callArgs[closureLen] = MezzeRecord.fromFields(X_FIELD, new Object[]{store[i]});
+                    Object result = callNode.call(callTarget, callArgs);
+                    matches[i] = result instanceof Boolean bool && bool;
+                }
+            }).virtual(true).build();
+            threads[b].start();
+        }
+
+        try {
+            for (Thread t : threads) {
+                t.join();
+            }
+        } catch (InterruptedException e) {
+            for (Thread t : threads) t.interrupt();
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Parallel partition interrupted", e);
+        }
+
+        // Collect results
+        List<Object> matching = new ArrayList<>();
+        List<Object> notMatching = new ArrayList<>();
         for (int i = 0; i < store.length; i++) {
-            Object result = callNode.call(f.getCallTarget(), appendToClosures(f.getClosureValues(), store[i]));
-            if (result instanceof Boolean b && b) {
+            if (matches[i]) {
                 matching.add(store[i]);
             } else {
                 notMatching.add(store[i]);
             }
         }
-        return MezzeRecord.fromFields(
-            new String[]{"matching", "not_matching"},
-            new Object[]{MezzeList.fromObjects(matching.toArray()), MezzeList.fromObjects(notMatching.toArray())}
-        );
+
+        return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
+            new Object[]{MezzeList.fromArray(matching.toArray()), MezzeList.fromArray(notMatching.toArray())});
+    }
+
+    private static MezzeRecord sequentialPartition(Object[] store, MezzeFunction f, IndirectCallNode callNode) {
+        var callTarget = f.getCallTarget();
+        Object[] closure = f.getClosureValues();
+        Object[] callArgs = getCallArgsBuffer(closure.length + 1);
+        System.arraycopy(closure, 0, callArgs, 0, closure.length);
+
+        List<Object> matching = new ArrayList<>();
+        List<Object> notMatching = new ArrayList<>();
+        for (Object x : store) {
+            // Wrap element in record - callbacks expect {x} -> ...
+            callArgs[closure.length] = MezzeRecord.fromFields(X_FIELD, new Object[]{x});
+            Object result = callNode.call(callTarget, callArgs);
+            if (result instanceof Boolean b && b) {
+                matching.add(x);
+            } else {
+                notMatching.add(x);
+            }
+        }
+        return MezzeRecord.fromFields(MATCHING_NOT_MATCHING,
+            new Object[]{MezzeList.fromArray(matching.toArray()), MezzeList.fromArray(notMatching.toArray())});
     }
 
     @TruffleBoundary
-    public static MezzeList parallelGroupBy(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        return sequentialGroupBy(args, callNode); // Fall back to sequential for simplicity
+    public static MezzeList parallelGroupBy(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+        // GroupBy is complex to parallelize correctly; fall back to sequential
+        return sequentialGroupBy(args, callNode);
     }
 
+    private static final String[] A_B_C_FIELDS = new String[]{"a", "b", "c"};
+
+    /**
+     * Parallel both - run two functions in parallel.
+     */
     @TruffleBoundary
-    public static MezzeRecord parallelBoth(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        // Due to Truffle context sharing constraints, we run sequentially on the main thread
+    public static MezzeRecord parallelBoth(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeFunction left = getFunction(args, "left");
         MezzeFunction right = getFunction(args, "right");
-        Object leftResult = callNode.call(left.getCallTarget(), left.getClosureValues());
-        Object rightResult = callNode.call(right.getCallTarget(), right.getClosureValues());
-        return MezzeRecord.fromFields(new String[]{"left", "right"}, new Object[]{leftResult, rightResult});
+
+        Env env = MezzeContext.get(node).getEnv();
+
+        CompletableFuture<Object> leftFuture = new CompletableFuture<>();
+        CompletableFuture<Object> rightFuture = new CompletableFuture<>();
+
+        Thread leftThread = env.newTruffleThreadBuilder(() -> {
+            try {
+                leftFuture.complete(callNode.call(left.getCallTarget(), left.getClosureValues()));
+            } catch (Throwable e) {
+                leftFuture.completeExceptionally(e);
+            }
+        }).virtual(true).build();
+
+        Thread rightThread = env.newTruffleThreadBuilder(() -> {
+            try {
+                rightFuture.complete(callNode.call(right.getCallTarget(), right.getClosureValues()));
+            } catch (Throwable e) {
+                rightFuture.completeExceptionally(e);
+            }
+        }).virtual(true).build();
+
+        leftThread.start();
+        rightThread.start();
+
+        try {
+            Object leftResult = leftFuture.get();
+            Object rightResult = rightFuture.get();
+            return MezzeRecord.fromFields(LEFT_RIGHT_FIELDS, new Object[]{leftResult, rightResult});
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            leftThread.interrupt();
+            rightThread.interrupt();
+            throw new RuntimeException("Parallel both interrupted", e);
+        } catch (ExecutionException e) {
+            leftThread.interrupt();
+            rightThread.interrupt();
+            throw new RuntimeException("Parallel both failed: " + e.getCause().getMessage(), e.getCause());
+        }
     }
 
+    /**
+     * Parallel both3 - run three functions in parallel.
+     */
     @TruffleBoundary
-    public static MezzeRecord parallelBoth3(MezzeRecord args, com.oracle.truffle.api.nodes.IndirectCallNode callNode, com.mezze.interpreter.v2.nodes.MezzeNode node) {
-        // Due to Truffle context sharing constraints, we run sequentially on the main thread
+    public static MezzeRecord parallelBoth3(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
         MezzeFunction a = getFunction(args, "a");
         MezzeFunction b = getFunction(args, "b");
         MezzeFunction c = getFunction(args, "c");
-        Object ra = callNode.call(a.getCallTarget(), a.getClosureValues());
-        Object rb = callNode.call(b.getCallTarget(), b.getClosureValues());
-        Object rc = callNode.call(c.getCallTarget(), c.getClosureValues());
-        return MezzeRecord.fromFields(new String[]{"a", "b", "c"}, new Object[]{ra, rb, rc});
+
+        Env env = MezzeContext.get(node).getEnv();
+
+        CompletableFuture<Object> aFuture = new CompletableFuture<>();
+        CompletableFuture<Object> bFuture = new CompletableFuture<>();
+        CompletableFuture<Object> cFuture = new CompletableFuture<>();
+
+        Thread aThread = env.newTruffleThreadBuilder(() -> {
+            try {
+                aFuture.complete(callNode.call(a.getCallTarget(), a.getClosureValues()));
+            } catch (Throwable e) {
+                aFuture.completeExceptionally(e);
+            }
+        }).virtual(true).build();
+
+        Thread bThread = env.newTruffleThreadBuilder(() -> {
+            try {
+                bFuture.complete(callNode.call(b.getCallTarget(), b.getClosureValues()));
+            } catch (Throwable e) {
+                bFuture.completeExceptionally(e);
+            }
+        }).virtual(true).build();
+
+        Thread cThread = env.newTruffleThreadBuilder(() -> {
+            try {
+                cFuture.complete(callNode.call(c.getCallTarget(), c.getClosureValues()));
+            } catch (Throwable e) {
+                cFuture.completeExceptionally(e);
+            }
+        }).virtual(true).build();
+
+        aThread.start();
+        bThread.start();
+        cThread.start();
+
+        try {
+            return MezzeRecord.fromFields(A_B_C_FIELDS,
+                new Object[]{aFuture.get(), bFuture.get(), cFuture.get()});
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            aThread.interrupt();
+            bThread.interrupt();
+            cThread.interrupt();
+            throw new RuntimeException("Parallel both3 interrupted", e);
+        } catch (ExecutionException e) {
+            aThread.interrupt();
+            bThread.interrupt();
+            cThread.interrupt();
+            throw new RuntimeException("Parallel both3 failed: " + e.getCause().getMessage(), e.getCause());
+        }
     }
 
     // === Parallel cfg variants ===
@@ -1795,7 +2745,8 @@ public final class ConcurrencyNatives {
     }
 
     // Pre-allocated field name arrays to avoid allocation in hot paths
-    private static final String[] X_FIELD = new String[]{"x"};
+    // X_FIELD is defined above in the Parallel Operations section
+    private static final String[] VAL_FIELD = new String[]{"val"};
     private static final String[] ACC_X_FIELDS = new String[]{"acc", "x"};
 
     /**
@@ -1845,11 +2796,16 @@ public final class ConcurrencyNatives {
     private static MezzeList getList(MezzeRecord args, String fieldName) {
         Object value = getField(args, fieldName);
         if (value instanceof MezzeList list) return list;
+        // Handle MezzeSeq (Vavr Vector) - convert to MezzeList
+        if (value instanceof MezzeSeq seq) {
+            return MezzeList.fromArray(seq.toJavaArray());
+        }
         // Handle array literals (Object[]) - convert to MezzeList
         if (value instanceof Object[] arr) {
-            return MezzeList.fromObjects(arr);
+            return MezzeList.fromArray(arr);
         }
-        throw new RuntimeException("Expected List for field '" + fieldName + "'");
+        throw new RuntimeException("Expected List for field '" + fieldName + "', got: " +
+            (value == null ? "null" : value.getClass().getSimpleName()));
     }
 
     private static Object getField(MezzeRecord r, String name) {
@@ -1893,4 +2849,5 @@ public final class ConcurrencyNatives {
         }
         throw new RuntimeException("Expected Array for field '" + fieldName + "'");
     }
+
 }

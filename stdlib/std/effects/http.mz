@@ -5,10 +5,16 @@
 # Request records and call Http.request.
 #
 # Implementations:
-# - HttpClient: Production implementation using Vert.x WebClient
-# - MockHttpClient: Testing implementation with configurable responses (future)
+# - HttpClient: Scoped client using Vert.x WebClient. Creates connection pool
+#               once per perform block, reuses for all requests. Best for
+#               multiple requests.
+# - HttpClientWith { config }: Same as HttpClient but with custom HttpConfig.
+# - SimpleHttpClient: Creates and closes connection per request. No scope
+#                     management. Good for one-off requests.
+# - SimpleHttpClientWith { config }: Same as SimpleHttpClient with custom config.
+# - MockHttpClient { rules }: Testing implementation with configurable mock responses.
 #
-# Example:
+# Example (HttpClient - recommended for multiple requests):
 #   use std::effects::http::{Http, HttpClient, get, post_json}
 #
 #   perform HttpClient in do
@@ -16,6 +22,19 @@
 #       match resp is
 #           Ok { val } -> val.body
 #           Err { error } -> handle_error { error }
+#
+# Example (HttpClientWith - custom config):
+#   use std::effects::http::{Http, HttpClientWith, default_http_config, get}
+#
+#   let my_config = { ...default_http_config, timeout_ms = 5000 }
+#   perform HttpClientWith { config = my_config } in do
+#       get { url = "https://api.example.com/fast" }
+#
+# Example (SimpleHttpClient - for one-off requests):
+#   use std::effects::http::{Http, SimpleHttpClient, get}
+#
+#   perform SimpleHttpClient in do
+#       get { url = "https://api.example.com/status" }
 
 use std::codec::json::{Json, to_string, parse_str}
 use std::codec::core::{Encode, Decode, DecodeError, EncodeError, CodecConfig, FieldTransform, default_config, EncodeFormat, DecodeFormat}
@@ -124,8 +143,57 @@ effect Http where {
 # =============================================================================
 
 # Production HTTP client using Vert.x WebClient
+# Uses scoped effects: client created once per perform block, closed on exit
+# Best for multiple requests - reuses connection pool
+# Uses default_http_config for all requests
 pub impl Http for HttpClient where {
-    request = { req, config } -> __native_http_request { req = req, config = config }
+    initialize_scope = {} -> do
+        let client = __native_http_client_create {}
+        {client = client},
+
+    finalize_scope = {} -> do
+        __native_http_client_close {client = scope.client}
+        {},
+
+    request = { req, config } -> __native_http_request { req = req, config = config, client = scope.client }
+}
+
+# HTTP client with custom configuration
+# Uses scoped effects like HttpClient but allows custom HttpConfig
+# Example:
+#   perform HttpClientWith { config = config_with_timeout { timeout_ms = 5000 } } in do
+#       get { url = "https://api.example.com/fast" }
+pub impl Http for HttpClientWith { config: HttpConfig } where {
+    initialize_scope = {} -> do
+        let client = __native_http_client_create {}
+        {client = client},
+
+    finalize_scope = {} -> do
+        __native_http_client_close {client = scope.client}
+        {},
+
+    # Use impl param `config` instead of the one passed by helpers (default_config)
+    request = { req, config: default_config } -> __native_http_request { req = req, config = config, client = scope.client }
+}
+
+# Simple HTTP client that creates and closes connection per request
+# No scope management needed - good for one-off requests
+# Less efficient for multiple requests (no connection reuse)
+pub impl Http for SimpleHttpClient where {
+    request = { req, config } -> do
+        let client = __native_http_client_create {}
+        let result = __native_http_request { req = req, config = config, client = client }
+        __native_http_client_close { client = client }
+        result
+}
+
+# Simple HTTP client with custom config
+pub impl Http for SimpleHttpClientWith { config: HttpConfig } where {
+    request = { req, config: default_config } -> do
+        let client = __native_http_client_create {}
+        let result = __native_http_request { req = req, config = config, client = client }
+        __native_http_client_close { client = client }
+        result
 }
 
 # Mock HTTP client for testing
@@ -137,6 +205,7 @@ pub impl Http for HttpClient where {
 #       { methods = [], url = Glob { pattern = "**" }, response = Err { error = ConnectionFailed { url = "", reason = "No mock" } } }
 #   ] } in do ...
 pub impl Http for MockHttpClient { rules: [MockRule] } where {
+    # Access rules directly from impl params (captured as closure)
     request = { req, config } -> __native_http_mock_request { req = req, rules = rules }
 }
 
@@ -230,41 +299,18 @@ pub let with_auth: { req: Request, auth: String } -> Request = { req, auth } ->
     with_header { req = req, key = "Authorization", value = auth }
 
 # =============================================================================
-# CONFIG BUILDERS
+# CONFIG
 # =============================================================================
-
-# Create config with custom timeout
-pub let config_with_timeout: { timeout_ms: Int } -> HttpConfig = { timeout_ms } -> {
-    timeout_ms = timeout_ms,
-    connect_timeout_ms = default_http_config.connect_timeout_ms,
-    follow_redirects = default_http_config.follow_redirects,
-    max_redirects = default_http_config.max_redirects,
-    verify_ssl = default_http_config.verify_ssl,
-    auto_decompress = default_http_config.auto_decompress,
-    keep_alive = default_http_config.keep_alive
-}
-
-# Create config with no redirect following
-pub let config_no_redirects: {} -> HttpConfig = {} -> {
-    timeout_ms = default_http_config.timeout_ms,
-    connect_timeout_ms = default_http_config.connect_timeout_ms,
-    follow_redirects = False,
-    max_redirects = 0,
-    verify_ssl = default_http_config.verify_ssl,
-    auto_decompress = default_http_config.auto_decompress,
-    keep_alive = default_http_config.keep_alive
-}
-
-# Create config with SSL verification disabled (for testing only!)
-pub let config_insecure: {} -> HttpConfig = {} -> {
-    timeout_ms = default_http_config.timeout_ms,
-    connect_timeout_ms = default_http_config.connect_timeout_ms,
-    follow_redirects = default_http_config.follow_redirects,
-    max_redirects = default_http_config.max_redirects,
-    verify_ssl = False,
-    auto_decompress = default_http_config.auto_decompress,
-    keep_alive = default_http_config.keep_alive
-}
+#
+# Use default_http_config and spread syntax to override specific fields:
+#
+#   let my_config = { ...default_http_config, timeout_ms = 5000 }
+#   let insecure_config = { ...default_http_config, verify_ssl = False }
+#   let no_redirects = { ...default_http_config, follow_redirects = False, max_redirects = 0 }
+#
+# Then use with HttpClientWith or SimpleHttpClientWith:
+#   perform HttpClientWith { config = my_config } in do ...
+#   perform SimpleHttpClientWith { config = my_config } in do ...
 
 # =============================================================================
 # BASIC REQUEST HELPERS (use default config)

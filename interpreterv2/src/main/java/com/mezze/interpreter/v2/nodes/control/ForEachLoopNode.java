@@ -1,8 +1,8 @@
 package com.mezze.interpreter.v2.nodes.control;
 
 import com.mezze.interpreter.v2.nodes.MezzeNode;
-import com.mezze.interpreter.v2.values.MezzeIntArray;
-import com.mezze.interpreter.v2.values.MezzeFloatArray;
+import com.mezze.interpreter.v2.values.MezzeSeq;
+import com.mezze.interpreter.v2.values.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeUnit;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -15,21 +15,20 @@ import com.oracle.truffle.api.nodes.RepeatingNode;
 import com.oracle.truffle.api.profiles.InlinedBranchProfile;
 
 /**
- * For-each loop node with OSR support - TYPE SPECIALIZED.
+ * For-each loop node with OSR support.
  *
  * Uses Truffle's LoopNode for On-Stack Replacement (OSR).
  * This enables JIT compilation mid-loop for long-running iterations.
  *
  * Type specializations:
- * 1. MezzeIntArray - NO BOXING, direct long iteration
- * 2. MezzeFloatArray - NO BOXING, direct double iteration
+ * 1. MezzeSeq (Vavr Vector) - O(log32 n) access per element
+ * 2. MezzeList (Vavr List) - O(n) access per element (but O(1) for head/tail iteration)
  * 3. Object[] - Generic object iteration
  *
  * The loop index is stored in a frame slot for proper Truffle semantics.
- * The array reference is passed via a frame slot to avoid storing mutable state in nodes.
  *
  * Example Mezze code this compiles:
- *   for x in array do body
+ *   for x in sequence do body
  */
 @NodeInfo(shortName = "foreach")
 public final class ForEachLoopNode extends MezzeNode {
@@ -44,18 +43,17 @@ public final class ForEachLoopNode extends MezzeNode {
     private final int indexSlot;    // Frame slot for loop index
 
     @CompilationFinal
-    private final int arraySlot;    // Frame slot for array reference
+    private final int arraySlot;    // Frame slot for sequence reference
 
     @CompilationFinal
-    private final int lengthSlot;   // Frame slot for array length
+    private final int lengthSlot;   // Frame slot for sequence length
 
     // Specialized loop nodes - LAZILY INITIALIZED
-    // Only the loop type actually used will be created
     @Child
-    private LoopNode intArrayLoopNode;
+    private LoopNode seqLoopNode;
 
     @Child
-    private LoopNode floatArrayLoopNode;
+    private LoopNode listLoopNode;
 
     @Child
     private LoopNode objectArrayLoopNode;
@@ -75,27 +73,26 @@ public final class ForEachLoopNode extends MezzeNode {
         this.arraySlot = arraySlot;
         this.lengthSlot = lengthSlot;
         this.bodyNode = bodyNode;
-        // Loop nodes are created lazily on first use
     }
 
-    private LoopNode getOrCreateIntArrayLoop() {
-        if (intArrayLoopNode == null) {
+    private LoopNode getOrCreateSeqLoop() {
+        if (seqLoopNode == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            intArrayLoopNode = insert(Truffle.getRuntime().createLoopNode(
-                new IntArrayRepeatingNode(elementSlot, indexSlot, arraySlot, lengthSlot, bodyNode)
+            seqLoopNode = insert(Truffle.getRuntime().createLoopNode(
+                new SeqRepeatingNode(elementSlot, indexSlot, arraySlot, lengthSlot, bodyNode)
             ));
         }
-        return intArrayLoopNode;
+        return seqLoopNode;
     }
 
-    private LoopNode getOrCreateFloatArrayLoop() {
-        if (floatArrayLoopNode == null) {
+    private LoopNode getOrCreateListLoop() {
+        if (listLoopNode == null) {
             CompilerDirectives.transferToInterpreterAndInvalidate();
-            floatArrayLoopNode = insert(Truffle.getRuntime().createLoopNode(
-                new FloatArrayRepeatingNode(elementSlot, indexSlot, arraySlot, lengthSlot, bodyNode)
+            listLoopNode = insert(Truffle.getRuntime().createLoopNode(
+                new ListRepeatingNode(elementSlot, indexSlot, arraySlot, lengthSlot, bodyNode)
             ));
         }
-        return floatArrayLoopNode;
+        return listLoopNode;
     }
 
     private LoopNode getOrCreateObjectArrayLoop() {
@@ -112,10 +109,10 @@ public final class ForEachLoopNode extends MezzeNode {
     public Object execute(VirtualFrame frame) {
         Object iterable = iterableNode.execute(frame);
 
-        if (iterable instanceof MezzeIntArray intArray) {
-            return executeIntArray(frame, intArray);
-        } else if (iterable instanceof MezzeFloatArray floatArray) {
-            return executeFloatArray(frame, floatArray);
+        if (iterable instanceof MezzeSeq seq) {
+            return executeSeq(frame, seq);
+        } else if (iterable instanceof MezzeList list) {
+            return executeList(frame, list);
         } else if (iterable instanceof Object[] objArray) {
             return executeObjectArray(frame, objArray);
         }
@@ -125,30 +122,26 @@ public final class ForEachLoopNode extends MezzeNode {
         throw new RuntimeException("Cannot iterate over: " + iterable.getClass().getSimpleName());
     }
 
-    private Object executeIntArray(VirtualFrame frame, MezzeIntArray array) {
-        long[] elements = array.getElements();
-
+    private Object executeSeq(VirtualFrame frame, MezzeSeq seq) {
         // Initialize loop state in frame slots
         frame.setInt(indexSlot, 0);
-        frame.setObject(arraySlot, elements);  // Store long[] directly
-        frame.setInt(lengthSlot, elements.length);
+        frame.setObject(arraySlot, seq);
+        frame.setInt(lengthSlot, seq.size());
 
-        // Execute OSR-enabled loop (lazy init on first use)
-        getOrCreateIntArrayLoop().execute(frame);
+        // Execute OSR-enabled loop
+        getOrCreateSeqLoop().execute(frame);
 
         return MezzeUnit.INSTANCE;
     }
 
-    private Object executeFloatArray(VirtualFrame frame, MezzeFloatArray array) {
-        double[] elements = array.getElements();
-
+    private Object executeList(VirtualFrame frame, MezzeList list) {
         // Initialize loop state in frame slots
         frame.setInt(indexSlot, 0);
-        frame.setObject(arraySlot, elements);  // Store double[] directly
-        frame.setInt(lengthSlot, elements.length);
+        frame.setObject(arraySlot, list);
+        frame.setInt(lengthSlot, list.size());
 
-        // Execute OSR-enabled loop (lazy init on first use)
-        getOrCreateFloatArrayLoop().execute(frame);
+        // Execute OSR-enabled loop
+        getOrCreateListLoop().execute(frame);
 
         return MezzeUnit.INSTANCE;
     }
@@ -159,7 +152,7 @@ public final class ForEachLoopNode extends MezzeNode {
         frame.setObject(arraySlot, array);
         frame.setInt(lengthSlot, array.length);
 
-        // Execute OSR-enabled loop (lazy init on first use)
+        // Execute OSR-enabled loop
         getOrCreateObjectArrayLoop().execute(frame);
 
         return MezzeUnit.INSTANCE;
@@ -167,7 +160,6 @@ public final class ForEachLoopNode extends MezzeNode {
 
     /**
      * Create a for-each loop node.
-     * Requires 3 additional frame slots: indexSlot, arraySlot, lengthSlot
      */
     public static ForEachLoopNode create(MezzeNode iterableNode, int elementSlot,
                                          int indexSlot, int arraySlot, int lengthSlot,
@@ -178,10 +170,9 @@ public final class ForEachLoopNode extends MezzeNode {
     // ==================== RepeatingNode implementations ====================
 
     /**
-     * RepeatingNode for MezzeIntArray - NO BOXING, direct long storage.
-     * All state is in frame slots for proper Truffle semantics.
+     * RepeatingNode for MezzeSeq (Vavr Vector).
      */
-    private static final class IntArrayRepeatingNode extends Node implements RepeatingNode {
+    private static final class SeqRepeatingNode extends Node implements RepeatingNode {
 
         @CompilationFinal
         private final int elementSlot;
@@ -198,7 +189,7 @@ public final class ForEachLoopNode extends MezzeNode {
         @Child
         private MezzeNode bodyNode;
 
-        IntArrayRepeatingNode(int elementSlot, int indexSlot, int arraySlot, int lengthSlot, MezzeNode bodyNode) {
+        SeqRepeatingNode(int elementSlot, int indexSlot, int arraySlot, int lengthSlot, MezzeNode bodyNode) {
             this.elementSlot = elementSlot;
             this.indexSlot = indexSlot;
             this.arraySlot = arraySlot;
@@ -215,9 +206,9 @@ public final class ForEachLoopNode extends MezzeNode {
                 return false;  // Done
             }
 
-            // Get array and extract element - NO BOXING
-            long[] elements = (long[]) frame.getObject(arraySlot);
-            frame.setLong(elementSlot, elements[index]);
+            // Get sequence and extract element
+            MezzeSeq seq = (MezzeSeq) frame.getObject(arraySlot);
+            frame.setObject(elementSlot, seq.get(index));
 
             // Increment index
             frame.setInt(indexSlot, index + 1);
@@ -229,9 +220,11 @@ public final class ForEachLoopNode extends MezzeNode {
     }
 
     /**
-     * RepeatingNode for MezzeFloatArray - NO BOXING, direct double storage.
+     * RepeatingNode for MezzeList (Vavr List).
+     * Note: O(n²) total because each get(index) is O(n).
+     * For better performance, consider using head/tail iteration in the future.
      */
-    private static final class FloatArrayRepeatingNode extends Node implements RepeatingNode {
+    private static final class ListRepeatingNode extends Node implements RepeatingNode {
 
         @CompilationFinal
         private final int elementSlot;
@@ -248,7 +241,7 @@ public final class ForEachLoopNode extends MezzeNode {
         @Child
         private MezzeNode bodyNode;
 
-        FloatArrayRepeatingNode(int elementSlot, int indexSlot, int arraySlot, int lengthSlot, MezzeNode bodyNode) {
+        ListRepeatingNode(int elementSlot, int indexSlot, int arraySlot, int lengthSlot, MezzeNode bodyNode) {
             this.elementSlot = elementSlot;
             this.indexSlot = indexSlot;
             this.arraySlot = arraySlot;
@@ -265,9 +258,9 @@ public final class ForEachLoopNode extends MezzeNode {
                 return false;  // Done
             }
 
-            // Get array and extract element - NO BOXING
-            double[] elements = (double[]) frame.getObject(arraySlot);
-            frame.setDouble(elementSlot, elements[index]);
+            // Get list and extract element (O(n) per access)
+            MezzeList list = (MezzeList) frame.getObject(arraySlot);
+            frame.setObject(elementSlot, list.get(index));
 
             // Increment index
             frame.setInt(indexSlot, index + 1);

@@ -5,6 +5,7 @@ import com.mezze.language.ast.hashing.ASTHasher
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.hashing.ContentHashComputer
+import com.mezze.language.typechecker.scope.detectScopedEffectMembers
 import com.mezze.language.typechecker.solving.Substitution
 
 /**
@@ -1997,10 +1998,16 @@ class SubstitutionApplier(
             val implDecl = implDeclarations[performerName] ?: return@mapNotNull null
             val implHash = implDecl.contentHash ?: return@mapNotNull null
 
+            // Detect scoped effect info
+            val scopedInfo = detectScopedEffectMembers(implDecl)
+
             effectName to ResolvedEffectHandler(
                 effectName = effectName,
                 performerName = performerName,
-                implDeclarationHash = implHash
+                implDeclarationHash = implHash,
+                isScopedEffect = scopedInfo.isScopedEffect,
+                initializeScopeExpr = scopedInfo.initializeScope?.implementation,
+                finalizeScopeExpr = scopedInfo.finalizeScope?.implementation
             )
         }.toMap()
 

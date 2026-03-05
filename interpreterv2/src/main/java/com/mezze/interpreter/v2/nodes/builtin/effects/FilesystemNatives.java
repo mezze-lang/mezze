@@ -175,7 +175,7 @@ public final class FilesystemNatives {
         if (entries == null) {
             entries = new String[0];
         }
-        return createOk(MezzeList.fromObjects(Arrays.stream(entries).toArray()));
+        return createOk(MezzeList.fromArray(Arrays.stream(entries).toArray()));
     }
 
     // ============== Delete Operations ==============

@@ -71,6 +71,10 @@ public final class StateMachineNode extends MezzeNode {
     @CompilationFinal
     private final int stateCount;
 
+    // Cached frame descriptor for resume targets - captured lazily on first execution
+    @CompilationFinal
+    private FrameDescriptor cachedFrameDescriptor;
+
     // Branch profile for early return path - rarely taken, JIT optimizes for normal path
     private final InlinedBranchProfile earlyReturnProfile = InlinedBranchProfile.getUncached();
 
@@ -97,6 +101,12 @@ public final class StateMachineNode extends MezzeNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
+        // Capture frame descriptor on first execution for use in resume targets
+        if (cachedFrameDescriptor == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            cachedFrameDescriptor = frame.getFrameDescriptor();
+        }
+
         // Set initial state index
         if (stateIndexSlot >= 0) {
             frame.setLong(stateIndexSlot, initialStateIndex);
@@ -127,12 +137,16 @@ public final class StateMachineNode extends MezzeNode {
                 frame.setObject(inputSlot, currentInput);
             }
 
+            // CRITICAL: Set context BEFORE executing state so capture can find us
+            int nextState = nextStateIndices[currentState];
+            setExecutionContext(frame, nextState);
+
             // Execute current state
             MezzeNode stateNode = stateNodes[currentState];
             Object result = stateNode.execute(frame);
 
             int stateType = stateTypes[currentState];
-            int nextState = nextStateIndices[currentState];
+            // nextState already computed above for context setting
 
             switch (stateType) {
                 case STATE_COMPUTE -> {
@@ -181,6 +195,11 @@ public final class StateMachineNode extends MezzeNode {
 
     /**
      * Capture locals from frame - JIT-safe, called before TruffleBoundary.
+     *
+     * OPTIMIZATION: Try typed reads first to preserve unboxed primitives.
+     * This avoids boxing overhead when capturing Long/Double/Boolean values.
+     * The try-catch pattern is JIT-friendly as Truffle eliminates the exception
+     * handling overhead after profiling shows which types are used.
      */
     @ExplodeLoop
     private Object[] captureLocals(VirtualFrame frame, int resumeState) {
@@ -189,21 +208,46 @@ public final class StateMachineNode extends MezzeNode {
         // First element is the resume state
         capturedValues[0] = (long) resumeState;
 
-        // Capture variable values
+        // Capture variable values - try typed reads first for unboxed primitives
         for (int i = 0; i < capturedVariableSlots.length; i++) {
             int slot = capturedVariableSlots[i];
             if (slot >= 0) {
-                try {
-                    capturedValues[i + 1] = frame.getObject(slot);
-                } catch (Exception e) {
-                    capturedValues[i + 1] = MezzeUnit.INSTANCE;
-                }
+                capturedValues[i + 1] = captureSlotValue(frame, slot);
             } else {
                 capturedValues[i + 1] = MezzeUnit.INSTANCE;
             }
         }
 
         return capturedValues;
+    }
+
+    /**
+     * Capture a single slot value, trying typed reads first for unboxed primitives.
+     * After JIT profiling, this becomes a direct typed read with no exception overhead.
+     */
+    private Object captureSlotValue(VirtualFrame frame, int slot) {
+        // Try Long first (most common numeric type in Mezze)
+        try {
+            return frame.getLong(slot);
+        } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e1) {
+            // Not a Long, try Double
+            try {
+                return frame.getDouble(slot);
+            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e2) {
+                // Not a Double, try Boolean
+                try {
+                    return frame.getBoolean(slot);
+                } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e3) {
+                    // Fall back to Object
+                    try {
+                        Object value = frame.getObject(slot);
+                        return value != null ? value : MezzeUnit.INSTANCE;
+                    } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e4) {
+                        return MezzeUnit.INSTANCE;
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -227,15 +271,33 @@ public final class StateMachineNode extends MezzeNode {
 
     /**
      * Create a CallTarget for resuming the state machine.
+     * Public so ContinuationCaptureNode can access it.
      */
     @TruffleBoundary
-    private CallTarget createResumeCallTarget() {
-        FrameDescriptor.Builder builder = FrameDescriptor.newBuilder();
-        FrameDescriptor fd = builder.build();
+    public CallTarget createResumeCallTarget() {
+        // Use the cached frame descriptor from the original execution.
+        // This ensures the resume frame has all the slots that the state machine's
+        // internal nodes expect (not just captured variables).
+        FrameDescriptor fd = cachedFrameDescriptor;
+
+        if (fd == null) {
+            // Fallback: build a frame descriptor with enough slots.
+            // This shouldn't normally happen since execute() captures it first.
+            int numSlots = Math.max(
+                    Math.max(inputSlot + 1, stateIndexSlot + 1),
+                    capturedVariableSlots.length > 0
+                            ? java.util.Arrays.stream(capturedVariableSlots).max().getAsInt() + 1
+                            : 0
+            );
+
+            FrameDescriptor.Builder builder = FrameDescriptor.newBuilder();
+            for (int i = 0; i < numSlots; i++) {
+                builder.addSlot(com.oracle.truffle.api.frame.FrameSlotKind.Object, "slot_" + i, null);
+            }
+            fd = builder.build();
+        }
 
         // Create a root node that resumes this state machine
-        // We pass null for language since MezzeRootNode handles this gracefully
-        // and it allows tests to run without a full polyglot context
         MezzeRootNode rootNode = new MezzeRootNode(
                 null,
                 fd,
@@ -246,6 +308,26 @@ public final class StateMachineNode extends MezzeNode {
         );
 
         return rootNode.getCallTarget();
+    }
+
+    /**
+     * Set the execution context so capture can find us.
+     * This captures the state machine and next state index.
+     * Split into JIT-safe capture + boundary-safe context set.
+     */
+    private void setExecutionContext(VirtualFrame frame, int nextStateIndex) {
+        // Capture locals before boundary (JIT-safe)
+        Object[] capturedLocals = captureLocals(frame, nextStateIndex);
+        // Then set context (boundary)
+        setExecutionContextBoundary(nextStateIndex, capturedLocals);
+    }
+
+    @TruffleBoundary
+    private void setExecutionContextBoundary(int nextStateIndex, Object[] capturedLocals) {
+        StateMachineContext.ExecutionSnapshot snapshot = new StateMachineContext.ExecutionSnapshot(
+                this, null, nextStateIndex, capturedLocals
+        );
+        StateMachineContext.setCurrentContext(snapshot);
     }
 
     /**
@@ -260,16 +342,34 @@ public final class StateMachineNode extends MezzeNode {
         // Extract resume state
         int resumeState = ((Number) capturedValues[0]).intValue();
 
-        // Restore captured variables
+        // Restore captured variables with correct types
+        // captureSlotValue preserves primitives, so we need to restore them as primitives
         for (int i = 0; i < capturedVariableSlots.length && i + 1 < capturedValues.length; i++) {
             int slot = capturedVariableSlots[i];
             if (slot >= 0) {
-                frame.setObject(slot, capturedValues[i + 1]);
+                restoreSlotValue(frame, slot, capturedValues[i + 1]);
             }
         }
 
         // Execute from resume state with resume value as input
         return executeFromState(frame, resumeState, resumeValue);
+    }
+
+    /**
+     * Restore a slot value with correct type to match how it was captured.
+     * This ensures that variables captured as Long/Double/Boolean are restored
+     * as primitives so typed reads will work correctly.
+     */
+    private void restoreSlotValue(VirtualFrame frame, int slot, Object value) {
+        if (value instanceof Long l) {
+            frame.setLong(slot, l);
+        } else if (value instanceof Double d) {
+            frame.setDouble(slot, d);
+        } else if (value instanceof Boolean b) {
+            frame.setBoolean(slot, b);
+        } else {
+            frame.setObject(slot, value);
+        }
     }
 
     /**

@@ -51,12 +51,29 @@ object HttpImplementations {
     /**
      * Register all HTTP effect implementations
      */
+    // HTTP client handle (V1 uses shared client, so this is just a marker)
+    private class HttpClientHandle(val id: Long = System.nanoTime())
+
     fun registerAll(context: MutableMap<String, MezzeValue>) {
-        // Core request operation with config
+        // Create HTTP client - returns a handle (V1 uses shared Vert.x instance)
+        context["__native_http_client_create"] = NativeMezzeFunction("__native_http_client_create") { _ ->
+            // V1 uses lazy-initialized shared client, so just return a marker handle
+            MezzeRecord(mapOf("__handle" to MezzeInt(System.nanoTime())))
+        }
+
+        // Close HTTP client - no-op in V1 (shared client stays alive)
+        context["__native_http_client_close"] = NativeMezzeFunction("__native_http_client_close") { _ ->
+            // V1 uses shared client, no explicit close needed
+            MezzeUnit
+        }
+
+        // Core request operation with config and client
+        // Note: V1 ignores the client parameter and uses the shared Vert.x instance
         context["__native_http_request"] = NativeMezzeFunction("__native_http_request") { args ->
             val record = args[0] as MezzeRecord
             val req = record.fields["req"] as MezzeRecord
             val config = record.fields["config"] as MezzeRecord
+            // client field is present but ignored - V1 uses shared Vert.x instance
             executeFromRequestWithConfig(req, config)
         }
 

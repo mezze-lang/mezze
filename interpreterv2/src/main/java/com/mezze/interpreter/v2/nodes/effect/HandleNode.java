@@ -3,8 +3,11 @@ package com.mezze.interpreter.v2.nodes.effect;
 import com.mezze.interpreter.v2.nodes.MezzeNode;
 import com.mezze.interpreter.v2.runtime.ImplSignature;
 import com.mezze.interpreter.v2.runtime.MezzeContext;
+import com.mezze.interpreter.v2.nodes.continuation.ForkedExecutionException;
 import com.mezze.interpreter.v2.nodes.continuation.MezzeContinuationSuspended;
+import com.mezze.interpreter.v2.values.MezzeList;
 import com.mezze.interpreter.v2.values.MezzeRecord;
+import com.mezze.interpreter.v2.values.MezzeSuspended;
 import com.mezze.interpreter.v2.values.MezzeVariant;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
@@ -12,9 +15,12 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.FrameSlotKind;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.DirectCallNode;
+import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Node that looks up a handler by content hash.
@@ -128,6 +134,10 @@ public final class HandleNode extends MezzeNode {
 
     @CompilationFinal
     private boolean scopeSlotIsValid = false;
+
+    // For executing suspended computations
+    @Child
+    private IndirectCallNode indirectCallNode;
 
     /**
      * Standard constructor for non-scoped effects (backward compatible).
@@ -271,7 +281,9 @@ public final class HandleNode extends MezzeNode {
         }
 
         // Also register in context so DynamicEffectCallNode can find it
+        // AND push onto handler stack for lazy effects
         registerHandlerInContext(handler);
+        pushHandlersToStack(handler);
 
         // SCOPED EFFECTS: Execute initialize_scope if present
         Object scope = null;
@@ -289,10 +301,14 @@ public final class HandleNode extends MezzeNode {
 
         Throwable bodyException = null;
         Object result = null;
+        MezzeList forkedResults = null;
 
         try {
             // Execute the body with the handler (and scope if scoped effect) installed
             result = bodyNode.execute(frame);
+        } catch (ForkedExecutionException e) {
+            // Fork completed - capture results, run finalize_scope, then return values
+            forkedResults = e.values;
         } catch (Throwable t) {
             // Capture exception for later - finalize_scope must still run
             bodyException = t;
@@ -312,6 +328,9 @@ public final class HandleNode extends MezzeNode {
             if (scopeSlotIsValid) {
                 frame.setObject(scopeSlot, null);
             }
+
+            // Pop handler from stack (for lazy effects)
+            popHandlersFromStack();
 
             // Restore previous handler (or clear if none) - only if slot is valid
             if (slotIsValid) {
@@ -350,16 +369,27 @@ public final class HandleNode extends MezzeNode {
             }
         }
 
+        // If fork completed successfully, return the forked results
+        if (forkedResults != null) {
+            return forkedResults;
+        }
+
         return processResult(result);
     }
 
     /**
      * Process the result:
+     * - For MezzeSuspended (lazy effects), try to execute with our handlers
      * - For MezzeContinuationSuspended with Exception/Return effects, extract suspended value
      * - For Exception effect, wrap successful results in Ok variant
      */
     @TruffleBoundary
     private Object processResult(Object result) {
+        // Handle lazy effects: if result is MezzeSuspended, try to execute with our handlers
+        if (result instanceof MezzeSuspended suspended) {
+            return processSuspended(suspended);
+        }
+
         // Handle suspended continuations (for early return/exception)
         if (result instanceof MezzeContinuationSuspended suspended) {
             // Exception and Return effects use suspend_with to return early
@@ -375,6 +405,56 @@ public final class HandleNode extends MezzeNode {
         }
 
         return result;
+    }
+
+    /**
+     * Process a MezzeSuspended result by executing it with our handlers.
+     */
+    @TruffleBoundary
+    private Object processSuspended(MezzeSuspended suspended) {
+        MezzeContext context;
+        try {
+            context = MezzeContext.get(this);
+        } catch (AssertionError e) {
+            // No context - return suspended as-is
+            return suspended;
+        }
+
+        // Build handler map from our effect names
+        Map<String, Object> handlers = new HashMap<>();
+        if (handlerName != null) {
+            Object handler = context.lookupLocal(handlerName);
+            if (handler == null) {
+                handler = context.lookupGlobal(handlerName);
+            }
+            if (handler != null) {
+                handlers.put(handlerName, handler);
+                // Also map effect names to this handler
+                for (String effectName : effectNames) {
+                    handlers.put(effectName, handler);
+                }
+            }
+        }
+
+        // Execute the suspended computation with our handlers
+        if (indirectCallNode == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            indirectCallNode = insert(IndirectCallNode.create());
+        }
+
+        Object executedResult = suspended.executeWith(handlers, context, indirectCallNode);
+
+        // If still suspended, return it
+        if (executedResult instanceof MezzeSuspended) {
+            return executedResult;
+        }
+
+        // Process the executed result (may need Ok wrapping for Exception effect)
+        if (hasEffect("Exception")) {
+            return MezzeVariant.ok(executedResult);
+        }
+
+        return executedResult;
     }
 
     private boolean hasEffect(String effectName) {
@@ -407,6 +487,47 @@ public final class HandleNode extends MezzeNode {
         for (String effectName : effectNames) {
             context.defineLocal(effectName, handler);
         }
+    }
+
+    /**
+     * Push handlers onto the context's handler stack for lazy effects.
+     */
+    @TruffleBoundary
+    private void pushHandlersToStack(Object handler) {
+        if (handler == null) return;
+
+        MezzeContext context;
+        try {
+            context = MezzeContext.get(this);
+        } catch (AssertionError e) {
+            return;
+        }
+
+        // Build handler map
+        Map<String, Object> handlers = new HashMap<>();
+        if (handlerName != null) {
+            handlers.put(handlerName, handler);
+        }
+        for (String effectName : effectNames) {
+            handlers.put(effectName, handler);
+        }
+
+        context.pushHandlers(handlers);
+    }
+
+    /**
+     * Pop handlers from the context's handler stack.
+     */
+    @TruffleBoundary
+    private void popHandlersFromStack() {
+        MezzeContext context;
+        try {
+            context = MezzeContext.get(this);
+        } catch (AssertionError e) {
+            return;
+        }
+
+        context.popHandlers();
     }
 
     /**

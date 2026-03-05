@@ -29,7 +29,7 @@ public final class ListNatives {
         for (int i = 0; i < size; i++) {
             elements[i] = start + i;
         }
-        return MezzeList.fromObjects(elements);
+        return MezzeList.fromArray(elements);
     }
 
     @TruffleBoundary
@@ -41,7 +41,7 @@ public final class ListNatives {
         for (int i = 0; i < count; i++) {
             elements[i] = element;
         }
-        return MezzeList.fromObjects(elements);
+        return MezzeList.fromArray(elements);
     }
 
     // ==================== Basic Operations ====================
@@ -125,7 +125,7 @@ public final class ListNatives {
         for (int i = 0; i < list2.size(); i++) {
             elements[list1.size() + i] = list2.get(i);
         }
-        return MezzeList.fromObjects(elements);
+        return MezzeList.fromArray(elements);
     }
 
     // ==================== Sublists ====================
@@ -149,7 +149,7 @@ public final class ListNatives {
         for (int i = 0; i < list.size(); i++) {
             elements[list.size() - 1 - i] = list.get(i);
         }
-        return MezzeList.fromObjects(elements);
+        return MezzeList.fromArray(elements);
     }
 
     @TruffleBoundary
@@ -162,7 +162,7 @@ public final class ListNatives {
             result[i] = callNode.call(mapper.getCallTarget(),
                 prepareArgs(mapper, list.get(i)));
         }
-        return MezzeList.fromObjects(result);
+        return MezzeList.fromArray(result);
     }
 
     @TruffleBoundary
@@ -183,7 +183,7 @@ public final class ListNatives {
         if (count == 0) return MezzeList.empty();
         Object[] filtered = new Object[count];
         System.arraycopy(temp, 0, filtered, 0, count);
-        return MezzeList.fromObjects(filtered);
+        return MezzeList.fromArray(filtered);
     }
 
     @TruffleBoundary
@@ -326,8 +326,8 @@ public final class ListNatives {
         return MezzeRecord.fromFields(
             new String[]{"matching", "not_matching"},
             new Object[]{
-                MezzeList.fromObjects(matchTrimmed),
-                MezzeList.fromObjects(nonMatchTrimmed)
+                MezzeList.fromArray(matchTrimmed),
+                MezzeList.fromArray(nonMatchTrimmed)
             }
         );
     }
@@ -346,7 +346,7 @@ public final class ListNatives {
                 new Object[]{list1.get(i), list2.get(i)}
             );
         }
-        return MezzeList.fromObjects(result);
+        return MezzeList.fromArray(result);
     }
 
     @TruffleBoundary
@@ -367,8 +367,8 @@ public final class ListNatives {
         return MezzeRecord.fromFields(
             new String[]{"fsts", "snds"},
             new Object[]{
-                MezzeList.fromObjects(firsts),
-                MezzeList.fromObjects(seconds)
+                MezzeList.fromArray(firsts),
+                MezzeList.fromArray(seconds)
             }
         );
     }
@@ -386,7 +386,7 @@ public final class ListNatives {
                 result[i * 2 + 1] = separator;
             }
         }
-        return MezzeList.fromObjects(result);
+        return MezzeList.fromArray(result);
     }
 
     // ==================== Sort Operations ====================
@@ -414,7 +414,7 @@ public final class ListNatives {
             return 0;
         });
 
-        return MezzeList.fromObjects(arr);
+        return MezzeList.fromArray(arr);
     }
 
     @TruffleBoundary
@@ -439,7 +439,7 @@ public final class ListNatives {
             return 0;
         });
 
-        return MezzeList.fromObjects(arr);
+        return MezzeList.fromArray(arr);
     }
 
     // ==================== Conversion ====================
@@ -455,7 +455,7 @@ public final class ListNatives {
 
     @TruffleBoundary
     public static MezzeList fromArray(Object[] arr) {
-        return MezzeList.fromObjects(arr);
+        return MezzeList.fromArray(arr);
     }
 
     // ==================== Helper Methods ====================
