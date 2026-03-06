@@ -202,8 +202,9 @@ class OperatorErrorMessageTest {
         val error = getErrorMessage(source)
         // With strict Nat type checking, Int is not compatible with Nat
         assertNotNull(error, "Expected type error: Int not compatible with Nat")
+        // Accept improved error messages: "Type annotation mismatch" or "Type mismatch" or "not compatible"
         assertTrue(
-            (error!!.contains("Type mismatch") || error.contains("not compatible")) && (error.contains("Int") || error.contains("Nat")),
+            (error!!.contains("mismatch") || error.contains("not compatible")) && (error.contains("Int") || error.contains("Nat")),
             "Error should mention Int/Nat type conflict: $error"
         )
     }

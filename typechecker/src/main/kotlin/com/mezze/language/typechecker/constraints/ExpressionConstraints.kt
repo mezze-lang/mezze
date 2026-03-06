@@ -155,6 +155,7 @@ class ExpressionConstraintGenerator {
         val usedVars = mutableSetOf<String>()
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
 
+        var interpolationIndex = 0
         for (part in expr.parts!!) {
             when (part) {
                 is StringPart -> {
@@ -177,9 +178,11 @@ class ExpressionConstraintGenerator {
                             left = exprResult.type,
                             right = MezzeType.StringType,
                             context = "String interpolation requires String type",
-                            sourceLocation = part.expression.sourceLocation
+                            sourceLocation = part.expression.sourceLocation,
+                            errorContext = ErrorContext.StringInterpolation(interpolationIndex)
                         )
                     )
+                    interpolationIndex++
                 }
             }
         }
@@ -212,6 +215,7 @@ class ExpressionConstraintGenerator {
         val associatedTypeConstraints = mutableListOf<Constraint.AssociatedTypeResolution>()
         val effects = mutableSetOf<String>()
 
+        var elementIndex = 0
         for (element in expr.elements) {
             when (element) {
                 is ArrayRegularElement -> {
@@ -227,9 +231,11 @@ class ExpressionConstraintGenerator {
                             left = result.type,
                             right = elementType,
                             context = "Array elements must have same type",
-                            sourceLocation = element.expression.sourceLocation
+                            sourceLocation = element.expression.sourceLocation,
+                            errorContext = ErrorContext.ArrayElement(elementIndex)
                         )
                     )
+                    elementIndex++
                 }
                 is ArraySpreadElement -> {
                     val result = generate(element.expression, context)
@@ -244,9 +250,11 @@ class ExpressionConstraintGenerator {
                             left = result.type,
                             right = MezzeType.ArrayType(elementType),
                             context = "Spread element must be an array",
-                            sourceLocation = element.expression.sourceLocation
+                            sourceLocation = element.expression.sourceLocation,
+                            errorContext = ErrorContext.ArrayElement(elementIndex)
                         )
                     )
+                    elementIndex++
                 }
             }
         }
@@ -2448,12 +2456,22 @@ class ExpressionConstraintGenerator {
                 constraints.addAll(argumentResult.constraints)
 
                 // Argument must match parameter type
+                // Extract function name for better error messages
+                val functionName = when (expr.function) {
+                    is Identifier -> (expr.function as Identifier).name
+                    else -> null
+                }
                 constraints.add(
                     Constraint.Equality(
                         left = argumentResult.type,
                         right = functionType.paramType,
                         context = "Function application argument",
-                        sourceLocation = expr.sourceLocation
+                        sourceLocation = expr.sourceLocation,
+                        errorContext = ErrorContext.FunctionArgument(
+                            functionName = functionName,
+                            argumentName = extractArgumentName(expr.arguments),
+                            parameterIndex = 0
+                        )
                     )
                 )
 
@@ -2509,6 +2527,11 @@ class ExpressionConstraintGenerator {
         // function must be a function type: argumentType -> returnType
         // Note: left = actual (what we got), right = expected (what we need)
         // The function's actual type must match a function that takes our argument type
+        // Extract function name for better error messages
+        val functionName = when (expr.function) {
+            is Identifier -> (expr.function as Identifier).name
+            else -> null
+        }
         constraints.add(
             Constraint.Equality(
                 left = MezzeType.FunctionType(
@@ -2517,7 +2540,12 @@ class ExpressionConstraintGenerator {
                 ),
                 right = functionResult.type,
                 context = "Function application",
-                sourceLocation = expr.sourceLocation
+                sourceLocation = expr.sourceLocation,
+                errorContext = ErrorContext.FunctionArgument(
+                    functionName = functionName,
+                    argumentName = extractArgumentName(expr.arguments),
+                    parameterIndex = 0
+                )
             )
         )
 
@@ -3933,5 +3961,33 @@ class ExpressionConstraintGenerator {
             }
         }
         return dp[m][n]
+    }
+
+    /**
+     * Extract a descriptive name for function arguments.
+     *
+     * For record literals, returns the first field name or a combined description.
+     * For identifiers, returns the identifier name.
+     * For other expressions, returns null.
+     */
+    private fun extractArgumentName(expr: Expression): String? {
+        return when (expr) {
+            is RecordLiteral -> {
+                val fieldNames = expr.entries.mapNotNull { entry ->
+                    when (entry) {
+                        is RecordFieldEntry -> entry.name
+                        else -> null  // RecordSpreadEntry doesn't have a name
+                    }
+                }
+                when {
+                    fieldNames.isEmpty() -> null
+                    fieldNames.size == 1 -> fieldNames.first()
+                    fieldNames.size <= 3 -> "{${fieldNames.joinToString(", ")}}"
+                    else -> "{${fieldNames.take(3).joinToString(", ")}, ...}"
+                }
+            }
+            is Identifier -> expr.name
+            else -> null
+        }
     }
 }

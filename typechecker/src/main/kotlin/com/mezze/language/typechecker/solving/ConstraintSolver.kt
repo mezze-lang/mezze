@@ -4,6 +4,8 @@ import com.mezze.language.ast.*
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.constraints.Constraint
+import com.mezze.language.typechecker.constraints.ErrorContext
+import com.mezze.language.typechecker.printing.TypeDiffPrinter
 import com.mezze.language.typechecker.context.TypingContext
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
@@ -902,57 +904,231 @@ class ConstraintSolver(
                 ConstraintResult.Success(result.substitution)
             }
             is UnificationResult.Failure -> {
-                // Detect literal vs variant mismatch for better error message
-                val constraintContext = constraint.context ?: ""
-                val type1 = constraint.left
-                val type2 = constraint.right
-
-                if (constraintContext.contains("Literal pattern")) {
-                    // Check if one side is a variant type
-                    val variantType = when {
-                        type1 is MezzeType.VariantType -> type1
-                        type2 is MezzeType.VariantType -> type2
-                        else -> null
-                    }
-
-                    if (variantType != null) {
-                        // OPTIMIZATION: Get first element without sorting, then sort only for error message
-                        val firstConstructor = variantType.constructors.keys.firstOrNull() ?: "ConstructorName"
-                        val sortedConstructors = variantType.constructors.keys.sorted()
-                        return ConstraintResult.Failure(
-                            "Cannot match variant type [${sortedConstructors.joinToString(", ")}] with a literal pattern. " +
-                            "Use a constructor pattern like '$firstConstructor' instead."
-                        )
-                    }
-
-                    // Check for TypeApplication (named type like Option, Result)
-                    val typeApp = when {
-                        type1 is MezzeType.TypeApplication -> type1
-                        type2 is MezzeType.TypeApplication -> type2
-                        else -> null
-                    }
-
-                    if (typeApp != null) {
-                        return ConstraintResult.Failure(
-                            "Cannot match type '${typeApp.constructor}' with a literal pattern. " +
-                            "Use a constructor pattern instead."
-                        )
-                    }
-                }
-
-                // Check for List vs Array confusion
-                if (constraintContext.contains("Array pattern")) {
-                    if (type1 is MezzeType.ListType || type2 is MezzeType.ListType) {
-                        return ConstraintResult.Failure(
-                            "Cannot use array pattern syntax [a, b, ...] with List type. " +
-                            "Use constructor patterns 'Cons { head, tail }' and 'Nil' instead."
-                        )
-                    }
-                }
-
-                ConstraintResult.Failure(result.message)
+                // Generate better error message based on structured context
+                val betterMessage = generateBetterErrorMessage(constraint, result)
+                ConstraintResult.Failure(betterMessage)
             }
         }
+    }
+
+    /**
+     * Generate a user-friendly error message based on structured error context.
+     *
+     * Uses ErrorContext when available, falls back to string-based context parsing
+     * for backwards compatibility.
+     */
+    private fun generateBetterErrorMessage(
+        constraint: Constraint.Equality,
+        failure: UnificationResult.Failure
+    ): String {
+        val type1 = constraint.left
+        val type2 = constraint.right
+        val errorContext = constraint.errorContext
+        val stringContext = constraint.context ?: ""
+
+        // Handle structured error context
+        when (errorContext) {
+            is ErrorContext.FunctionArgument -> {
+                val argName = errorContext.argumentName
+                val funcName = errorContext.functionName
+                val expected = TypeDiffPrinter.formatType(type2)
+                val actual = TypeDiffPrinter.formatType(type1)
+
+                return if (argName != null && funcName != null) {
+                    "Type mismatch for argument '$argName' in call to '$funcName': expected $expected but got $actual"
+                } else if (argName != null) {
+                    "Type mismatch for argument '$argName': expected $expected but got $actual"
+                } else if (funcName != null) {
+                    "Type mismatch in call to '$funcName': expected $expected but got $actual"
+                } else {
+                    "Function argument type mismatch: expected $expected but got $actual"
+                }
+            }
+            is ErrorContext.TypeAnnotation -> {
+                val bindingName = errorContext.bindingName
+                val expected = TypeDiffPrinter.formatType(type2)
+                val actual = TypeDiffPrinter.formatType(type1)
+
+                return if (errorContext.isReturnType) {
+                    "Return type mismatch in '$bindingName': declared as $expected but returns $actual"
+                } else {
+                    "Type annotation mismatch for '$bindingName': declared as $expected but expression has type $actual"
+                }
+            }
+            is ErrorContext.FieldAccess -> {
+                val fieldName = errorContext.fieldName
+                val expected = TypeDiffPrinter.formatType(type2)
+                val actual = TypeDiffPrinter.formatType(type1)
+
+                return "Field '$fieldName' has type $actual but expected $expected"
+            }
+            is ErrorContext.PatternMatch -> {
+                return generatePatternMatchError(type1, type2, errorContext, stringContext)
+            }
+            is ErrorContext.BinaryOperation -> {
+                val op = errorContext.operator
+                val side = if (errorContext.isLeftOperand) "left" else "right"
+                val expected = TypeDiffPrinter.formatType(type2)
+                val actual = TypeDiffPrinter.formatType(type1)
+
+                return "Type mismatch in '$op' operator ($side operand): expected $expected but got $actual"
+            }
+            is ErrorContext.ArrayElement -> {
+                val expected = TypeDiffPrinter.formatType(type2)
+                val actual = TypeDiffPrinter.formatType(type1)
+
+                return "Array element at index ${errorContext.elementIndex} has type $actual but array expects $expected"
+            }
+            is ErrorContext.ReturnType -> {
+                val funcName = errorContext.functionName
+                val expected = TypeDiffPrinter.formatType(type2)
+                val actual = TypeDiffPrinter.formatType(type1)
+
+                return if (funcName != null) {
+                    "Return type mismatch in function '$funcName': expected $expected but got $actual"
+                } else {
+                    "Return type mismatch: expected $expected but got $actual"
+                }
+            }
+            is ErrorContext.StringInterpolation -> {
+                val actual = TypeDiffPrinter.formatType(type1)
+                return "String interpolation requires String type, but expression has type $actual"
+            }
+            is ErrorContext.Simple -> {
+                // Fall through to string-based handling
+            }
+            null -> {
+                // Fall through to string-based handling
+            }
+        }
+
+        // Backwards-compatible string-based context parsing
+        return generateErrorFromStringContext(type1, type2, stringContext, failure)
+    }
+
+    /**
+     * Generate error message from string-based context (backwards compatibility).
+     */
+    private fun generateErrorFromStringContext(
+        type1: MezzeType,
+        type2: MezzeType,
+        stringContext: String,
+        failure: UnificationResult.Failure
+    ): String {
+        // Detect literal vs variant mismatch for better error message
+        if (stringContext.contains("Literal pattern")) {
+            // Check if one side is a variant type
+            val variantType = when {
+                type1 is MezzeType.VariantType -> type1
+                type2 is MezzeType.VariantType -> type2
+                else -> null
+            }
+
+            if (variantType != null) {
+                val firstConstructor = variantType.constructors.keys.firstOrNull() ?: "ConstructorName"
+                val sortedConstructors = variantType.constructors.keys.sorted()
+                return "Cannot match variant type [${sortedConstructors.joinToString(", ")}] with a literal pattern. " +
+                    "Use a constructor pattern like '$firstConstructor' instead."
+            }
+
+            // Check for TypeApplication (named type like Option, Result)
+            val typeApp = when {
+                type1 is MezzeType.TypeApplication -> type1
+                type2 is MezzeType.TypeApplication -> type2
+                else -> null
+            }
+
+            if (typeApp != null) {
+                return "Cannot match type '${typeApp.constructor}' with a literal pattern. " +
+                    "Use a constructor pattern instead."
+            }
+        }
+
+        // Check for List vs Array confusion
+        if (stringContext.contains("Array pattern")) {
+            if (type1 is MezzeType.ListType || type2 is MezzeType.ListType) {
+                return "Cannot use array pattern syntax [a, b, ...] with List type. " +
+                    "Use constructor patterns 'Cons { head, tail }' and 'Nil' instead."
+            }
+        }
+
+        // Improve generic messages by extracting context info
+        if (stringContext.isNotEmpty()) {
+            val expected = TypeDiffPrinter.formatType(type2)
+            val actual = TypeDiffPrinter.formatType(type1)
+
+            // Extract useful context information
+            return when {
+                stringContext.contains("Function application argument") -> {
+                    "Function argument type mismatch: expected $expected but got $actual"
+                }
+                stringContext.contains("Type annotation on") -> {
+                    val bindingName = extractBindingName(stringContext)
+                    if (bindingName != null) {
+                        "Type annotation mismatch for '$bindingName': declared as $expected but expression has type $actual"
+                    } else {
+                        failure.message
+                    }
+                }
+                stringContext.contains("Field access") -> {
+                    val fieldName = extractFieldName(stringContext)
+                    if (fieldName != null) {
+                        "Field '$fieldName' type mismatch: expected $expected but got $actual"
+                    } else {
+                        failure.message
+                    }
+                }
+                else -> failure.message
+            }
+        }
+
+        return failure.message
+    }
+
+    /**
+     * Generate pattern match error message.
+     */
+    private fun generatePatternMatchError(
+        type1: MezzeType,
+        type2: MezzeType,
+        context: ErrorContext.PatternMatch,
+        stringContext: String
+    ): String {
+        val expected = TypeDiffPrinter.formatType(type2)
+        val actual = TypeDiffPrinter.formatType(type1)
+
+        // Check for variant type matching
+        val variantType = when {
+            type1 is MezzeType.VariantType -> type1
+            type2 is MezzeType.VariantType -> type2
+            else -> null
+        }
+
+        if (variantType != null && context.constructorName != null) {
+            return "Pattern '${context.constructorName}' expects $expected but scrutinee has type $actual"
+        }
+
+        return "Pattern match type mismatch: expected $expected but got $actual"
+    }
+
+    /**
+     * Extract binding name from context string like "Type annotation on myFunc"
+     */
+    private fun extractBindingName(context: String): String? {
+        val prefix = "Type annotation on "
+        return if (context.startsWith(prefix)) {
+            context.removePrefix(prefix).trim()
+        } else null
+    }
+
+    /**
+     * Extract field name from context string like "Field access fieldName"
+     */
+    private fun extractFieldName(context: String): String? {
+        val prefix = "Field access "
+        return if (context.startsWith(prefix)) {
+            context.removePrefix(prefix).trim()
+        } else null
     }
 
     /**

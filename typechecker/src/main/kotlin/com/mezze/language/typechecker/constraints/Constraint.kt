@@ -20,6 +20,57 @@ import com.mezze.language.typechecker.dependencies.DefinitionRef
  */
 
 /**
+ * Structured error context for generating user-friendly type error messages.
+ *
+ * Instead of parsing unstructured context strings, this sealed class provides
+ * typed context information that can be used to generate clear error messages.
+ */
+sealed class ErrorContext {
+    /** Fallback for simple string context (backwards compatibility) */
+    data class Simple(val message: String) : ErrorContext()
+
+    /** Function application: argument type must match parameter type */
+    data class FunctionArgument(
+        val functionName: String?,
+        val argumentName: String?,      // Name of the argument (from record field or param name)
+        val parameterIndex: Int = 0     // 0-indexed position
+    ) : ErrorContext()
+
+    /** Type annotation: expression type must match annotation */
+    data class TypeAnnotation(
+        val bindingName: String,
+        val isReturnType: Boolean = false
+    ) : ErrorContext()
+
+    /** Field access: record must have field with matching type */
+    data class FieldAccess(
+        val fieldName: String,
+        val recordExpression: String? = null
+    ) : ErrorContext()
+
+    /** Pattern matching: scrutinee type must match pattern */
+    data class PatternMatch(
+        val patternDescription: String,
+        val constructorName: String? = null
+    ) : ErrorContext()
+
+    /** Binary operation: operand types must be compatible */
+    data class BinaryOperation(
+        val operator: String,
+        val isLeftOperand: Boolean
+    ) : ErrorContext()
+
+    /** Array literal: all elements must have same type */
+    data class ArrayElement(val elementIndex: Int) : ErrorContext()
+
+    /** Return type: expression type must match function return type */
+    data class ReturnType(val functionName: String?) : ErrorContext()
+
+    /** String interpolation: expression must be convertible to String */
+    data class StringInterpolation(val expressionIndex: Int) : ErrorContext()
+}
+
+/**
  * Type constraint - represents a requirement on types.
  *
  * Sealed interface ensures exhaustive pattern matching.
@@ -46,10 +97,12 @@ sealed interface Constraint {
     data class Equality(
         val left: MezzeType,
         val right: MezzeType,
-        val context: String? = null,  // For error messages
+        val context: String? = null,  // For error messages (backwards compat)
         override val sourceLocation: SourceLocation? = null,
         /** True if this constraint was generated from a match case (allows variant merging) */
-        val isMatchCaseContext: Boolean = false
+        val isMatchCaseContext: Boolean = false,
+        /** Structured error context for better error messages */
+        val errorContext: ErrorContext? = null
     ) : Constraint
 
     /**

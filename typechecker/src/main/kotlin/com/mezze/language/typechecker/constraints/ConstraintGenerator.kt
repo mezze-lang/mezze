@@ -691,10 +691,12 @@ class ConstraintGenerator(
                 emptyList()
             }
 
+            val bindingName = getBindingName(binding)
             val constraintsWithAnnotation = allConstraints + Constraint.Equality(
                 left = exprResult.type,
                 right = annotatedType,
-                context = "Type annotation on ${getBindingName(binding)}"
+                context = "Type annotation on $bindingName",
+                errorContext = ErrorContext.TypeAnnotation(bindingName = bindingName)
             )
 
             Pair(constraintsWithAnnotation, exprResult.abilityConstraints + annotationAbilityConstraints)
