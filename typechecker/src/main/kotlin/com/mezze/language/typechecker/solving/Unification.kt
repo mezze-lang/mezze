@@ -148,21 +148,21 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
         }
         // Handle cross-type unification: RecordType with TypeApplication
         type1 is MezzeType.RecordType && type2 is MezzeType.TypeApplication -> {
-            // First try expanding as a record
-            val expandedRecord = expandTypeApplicationToRecord(type2, typeDeclarations)
-            if (expandedRecord != null) {
-                return unify(type1, expandedRecord, typeDeclarations)
-            }
-            // If not a record, try as a single-constructor variant (newtype pattern)
-            // This allows {age: Int} to unify with User (| User { name: String, age: Int } |)
-            val expandedVariant = expandTypeApplicationToVariant(type2, typeDeclarations)
-            if (expandedVariant != null && expandedVariant.constructors.size == 1 && expandedVariant.rowVar == null) {
-                val (_, payloadType) = expandedVariant.constructors.entries.first()
-                if (payloadType != null) {
-                    return unify(type1, payloadType, typeDeclarations)
+            // Use principled expansion based on definition type
+            when (val expansion = expandTypeApplication(type2, typeDeclarations)) {
+                is TypeExpansionResult.Record -> {
+                    return unify(type1, expansion.recordType, typeDeclarations)
+                }
+                is TypeExpansionResult.Newtype -> {
+                    // Newtype pattern: {age: Int} unifies with User (| User { name: String, age: Int } |)
+                    if (expansion.payloadType != null && expansion.variantType.rowVar == null) {
+                        return unify(type1, expansion.payloadType, typeDeclarations)
+                    }
+                }
+                is TypeExpansionResult.Variant, is TypeExpansionResult.NotFound -> {
+                    // Can't unify record with variant or unknown type
                 }
             }
-            // Can't expand - error
             return UnificationResult.Failure(
                 message = "Type mismatch: ${formatType(type1)} is not compatible with ${formatType(type2)}",
                 type1 = type1,
@@ -170,20 +170,21 @@ private fun unifyImpl(type1: MezzeType, type2: MezzeType, typeDeclarations: Map<
             )
         }
         type1 is MezzeType.TypeApplication && type2 is MezzeType.RecordType -> {
-            // First try expanding as a record
-            val expandedRecord = expandTypeApplicationToRecord(type1, typeDeclarations)
-            if (expandedRecord != null) {
-                return unify(expandedRecord, type2, typeDeclarations)
-            }
-            // If not a record, try as a single-constructor variant (newtype pattern)
-            val expandedVariant = expandTypeApplicationToVariant(type1, typeDeclarations)
-            if (expandedVariant != null && expandedVariant.constructors.size == 1 && expandedVariant.rowVar == null) {
-                val (_, payloadType) = expandedVariant.constructors.entries.first()
-                if (payloadType != null) {
-                    return unify(payloadType, type2, typeDeclarations)
+            // Use principled expansion based on definition type
+            when (val expansion = expandTypeApplication(type1, typeDeclarations)) {
+                is TypeExpansionResult.Record -> {
+                    return unify(expansion.recordType, type2, typeDeclarations)
+                }
+                is TypeExpansionResult.Newtype -> {
+                    // Newtype pattern
+                    if (expansion.payloadType != null && expansion.variantType.rowVar == null) {
+                        return unify(expansion.payloadType, type2, typeDeclarations)
+                    }
+                }
+                is TypeExpansionResult.Variant, is TypeExpansionResult.NotFound -> {
+                    // Can't unify variant or unknown with record
                 }
             }
-            // Can't expand - error
             return UnificationResult.Failure(
                 message = "Type mismatch: ${formatType(type1)} is not compatible with ${formatType(type2)}",
                 type1 = type1,
@@ -1330,4 +1331,102 @@ private fun isBoolVariant(variant: MezzeType.VariantType): Boolean {
            variant.constructors.containsKey("False") &&
            variant.constructors["True"] == null &&
            variant.constructors["False"] == null
+}
+
+/**
+ * Result of expanding a TypeApplication to its underlying type.
+ *
+ * Rather than trying RecordType first then VariantType, this sealed class
+ * allows the caller to handle each case appropriately based on the actual
+ * type definition.
+ */
+sealed class TypeExpansionResult {
+    /** TypeApplication expands to a RecordType */
+    data class Record(val recordType: MezzeType.RecordType) : TypeExpansionResult()
+
+    /** TypeApplication expands to a VariantType */
+    data class Variant(val variantType: MezzeType.VariantType) : TypeExpansionResult()
+
+    /** TypeApplication is a newtype - single-constructor variant with payload */
+    data class Newtype(
+        val variantType: MezzeType.VariantType,
+        val constructorName: String,
+        val payloadType: MezzeType?
+    ) : TypeExpansionResult()
+
+    /** TypeApplication could not be expanded (unknown type) */
+    object NotFound : TypeExpansionResult()
+}
+
+/**
+ * Get the definition kind of a TypeApplication without expanding.
+ *
+ * This is a fast check that only looks up the TypeDeclaration and
+ * checks its definition type, without doing full type parameter substitution.
+ */
+enum class TypeDefinitionKind {
+    RECORD,
+    VARIANT,
+    NEWTYPE,
+    UNKNOWN
+}
+
+internal fun getTypeDefinitionKind(
+    typeApp: MezzeType.TypeApplication,
+    typeDeclarations: Map<String, TypeDeclaration>
+): TypeDefinitionKind {
+    val typeDecl = typeDeclarations[typeApp.constructor] ?: return TypeDefinitionKind.UNKNOWN
+    return when (typeDecl.definition) {
+        is RecordDefinition -> TypeDefinitionKind.RECORD
+        is VariantDefinition -> TypeDefinitionKind.VARIANT
+        is NewtypeDefinition -> TypeDefinitionKind.NEWTYPE
+        else -> TypeDefinitionKind.UNKNOWN
+    }
+}
+
+/**
+ * Expand a TypeApplication to its underlying type in a principled way.
+ *
+ * This function first checks the TypeDeclaration's definition type,
+ * then expands accordingly. This is more efficient than trying RecordType
+ * first and then falling back to VariantType.
+ *
+ * @param typeApp The type application to expand
+ * @param typeDeclarations Map of type declarations
+ * @return A TypeExpansionResult indicating the expanded type
+ */
+internal fun expandTypeApplication(
+    typeApp: MezzeType.TypeApplication,
+    typeDeclarations: Map<String, TypeDeclaration>
+): TypeExpansionResult {
+    val typeDecl = typeDeclarations[typeApp.constructor] ?: return TypeExpansionResult.NotFound
+
+    return when (val definition = typeDecl.definition) {
+        is RecordDefinition -> {
+            val expanded = expandTypeApplicationToRecord(typeApp, typeDeclarations)
+            if (expanded != null) {
+                TypeExpansionResult.Record(expanded)
+            } else {
+                TypeExpansionResult.NotFound
+            }
+        }
+        is VariantDefinition -> {
+            val expanded = expandTypeApplicationToVariant(typeApp, typeDeclarations)
+            if (expanded != null) {
+                TypeExpansionResult.Variant(expanded)
+            } else {
+                TypeExpansionResult.NotFound
+            }
+        }
+        is NewtypeDefinition -> {
+            val expanded = expandTypeApplicationToVariant(typeApp, typeDeclarations)
+            if (expanded != null && expanded.constructors.size == 1) {
+                val (constructorName, payloadType) = expanded.constructors.entries.first()
+                TypeExpansionResult.Newtype(expanded, constructorName, payloadType)
+            } else {
+                TypeExpansionResult.NotFound
+            }
+        }
+        else -> TypeExpansionResult.NotFound
+    }
 }

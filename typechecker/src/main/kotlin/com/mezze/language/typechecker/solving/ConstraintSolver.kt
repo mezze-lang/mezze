@@ -2306,9 +2306,18 @@ class ConstraintSolver(
         val recordType = when (resolvedType) {
             is MezzeType.RecordType -> resolvedType
             is MezzeType.TypeApplication -> {
-                expandTypeApplicationToRecord(resolvedType, typeDeclarations) ?: run {
-                    // Not a record type - this will be caught by HasField constraints
-                    return ConstraintResult.Success(Substitution.empty)
+                // Use principled expansion
+                when (val expansion = expandTypeApplication(resolvedType, typeDeclarations)) {
+                    is TypeExpansionResult.Record -> expansion.recordType
+                    is TypeExpansionResult.Newtype -> {
+                        // For newtypes, check if payload is a record
+                        expansion.payloadType as? MezzeType.RecordType
+                            ?: return ConstraintResult.Success(Substitution.empty)
+                    }
+                    else -> {
+                        // Not a record type - this will be caught by HasField constraints
+                        return ConstraintResult.Success(Substitution.empty)
+                    }
                 }
             }
             else -> {
@@ -2343,32 +2352,35 @@ class ConstraintSolver(
 
         // If record type is a TypeApplication (e.g., Person), expand it first
         if (recordType is MezzeType.TypeApplication) {
-            // First try expanding to RecordType (for record type aliases)
-            val expandedRecord = expandTypeApplicationToRecord(recordType, typeDeclarations)
-            if (expandedRecord != null) {
-                // Recursively solve with the expanded record type
-                return solveHasField(
-                    constraint.copy(recordType = expandedRecord),
-                    currentSubst
-                )
+            // Use principled expansion based on definition type
+            when (val expansion = expandTypeApplication(recordType, typeDeclarations)) {
+                is TypeExpansionResult.Record -> {
+                    return solveHasField(
+                        constraint.copy(recordType = expansion.recordType),
+                        currentSubst
+                    )
+                }
+                is TypeExpansionResult.Variant -> {
+                    // Recursively solve with the expanded variant type
+                    // The code below handles single-constructor variants
+                    return solveHasField(
+                        constraint.copy(recordType = expansion.variantType),
+                        currentSubst
+                    )
+                }
+                is TypeExpansionResult.Newtype -> {
+                    // Newtype: delegate field access to the payload
+                    return solveHasField(
+                        constraint.copy(recordType = expansion.variantType),
+                        currentSubst
+                    )
+                }
+                is TypeExpansionResult.NotFound -> {
+                    return ConstraintResult.Failure(
+                        "Cannot expand type application ${recordType.constructor} to check field '$fieldName'"
+                    )
+                }
             }
-
-            // Then try expanding to VariantType (for single-constructor variants like newtypes)
-            // Example: type User = | User { name: String, age: Int } |
-            // Field access on User should delegate to the payload
-            val expandedVariant = expandTypeApplicationToVariant(recordType, typeDeclarations)
-            if (expandedVariant != null) {
-                // Recursively solve with the expanded variant type
-                // The code below handles single-constructor variants
-                return solveHasField(
-                    constraint.copy(recordType = expandedVariant),
-                    currentSubst
-                )
-            }
-
-            return ConstraintResult.Failure(
-                "Cannot expand type application ${recordType.constructor} to check field '$fieldName'"
-            )
         }
 
         // If record type is a type variable, we can't check yet
