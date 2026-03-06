@@ -6,6 +6,7 @@ import com.mezze.language.ast.hashing.MezzeHashBuilder
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
+import com.mezze.language.typechecker.util.StringDistance
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.Files
@@ -175,7 +176,13 @@ sealed class ModuleError(message: String) : Exception(message) {
         val exportName: String,
         val sourceLocation: com.mezze.language.ast.SourceLocation? = null,
         val availableExports: List<String> = emptyList()
-    ) : ModuleError("Export '$exportName' not found in module '$modulePath'")
+    ) : ModuleError(buildString {
+        append("Export '$exportName' not found in module '$modulePath'")
+        if (availableExports.isNotEmpty()) {
+            append(". ")
+            append(StringDistance.suggestOrList(exportName, availableExports, "exports"))
+        }
+    })
 
     /**
      * Thrown when trying to import an item that exists but is not public.

@@ -10,6 +10,7 @@ import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.typechecker.solving.collectFreeTypeVars
 import com.mezze.language.typechecker.ErrorType
+import com.mezze.language.typechecker.util.StringDistance
 
 /**
  * Expression constraint generator - generates constraints for all expression types.
@@ -3928,39 +3929,12 @@ class ExpressionConstraintGenerator {
     /**
      * Find the closest matching name from a set of candidates using Levenshtein distance.
      * Returns null if no close match is found (distance > threshold).
+     * Delegates to shared StringDistance utility.
      */
     private fun findClosestMatch(name: String, candidates: Set<String>, threshold: Int = 3): String? {
         if (candidates.isEmpty()) return null
-
-        val closest = candidates.minByOrNull { levenshteinDistance(name, it) }
-        return if (closest != null && levenshteinDistance(name, closest) <= threshold) {
-            closest
-        } else {
-            null
-        }
-    }
-
-    /**
-     * Calculate Levenshtein distance between two strings.
-     */
-    private fun levenshteinDistance(s1: String, s2: String): Int {
-        val m = s1.length
-        val n = s2.length
-        val dp = Array(m + 1) { IntArray(n + 1) }
-
-        for (i in 0..m) dp[i][0] = i
-        for (j in 0..n) dp[0][j] = j
-
-        for (i in 1..m) {
-            for (j in 1..n) {
-                dp[i][j] = if (s1[i - 1] == s2[j - 1]) {
-                    dp[i - 1][j - 1]
-                } else {
-                    1 + minOf(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
-                }
-            }
-        }
-        return dp[m][n]
+        val similar = StringDistance.findSimilar(name, candidates.toList(), threshold, maxResults = 1)
+        return similar.firstOrNull()
     }
 
     /**

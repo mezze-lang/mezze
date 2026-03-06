@@ -11,6 +11,7 @@ import com.mezze.language.typechecker.solving.expandTypeApplicationToVariant
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.codec.CodecGenerator
 import com.mezze.language.typechecker.hashing.ContentHashComputer
+import com.mezze.language.typechecker.util.StringDistance
 
 /**
  * Type validator - validates types after constraint solving.
@@ -1883,53 +1884,10 @@ class TypeValidator(
      * Find similar names for suggestions using Levenshtein distance.
      *
      * Returns up to 3 most similar names.
+     * Delegates to shared StringDistance utility.
      */
     internal fun findSimilarNames(target: String, candidates: List<String>, maxDistance: Int = 3): List<String> {
-        if (candidates.isEmpty()) return emptyList()
-
-        // Calculate Levenshtein distance for each candidate
-        val distances = candidates.map { candidate ->
-            candidate to levenshteinDistance(target, candidate)
-        }
-
-        // Filter candidates within max distance and sort by distance
-        return distances
-            .filter { (_, distance) -> distance <= maxDistance }
-            .sortedBy { (_, distance) -> distance }
-            .take(3)
-            .map { (name, _) -> name }
-    }
-
-    /**
-     * Calculate Levenshtein distance between two strings.
-     *
-     * Measures minimum number of single-character edits (insertions, deletions, substitutions)
-     * required to change one string into another.
-     */
-    private fun levenshteinDistance(s1: String, s2: String): Int {
-        val len1 = s1.length
-        val len2 = s2.length
-
-        // Create matrix of distances
-        val dp = Array(len1 + 1) { IntArray(len2 + 1) }
-
-        // Initialize base cases
-        for (i in 0..len1) dp[i][0] = i
-        for (j in 0..len2) dp[0][j] = j
-
-        // Calculate distances
-        for (i in 1..len1) {
-            for (j in 1..len2) {
-                val cost = if (s1[i - 1] == s2[j - 1]) 0 else 1
-                dp[i][j] = minOf(
-                    dp[i - 1][j] + 1,      // deletion
-                    dp[i][j - 1] + 1,      // insertion
-                    dp[i - 1][j - 1] + cost // substitution
-                )
-            }
-        }
-
-        return dp[len1][len2]
+        return StringDistance.findSimilar(target, candidates, maxDistance, maxResults = 3)
     }
 
     /**

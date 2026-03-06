@@ -3,6 +3,7 @@ package com.mezze.language.typechecker.printing
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.validation.ValidationError
+import com.mezze.language.typechecker.util.StringDistance
 
 /**
  * Generates helpful suggestions for type errors.
@@ -301,53 +302,14 @@ object SuggestionGenerator {
 
     /**
      * Find similar names using Levenshtein distance.
+     * Delegates to shared StringDistance utility.
      */
     private fun findSimilar(
         target: String,
         candidates: List<String>,
         maxDistance: Int = 2
     ): List<String> {
-        return candidates
-            .map { it to levenshteinDistance(target, it) }
-            .filter { (_, distance) -> distance <= maxDistance }
-            .sortedBy { (_, distance) -> distance }
-            .map { (name, _) -> name }
-            .take(3) // Show at most 3 suggestions
-    }
-
-    /**
-     * Calculate Levenshtein distance between two strings.
-     *
-     * This is the minimum number of single-character edits (insertions,
-     * deletions, or substitutions) required to change one string into the other.
-     */
-    private fun levenshteinDistance(s1: String, s2: String): Int {
-        val len1 = s1.length
-        val len2 = s2.length
-
-        // Create a 2D array for dynamic programming
-        val dp = Array(len1 + 1) { IntArray(len2 + 1) }
-
-        // Initialize base cases
-        for (i in 0..len1) dp[i][0] = i
-        for (j in 0..len2) dp[0][j] = j
-
-        // Fill the DP table
-        for (i in 1..len1) {
-            for (j in 1..len2) {
-                dp[i][j] = if (s1[i - 1] == s2[j - 1]) {
-                    dp[i - 1][j - 1] // No operation needed
-                } else {
-                    1 + minOf(
-                        dp[i - 1][j],     // Deletion
-                        dp[i][j - 1],     // Insertion
-                        dp[i - 1][j - 1]  // Substitution
-                    )
-                }
-            }
-        }
-
-        return dp[len1][len2]
+        return StringDistance.findSimilar(target, candidates, maxDistance, maxResults = 3)
     }
 
     private fun suggestForRecordMismatch(
