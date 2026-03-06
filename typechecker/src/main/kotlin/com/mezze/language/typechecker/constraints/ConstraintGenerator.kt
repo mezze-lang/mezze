@@ -425,24 +425,59 @@ class ConstraintGenerator(
                                 if (quantifiableVars.isNotEmpty() && !hasUserDefinedAbilityConstraints) {
                                     // Polymorphic binding - generalize into TypeScheme
                                     // Extract ability constraints for quantified variables
-                                    // CRITICAL: Compare by ID since TypeVar instances may differ even for same logical variable
-                                    val quantifiableVarIds = quantifiableVars.map { it.id }.toSet()
-                                    val abilityConstraints = result.abilityConstraints.mapNotNull { constraint ->
-                                        // Check if constraint's typeVar matches any quantifiable var by ID
-                                        val resolvedConstraintVar = substitution.apply(MezzeType.VarType(constraint.typeVar))
-                                        val constraintVarId = if (resolvedConstraintVar is MezzeType.VarType) {
-                                            resolvedConstraintVar.variable.id
-                                        } else {
-                                            constraint.typeVar.id
+
+                                    // CRITICAL: If the user explicitly declared ability constraints in the type annotation,
+                                    // use THOSE directly instead of inferring from expression constraints.
+                                    // The annotation constraints have the complete type args (e.g., [Json, 'a] for Encode Json 'a)
+                                    // while expression constraints from method calls only have partial info.
+                                    //
+                                    // Use the already-converted FunctionType's abilityConstraints to get the correct TypeVars
+                                    // (not re-convert from annotation, which would create different TypeVars)
+                                    val abilityConstraints = if (hasExplicitAbilityConstraints && authoritativeType is MezzeType.FunctionType) {
+                                        val funcType = authoritativeType
+                                        funcType.abilityConstraints.mapNotNull { constraint ->
+                                            // Find the type variable in the args - that's the constrained parameter
+                                            val typeVarArg = constraint.typeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
+
+                                            if (typeVarArg != null) {
+                                                // Keep ALL type args in their original order (including the constrained var)
+                                                // For multi-parameter abilities like "Encode Json 'a", typeArgs = [Json, 'a]
+                                                // For single-parameter abilities like "Show 'a", typeArgs = ['a]
+                                                // The solver's solveAbilityRequired will use typeArgs directly when
+                                                // typeVarInArgs is true, preserving the correct order
+                                                AbilityConstraint(
+                                                    abilityName = constraint.abilityName,
+                                                    typeParam = typeVarArg.variable.name,
+                                                    typeArgs = constraint.typeArgs
+                                                )
+                                            } else {
+                                                null
+                                            }
                                         }
-                                        if (quantifiableVarIds.contains(constraintVarId)) {
-                                            // Find the actual quantifiable var to get its name
-                                            val quantVar = quantifiableVars.find { it.id == constraintVarId }
-                                            AbilityConstraint(
-                                                abilityName = constraint.abilityName,
-                                                typeParam = quantVar?.name ?: constraint.typeVar.name
-                                            )
-                                        } else null
+                                    } else {
+                                        // Infer from expression constraints
+                                        // CRITICAL: Compare by ID since TypeVar instances may differ even for same logical variable
+                                        val quantifiableVarIds = quantifiableVars.map { it.id }.toSet()
+                                        result.abilityConstraints.mapNotNull { constraint ->
+                                            // Check if constraint's typeVar matches any quantifiable var by ID
+                                            val resolvedConstraintVar = substitution.apply(MezzeType.VarType(constraint.typeVar))
+                                            val constraintVarId = if (resolvedConstraintVar is MezzeType.VarType) {
+                                                resolvedConstraintVar.variable.id
+                                            } else {
+                                                constraint.typeVar.id
+                                            }
+                                            if (quantifiableVarIds.contains(constraintVarId)) {
+                                                // Find the actual quantifiable var to get its name
+                                                val quantVar = quantifiableVars.find { it.id == constraintVarId }
+                                                // Apply substitution to typeArgs in case they contain type variables
+                                                val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
+                                                AbilityConstraint(
+                                                    abilityName = constraint.abilityName,
+                                                    typeParam = quantVar?.name ?: constraint.typeVar.name,
+                                                    typeArgs = resolvedTypeArgs
+                                                )
+                                            } else null
+                                        }
                                     }
 
                                     val scheme = TypeScheme(
@@ -629,21 +664,27 @@ class ConstraintGenerator(
             validateAnnotationAgainstExpression(binding, annotatedType, typeAnnotationValue, binding.expression, exprResult.type)
 
             // Extract ability constraints from annotation if it's a function type
+            // For multi-parameter abilities like Encode Json 'a:
+            //   constraint.typeArgs = [Json, 'a]
+            //   We find the type variable(s) and create constraint(s) for each
+            //   typeArgs should contain ALL type args in order for proper impl matching
             val annotationAbilityConstraints = if (typeAnnotationValue is FunctionTypeAnnotation) {
-                typeAnnotationValue.abilityConstraints.flatMap { constraint ->
-                    // Create Constraint.AbilityRequired for each type argument
-                    constraint.typeArgs.map { typeArg ->
-                        val typeArgType = convertTypeAnnotation(typeArg)
-                        val typeVar = when (typeArgType) {
-                            is MezzeType.VarType -> typeArgType.variable
-                            else -> TypeVar.fresh() // Shouldn't happen, but handle it
-                        }
+                typeAnnotationValue.abilityConstraints.mapNotNull { constraint ->
+                    // Convert all type args to MezzeType
+                    val allTypeArgs = constraint.typeArgs.map { convertTypeAnnotation(it) }
+
+                    // Find the type variable in the args - that's the constrained parameter
+                    val typeVarArg = allTypeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
+
+                    if (typeVarArg != null) {
                         Constraint.AbilityRequired(
-                            typeVar = typeVar,
+                            typeVar = typeVarArg.variable,
                             abilityName = constraint.abilityName,
-                            typeArgs = emptyList(),
+                            typeArgs = allTypeArgs,  // Include ALL type args in order
                             context = "Type annotation on ${getBindingName(binding)}"
                         )
+                    } else {
+                        null  // No type variable found - skip this constraint
                     }
                 }
             } else {
@@ -1779,7 +1820,7 @@ class ConstraintGenerator(
             is MezzeType.IntType,
             is MezzeType.FloatType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.NatType,
             is MezzeType.FracType,
             is MezzeType.OrderingType,
@@ -1831,7 +1872,7 @@ class ConstraintGenerator(
             // Concrete types: IntType, StringType, BoolType, FloatType, UnitType
             is MezzeType.IntType,
             is MezzeType.StringType,
-            is MezzeType.BooleanType,
+            is MezzeType.BoolType,
             is MezzeType.FloatType -> true
             // Other types are considered concrete by default
             else -> true

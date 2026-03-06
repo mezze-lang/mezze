@@ -394,8 +394,11 @@ class TypeValidator(
 
             // Check if user-defined implementation exists
             // Handle multi-type abilities like Convert 'a 'b
-            val implTypeParts = mutableListOf(typeName)
+            // IMPORTANT: constraint.typeArgs may already include the constrained type var
+            // (when from type annotations like "with Show 'a" or "with Encode Json 'a").
+            val implTypeParts = mutableListOf<String>()
             var hasPolymorphicTypeArg = false
+            var hasConstrainedTypeInArgs = false
             for (typeArg in constraint.typeArgs) {
                 val argType = substitution.apply(typeArg)
                 val argTypeName = getTypeNameForAbility(argType)
@@ -403,6 +406,9 @@ class TypeValidator(
                     // Type argument is still polymorphic - can't validate yet
                     hasPolymorphicTypeArg = true
                     break
+                }
+                if (argTypeName == typeName) {
+                    hasConstrainedTypeInArgs = true
                 }
                 implTypeParts.add(argTypeName)
             }
@@ -413,10 +419,24 @@ class TypeValidator(
                 continue
             }
 
+            // If typeArgs doesn't contain the constrained type, prepend it
+            if (!hasConstrainedTypeInArgs) {
+                implTypeParts.add(0, typeName)
+            }
+
             // Build list of concrete types for structural matching
-            val concreteTypes = mutableListOf(concreteType)
-            for (typeArg in constraint.typeArgs) {
-                concreteTypes.add(substitution.apply(typeArg))
+            // IMPORTANT: constraint.typeArgs may already include the constrained type var
+            // (when from type annotations like "with Show 'a" or "with Encode Json 'a").
+            // In that case, use resolved typeArgs directly to avoid duplicates.
+            val resolvedTypeArgs = constraint.typeArgs.map { substitution.apply(it) }
+            val concreteTypes = if (resolvedTypeArgs.any { it == concreteType }) {
+                // TypeArgs already contains the constrained type, use as-is
+                resolvedTypeArgs
+            } else if (resolvedTypeArgs.isEmpty()) {
+                listOf(concreteType)
+            } else {
+                // Prepend constrained type (from method call constraints)
+                listOf(concreteType) + resolvedTypeArgs
             }
 
             // OPTIMIZATION: Cache ability impls lookup - called once per constraint instead of 4x
@@ -737,7 +757,7 @@ class TypeValidator(
                 unwrappedType is MezzeType.IntType ||
                 unwrappedType is MezzeType.FloatType ||
                 unwrappedType is MezzeType.StringType ||
-                unwrappedType is MezzeType.BooleanType ||
+                unwrappedType is MezzeType.BoolType ||
                 unwrappedType is MezzeType.NatType ||
                 unwrappedType is MezzeType.FracType ||
                 unwrappedType is MezzeType.OrderingType ||
@@ -783,7 +803,7 @@ class TypeValidator(
 
             // Logical operations - only for Bool
             "LogicalAnd", "LogicalOr", "LogicalNot" -> {
-                unwrappedType is MezzeType.BooleanType || isBoolVariant(unwrappedType)
+                unwrappedType is MezzeType.BoolType || isBoolVariant(unwrappedType)
             }
 
             else -> false
@@ -1573,8 +1593,8 @@ class TypeValidator(
                     scrutineeType  // Not a variant, keep as-is
                 }
             }
-            // BooleanType is internally optimized but behaves like variant for pattern matching
-            is MezzeType.BooleanType -> MezzeType.VariantType(
+            // BoolType is internally optimized but behaves like variant for pattern matching
+            is MezzeType.BoolType -> MezzeType.VariantType(
                 constructors = mapOf("True" to null, "False" to null),
                 rowVar = null
             )
@@ -1675,12 +1695,12 @@ class TypeValidator(
 
         // Check for unreachable patterns: if all constructors are covered BEFORE a wildcard,
         // the wildcard is unreachable.
-        // IMPORTANT: Only apply this check for BooleanType matches, where unreachable wildcards
+        // IMPORTANT: Only apply this check for BoolType matches, where unreachable wildcards
         // after true/false are clearly mistakes. For other variant types (like Option), allowing
         // defensive wildcards after exhaustive patterns is reasonable and often intentional.
         //
         // We detect Bool matches either by:
-        // 1. scrutineeType is BooleanType (explicit annotation)
+        // 1. scrutineeType is BoolType (explicit annotation)
         // 2. scrutineeType is a VariantType with exactly True and False constructors
         // 3. The patterns include boolean literals (true/false) - indicates inferred Bool type
         // 4. The patterns include True/False constructor patterns - indicates Bool variant type
@@ -1696,7 +1716,7 @@ class TypeValidator(
         }
         val isBoolVariant = scrutineeType is MezzeType.VariantType &&
             scrutineeType.constructors.keys == setOf("True", "False")
-        val isBoolMatch = scrutineeType is MezzeType.BooleanType || isBoolVariant ||
+        val isBoolMatch = scrutineeType is MezzeType.BoolType || isBoolVariant ||
             hasBoolLiteralPatterns || hasBoolConstructorPatterns
         if (isBoolMatch && hasWildcard && uncoveredConstructors.isEmpty()) {
             // Find the wildcard pattern to report its location
@@ -2779,7 +2799,7 @@ class TypeValidator(
             }
             is StringLiteral -> MezzeType.StringType
             is IntLiteral -> MezzeType.IntType
-            is BooleanLiteral -> MezzeType.BooleanType
+            is BooleanLiteral -> MezzeType.BoolType
             is FloatLiteral -> MezzeType.FloatType
             is Identifier -> {
                 // For identifiers, we don't know the type without context
@@ -2805,7 +2825,7 @@ class TypeValidator(
                     "Int" -> return MezzeType.IntType
                     "Float" -> return MezzeType.FloatType
                     "String" -> return MezzeType.StringType
-                    "Boolean", "Bool" -> return MezzeType.BooleanType
+                    "Boolean", "Bool" -> return MezzeType.BoolType
                     "Nat" -> return MezzeType.NatType
                     "Frac" -> return MezzeType.FracType
                     "Ordering" -> return MezzeType.OrderingType
@@ -2922,7 +2942,7 @@ class TypeValidator(
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
                     "String" -> type is MezzeType.StringType
-                    "Bool" -> type is MezzeType.BooleanType
+                    "Bool" -> type is MezzeType.BoolType
                     "Nat" -> type is MezzeType.NatType
                     "Frac" -> type is MezzeType.FracType
                     "Char" -> type is MezzeType.CharType

@@ -610,4 +610,221 @@ class AbilityValidationTest {
 
         assertNotNull(typedProgram, "Should pass: Int implements Show")
     }
+
+    // ========== MULTI-PARAMETER ABILITY CONSTRAINT TESTS ==========
+    // These tests verify that ability constraints with multiple type parameters
+    // (like "with Encode Json 'a" or "with Convert 'a 'b") correctly track
+    // all type arguments without double-counting.
+
+    @Test
+    fun `test single-parameter ability constraint does not duplicate type`() {
+        // Regression test: "with Show 'a" should check for "impl Show Int",
+        // not "impl Show Int Int" (which was the bug)
+        val source = """
+            use std::int
+
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            impl Show Int where {
+              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+            }
+
+            # Single-parameter constraint: Show 'a
+            let format: {x: 'a} -> String with Show 'a = {x} ->
+              "Value: $(Show.show {val = x})"
+
+            # Should find impl Show Int, not look for impl Show Int Int
+            format {x = 42}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        assertNotNull(typedProgram, "Single-parameter ability should not duplicate type args")
+    }
+
+    @Test
+    fun `test multi-parameter ability constraint preserves type order`() {
+        // Test that "with Convert String Int" correctly checks for
+        // "impl Convert String Int" with types in the right order
+        val source = """
+            ability Convert 'from 'to where {
+              convert: {value: 'from} -> 'to
+            }
+
+            impl Convert String Int where {
+              convert: {value: String} -> Int = {value} -> 0
+            }
+
+            # Multi-parameter constraint: Convert 'a 'b with 'a=String, 'b=Int
+            let parse: {s: 'a} -> 'b with Convert 'a 'b = {s} ->
+              Convert.convert {value = s}
+
+            # Should find impl Convert String Int
+            parse {s = "42"}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        assertNotNull(typedProgram, "Multi-parameter ability should preserve type order")
+    }
+
+    @Test
+    fun `test chained ability constraints with single-parameter abilities`() {
+        // Test that nested function calls with constraints work correctly
+        val source = """
+            use std::int
+
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            impl Show Int where {
+              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+            }
+
+            impl Show String where {
+              show: {val: String} -> String = {val} -> val
+            }
+
+            let wrap: {x: 'a} -> String with Show 'a = {x} ->
+              "[$(Show.show {val = x})]"
+
+            let doubleWrap: {x: 'a} -> String with Show 'a = {x} ->
+              "<<$(wrap {x = x})>>"
+
+            # Should propagate Show constraint through both functions
+            doubleWrap {x = 123}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        assertNotNull(typedProgram, "Chained constraints should propagate correctly")
+    }
+
+    @Test
+    fun `test ability constraint with concrete and polymorphic type args`() {
+        // Test mixed concrete and polymorphic type args like "Encode Json 'a"
+        val source = """
+            use std::int
+
+            type Json = { raw: String }
+
+            ability Encode 'format 'data where {
+              encode: {val: 'data} -> 'format
+            }
+
+            impl Encode Json Int where {
+              encode: {val: Int} -> Json = {val} -> { raw = int::to_string {n = val} }
+            }
+
+            # Constraint has concrete type (Json) and polymorphic type ('a)
+            let toJson: {data: 'a} -> Json with Encode Json 'a = {data} ->
+              Encode.encode {val = data}
+
+            # Should find impl Encode Json Int
+            toJson {data = 42}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        assertNotNull(typedProgram, "Mixed concrete and polymorphic type args should work")
+    }
+
+    @Test
+    fun `test multiple different ability constraints on same function`() {
+        // Test function with multiple constraints: "with Show 'a, Eq 'a"
+        val source = """
+            use std::int
+
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            ability Eq 'a where {
+              eq: {l: 'a, r: 'a} -> Bool
+            }
+
+            impl Show Int where {
+              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+            }
+
+            impl Eq Int where {
+              eq: {l: Int, r: Int} -> Bool = {l, r} -> l == r
+            }
+
+            # Multiple constraints on same type parameter
+            let showIfEqual: {a: 'x, b: 'x} -> String with Show 'x, Eq 'x = {a, b} ->
+              if Eq.eq {l = a, r = b} then
+                Show.show {val = a}
+              else
+                "not equal"
+
+            showIfEqual {a = 5, b = 5}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        assertNotNull(typedProgram, "Multiple constraints on same type param should work")
+    }
+
+    @Test
+    fun `test ability constraint missing implementation fails correctly`() {
+        // Verify that missing impl for constrained type still produces good error
+        val source = """
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            # No impl Show Float defined!
+
+            let format: {x: 'a} -> String with Show 'a = {x} ->
+              Show.show {val = x}
+
+            # Should fail - no impl Show Float
+            format {x = 3.14}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+
+        assertThrows<TypeCheckError>("Should fail: Float does not implement Show") {
+            typeChecker.typeCheck(program).program
+        }
+    }
+
+    @Test
+    fun `test higher-order function with ability constraint`() {
+        // Test that ability constraints work with higher-order functions
+        val source = """
+            use std::int
+
+            ability Show 'a where {
+              show: {val: 'a} -> String
+            }
+
+            impl Show Int where {
+              show: {val: Int} -> String = {val} -> int::to_string {n = val}
+            }
+
+            # Higher-order: takes a function that requires Show constraint
+            let applyAndShow: {f: {x: 'a} -> 'a, val: 'a} -> String with Show 'a = {f, val} -> do
+              let result = f {x = val}
+              Show.show {val = result}
+
+            let double = {x: Int} -> x * 2
+
+            applyAndShow {f = double, val = 21}
+        """.trimIndent()
+
+        val program = parser.parse(source)
+        val typedProgram = typeChecker.typeCheck(program).program
+
+        assertNotNull(typedProgram, "Higher-order functions with ability constraints should work")
+    }
 }

@@ -69,7 +69,7 @@ class AbilityResolver(
 
             // Other primitive types
             is MezzeType.StringType -> checkStringAbility(abilityName, typeArgs)
-            is MezzeType.BooleanType -> checkBooleanAbility(abilityName, typeArgs)
+            is MezzeType.BoolType -> checkBooleanAbility(abilityName, typeArgs)
             is MezzeType.CharType -> checkCharAbility(abilityName, typeArgs)
             is MezzeType.OrderingType -> checkOrderingAbility(abilityName, typeArgs)
             is MezzeType.BytesType -> checkBytesAbility(abilityName, typeArgs)
@@ -172,7 +172,7 @@ class AbilityResolver(
             "Inspect" -> AbilityCheckResult.Satisfied("Built-in Bool to_string")
             "LogicalAnd", "LogicalOr", "LogicalNot" ->
                 AbilityCheckResult.Satisfied("Built-in Bool logic")
-            else -> checkUserDefinedAbilityImpl(MezzeType.BooleanType, abilityName, typeArgs)
+            else -> checkUserDefinedAbilityImpl(MezzeType.BoolType, abilityName, typeArgs)
         }
     }
 
@@ -509,7 +509,7 @@ class AbilityResolver(
             is MezzeType.IntType -> "Int"
             is MezzeType.FloatType -> "Float"
             is MezzeType.StringType -> "String"
-            is MezzeType.BooleanType -> "Bool"
+            is MezzeType.BoolType -> "Bool"
             is MezzeType.NatType -> "Nat"
             is MezzeType.FracType -> "Frac"
             is MezzeType.CharType -> "Char"
@@ -537,19 +537,29 @@ class AbilityResolver(
             // Match associated types against associatedTypeBindings
             val associatedBindings = impl.associatedTypeBindings
 
-            // Case 1: No additional type args, just match the primary type
-            if (additionalTypeArgs.isEmpty()) {
-                annotations.size == 1 && typeMatchesAnnotation(type, annotations.first())
+            // IMPORTANT: additionalTypeArgs may contain the primary type as first element
+            // when the constraint comes from a type annotation like "with Show 'a".
+            // In that case, we should use additionalTypeArgs directly without prepending.
+            // For "Show 'a" with 'a=Int: type=Int, additionalTypeArgs=[Int] -> allTypes=[Int]
+            // For "Encode Json 'a" with 'a=Record: type=Record, additionalTypeArgs=[Json,Record] -> allTypes=[Json,Record]
+            val allTypes = if (additionalTypeArgs.isNotEmpty() && additionalTypeArgs.any { it == type }) {
+                // additionalTypeArgs already contains the primary type, use as-is
+                additionalTypeArgs
+            } else if (additionalTypeArgs.isEmpty()) {
+                listOf(type)
+            } else {
+                // Prepend primary type for method call constraints
+                listOf(type) + additionalTypeArgs
             }
-            // Case 2: Multi-parameter ability without associated types (e.g., Convert 'a 'b)
-            else if (associatedBindings.isEmpty()) {
-                val allTypes = listOf(type) + additionalTypeArgs
+
+            // Case 1: Simple matching with computed allTypes
+            if (associatedBindings.isEmpty()) {
                 annotations.size == allTypes.size &&
                 allTypes.zip(annotations).all { (actualType, annotation) ->
                     typeMatchesAnnotation(actualType, annotation)
                 }
             }
-            // Case 3: Ability with associated types (e.g., Container 'c having 'item)
+            // Case 2: Ability with associated types (e.g., Container 'c having 'item)
             else {
                 // For abilities with associated types, only match the primary type params.
                 // Associated types are determined by the impl itself, not by unification.
@@ -691,7 +701,7 @@ class AbilityResolver(
                     "Int" -> type is MezzeType.IntType
                     "Float" -> type is MezzeType.FloatType
                     "String" -> type is MezzeType.StringType
-                    "Bool" -> type is MezzeType.BooleanType || isBoolVariant(type)
+                    "Bool" -> type is MezzeType.BoolType || isBoolVariant(type)
                     "Nat" -> type is MezzeType.NatType
                     "Frac" -> type is MezzeType.FracType
                     "Char" -> type is MezzeType.CharType
