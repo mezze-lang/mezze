@@ -368,7 +368,20 @@ class ConstraintGenerator(
                                 // because NumAdd has built-in implementations for all numeric types.
                                 //
                                 // We only prevent generalization for user-defined abilities that need explicit implementations.
-                                val hasUserDefinedAbilityConstraints = result.abilityConstraints.any { constraint ->
+                                // EXCEPTION: If the user explicitly declared ability constraints in their type annotation,
+                                // we MUST allow generalization. The user is explicitly telling us "this is polymorphic with these constraints".
+                                // Example: let encode_value: {x: 'a} -> String with Encoder 'a = ...
+                                // The user explicitly wants this to be polymorphic over 'a with Encoder 'a constraint.
+                                val hasExplicitAbilityConstraints = when (val annotation = item.typeAnnotation) {
+                                    is FunctionTypeAnnotation -> annotation.abilityConstraints.isNotEmpty()
+                                    else -> false
+                                }
+
+                                val hasUserDefinedAbilityConstraints = if (hasExplicitAbilityConstraints) {
+                                    // User explicitly declared ability constraints - allow generalization
+                                    false
+                                } else {
+                                    result.abilityConstraints.any { constraint ->
                                     // Check if this is a built-in ability with built-in implementations
                                     val isBuiltInAbility = BuiltInAbilities.isBuiltInAbility(constraint.abilityName)
 
@@ -405,6 +418,7 @@ class ConstraintGenerator(
                                         }
 
                                         mainVarIsQuantifiable || typeArgsHaveQuantifiableVars
+                                    }
                                     }
                                 }
 

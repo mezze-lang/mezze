@@ -179,17 +179,39 @@ public final class MezzeContext {
     // Ability Implementations
     // ========================
 
-    // Ability name → impl record (for runtime ability lookups)
+    // Ability name → impl record (for runtime ability lookups by name - legacy)
     private final ConcurrentHashMap<String, Object> abilityImpls = new ConcurrentHashMap<>();
+
+    // Content hash → impl record (for O(1) lookup by hash - JIT-friendly)
+    private final ConcurrentHashMap<String, Object> abilityImplsByHash = new ConcurrentHashMap<>();
 
     @TruffleBoundary
     public void registerAbilityImpl(String abilityName, Object implRecord) {
         abilityImpls.put(abilityName, implRecord);
     }
 
+    /**
+     * Register an ability implementation by content hash.
+     * Used for polymorphic functions where the typechecker resolves implementations
+     * and provides their content hashes.
+     */
+    @TruffleBoundary
+    public void registerAbilityImplByHash(String contentHash, Object implRecord) {
+        abilityImplsByHash.put(contentHash, implRecord);
+    }
+
     @TruffleBoundary
     public Object lookupAbilityImpl(String abilityName) {
         return abilityImpls.get(abilityName);
+    }
+
+    /**
+     * Look up an ability implementation by content hash.
+     * Returns null if not found.
+     */
+    @TruffleBoundary
+    public Object getAbilityImplByHash(String contentHash) {
+        return abilityImplsByHash.get(contentHash);
     }
 
     @TruffleBoundary

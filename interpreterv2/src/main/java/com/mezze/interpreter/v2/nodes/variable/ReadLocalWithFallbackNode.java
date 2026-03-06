@@ -56,14 +56,8 @@ public final class ReadLocalWithFallbackNode extends MezzeNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
-        // First try reading from frame slot
-        Object value;
-        try {
-            value = frame.getObject(slot);
-        } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e) {
-            // Slot might be uninitialized or have wrong type - fall back to global
-            value = null;
-        }
+        // First try reading from frame slot using getValue() which handles all types
+        Object value = frame.getValue(slot);
 
         if (value != null) {
             return value;

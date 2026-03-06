@@ -319,7 +319,7 @@ class LoomConcurrencyTest {
     // =============================================================================
 
     @Test
-    // Previously disabled for flakiness - now fixed with sequential execution
+    // Test spawning multiple concurrent tasks with closure capture
     fun testMultipleClosures() {
         val code = """
             $setupCode
@@ -328,11 +328,12 @@ class LoomConcurrencyTest {
                 let a = 10
                 let b = 20
 
+                # Closures capture a and b from outer scope
                 let p1 = spawn {f = {} -> a * 2}
                 let p2 = spawn {f = {} -> b * 3}
 
-                let r1 = await {p =p1}
-                let r2 = await {p =p2}
+                let r1 = await {p = p1}
+                let r2 = await {p = p2}
 
                 r1 + r2
 
@@ -343,21 +344,24 @@ class LoomConcurrencyTest {
     }
 
     @Test
-    // Previously disabled for flakiness - now fixed with sequential execution
+    // Test higher-order functions with closure capture in concurrent execution
     fun testNestedClosuresInSpawn() {
         val code = """
             $setupCode
 
+            # Higher-order function that returns a closure capturing x
             let makeAdder = {x} -> {y} -> x + y
 
             let test = {} -> do
+                # add10 is a closure that captures x=10
                 let add10 = makeAdder {x = 10}
 
+                # Spawn tasks that use the captured closure
                 let p1 = spawn {f = {} -> add10 {y = 5}}
                 let p2 = spawn {f = {} -> add10 {y = 15}}
 
-                let r1 = await {p =p1}
-                let r2 = await {p =p2}
+                let r1 = await {p = p1}
+                let r2 = await {p = p2}
 
                 r1 + r2
 

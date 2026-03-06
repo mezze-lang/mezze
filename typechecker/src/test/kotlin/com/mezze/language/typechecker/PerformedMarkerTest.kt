@@ -48,7 +48,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let result = {} -> perform Console in Log.println { msg = "hello" }
@@ -107,7 +107,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let partialHandle = {} -> perform Console in do
@@ -137,7 +137,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let inner = {} -> perform Console in Log.println { msg = "inner" }
@@ -160,7 +160,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let conditional = {cond} -> if cond then perform Console in Log.println { msg = "yes" } else {}
@@ -182,7 +182,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let matchExpr = {x} -> match x is
@@ -206,7 +206,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let doBlock = {} -> do
@@ -283,7 +283,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             impl State for IntState having 'state = Int where {
@@ -323,7 +323,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             impl State for IntState having 'state = Int where {
@@ -360,7 +360,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             impl State for IntState having 'state = Int where {
@@ -450,7 +450,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             impl State for IntState having 'state = Int where {
@@ -490,7 +490,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             impl State for IntState having 'state = Int where {
@@ -530,7 +530,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             impl State for IntState having 'state = Int where {
@@ -569,7 +569,7 @@ class PerformedMarkerTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let partial = {} -> perform Console in do

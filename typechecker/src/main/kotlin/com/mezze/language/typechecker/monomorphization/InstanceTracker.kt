@@ -114,6 +114,35 @@ class InstanceTracker private constructor(
     }
 
     /**
+     * Get the content hash for a monomorphic call, if tracked.
+     *
+     * Returns null if the call doesn't need monomorphization or
+     * if the original function doesn't have a content hash.
+     */
+    fun getContentHash(
+        functionName: String,
+        typeSubstitution: Map<String, MezzeType>
+    ): String? {
+        if (typeSubstitution.isEmpty()) {
+            return null
+        }
+
+        // Create a temporary request to compute the name
+        val tempRequest = InstanceRequest(
+            originalName = functionName,
+            typeArgs = typeSubstitution
+        )
+
+        val monomorphicName = tempRequest.generateMonomorphicName()
+
+        // Get the original tracked request (has the originalContentHash)
+        val originalRequest = requests[monomorphicName] ?: return null
+
+        // Generate the content hash for this monomorphic instance
+        return originalRequest.generateContentHash()
+    }
+
+    /**
      * Get the number of tracked instances.
      */
     fun size(): Int {

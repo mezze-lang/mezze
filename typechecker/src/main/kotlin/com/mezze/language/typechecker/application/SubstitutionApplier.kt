@@ -81,6 +81,11 @@ class SubstitutionApplier(
     // Maps identifier names to their types
     private val identifierContext = mutableMapOf<String, MezzeType>()
 
+    // Track polymorphic function types for let-polymorphism support
+    // Maps identifier name to the polymorphic function type (with ability constraints)
+    // This allows resolving abilities when calling polymorphic functions
+    private val polymorphicFunctionTypes = mutableMapOf<String, MezzeType.FunctionType>()
+
     // CodecGenerator for auto-deriving Encode/Decode implementations
     private val codecGenerator = CodecGenerator()
 
@@ -198,7 +203,17 @@ class SubstitutionApplier(
                     ?: updatedItem.pattern.extractBindings().firstOrNull()
                 updatedItem.inferredType?.let { type ->
                     if (bindingName != null) {
-                        identifierContext[bindingName] = type
+                        // Check if this is a polymorphic function with ability constraints
+                        val isPolymorphicWithAbilities = when (type) {
+                            is MezzeType.FunctionType -> type.abilityConstraints.isNotEmpty()
+                            else -> false
+                        }
+                        if (isPolymorphicWithAbilities && type is MezzeType.FunctionType) {
+                            // Track polymorphic functions for ability resolution at call sites
+                            polymorphicFunctionTypes[bindingName] = type
+                        } else {
+                            identifierContext[bindingName] = type
+                        }
                     }
                 }
             }
@@ -1080,6 +1095,16 @@ class SubstitutionApplier(
         // This matches OldTypeChecker.kt:16483-16581 (resolveAbilitiesForFunctionCall)
         var resolvedAbilities = resolveAbilitiesForCall(updatedFunction)
 
+        // LET-POLYMORPHISM: If function is a polymorphic identifier with ability constraints,
+        // resolve abilities based on the argument types
+        if (resolvedAbilities.isEmpty() && updatedFunction is Identifier) {
+            val funcName = updatedFunction.name
+            val polymorphicType = polymorphicFunctionTypes[funcName]
+            if (polymorphicType != null && polymorphicType.abilityConstraints.isNotEmpty()) {
+                resolvedAbilities = resolvePolymorphicAbilities(polymorphicType, updatedArguments)
+            }
+        }
+
         // Also check if this is a direct ability method call (e.g., Show.show {val = 42})
         // In this case, we need to resolve based on the argument types, not the function type constraints
         if (resolvedAbilities.isEmpty() && updatedFunction is MemberAccess) {
@@ -1377,6 +1402,91 @@ class SubstitutionApplier(
                         typeArgs = typeArgs,
                         isBuiltin = true
                         // No implementationHash for builtins
+                    )
+                }
+            }
+        }
+
+        return resolvedAbilities
+    }
+
+    /**
+     * Resolve abilities for a polymorphic function call.
+     *
+     * Given a polymorphic function type like `{x: 'a} -> String with Encoder 'a`
+     * and arguments like `{x: Int}`, we:
+     * 1. Unify the parameter type with the argument type to find type variable bindings
+     * 2. Apply those bindings to the ability constraints
+     * 3. Look up implementations for the resolved ability constraints
+     */
+    private fun resolvePolymorphicAbilities(
+        polymorphicType: MezzeType.FunctionType,
+        arguments: Expression
+    ): Map<String, ResolvedAbility> {
+        val resolvedAbilities = mutableMapOf<String, ResolvedAbility>()
+
+        // Get the argument type
+        val argType = arguments.inferredType ?: return resolvedAbilities
+
+        // Build a mapping from type variables to concrete types
+        // by matching the parameter type with the argument type
+        val typeVarBindings = mutableMapOf<TypeVar, MezzeType>()
+
+        fun collectBindings(paramType: MezzeType, argType: MezzeType) {
+            when {
+                paramType is MezzeType.VarType -> {
+                    // Bind type variable to argument type
+                    typeVarBindings[paramType.variable] = argType
+                }
+                paramType is MezzeType.RecordType && argType is MezzeType.RecordType -> {
+                    // Recursively collect bindings from record fields
+                    for ((fieldName, fieldType) in paramType.fields) {
+                        val argFieldType = argType.fields[fieldName]
+                        if (argFieldType != null) {
+                            collectBindings(fieldType, argFieldType)
+                        }
+                    }
+                }
+                // Add more cases as needed (arrays, variants, etc.)
+            }
+        }
+
+        collectBindings(polymorphicType.paramType, argType)
+
+        // Now resolve each ability constraint using the type variable bindings
+        for (constraint in polymorphicType.abilityConstraints) {
+            val abilityName = constraint.abilityName
+            // Apply type variable bindings to the constraint's type args
+            val typeArgs = constraint.typeArgs.map { typeArg ->
+                when (typeArg) {
+                    is MezzeType.VarType -> typeVarBindings[typeArg.variable] ?: typeArg
+                    else -> typeArg
+                }
+            }
+
+            // Try to find an explicit implementation
+            val impl = findAbilityImplementation(abilityName, typeArgs)
+
+            if (impl != null) {
+                // Found explicit implementation - use content hash as key
+                val contentHash = impl.contentHash
+                    ?: throw IllegalStateException("Content hash not computed for impl: ${impl.abilityName} ${impl.targetTypes}")
+                resolvedAbilities[contentHash] = ResolvedAbility(
+                    abilityName = abilityName,
+                    typeArgs = typeArgs,
+                    isBuiltin = false,
+                    implementationHash = contentHash
+                )
+            } else if (BuiltinAbilities.isBuiltin(abilityName) && typeArgs.size == 1) {
+                // Check if it's a built-in ability with automatic implementation
+                val targetType = typeArgs[0]
+                if (BuiltinAbilities.typeHasAutomaticImplementation(targetType, abilityName)) {
+                    // For builtins, use a deterministic synthetic key
+                    val builtinKey = "builtin:$abilityName:${getTypeNameForAbility(targetType)}"
+                    resolvedAbilities[builtinKey] = ResolvedAbility(
+                        abilityName = abilityName,
+                        typeArgs = typeArgs,
+                        isBuiltin = true
                     )
                 }
             }
@@ -1914,6 +2024,7 @@ class SubstitutionApplier(
         // CRITICAL FIX: Add let bindings to context sequentially
         // This matches OldTypeChecker.kt:1925-1953
         val originalContext = identifierContext.toMap()
+        val originalPolymorphicTypes = polymorphicFunctionTypes.toMap()
 
         val updatedStatements = expr.statements.map { stmt ->
             when (stmt) {
@@ -1929,6 +2040,7 @@ class SubstitutionApplier(
                     val exprWithType = if (annotatedType != null) {
                         when (val e = stmt.expression) {
                             is FunctionCall -> e.copy(inferredType = annotatedType)
+                            is LambdaExpression -> e.copy(inferredType = annotatedType)
                             else -> e
                         }
                     } else {
@@ -1942,12 +2054,34 @@ class SubstitutionApplier(
                     // For complex patterns (let {a, b} = ...), extract all bindings
                     val exprType = annotatedType?.let { substitution.apply(it) } ?: updatedExpr.inferredType
                     if (exprType != null) {
-                        // Extract all variable names from the pattern
-                        val variableNames = stmt.pattern.extractBindings()
-                        // For simple case: just bind the pattern variable to the expression type
-                        for (varName in variableNames) {
-                            identifierContext[varName] = exprType
+                        // POLYMORPHISM FIX: Don't store polymorphic types in identifierContext.
+                        // Polymorphic bindings (with ability constraints or free type variables)
+                        // should rely on per-use instantiated types from expr.inferredType.
+                        // If we stored the polymorphic type here, all uses would share it,
+                        // breaking let-polymorphism where each use can have different type args.
+                        val isPolymorphic = when (exprType) {
+                            is MezzeType.FunctionType -> {
+                                exprType.abilityConstraints.isNotEmpty() ||
+                                com.mezze.language.typechecker.solving.collectFreeTypeVars(exprType).isNotEmpty()
+                            }
+                            else -> com.mezze.language.typechecker.solving.collectFreeTypeVars(exprType).isNotEmpty()
                         }
+
+                        if (!isPolymorphic) {
+                            // Only add monomorphic types to context
+                            val variableNames = stmt.pattern.extractBindings()
+                            for (varName in variableNames) {
+                                identifierContext[varName] = exprType
+                            }
+                        } else if (exprType is MezzeType.FunctionType && exprType.abilityConstraints.isNotEmpty()) {
+                            // POLYMORPHISM: Track polymorphic functions with ability constraints
+                            // This allows resolveAbilitiesForCall to resolve abilities at each call site
+                            val variableNames = stmt.pattern.extractBindings()
+                            for (varName in variableNames) {
+                                polymorphicFunctionTypes[varName] = exprType
+                            }
+                        }
+                        // For other polymorphic bindings, let applyToIdentifier use expr.inferredType
                     }
                     LetStatement(stmt.pattern, stmt.typeAnnotation, updatedExpr)
                 }
@@ -1962,6 +2096,8 @@ class SubstitutionApplier(
         // Restore original context
         identifierContext.clear()
         identifierContext.putAll(originalContext)
+        polymorphicFunctionTypes.clear()
+        polymorphicFunctionTypes.putAll(originalPolymorphicTypes)
 
         val updatedType = expr.inferredType?.let { substitution.apply(it) }
         return expr.copy(statements = updatedStatements, result = updatedResult, inferredType = updatedType)

@@ -157,7 +157,7 @@ class CallSiteUpdater(
     }
 
     /**
-     * Update a function call with its resolved monomorphic name.
+     * Update a function call with its resolved monomorphic name and content hash.
      */
     private fun updateFunctionCall(expr: FunctionCall): FunctionCall {
         // Get the function name (if it's a direct identifier)
@@ -173,9 +173,19 @@ class CallSiteUpdater(
             null
         }
 
-        // Update the call with the resolved name
+        // Get the content hash for the monomorphic instance
+        val contentHash = if (functionName != null && expr.typeSubstitution.isNotEmpty()) {
+            tracker.getContentHash(functionName, expr.typeSubstitution)
+        } else {
+            null
+        }
+
+        // Update the call with the resolved name and content hash
         val updatedCall = if (monomorphicName != null) {
-            expr.copy(resolvedFunctionName = monomorphicName)
+            expr.copy(
+                resolvedFunctionName = monomorphicName,
+                resolvedFunctionContentHash = contentHash
+            )
         } else {
             expr
         }

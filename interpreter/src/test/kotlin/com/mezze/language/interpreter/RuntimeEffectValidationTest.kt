@@ -66,7 +66,7 @@ class RuntimeEffectValidationTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             let effectfulFunc = {x} -> do
@@ -98,11 +98,11 @@ class RuntimeEffectValidationTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
-              nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+              nextInt : {max: Int} -> Int = {max} -> max
             }
 
             let multiEffectFunc = {x} -> do
@@ -146,11 +146,11 @@ class RuntimeEffectValidationTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
-              nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+              nextInt : {max: Int} -> Int = {max} -> max
             }
 
             let multiEffectFunc : {x: Int} -> Int <Log, Random> = {x} -> do
@@ -195,11 +195,11 @@ class RuntimeEffectValidationTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             impl Random for SystemRandom where {
-              nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+              nextInt : {max: Int} -> Int = {max} -> max
             }
             
             let multiEffectFunc = {x} -> do
@@ -244,7 +244,7 @@ class RuntimeEffectValidationTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             let innerFunc : {x: Int} -> Int <Log> = {x} -> do
@@ -286,7 +286,7 @@ class RuntimeEffectValidationTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             let effectfulFunc = {x, y} -> do

@@ -1197,8 +1197,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_log_error", (r, c) -> LogNatives.logError(r));
         HANDLERS.put("__native_log_debug", (r, c) -> LogNatives.logDebug(r));
         HANDLERS.put("__native_log_trace", (r, c) -> LogNatives.logTrace(r));
-        // Legacy aliases without double underscore prefix (used by some tests)
-        HANDLERS.put("native_print", (r, c) -> LogNatives.consolePrintln(r));
     }
 
     // ==================== Inspect ====================
@@ -1219,11 +1217,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seeded_random_nat", (r, c) -> RandomNatives.seededRandomNat(r));
         HANDLERS.put("__native_update_seed", (r, c) -> RandomNatives.updateSeed(r));
         HANDLERS.put("__native_reset_seeded_random", (r, c) -> RandomNatives.resetSeededRandom(r));
-        // Legacy aliases without double underscore prefix (used by some tests)
-        HANDLERS.put("native_random_int", (r, c) -> RandomNatives.randomInt(r));
-        HANDLERS.put("native_random_double", (r, c) -> RandomNatives.randomFloat(r));
-        // Legacy alias used by RuntimeEffectValidationTest - takes only {max}
-        HANDLERS.put("native_random", (r, c) -> RandomNatives.legacyRandom(r));
     }
 
     // ==================== Filesystem ====================

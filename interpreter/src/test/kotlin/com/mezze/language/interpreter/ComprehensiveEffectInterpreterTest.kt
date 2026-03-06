@@ -28,7 +28,7 @@ class ComprehensiveEffectInterpreterTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             perform Console in Log.print {msg = "Hello from effect test!"}
@@ -53,7 +53,7 @@ class ComprehensiveEffectInterpreterTest {
             }
 
             impl Random for MathRandom where {
-              nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
+              nextInt : {min: Int, max: Int} -> Int = {min, max} -> min + max / 2
             }
             
             perform MathRandom in Random.nextInt {min = 1, max = 100}
@@ -84,11 +84,11 @@ class ComprehensiveEffectInterpreterTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Random for MathRandom where {
-              nextInt : {min: Int, max: Int} -> Int = {min, max} -> native_random_int {min = min, max = max}
+              nextInt : {min: Int, max: Int} -> Int = {min, max} -> min + max / 2
             }
 
             # Direct effect calls with multiple handlers
@@ -120,7 +120,7 @@ class ComprehensiveEffectInterpreterTest {
             }
 
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> {}
             }
 
             # Computation with effects in do block
@@ -156,7 +156,7 @@ class ComprehensiveEffectInterpreterTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             perform Console in Log.print {msg = "Hello from use expression!"}
@@ -204,7 +204,7 @@ class ComprehensiveEffectInterpreterTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             # Just declare the impl, don't use it
@@ -232,9 +232,9 @@ class ComprehensiveEffectInterpreterTest {
             }
             
             impl Log for Console where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"},
-              error : {msg: String} -> {} = {msg} -> native_print {msg = "[ERROR] $(msg)"},
-              debug : {msg: String} -> {} = {msg} -> native_print {msg = "[DEBUG] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> {},
+              error : {msg: String} -> {} = {msg} -> {},
+              debug : {msg: String} -> {} = {msg} -> {}
             }
             
             # Test function with multiple log operations
@@ -267,7 +267,7 @@ class ComprehensiveEffectInterpreterTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             # Simple nested effect calls
@@ -400,11 +400,11 @@ let quot = a / b
             }
             
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = "[LOG] $(msg)"}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Debug for DebugConsole where {
-              log : {msg: String} -> {} = {msg} -> native_print {msg = "[DEBUG] $(msg)"}
+              log : {msg: String} -> {} = {msg} -> {}
             }
             
             # Direct multiple effect calls
@@ -433,7 +433,7 @@ let quot = a / b
             }
             
             impl Logging for FileLogger {path: String} where {
-              log : {msg: String} -> {} = {msg} -> native_print {msg = "[FILE] $(msg)"}
+              log : {msg: String} -> {} = {msg} -> {}
             }
             
             # Test parameterized handler with path parameter

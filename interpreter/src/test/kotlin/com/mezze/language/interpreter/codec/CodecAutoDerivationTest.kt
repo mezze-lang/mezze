@@ -940,7 +940,6 @@ class CodecAutoDerivationTest {
     // ========================================================================
 
     @Test
-    @Disabled("Bidirectional inference for Decode without type annotation not yet implemented - needs typechecker changes")
     fun `decode record with bidirectional inference - no type annotation`() {
         // TODO: Currently requires type annotation. Bidirectional inference should allow
         // the target type to be inferred from usage (e.g., result == "hello" implies String)

@@ -9,9 +9,9 @@ import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.frame.FrameDescriptor;
-import com.oracle.truffle.api.frame.FrameSlotTypeException;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
+import com.oracle.truffle.api.frame.FrameSlotTypeException;
 import com.oracle.truffle.api.nodes.NodeInfo;
 
 /**
@@ -35,6 +35,13 @@ public final class FunctionDefinitionNode extends MezzeNode {
     private static final Object[] EMPTY_CLOSURE = new Object[0];
     private static final int[] EMPTY_SLOTS = new int[0];
     private static final String[] EMPTY_STRINGS = new String[0];
+    private static final MezzeFunction.AbilitySlotRequirement[] EMPTY_ABILITY_REQS = new MezzeFunction.AbilitySlotRequirement[0];
+
+    // Slot kind constants (must match ReadLocalNode)
+    public static final int KIND_LONG = 0;
+    public static final int KIND_DOUBLE = 1;
+    public static final int KIND_BOOLEAN = 2;
+    public static final int KIND_OBJECT = 3;
 
     private final String name;
 
@@ -44,6 +51,10 @@ public final class FunctionDefinitionNode extends MezzeNode {
 
     @CompilationFinal(dimensions = 1)
     private final int[] closureSlots;
+
+    // Types of closure slots for typed reads (0=Long, 1=Double, 2=Boolean, 3=Object)
+    @CompilationFinal(dimensions = 1)
+    private final int[] closureKinds;
 
     @CompilationFinal(dimensions = 1)
     private final String[] parameterNames;
@@ -60,11 +71,17 @@ public final class FunctionDefinitionNode extends MezzeNode {
     @CompilationFinal
     private final FrameDescriptor frameDescriptor;
 
+    // Ability operation slot requirements for polymorphic functions
+    // Each entry describes where an ability operation function should be stored
+    @CompilationFinal(dimensions = 1)
+    private final MezzeFunction.AbilitySlotRequirement[] abilitySlotRequirements;
+
     @CompilationFinal
     private CallTarget callTarget;
 
     /**
      * Full constructor with parameter names for record unpacking.
+     * Uses KIND_OBJECT for all closure slots (backwards compatible).
      */
     public FunctionDefinitionNode(
             String name,
@@ -73,11 +90,12 @@ public final class FunctionDefinitionNode extends MezzeNode {
             MezzeNode bodyNode,
             FrameDescriptor frameDescriptor
     ) {
-        this(name, null, closureSlots, parameterNames, bodyNode, frameDescriptor);
+        this(name, null, closureSlots, null, parameterNames, bodyNode, frameDescriptor, null);
     }
 
     /**
      * Constructor with content hash for CallTarget caching.
+     * Uses KIND_OBJECT for all closure slots (backwards compatible).
      */
     public FunctionDefinitionNode(
             String name,
@@ -87,14 +105,49 @@ public final class FunctionDefinitionNode extends MezzeNode {
             MezzeNode bodyNode,
             FrameDescriptor frameDescriptor
     ) {
+        this(name, contentHash, closureSlots, null, parameterNames, bodyNode, frameDescriptor, null);
+    }
+
+    /**
+     * Full constructor with typed closure slots.
+     * closureKinds specifies the type of each closure slot (KIND_LONG, KIND_DOUBLE, KIND_BOOLEAN, KIND_OBJECT).
+     */
+    public FunctionDefinitionNode(
+            String name,
+            String contentHash,
+            int[] closureSlots,
+            int[] closureKinds,
+            String[] parameterNames,
+            MezzeNode bodyNode,
+            FrameDescriptor frameDescriptor
+    ) {
+        this(name, contentHash, closureSlots, closureKinds, parameterNames, bodyNode, frameDescriptor, null);
+    }
+
+    /**
+     * Full constructor with typed closure slots and ability slot requirements.
+     * This is used for polymorphic functions that have ability constraints.
+     */
+    public FunctionDefinitionNode(
+            String name,
+            String contentHash,
+            int[] closureSlots,
+            int[] closureKinds,
+            String[] parameterNames,
+            MezzeNode bodyNode,
+            FrameDescriptor frameDescriptor,
+            MezzeFunction.AbilitySlotRequirement[] abilitySlotRequirements
+    ) {
         this.name = name;
         this.contentHash = contentHash;
         this.closureSlots = closureSlots != null && closureSlots.length > 0 ? closureSlots : EMPTY_SLOTS;
+        this.closureKinds = closureKinds != null && closureKinds.length > 0 ? closureKinds : null;
         this.parameterNames = parameterNames != null && parameterNames.length > 0 ? parameterNames : EMPTY_STRINGS;
         this.closureCount = this.closureSlots.length;
         this.parameterCount = this.parameterNames.length;
         this.bodyNode = bodyNode;
         this.frameDescriptor = frameDescriptor;
+        this.abilitySlotRequirements = abilitySlotRequirements != null ? abilitySlotRequirements : EMPTY_ABILITY_REQS;
     }
 
     /**
@@ -111,11 +164,13 @@ public final class FunctionDefinitionNode extends MezzeNode {
         this.name = name;
         this.contentHash = null;
         this.closureSlots = closureSlots != null && closureSlots.length > 0 ? closureSlots : EMPTY_SLOTS;
+        this.closureKinds = null;
         this.parameterNames = EMPTY_STRINGS;
         this.closureCount = this.closureSlots.length;
         this.parameterCount = parameterCount;
         this.bodyNode = bodyNode;
         this.frameDescriptor = frameDescriptor;
+        this.abilitySlotRequirements = EMPTY_ABILITY_REQS;
     }
 
     /**
@@ -137,6 +192,15 @@ public final class FunctionDefinitionNode extends MezzeNode {
     }
 
     private void initializeCallTarget(MezzeLanguage language) {
+        // Extract ability slot indices from requirements
+        int[] abilitySlots = null;
+        if (abilitySlotRequirements.length > 0) {
+            abilitySlots = new int[abilitySlotRequirements.length];
+            for (int i = 0; i < abilitySlotRequirements.length; i++) {
+                abilitySlots[i] = abilitySlotRequirements[i].slotIndex;
+            }
+        }
+
         // Use MezzeFunctionRootNode for proper record argument unpacking
         MezzeFunctionRootNode rootNode = new MezzeFunctionRootNode(
             language,
@@ -145,7 +209,8 @@ public final class FunctionDefinitionNode extends MezzeNode {
             name,
             parameterNames,
             closureSlots,
-            null  // slotTypes - auto-detect
+            null,  // slotTypes - auto-detect
+            abilitySlots
         );
         callTarget = rootNode.getCallTarget();
     }
@@ -159,17 +224,35 @@ public final class FunctionDefinitionNode extends MezzeNode {
             createCallTarget();
         }
 
-        // Fast path: no closure variables
-        if (closureCount == 0) {
+        // Fast path: no closure variables and no ability requirements
+        if (closureCount == 0 && abilitySlotRequirements.length == 0) {
             return new MezzeFunction(callTarget, name, EMPTY_CLOSURE, parameterNames);
+        }
+
+        // Fast path: no closure variables but has ability requirements
+        if (closureCount == 0) {
+            return new MezzeFunction(callTarget, name, EMPTY_CLOSURE, parameterNames, null, abilitySlotRequirements);
         }
 
         // Capture closure variables from current frame
         // @ExplodeLoop unrolls this based on closureCount
-        // Handle different slot types (Object, Long, Double, Boolean)
+        // Use typed reads when closureKinds is available for maximum performance
         Object[] closureValues = new Object[closureCount];
-        for (int i = 0; i < closureCount; i++) {
-            closureValues[i] = readSlotValue(frame, closureSlots[i]);
+        if (closureKinds != null) {
+            // Fast path: use static type info from compiler
+            for (int i = 0; i < closureCount; i++) {
+                closureValues[i] = readSlotTyped(frame, closureSlots[i], closureKinds[i]);
+            }
+        } else {
+            // Fallback: use generic getValue (backwards compatible)
+            for (int i = 0; i < closureCount; i++) {
+                closureValues[i] = frame.getValue(closureSlots[i]);
+            }
+        }
+
+        // Pass ability slot requirements if present
+        if (abilitySlotRequirements.length > 0) {
+            return new MezzeFunction(callTarget, name, closureValues, parameterNames, null, abilitySlotRequirements);
         }
 
         return new MezzeFunction(callTarget, name, closureValues, parameterNames);
@@ -185,7 +268,16 @@ public final class FunctionDefinitionNode extends MezzeNode {
             }
         }
 
-        // Create new CallTarget
+        // Extract ability slot indices from requirements
+        int[] abilitySlots = null;
+        if (abilitySlotRequirements.length > 0) {
+            abilitySlots = new int[abilitySlotRequirements.length];
+            for (int i = 0; i < abilitySlotRequirements.length; i++) {
+                abilitySlots[i] = abilitySlotRequirements[i].slotIndex;
+            }
+        }
+
+        // Create new CallTarget with ability slots
         MezzeFunctionRootNode rootNode = new MezzeFunctionRootNode(
             MezzeLanguage.get(this),
             frameDescriptor,
@@ -193,7 +285,8 @@ public final class FunctionDefinitionNode extends MezzeNode {
             name,
             parameterNames,
             closureSlots,
-            null  // slotTypes - auto-detect
+            null,  // slotTypes - auto-detect
+            abilitySlots
         );
         callTarget = rootNode.getCallTarget();
 
@@ -232,31 +325,23 @@ public final class FunctionDefinitionNode extends MezzeNode {
     }
 
     /**
-     * Read a value from a frame slot, handling different slot types.
-     * Slots can hold Long, Double, Boolean, or Object values.
+     * Read a value from a frame slot using compile-time type info.
+     * Falls back to getValue() if the slot type doesn't match (can happen with
+     * closure capture across threads where Truffle's type specialization differs).
      */
-    private static Object readSlotValue(VirtualFrame frame, int slot) {
+    private static Object readSlotTyped(VirtualFrame frame, int slot, int kind) {
         try {
-            return frame.getObject(slot);
-        } catch (FrameSlotTypeException e1) {
-            // Not an Object slot, try primitive types
+            return switch (kind) {
+                case KIND_LONG -> frame.getLong(slot);
+                case KIND_DOUBLE -> frame.getDouble(slot);
+                case KIND_BOOLEAN -> frame.getBoolean(slot);
+                default -> frame.getObject(slot);
+            };
+        } catch (FrameSlotTypeException e) {
+            // Slot type mismatch - fall back to generic read
+            // This can happen when closures are captured across threads
+            // where type specialization may differ
+            return frame.getValue(slot);
         }
-        try {
-            return frame.getLong(slot);
-        } catch (FrameSlotTypeException e2) {
-            // Not a Long slot
-        }
-        try {
-            return frame.getDouble(slot);
-        } catch (FrameSlotTypeException e3) {
-            // Not a Double slot
-        }
-        try {
-            return frame.getBoolean(slot);
-        } catch (FrameSlotTypeException e4) {
-            // Not a Boolean slot
-        }
-        // Slot is empty or has unsupported type
-        return null;
     }
 }

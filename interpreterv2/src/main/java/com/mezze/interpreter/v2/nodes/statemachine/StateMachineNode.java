@@ -222,32 +222,12 @@ public final class StateMachineNode extends MezzeNode {
     }
 
     /**
-     * Capture a single slot value, trying typed reads first for unboxed primitives.
-     * After JIT profiling, this becomes a direct typed read with no exception overhead.
+     * Capture a single slot value using getValue() which handles all types.
      */
     private Object captureSlotValue(VirtualFrame frame, int slot) {
-        // Try Long first (most common numeric type in Mezze)
-        try {
-            return frame.getLong(slot);
-        } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e1) {
-            // Not a Long, try Double
-            try {
-                return frame.getDouble(slot);
-            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e2) {
-                // Not a Double, try Boolean
-                try {
-                    return frame.getBoolean(slot);
-                } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e3) {
-                    // Fall back to Object
-                    try {
-                        Object value = frame.getObject(slot);
-                        return value != null ? value : MezzeUnit.INSTANCE;
-                    } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e4) {
-                        return MezzeUnit.INSTANCE;
-                    }
-                }
-            }
-        }
+        // getValue() returns the value regardless of type (Object, Long, Double, Boolean)
+        Object value = frame.getValue(slot);
+        return value != null ? value : MezzeUnit.INSTANCE;
     }
 
     /**

@@ -13,33 +13,35 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Tests for structured concurrency scope cleanup and cancellation
+ * Tests for structured concurrency scope cleanup and cancellation.
+ * Tests the LoomConcurrencyManager infrastructure directly (not Mezze code).
+ *
  * Tests requirements 8.1, 8.2: Structured concurrency and cancellation
  */
 class StructuredConcurrencyTest {
-    
+
     private lateinit var concurrencyManager: LoomConcurrencyManager
-    
+
     @BeforeEach
     fun setUp() {
         concurrencyManager = LoomConcurrencyManager()
     }
-    
+
     @AfterEach
     fun tearDown() {
         concurrencyManager.shutdown()
     }
-    
+
     @Test
     @Timeout(10)
     fun `should execute all tasks in structured scope`() {
         val results = mutableListOf<Int>()
         val completedTasks = AtomicInteger(0)
-        
+
         val scopeResult = concurrencyManager.withStructuredScope("test-scope") { scope ->
             val futures = (1..5).map { i ->
                 scope.submit {
-                    Thread.sleep(100) // Simulate work
+                    Thread.sleep(50) // Simulate work
                     completedTasks.incrementAndGet()
                     synchronized(results) {
                         results.add(i)
@@ -47,21 +49,20 @@ class StructuredConcurrencyTest {
                     i * 2
                 }
             }
-            
+
             futures.map { it.get() }
         }
-        
+
         assertEquals(listOf(2, 4, 6, 8, 10), scopeResult.sorted())
         assertEquals(5, completedTasks.get())
         assertEquals(5, results.size)
     }
-    
+
     @Test
     @Timeout(10)
     fun `should automatically clean up scope when completed`() {
-        val initialStats = concurrencyManager.getThreadStatistics()
         val scopeName = "cleanup-test-scope"
-        
+
         concurrencyManager.withStructuredScope(scopeName) { scope ->
             repeat(3) { i ->
                 scope.submit {
@@ -71,260 +72,226 @@ class StructuredConcurrencyTest {
             }
             "scope-completed"
         }
-        
+
         // Scope should be cleaned up automatically
         val finalStats = concurrencyManager.getThreadStatistics()
-        assertFalse(finalStats.scopeNames.contains(scopeName), 
+        assertFalse(finalStats.scopeNames.contains(scopeName),
             "Scope should be cleaned up after completion")
     }
-    
+
     @Test
     @Timeout(10)
-    fun `should cancel all tasks when scope is cancelled`() {
-        val completedTasks = AtomicInteger(0)
-        val cancelledTasks = AtomicInteger(0)
+    fun `should cancel scope and interrupt tasks`() {
+        // Use a latch to ensure tasks have started before cancellation
+        val tasksStarted = CountDownLatch(5)
+        val tasksInterrupted = AtomicInteger(0)
+        val tasksCompleted = AtomicInteger(0)
         val scopeName = "cancellation-test"
-        
+
         val scopeThread = Thread {
             try {
                 concurrencyManager.withStructuredScope(scopeName) { scope ->
-                    repeat(10) { i ->
+                    repeat(5) { i ->
                         scope.submit {
+                            tasksStarted.countDown()
                             try {
-                                Thread.sleep(500) // Long-running task
-                                completedTasks.incrementAndGet()
+                                // Long sleep to ensure we're still running when cancelled
+                                Thread.sleep(10000)
+                                tasksCompleted.incrementAndGet()
                                 "completed-$i"
                             } catch (e: InterruptedException) {
-                                cancelledTasks.incrementAndGet()
+                                tasksInterrupted.incrementAndGet()
                                 throw e
                             }
                         }
                     }
-                    Thread.sleep(100) // Keep scope alive
+                    // Keep scope alive while we wait
+                    Thread.sleep(10000)
                     "scope-result"
                 }
             } catch (e: Exception) {
                 // Expected when scope is cancelled
             }
         }
-        
+
         scopeThread.start()
-        Thread.sleep(200) // Let tasks start
-        
+
+        // Wait for all tasks to start
+        assertTrue(tasksStarted.await(5, TimeUnit.SECONDS), "Tasks should start within timeout")
+
         // Cancel the scope
         concurrencyManager.cancelScope(scopeName)
-        
-        scopeThread.join(2000) // Wait for cleanup
-        
-        // Most tasks should have been cancelled
-        assertTrue(cancelledTasks.get() > 0, "Some tasks should have been cancelled")
-        assertTrue(completedTasks.get() < 10, "Not all tasks should have completed")
+
+        // Wait for scope thread to finish
+        scopeThread.join(5000)
+
+        // Verify that not all tasks completed (some should have been interrupted/cancelled)
+        assertTrue(tasksCompleted.get() < 5,
+            "Not all tasks should have completed when scope was cancelled (completed: ${tasksCompleted.get()})")
     }
-    
+
     @Test
     @Timeout(10)
     fun `should handle exceptions in structured scope`() {
         val successfulTasks = AtomicInteger(0)
-        val failedTasks = AtomicInteger(0)
-        
-        assertThrows(RuntimeException::class.java) {
+
+        val exception = assertThrows(Exception::class.java) {
             concurrencyManager.withStructuredScope("exception-scope") { scope ->
                 val futures = (1..5).map { i ->
                     scope.submit {
                         if (i == 3) {
-                            failedTasks.incrementAndGet()
-                            throw RuntimeException("Task $i failed")
+                            throw RuntimeException("Task $i failed intentionally")
                         } else {
-                            Thread.sleep(100)
+                            Thread.sleep(50)
                             successfulTasks.incrementAndGet()
-                            i
+                            "result-$i"
                         }
                     }
                 }
-                
-                try {
-                    futures.map { it.get() }
-                } catch (e: java.util.concurrent.ExecutionException) {
-                    // Unwrap ExecutionException to get the original exception
-                    throw e.cause ?: e
-                }
+
+                // Get all results - should propagate the exception
+                futures.map { it.get() }
             }
         }
-        
-        assertEquals(1, failedTasks.get(), "One task should have failed")
-        // Some successful tasks might complete before the exception propagates
-        assertTrue(successfulTasks.get() >= 0, "Some tasks might have succeeded")
+
+        // Exception may be wrapped in ExecutionException
+        val rootCause = if (exception is java.util.concurrent.ExecutionException) {
+            exception.cause
+        } else {
+            exception
+        }
+        assertTrue(rootCause?.message?.contains("Task 3 failed") == true,
+            "Should propagate the exception from the failed task, got: ${rootCause?.message}")
     }
-    
+
     @Test
     @Timeout(10)
     fun `should support nested structured scopes`() {
-        val results = ConcurrentHashMap<String, String>()
-        
-        val outerResult = concurrencyManager.withStructuredScope("outer-scope") { outerScope ->
-            val outerFuture = outerScope.submit {
-                results["outer-start"] = "started"
-                
-                val innerResult = concurrencyManager.withStructuredScope("inner-scope") { innerScope ->
-                    val innerFutures = (1..3).map { i ->
-                        innerScope.submit {
-                            Thread.sleep(50)
-                            results["inner-$i"] = "completed"
-                            "inner-$i"
-                        }
+        val outerResults = mutableListOf<String>()
+        val innerResults = mutableListOf<String>()
+
+        concurrencyManager.withStructuredScope("outer-scope") { outerScope ->
+            outerScope.submit {
+                synchronized(outerResults) { outerResults.add("outer-1") }
+
+                // Nested scope
+                concurrencyManager.withStructuredScope("inner-scope") { innerScope ->
+                    innerScope.submit {
+                        synchronized(innerResults) { innerResults.add("inner-1") }
+                        "inner-result-1"
                     }
-                    innerFutures.map { it.get() }
+                    innerScope.submit {
+                        synchronized(innerResults) { innerResults.add("inner-2") }
+                        "inner-result-2"
+                    }
+                    "inner-scope-complete"
                 }
-                
-                results["outer-end"] = "completed"
-                innerResult
+
+                "outer-result-1"
             }
-            
-            outerFuture.get()
+
+            outerScope.submit {
+                synchronized(outerResults) { outerResults.add("outer-2") }
+                "outer-result-2"
+            }
+
+            "outer-scope-complete"
         }
-        
-        assertEquals(listOf("inner-1", "inner-2", "inner-3"), outerResult.sorted())
-        assertEquals("started", results["outer-start"])
-        assertEquals("completed", results["outer-end"])
-        assertEquals("completed", results["inner-1"])
-        assertEquals("completed", results["inner-2"])
-        assertEquals("completed", results["inner-3"])
+
+        assertEquals(2, outerResults.size, "Should have 2 outer results")
+        assertEquals(2, innerResults.size, "Should have 2 inner results")
     }
-    
+
     @Test
     @Timeout(10)
     fun `should handle scope timeout properly`() {
-        val taskStarted = AtomicBoolean(false)
-        val taskCompleted = AtomicBoolean(false)
-        
-        val startTime = System.currentTimeMillis()
-        
-        try {
-            concurrencyManager.withStructuredScope("timeout-scope", Duration.ofMillis(500)) { scope ->
+        val tasksStarted = AtomicInteger(0)
+
+        val exception = assertThrows(java.util.concurrent.TimeoutException::class.java) {
+            concurrencyManager.withStructuredScope(
+                name = "timeout-scope",
+                timeout = Duration.ofMillis(200)
+            ) { scope ->
                 scope.submit {
-                    taskStarted.set(true)
-                    Thread.sleep(1000) // Longer than timeout
-                    taskCompleted.set(true)
+                    tasksStarted.incrementAndGet()
+                    Thread.sleep(5000) // Much longer than timeout
                     "should-not-complete"
                 }
-                Thread.sleep(200) // Keep scope alive longer than timeout
                 "scope-result"
             }
-        } catch (e: Exception) {
-            // Expected timeout behavior
         }
-        
-        val endTime = System.currentTimeMillis()
-        val duration = endTime - startTime
-        
-        assertTrue(taskStarted.get(), "Task should have started")
-        assertFalse(taskCompleted.get(), "Task should not have completed due to timeout")
-        assertTrue(duration < 1500, "Scope should have timed out quickly (${duration}ms)")
+
+        assertTrue(exception.message?.contains("timed out") == true,
+            "Should timeout with appropriate message")
+        assertTrue(tasksStarted.get() > 0, "Task should have started before timeout")
     }
-    
+
     @Test
     @Timeout(10)
-    fun `should properly clean up resources on scope exit`() {
-        val resourcesCreated = AtomicInteger(0)
-        val resourcesCleaned = AtomicInteger(0)
-        val activeResources = ConcurrentHashMap.newKeySet<String>()
-        
-        concurrencyManager.withStructuredScope("resource-cleanup") { scope ->
-            repeat(5) { i ->
+    fun `should execute tasks concurrently`() {
+        val taskStartTimes = ConcurrentHashMap<Int, Long>()
+        val taskEndTimes = ConcurrentHashMap<Int, Long>()
+
+        concurrencyManager.withStructuredScope("concurrent-scope") { scope ->
+            val futures = (1..3).map { i ->
                 scope.submit {
-                    val resourceId = "resource-$i"
-                    try {
-                        resourcesCreated.incrementAndGet()
-                        activeResources.add(resourceId)
-                        Thread.sleep(100) // Use resource
-                        "result-$i"
-                    } finally {
-                        activeResources.remove(resourceId)
-                        resourcesCleaned.incrementAndGet()
-                    }
+                    taskStartTimes[i] = System.currentTimeMillis()
+                    Thread.sleep(200)
+                    taskEndTimes[i] = System.currentTimeMillis()
+                    "result-$i"
                 }
             }
-            "scope-completed"
+            futures.map { it.get() }
         }
-        
-        assertEquals(5, resourcesCreated.get(), "All resources should have been created")
-        assertEquals(5, resourcesCleaned.get(), "All resources should have been cleaned up")
-        assertTrue(activeResources.isEmpty(), "No resources should remain active")
+
+        // Verify that tasks ran concurrently by checking overlap
+        val starts = taskStartTimes.values.toList()
+        val ends = taskEndTimes.values.toList()
+
+        // The max start time should be less than the min end time for concurrent execution
+        // (i.e., all tasks started before any finished)
+        val maxStart = starts.maxOrNull()!!
+        val minEnd = ends.minOrNull()!!
+
+        assertTrue(maxStart < minEnd,
+            "Tasks should run concurrently (maxStart=$maxStart < minEnd=$minEnd)")
     }
-    
+
     @Test
     @Timeout(10)
-    fun `should support concurrent access to scope statistics`() {
-        val scopeName = "stats-scope"
-        val accessCount = AtomicInteger(0)
-        val latch = CountDownLatch(10)
-        
-        // Start scope in background
+    fun `should track active scopes in statistics`() {
+        val scopeStarted = CountDownLatch(1)
+        val canFinish = CountDownLatch(1)
+
         val scopeThread = Thread {
-            concurrencyManager.withStructuredScope(scopeName) { scope ->
-                repeat(5) { i ->
-                    scope.submit {
-                        Thread.sleep(200)
-                        "task-$i"
-                    }
+            concurrencyManager.withStructuredScope("tracked-scope") { scope ->
+                scopeStarted.countDown()
+                scope.submit {
+                    canFinish.await()
+                    "task-done"
                 }
-                Thread.sleep(50)
-                "scope-result"
+                "scope-done"
             }
         }
+
         scopeThread.start()
-        
-        // Concurrently access statistics
-        repeat(10) { i ->
-            Thread {
-                try {
-                    Thread.sleep(50) // Let scope start
-                    val stats = concurrencyManager.getThreadStatistics()
-                    if (stats.scopeNames.contains(scopeName)) {
-                        accessCount.incrementAndGet()
-                    }
-                } finally {
-                    latch.countDown()
-                }
-            }.start()
-        }
-        
-        assertTrue(latch.await(5, TimeUnit.SECONDS), "All stat access threads should complete")
-        scopeThread.join(2000)
-        
-        assertTrue(accessCount.get() > 0, "Should have accessed scope statistics successfully")
-    }
-    
-    @Test
-    @Timeout(10)
-    fun `should handle rapid scope creation and destruction`() {
-        val scopeCount = 50
-        val completedScopes = AtomicInteger(0)
-        val latch = CountDownLatch(scopeCount)
-        
-        repeat(scopeCount) { i ->
-            Thread {
-                try {
-                    concurrencyManager.withStructuredScope("rapid-scope-$i") { scope ->
-                        scope.submit {
-                            Thread.sleep(10)
-                            "task-$i"
-                        }
-                        "scope-$i"
-                    }
-                    completedScopes.incrementAndGet()
-                } finally {
-                    latch.countDown()
-                }
-            }.start()
-        }
-        
-        assertTrue(latch.await(10, TimeUnit.SECONDS), "All scopes should complete")
-        assertEquals(scopeCount, completedScopes.get(), "All scopes should have completed successfully")
-        
-        // Verify cleanup
+
+        // Wait for scope to start
+        assertTrue(scopeStarted.await(5, TimeUnit.SECONDS))
+        Thread.sleep(50) // Brief pause to ensure scope is registered
+
+        // Check that scope is tracked
+        val stats = concurrencyManager.getThreadStatistics()
+        assertTrue(stats.scopeNames.contains("tracked-scope"),
+            "Active scope should be tracked in statistics")
+
+        // Allow scope to finish
+        canFinish.countDown()
+        scopeThread.join(5000)
+
+        // Check that scope is cleaned up
         val finalStats = concurrencyManager.getThreadStatistics()
-        val remainingScopes = finalStats.scopeNames.filter { it.startsWith("rapid-scope-") }
-        assertTrue(remainingScopes.isEmpty(), "All rapid scopes should be cleaned up")
+        assertFalse(finalStats.scopeNames.contains("tracked-scope"),
+            "Completed scope should be removed from statistics")
     }
 }

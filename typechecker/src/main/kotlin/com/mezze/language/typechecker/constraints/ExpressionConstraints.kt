@@ -2924,9 +2924,56 @@ class ExpressionConstraintGenerator {
                     // For simple variable bindings: extends with one binding
                     // For destructuring patterns: extends with multiple bindings
                     val typingContext = currentContext.typingContext
-                    val contextBindings = patternResult.bindings.mapValues { (_, type) ->
-                        TypingContext.Binding.Monomorphic(type)
+
+                    // LET-POLYMORPHISM: If the user explicitly declares a polymorphic type annotation
+                    // with ability constraints, we should create a Polymorphic binding.
+                    // Example: let encode_value: {x: 'a} -> String with Encoder 'a = ...
+                    // The user is explicitly telling us this should be polymorphic.
+                    val contextBindings = if (stmt.pattern is VariablePattern &&
+                        stmt.typeAnnotation is FunctionTypeAnnotation &&
+                        (stmt.typeAnnotation as FunctionTypeAnnotation).abilityConstraints.isNotEmpty()
+                    ) {
+                        // User explicitly declared ability constraints - create Polymorphic binding
+                        val annotation = stmt.typeAnnotation as FunctionTypeAnnotation
+                        val contextBuilder = com.mezze.language.typechecker.context.ContextBuilder()
+                        val annotatedType = contextBuilder.convertTypeAnnotation(annotation)
+
+                        // Collect type variables from the annotation
+                        val typeVars = com.mezze.language.typechecker.context.collectFreeTypeVars(annotatedType)
+
+                        // Convert annotation's ability constraints to AbilityConstraint
+                        // FunctionAbilityConstraint has typeArgs, extract the type param name from the first one
+                        val abilityConstraints = annotation.abilityConstraints.mapNotNull { constraint ->
+                            // Get the type parameter name from the first typeArg (e.g., "'a")
+                            val firstArg = constraint.typeArgs.firstOrNull()
+                            val typeParamName = when (firstArg) {
+                                is IdentifierTypeAnnotation -> firstArg.name
+                                else -> null
+                            }
+                            if (typeParamName != null) {
+                                AbilityConstraint(
+                                    abilityName = constraint.abilityName,
+                                    typeParam = typeParamName
+                                )
+                            } else null
+                        }
+
+                        val scheme = com.mezze.language.typechecker.context.TypeScheme(
+                            quantifiedVars = typeVars.toList(),
+                            constraints = abilityConstraints,
+                            type = annotatedType
+                        )
+
+                        patternResult.bindings.mapValues { (_, _) ->
+                            TypingContext.Binding.Polymorphic(scheme)
+                        }
+                    } else {
+                        // Regular monomorphic binding
+                        patternResult.bindings.mapValues { (_, type) ->
+                            TypingContext.Binding.Monomorphic(type)
+                        }
                     }
+
                     val extendedTypingContext = typingContext.extendAll(contextBindings)
                     currentContext = currentContext.copy(typingContext = extendedTypingContext)
 

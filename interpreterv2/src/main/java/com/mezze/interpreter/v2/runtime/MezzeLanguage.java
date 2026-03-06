@@ -303,32 +303,11 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         }
 
         /**
-         * Read a frame slot value, handling different kinds (Long, Double, Boolean, Object).
+         * Read a frame slot value using getValue() which handles all kinds.
          */
         private static Object readSlotValue(com.oracle.truffle.api.frame.MaterializedFrame frame, int slot) {
-            // Try each kind in order of likelihood
-            try {
-                return frame.getObject(slot);
-            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e1) {
-                // Not an Object slot, try primitives
-            }
-            try {
-                return frame.getLong(slot);
-            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e2) {
-                // Not a Long slot
-            }
-            try {
-                return frame.getDouble(slot);
-            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e3) {
-                // Not a Double slot
-            }
-            try {
-                return frame.getBoolean(slot);
-            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e4) {
-                // Not a Boolean slot
-            }
-            // Slot might be uninitialized
-            return null;
+            // getValue() returns the value regardless of type (Object, Long, Double, Boolean)
+            return frame.getValue(slot);
         }
     }
 
@@ -489,33 +468,12 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         }
 
         /**
-         * Read a frame slot value, handling different kinds (Long, Double, Boolean, Object).
+         * Read a frame slot value using getValue() which handles all kinds.
          * Used by module loading to export values that might be primitives.
          */
         private static Object readSlotValue(com.oracle.truffle.api.frame.MaterializedFrame frame, int slot) {
-            // Try each kind in order of likelihood
-            try {
-                return frame.getObject(slot);
-            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e1) {
-                // Not an Object slot, try primitives
-            }
-            try {
-                return frame.getLong(slot);
-            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e2) {
-                // Not a Long slot
-            }
-            try {
-                return frame.getDouble(slot);
-            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e3) {
-                // Not a Double slot
-            }
-            try {
-                return frame.getBoolean(slot);
-            } catch (com.oracle.truffle.api.frame.FrameSlotTypeException e4) {
-                // Not a Boolean slot
-            }
-            // Slot might be uninitialized
-            return null;
+            // getValue() returns the value regardless of type (Object, Long, Double, Boolean)
+            return frame.getValue(slot);
         }
 
         private static String extractModulePathStatic(UsePath path) {

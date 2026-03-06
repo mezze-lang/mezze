@@ -26,11 +26,11 @@ class PerformerConflictTest {
             }
 
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Log for EnhancedLogger where {
-              info : {msg: String} -> {} = {msg} -> BasicLogger.info {msg = "[ENHANCED] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> {}
             }
 
             perform BasicLogger, EnhancedLogger in Log.info {msg = "Test"}
@@ -57,11 +57,11 @@ class PerformerConflictTest {
             }
 
             impl Log for Logger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[LOG] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Database for DbHandler where {
-              save : {data: String} -> {} = {data} -> native_print {msg = "[DB] $(data)"}
+              save : {data: String} -> {} = {data} -> {}
             }
 
             perform DbHandler, Logger in do
@@ -84,7 +84,7 @@ class PerformerConflictTest {
             }
 
             impl Log for BasicLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[INFO] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> {}
             }
 
             perform BasicLogger in Log.info {msg = "Test"}
@@ -109,11 +109,11 @@ class PerformerConflictTest {
             }
 
             impl Log for Logger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "[LOG] $(msg)"}
+              info : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Database for DbHandler where {
-              save : {data: String} -> {} = {data} -> native_print {msg = "[DB] $(data)"}
+              save : {data: String} -> {} = {data} -> {}
             }
 
             perform DbHandler, Logger in do

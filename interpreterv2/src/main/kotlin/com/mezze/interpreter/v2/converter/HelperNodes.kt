@@ -406,8 +406,10 @@ class AbilityImplStorageNode(
     private fun storeInContext(value: Any) {
         val context = MezzeContext.get(this)
         context.defineGlobal(contentHash, value)
-        // Also register by ability name for runtime ability lookups
+        // Register by ability name for runtime ability lookups (legacy)
         context.registerAbilityImpl(abilityName, value)
+        // Register by content hash for dictionary passing (JIT-friendly)
+        context.registerAbilityImplByHash(contentHash, value)
     }
 }
 

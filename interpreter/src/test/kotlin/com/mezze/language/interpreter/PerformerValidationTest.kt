@@ -38,7 +38,7 @@ class PerformerValidationTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             # This should fail - perform not allowed in performer implementation
@@ -72,7 +72,7 @@ class PerformerValidationTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             # This should fail - cross-effect reuse not allowed
@@ -106,7 +106,7 @@ class PerformerValidationTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             # This should work - Log performer can use Console effect
@@ -134,7 +134,7 @@ class PerformerValidationTest {
             }
 
             impl Log for FileLogger {path: String} where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "$(path): $(msg)"}
+              info : {msg: String} -> {} = {msg} -> {}
             }
             
             perform FileLogger {path = "app.log"} in Log.info {msg = "Test message"}

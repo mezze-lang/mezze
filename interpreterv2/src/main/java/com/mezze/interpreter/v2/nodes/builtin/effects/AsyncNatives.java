@@ -118,17 +118,22 @@ public final class AsyncNatives {
         private volatile MezzePromise delegate;
 
         boolean complete(Object value) {
+            // Set result BEFORE state to ensure visibility
+            // The state CAS acts as a release fence, making result visible
+            RESULT.setVolatile(this, value);
             if (STATE.compareAndSet(this, PENDING, COMPLETED)) {
-                RESULT.setVolatile(this, value);
                 unparkWaiter();
                 return true;
             }
+            // CAS failed, but we already set result - this is fine because
+            // state didn't change, so no one will read the result
             return false;
         }
 
         boolean fail(Throwable error) {
+            // Set result BEFORE state to ensure visibility
+            RESULT.setVolatile(this, error);
             if (STATE.compareAndSet(this, PENDING, FAILED)) {
-                RESULT.setVolatile(this, error);
                 unparkWaiter();
                 return true;
             }

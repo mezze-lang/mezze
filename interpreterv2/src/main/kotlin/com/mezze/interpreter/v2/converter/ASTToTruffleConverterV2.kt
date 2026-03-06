@@ -32,8 +32,13 @@ import com.mezze.interpreter.v2.nodes.effect.DynamicEffectCallNode
 import com.mezze.interpreter.v2.nodes.builtin.BuiltinBinaryNodes.*
 import com.mezze.interpreter.v2.nodes.builtin.BuiltinUnaryNodes.*
 import com.mezze.interpreter.v2.nodes.builtin.NativeFunctions
+import com.mezze.interpreter.v2.nodes.inline.*
 import com.mezze.interpreter.v2.nodes.ability.ResolvedAbilityCallNode as OptimizedAbilityCallNode
+import com.mezze.interpreter.v2.nodes.ability.DictionaryAbilityCallNode
+import com.mezze.interpreter.v2.nodes.ability.DirectDictionaryCallNode
 import com.mezze.interpreter.v2.nodes.function.RuntimeAbilityCallNode
+import com.mezze.interpreter.v2.nodes.function.DictionaryPassingInvokeNode
+import com.mezze.interpreter.v2.values.MezzeFunction
 import com.mezze.interpreter.v2.nodes.continuation.*
 import com.mezze.interpreter.v2.nodes.statemachine.StateMachineNode
 import com.mezze.interpreter.v2.runtime.MezzeContext
@@ -93,6 +98,57 @@ class ASTToTruffleConverterV2(
     )
     private val scopedEffectInfo = mutableMapOf<String, ScopedImplInfo>().apply {
         parentScopedEffectInfo?.let { putAll(it) }
+    }
+
+    /**
+     * Tracks ability dictionary operation slots for polymorphic functions.
+     *
+     * When a function has ability constraints like `with Encode Json 'a`,
+     * and calls operations like `Encode.encode`, we need to pass the
+     * resolved implementation's operation function via closure.
+     *
+     * Key: (constraintIndex, operationName) - identifies which constraint and which operation
+     * Value: frame slot index where the operation function will be stored
+     *
+     * The constraintIndex corresponds to the position in the function's abilityConstraints list.
+     * At call sites, we map resolved abilities (by content hash) to the correct slot.
+     */
+    data class AbilityOperationKey(val constraintIndex: Int, val operationName: String)
+    private val abilityOperationSlots = mutableMapOf<AbilityOperationKey, Int>()
+
+    /**
+     * Maps constraint index to its expected ability name.
+     * Used to match resolved abilities at call sites to the correct constraint slots.
+     */
+    private val constraintAbilityNames = mutableListOf<String>()
+
+    /**
+     * Find or create a slot for an ability operation.
+     * Returns the slot index for the operation function.
+     */
+    private fun getOrCreateAbilityOperationSlot(constraintIndex: Int, operationName: String): Int {
+        val key = AbilityOperationKey(constraintIndex, operationName)
+        return abilityOperationSlots.getOrPut(key) {
+            frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
+        }
+    }
+
+    /**
+     * Get the slot for an ability operation if it exists.
+     * Returns null if no slot has been allocated for this operation.
+     */
+    private fun findAbilityOperationSlot(constraintIndex: Int, operationName: String): Int? {
+        return abilityOperationSlots[AbilityOperationKey(constraintIndex, operationName)]
+    }
+
+    /**
+     * Get all ability operation slots in order for closure capture.
+     * Returns list of (constraintIndex, operationName, slotIndex) tuples.
+     */
+    private fun getAbilityOperationSlotsOrdered(): List<Triple<Int, String, Int>> {
+        return abilityOperationSlots.entries
+            .sortedBy { it.value }  // Sort by slot index for deterministic order
+            .map { Triple(it.key.constraintIndex, it.key.operationName, it.value) }
     }
 
     /**
@@ -661,11 +717,14 @@ class ASTToTruffleConverterV2(
         val branches = mutableListOf<MatchBranchNode>()
         var wildcardIndex = -1
 
+        // Get the matched type for type-aware pattern bindings
+        val matchedType = matchExpr.expression.inferredType
+
         for ((index, case) in matchExpr.cases.withIndex()) {
             // IMPORTANT: Pre-create slots for pattern variables BEFORE converting guards/if-let bindings.
             // This ensures that expressions like `lookup {key = k}` in if-let bindings
             // can find the slot for `k` from the main pattern.
-            preCreatePatternSlots(case.patterns)
+            preCreatePatternSlotsWithType(case.patterns, matchedType)
 
             // Now convert guard and if-let bindings (they can reference pattern variables)
             val guardNode = case.guard?.let { convertExpression(it) }
@@ -698,14 +757,21 @@ class ASTToTruffleConverterV2(
                         // Also collect nested pattern info for wrapped body generation
                         val nestedPatterns = mutableListOf<Pair<Int, RecordPattern>>() // (tempSlot, nestedPattern)
 
+                        // Get the payload type for this constructor from the matched type
+                        val payloadType = getConstructorPayloadType(matchedType, pattern.constructor)
+
                         val fieldNames = pattern.recordPattern?.let { recordPattern ->
                             recordPattern.entries.map { it.name }.toTypedArray()
                         } ?: arrayOf()
                         val fieldSlots = pattern.recordPattern?.let { recordPattern ->
                             recordPattern.entries.mapIndexed { entryIdx, entry ->
+                                // Get field type from payload if available
+                                val fieldType = getFieldTypeFromPayload(payloadType, entry.name)
+                                val kind = if (fieldType != null) kindFromType(fieldType) else ReadLocalNode.KIND_OBJECT
+
                                 when (val fp = entry.pattern) {
-                                    is VariablePattern -> getOrCreateSlot(fp.name)
-                                    null -> getOrCreateSlot(entry.name)
+                                    is VariablePattern -> getOrCreateSlotWithKind(fp.name, kind)
+                                    null -> getOrCreateSlotWithKind(entry.name, kind)
                                     is RecordPattern -> {
                                         // Nested record pattern: allocate anonymous slot by index
                                         val tempSlot = frameDescriptorBuilder.addSlot(FrameSlotKind.Object, null, null)
@@ -938,6 +1004,88 @@ class ASTToTruffleConverterV2(
         }
     }
 
+    /**
+     * Pre-create frame slots for pattern variables with type information.
+     * Uses the matched expression's type to infer proper slot kinds.
+     */
+    private fun preCreatePatternSlotsWithType(patterns: List<Pattern>, matchedType: MezzeType?) {
+        for (pattern in patterns) {
+            preCreatePatternSlotsWithTypeRecursive(pattern, matchedType)
+        }
+    }
+
+    private fun preCreatePatternSlotsWithTypeRecursive(pattern: Pattern, matchedType: MezzeType?) {
+        when (pattern) {
+            is VariablePattern -> {
+                // For a variable pattern, the entire matched type is bound to it
+                val kind = if (matchedType != null) kindFromType(matchedType) else ReadLocalNode.KIND_OBJECT
+                getOrCreateSlotWithKind(pattern.name, kind)
+            }
+            is ConstructorPattern -> {
+                // Get payload type for this constructor
+                val payloadType = getConstructorPayloadType(matchedType, pattern.constructor)
+                pattern.recordPattern?.let { preCreatePatternSlotsWithTypeRecursive(it, payloadType) }
+            }
+            is RecordPattern -> {
+                // For record patterns, get field types from the record type
+                val recordType = matchedType as? MezzeType.RecordType
+                for (entry in pattern.entries) {
+                    val fieldType = recordType?.fields?.get(entry.name)
+                    val kind = if (fieldType != null) kindFromType(fieldType) else ReadLocalNode.KIND_OBJECT
+                    when (val p = entry.pattern) {
+                        is VariablePattern -> getOrCreateSlotWithKind(p.name, kind)
+                        is RecordPattern -> preCreatePatternSlotsWithTypeRecursive(p, fieldType)
+                        null -> getOrCreateSlotWithKind(entry.name, kind) // shorthand {x} = {x = x}
+                        else -> {} // WildcardPattern etc - no slot needed
+                    }
+                }
+            }
+            is ArrayPattern -> {
+                // Get element type from array type
+                val elemType = (matchedType as? MezzeType.ArrayType)?.elementType
+                    ?: (matchedType as? MezzeType.ListType)?.elementType
+                for (elemPattern in pattern.elements) {
+                    when (elemPattern) {
+                        is VariablePattern -> {
+                            val kind = if (elemType != null) kindFromType(elemType) else ReadLocalNode.KIND_OBJECT
+                            getOrCreateSlotWithKind(elemPattern.name, kind)
+                        }
+                        is ArrayPattern -> preCreatePatternSlotsWithTypeRecursive(elemPattern, elemType)
+                        is ConstructorPattern -> preCreatePatternSlotsWithTypeRecursive(elemPattern, elemType)
+                        else -> {}
+                    }
+                }
+                // Rest pattern captures remaining elements as an array/list
+                pattern.restPattern?.let { getOrCreateSlot(it) } // Always object for arrays/lists
+            }
+            is StringInterpolationPattern -> {
+                // String captures are always strings
+                for (part in pattern.parts) {
+                    if (part is StringPatternCapture) {
+                        getOrCreateSlotWithKind(part.variableName, ReadLocalNode.KIND_OBJECT) // Strings are objects
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+
+    /**
+     * Get the payload type for a constructor from a variant type.
+     */
+    private fun getConstructorPayloadType(matchedType: MezzeType?, constructor: String): MezzeType? {
+        val variantType = matchedType as? MezzeType.VariantType ?: return null
+        return variantType.constructors[constructor]
+    }
+
+    /**
+     * Get the type of a field from a payload type (which should be a RecordType).
+     */
+    private fun getFieldTypeFromPayload(payloadType: MezzeType?, fieldName: String): MezzeType? {
+        val recordType = payloadType as? MezzeType.RecordType ?: return null
+        return recordType.fields[fieldName]
+    }
+
     private fun getTagForConstructor(constructor: String): Int {
         // Use the global tag registry for consistent tag assignment
         return com.mezze.interpreter.v2.values.MezzeVariant.TagRegistry.getGlobal().getOrCreateTag(constructor)
@@ -991,17 +1139,28 @@ class ASTToTruffleConverterV2(
                     return convertResolvedAbilityCall(funcCall)
                 }
 
-                // Check if this is a codec ability call that needs runtime lookup
-                // These abilities (Encode, Decode, EncodeFormat, DecodeFormat) have auto-generated
-                // implementations that may not have resolvedAbilities populated yet
-                val isCodecAbility = receiverName in listOf(
+                // Check if this is an ability call inside a polymorphic function
+                // (i.e., we're inside a function with ability constraints like "with Encoder 'a")
+                // This handles BOTH builtin codec abilities AND user-defined abilities.
+                val constraintIndex = constraintAbilityNames.indexOf(receiverName)
+                if (constraintIndex >= 0) {
+                    // We're inside a polymorphic function with this ability constraint.
+                    // Use dictionary passing - the caller will provide the operation function.
+                    val operationSlot = getOrCreateAbilityOperationSlot(constraintIndex, operationName)
+                    val argsNode = convertExpression(funcCall.arguments)
+                    // DirectDictionaryCallNode reads the operation function from the frame slot
+                    return DirectDictionaryCallNode.create(operationSlot, receiverName, operationName, argsNode)
+                }
+
+                // Check if this is a codec ability call outside a polymorphic function
+                // These use runtime lookup based on argument types
+                val codecAbilities = setOf(
                     "Encode", "Decode",
                     "EncodeFormat", "DecodeFormat",
                     "StreamEncodeFormat", "StreamDecodeFormat"
                 )
-                if (isCodecAbility) {
-                    // For codec abilities, we need to do a runtime lookup by ability name
-                    // because the typechecker generates impls dynamically
+                if (receiverName in codecAbilities) {
+                    // Not inside a polymorphic function - fall back to runtime lookup
                     val argsNode = convertExpression(funcCall.arguments)
                     return RuntimeAbilityCallNode.create(receiverName, operationName, argsNode)
                 }
@@ -1037,6 +1196,35 @@ class ASTToTruffleConverterV2(
         val argumentsNode = convertExpression(funcCall.arguments)
         val contentHash = funcCall.resolvedFunctionContentHash
 
+        // Check if this call has resolved abilities that need dictionary passing
+        // Filter out builtin abilities - they don't need dictionary passing
+        val userDefinedAbilities = funcCall.resolvedAbilities.values
+            .filter { !it.isBuiltin && it.implementationHash != null }
+
+        if (userDefinedAbilities.isNotEmpty()) {
+            // Dictionary passing: pass ability implementations to polymorphic callee
+            val abilityNames = userDefinedAbilities.map { it.abilityName }.toTypedArray()
+            val implHashes = userDefinedAbilities.map { it.implementationHash!! }.toTypedArray()
+
+            // Get function node - either by content hash or local lookup
+            val functionNode = if (contentHash != null) {
+                // Cross-module: use ReadLocalWithFallbackNode with the content hash as lookup key
+                ReadLocalWithFallbackNode.create(getOrCreateSlot(monomorphicName), contentHash)
+            } else {
+                // Local: use frame lookup with fallback
+                val slot = getOrCreateSlot(monomorphicName)
+                ReadLocalWithFallbackNode.create(slot, monomorphicName)
+            }
+
+            return DictionaryPassingInvokeNode.create(
+                functionNode,
+                argumentsNode,
+                abilityNames,
+                implHashes
+            )
+        }
+
+        // No dictionary passing needed - use standard call nodes
         // Cross-module references have content hash - use MonomorphicCallNode
         // which caches the function lookup and DirectCallNode for maximum performance
         if (contentHash != null) {
@@ -1061,6 +1249,14 @@ class ASTToTruffleConverterV2(
                 val memberAccess = funcCall.function as MemberAccess
                 val operationName = memberAccess.member
                 val abilityName = resolvedAbility.abilityName
+
+                // Try to use direct nodes when we have {l, r} record literal
+                val directNode = tryCreateDirectBinaryOp(abilityName, operationName, funcCall.arguments)
+                if (directNode != null) {
+                    return directNode
+                }
+
+                // Fall back to builtin nodes that extract from record
                 val argsNode = convertExpression(funcCall.arguments)
                 return createBuiltinBinaryOp(abilityName, operationName, argsNode)
             }
@@ -1083,6 +1279,27 @@ class ASTToTruffleConverterV2(
                     operationName
                 )
             }
+        }
+
+        // LET-POLYMORPHISM: If calling a function (not ability method) with resolved abilities,
+        // use dictionary passing to provide ability implementations to the callee
+        val userDefinedAbilities = funcCall.resolvedAbilities.values
+            .filter { !it.isBuiltin && it.implementationHash != null }
+
+        if (userDefinedAbilities.isNotEmpty()) {
+            val functionNode = convertExpression(funcCall.function)
+            val argumentsNode = convertExpression(funcCall.arguments)
+
+            // Dictionary passing: pass ability implementations to polymorphic callee
+            val abilityNames = userDefinedAbilities.map { it.abilityName }.toTypedArray()
+            val implHashes = userDefinedAbilities.map { it.implementationHash!! }.toTypedArray()
+
+            return DictionaryPassingInvokeNode.create(
+                functionNode,
+                argumentsNode,
+                abilityNames,
+                implHashes
+            )
         }
 
         val functionNode = convertExpression(funcCall.function)
@@ -1140,6 +1357,68 @@ class ASTToTruffleConverterV2(
             abilityName == "Inspect" && operationName == "to_str" -> BuiltinInspectToStrNode.create(argsNode)
             else -> throw RuntimeException("Unknown builtin: $abilityName.$operationName")
         }
+    }
+
+    /**
+     * Try to create a direct binary operation node.
+     *
+     * When the arguments are a RecordLiteral with {l, r} fields, we can create
+     * DirectAddNode/DirectSubtractNode/etc. that take operands directly,
+     * avoiding:
+     * 1. Record allocation for {l, r}
+     * 2. Field extraction at runtime
+     * 3. Runtime type dispatch
+     *
+     * Returns null if the arguments are not in the expected form.
+     */
+    private fun tryCreateDirectBinaryOp(abilityName: String, operationName: String, args: Expression): MezzeNode? {
+        // Check if args is a RecordLiteral with l and r fields
+        if (args !is RecordLiteral) return null
+
+        // Extract field entries (filter out spread entries)
+        val fieldEntries = args.entries.filterIsInstance<RecordFieldEntry>()
+
+        val lField = fieldEntries.find { entry -> entry.name == "l" }
+        val rField = fieldEntries.find { entry -> entry.name == "r" }
+
+        // For binary operations, we need both l and r
+        if (abilityName in listOf("NumAdd", "NumSub", "NumMul", "NumDiv", "NumMod", "Eq", "Ord")) {
+            if (lField == null || rField == null) return null
+
+            // RecordFieldEntry.value can be null for shorthand {x} - in that case, fall back
+            val lValue = lField.value ?: return null
+            val rValue = rField.value ?: return null
+
+            val leftNode = convertExpression(lValue)
+            val rightNode = convertExpression(rValue)
+
+            return when {
+                abilityName == "NumAdd" && operationName == "add" -> DirectAddNode.create(leftNode, rightNode)
+                abilityName == "NumSub" && operationName == "sub" -> DirectSubtractNode.create(leftNode, rightNode)
+                abilityName == "NumMul" && operationName == "mul" -> DirectMultiplyNode.create(leftNode, rightNode)
+                abilityName == "NumDiv" && operationName == "div" -> DirectDivideNode.create(leftNode, rightNode)
+                abilityName == "NumMod" && operationName == "mod" -> DirectModuloNode.create(leftNode, rightNode)
+                abilityName == "Eq" && operationName == "eq" -> DirectEqualNode.create(leftNode, rightNode)
+                abilityName == "Eq" && operationName == "neq" -> DirectNotEqualNode.create(leftNode, rightNode)
+                abilityName == "Ord" && operationName == "lt" -> DirectLessThanNode.create(leftNode, rightNode)
+                abilityName == "Ord" && operationName == "gt" -> DirectGreaterThanNode.create(leftNode, rightNode)
+                abilityName == "Ord" && operationName == "le" -> DirectLessThanOrEqualNode.create(leftNode, rightNode)
+                abilityName == "Ord" && operationName == "ge" -> DirectGreaterThanOrEqualNode.create(leftNode, rightNode)
+                else -> null
+            }
+        }
+
+        // For unary operations like neg, we need val field
+        if (abilityName == "NumSub" && operationName == "neg") {
+            val valField = fieldEntries.find { entry -> entry.name == "val" }
+            if (valField != null) {
+                val valValue = valField.value ?: return null
+                val operandNode = convertExpression(valValue)
+                return DirectNegateNode.create(operandNode)
+            }
+        }
+
+        return null
     }
 
     // ===== IF-LET GUARD CONVERSION =====
@@ -1287,10 +1566,22 @@ class ASTToTruffleConverterV2(
             parentScopedEffectInfo = this.scopedEffectInfo.toMap()
         )
 
+        // Extract ability constraints from the lambda's inferred type
+        // These are populated by the typechecker for polymorphic functions
+        val abilityConstraints = (lambda.inferredType as? MezzeType.FunctionType)?.abilityConstraints ?: emptyList()
+
+        // Populate the function converter's constraint names BEFORE converting the body.
+        // This allows ability calls inside the body to find their constraint indices.
+        abilityConstraints.forEach { constraint ->
+            functionConverter.constraintAbilityNames.add(constraint.abilityName)
+        }
+
         // Closure slots come first (only for capturable vars), then parameter slots
-        // Layout: [closure0, closure1, ..., param0, param1, ...]
+        // Layout: [closure0, closure1, ..., abilityOp0, abilityOp1, ..., param0, param1, ...]
+        // Use the same kind as the parent scope so typed reads work correctly
         capturableVars.forEach { varName ->
-            functionConverter.getOrCreateSlot(varName)
+            val parentKind = variableInfo[varName]!!.kind
+            functionConverter.getOrCreateSlotWithKind(varName, parentKind)
             // Mark as closure variable so convertIdentifier uses fallback lookup.
             // This is critical for recursive functions where the closure value is null.
             functionConverter.markAsClosure(varName)
@@ -1301,24 +1592,44 @@ class ASTToTruffleConverterV2(
 
         val rawBodyNode = functionConverter.convertExpression(lambda.body)
         val hasTailCalls = containsTailCalls(lambda.body)
-        val closureSlots = capturableVars.map { variableInfo[it]!!.slot }.toIntArray()
+
+        // Gather all closure slots: regular variables + ability operation functions
+        val regularClosureSlots = capturableVars.map { variableInfo[it]!!.slot }.toIntArray()
+        val regularClosureKinds = capturableVars.map { variableInfo[it]!!.kind }.toIntArray()
+
+        // Get ability operation slots that were allocated during body conversion
+        // These are slots inside the function's frame where operation functions will be stored
+        val abilityOpSlotInfo = functionConverter.getAbilityOperationSlotsOrdered()
+
         val bodyNode = if (hasTailCalls) {
             // Pass parameter names so TailCallLoopNode can unpack record arguments correctly
-            TailCallLoopNode(rawBodyNode, paramNames.size, closureSlots.size, paramNames.toTypedArray())
+            TailCallLoopNode(rawBodyNode, paramNames.size, regularClosureSlots.size, paramNames.toTypedArray())
         } else {
             rawBodyNode
         }
 
         val functionFrameDescriptor = functionConverter.getFrameDescriptor()
 
-        // Pass content hash for CallTarget caching
+        // Build ability slot requirements from the slots allocated during body conversion
+        val abilitySlotRequirements = if (abilityOpSlotInfo.isNotEmpty()) {
+            abilityOpSlotInfo.map { (constraintIdx, opName, slotIdx) ->
+                val abilityName = abilityConstraints.getOrNull(constraintIdx)?.abilityName ?: "unknown"
+                MezzeFunction.AbilitySlotRequirement(constraintIdx, abilityName, opName, slotIdx)
+            }.toTypedArray()
+        } else {
+            null
+        }
+
+        // Pass content hash, closure kinds, and ability slot requirements
         return FunctionDefinitionNode(
             functionName,
             contentHash,
-            closureSlots,
+            regularClosureSlots,
+            regularClosureKinds,
             paramNames.toTypedArray(),
             bodyNode,
-            functionFrameDescriptor
+            functionFrameDescriptor,
+            abilitySlotRequirements
         )
     }
 
@@ -1520,6 +1831,11 @@ class ASTToTruffleConverterV2(
             fieldValueNodes.add(valueNode)
         }
 
+        // Note: We could use typed storage here based on inferredType, but the current
+        // BuiltinBinaryNodes use hardcoded field indices that assume Object storage.
+        // Using allObjects ensures compatibility with existing builtin implementations.
+        // Future optimization: update BuiltinNodes to use Shape-based field access,
+        // then enable typed record creation here.
         return RecordLiteralNode.allObjects(
             fieldNames.toTypedArray(),
             fieldValueNodes.toTypedArray()
@@ -1568,6 +1884,11 @@ class ASTToTruffleConverterV2(
         // Module access like bytes::from_string is parsed as Identifier("bytes::from_string"),
         // not MemberAccess, so we just handle record field access here.
         val receiverNode = convertExpression(memberAccess.receiver)
+
+        // Note: We cannot use StaticFieldAccessNode here because the storage index
+        // depends on the field ordering in the record literal, which we don't know.
+        // CachedFieldAccessNode provides efficient polymorphic inline caching that
+        // resolves the field location at runtime after the first access.
         return RecordFieldAccessNode.createByName(receiverNode, memberAccess.member)
     }
 
@@ -1865,7 +2186,7 @@ class ASTToTruffleConverterV2(
         }
     }
 
-    private fun getOrCreateSlotWithKind(name: String, kind: Int): Int {
+    fun getOrCreateSlotWithKind(name: String, kind: Int): Int {
         variableInfo[name]?.let { return it.slot }
         val frameKind = when (kind) {
             ReadLocalNode.KIND_LONG -> FrameSlotKind.Long
@@ -1881,21 +2202,27 @@ class ASTToTruffleConverterV2(
     private fun inferKind(expr: Expression): Int {
         val inferredType = expr.inferredType
         if (inferredType != null) {
-            // Use proper sealed class matching instead of toString() comparison
-            // NatType uses KIND_LONG for optimal JIT performance (unboxed)
-            return when (inferredType) {
-                is MezzeType.IntType -> ReadLocalNode.KIND_LONG
-                is MezzeType.NatType -> ReadLocalNode.KIND_LONG
-                is MezzeType.FloatType -> ReadLocalNode.KIND_DOUBLE
-                is MezzeType.BooleanType -> ReadLocalNode.KIND_BOOLEAN
-                else -> ReadLocalNode.KIND_OBJECT
-            }
+            return kindFromType(inferredType)
         }
 
         return when (expr) {
             is IntLiteral, is NatLiteral -> ReadLocalNode.KIND_LONG
             is FloatLiteral, is FractionLiteral -> ReadLocalNode.KIND_DOUBLE
             is BooleanLiteral -> ReadLocalNode.KIND_BOOLEAN
+            else -> ReadLocalNode.KIND_OBJECT
+        }
+    }
+
+    /**
+     * Get the appropriate frame slot kind for a given MezzeType.
+     * Used for pattern bindings and typed variables.
+     */
+    private fun kindFromType(type: MezzeType): Int {
+        return when (type) {
+            is MezzeType.IntType -> ReadLocalNode.KIND_LONG
+            is MezzeType.NatType -> ReadLocalNode.KIND_LONG
+            is MezzeType.FloatType -> ReadLocalNode.KIND_DOUBLE
+            is MezzeType.BooleanType -> ReadLocalNode.KIND_BOOLEAN
             else -> ReadLocalNode.KIND_OBJECT
         }
     }

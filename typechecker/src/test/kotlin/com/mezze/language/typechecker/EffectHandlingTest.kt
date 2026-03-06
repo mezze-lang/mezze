@@ -38,7 +38,7 @@ class EffectHandlingTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             let effectfulFunc = {x} -> Log.print {msg = "test"}
@@ -85,15 +85,15 @@ class EffectHandlingTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
-              nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+              nextInt : {max: Int} -> Int = {max} -> max
             }
 
             impl FileIO for SystemFileIO where {
-              writeFile : {path: String, content: String} -> {} = {path, content} -> native_write_file {path = path, content = content}
+              writeFile : {path: String, content: String} -> {} = {path, content} -> {}
             }
 
             let multiEffectFunc = {x, y} -> do
@@ -135,11 +135,11 @@ class EffectHandlingTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
-              nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+              nextInt : {max: Int} -> Int = {max} -> max
             }
 
             let multiEffectFunc = {x} -> do
@@ -186,11 +186,11 @@ class EffectHandlingTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
-              nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+              nextInt : {max: Int} -> Int = {max} -> max
             }
 
             let multiEffectFunc = {x} -> do
@@ -233,11 +233,11 @@ class EffectHandlingTest {
             }
 
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             impl Random for SystemRandom where {
-              nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+              nextInt : {max: Int} -> Int = {max} -> max
             }
 
             let multiEffectFunc = {x} -> do
@@ -274,7 +274,7 @@ class EffectHandlingTest {
             }
             
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             let effectfulCalc = {x, y} -> do
@@ -322,7 +322,7 @@ class EffectHandlingTest {
             }
             
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             let dualEffectFunc = {x} -> do
@@ -359,11 +359,11 @@ class EffectHandlingTest {
             }
             
             impl Log for Console where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
             
             impl Random for SystemRandom where {
-              nextInt : {max: Int} -> Int = {max} -> native_random {max = max}
+              nextInt : {max: Int} -> Int = {max} -> max
             }
             
             let composedFunc = {x} -> do

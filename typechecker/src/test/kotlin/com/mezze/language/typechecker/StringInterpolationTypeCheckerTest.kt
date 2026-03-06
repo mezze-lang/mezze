@@ -284,7 +284,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Log for Console where {
-                print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+                print : {msg: String} -> {} = {msg} -> {}
             }
 
             let logMessage: {prefix: String, message: String} -> {} <Log> = {prefix, message} ->
@@ -320,7 +320,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Log for Console where {
-                print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+                print : {msg: String} -> {} = {msg} -> {}
             }
 
             let logMessage = {prefix: String, message: String} ->
@@ -597,7 +597,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Log for Console where {
-                print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+                print : {msg: String} -> {} = {msg} -> {}
             }
 
             let processResult: {r: Result} -> String = {r} -> match r is

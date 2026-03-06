@@ -29,7 +29,7 @@ class SimplePerformerTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
 
             perform Terminal in Console.print {msg = "Hello"}

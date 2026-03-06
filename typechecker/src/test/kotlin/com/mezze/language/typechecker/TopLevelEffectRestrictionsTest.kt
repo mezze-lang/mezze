@@ -74,7 +74,7 @@ class TopLevelEffectRestrictionsTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let performedValue = perform Console in Log.println { msg = "hello" }
@@ -96,7 +96,7 @@ class TopLevelEffectRestrictionsTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let myFunc = {} -> perform Console in Log.println { msg = "hello" }
@@ -151,7 +151,7 @@ class TopLevelEffectRestrictionsTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let main = {} -> perform Console in Log.println { msg = "Hello World" }
@@ -214,7 +214,7 @@ class TopLevelEffectRestrictionsTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             impl Random for SystemRandom having 'val = Int where {
@@ -243,7 +243,7 @@ class TopLevelEffectRestrictionsTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let helper = {} -> perform Console in Log.println { msg = "helper" }

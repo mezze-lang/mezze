@@ -57,19 +57,55 @@ public final class MezzeFunction implements TruffleObject {
      */
     private final Assumption inlineAssumption;
 
+    /**
+     * Ability slot requirements for polymorphic functions with ability constraints.
+     * Each entry describes an ability operation that must be provided by the caller.
+     * Null for functions without ability constraints.
+     */
+    @CompilationFinal(dimensions = 1)
+    private final AbilitySlotRequirement[] abilitySlotRequirements;
+
+    /**
+     * Describes a required ability operation slot.
+     * At call time, the caller must provide the operation function based on resolved abilities.
+     */
+    public static final class AbilitySlotRequirement {
+        public final int constraintIndex;  // Index in the function's ability constraints
+        public final String abilityName;   // e.g., "Encode"
+        public final String operationName; // e.g., "encode"
+        public final int slotIndex;        // Frame slot where the operation goes
+
+        public AbilitySlotRequirement(int constraintIndex, String abilityName, String operationName, int slotIndex) {
+            this.constraintIndex = constraintIndex;
+            this.abilityName = abilityName;
+            this.operationName = operationName;
+            this.slotIndex = slotIndex;
+        }
+    }
+
     private static final Object[] EMPTY_CLOSURE = new Object[0];
     private static final String[] EMPTY_PARAMS = new String[0];
+    private static final AbilitySlotRequirement[] EMPTY_ABILITY_SLOTS = new AbilitySlotRequirement[0];
 
     public MezzeFunction(CallTarget callTarget, String name, Object[] closureValues) {
-        this(callTarget, name, closureValues, EMPTY_PARAMS, null);
+        this(callTarget, name, closureValues, EMPTY_PARAMS, null, null);
     }
 
     public MezzeFunction(CallTarget callTarget, String name, Object[] closureValues, String[] parameterNames) {
-        this(callTarget, name, closureValues, parameterNames, null);
+        this(callTarget, name, closureValues, parameterNames, null, null);
     }
 
     public MezzeFunction(CallTarget callTarget, String name, Object[] closureValues,
                          String[] parameterNames, java.util.Map<String, Object> partialArgs) {
+        this(callTarget, name, closureValues, parameterNames, partialArgs, null);
+    }
+
+    /**
+     * Full constructor with ability slot requirements.
+     */
+    public MezzeFunction(CallTarget callTarget, String name, Object[] closureValues,
+                         String[] parameterNames, java.util.Map<String, Object> partialArgs,
+                         AbilitySlotRequirement[] abilitySlotRequirements) {
         this.callTarget = callTarget;
         this.name = name;
         this.closureValues = closureValues != null ? closureValues : EMPTY_CLOSURE;
@@ -77,6 +113,7 @@ public final class MezzeFunction implements TruffleObject {
         this.parameterNames = parameterNames != null ? parameterNames : EMPTY_PARAMS;
         this.partialArgs = partialArgs;
         this.inlineAssumption = Truffle.getRuntime().createAssumption("inline:" + name);
+        this.abilitySlotRequirements = abilitySlotRequirements != null ? abilitySlotRequirements : EMPTY_ABILITY_SLOTS;
     }
 
     /**
@@ -123,6 +160,21 @@ public final class MezzeFunction implements TruffleObject {
 
     public boolean hasPartialArgs() {
         return partialArgs != null && !partialArgs.isEmpty();
+    }
+
+    /**
+     * Get ability slot requirements for this function.
+     * Returns empty array if this function has no ability constraints.
+     */
+    public AbilitySlotRequirement[] getAbilitySlotRequirements() {
+        return abilitySlotRequirements;
+    }
+
+    /**
+     * Check if this function requires ability operations to be provided by the caller.
+     */
+    public boolean hasAbilityRequirements() {
+        return abilitySlotRequirements.length > 0;
     }
 
     /**
@@ -177,7 +229,7 @@ public final class MezzeFunction implements TruffleObject {
             newPartial.put(fieldName, fieldValue);
         }
 
-        return new MezzeFunction(callTarget, name, closureValues, parameterNames, newPartial);
+        return new MezzeFunction(callTarget, name, closureValues, parameterNames, newPartial, abilitySlotRequirements);
     }
 
     /**

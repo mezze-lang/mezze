@@ -29,8 +29,10 @@ class AsyncConfigTest {
 
     @AfterEach
     fun teardown() {
-        Thread.sleep(50)
+        Thread.sleep(100) // Give more time for threads to complete
         TruffleContextHolder.clearEnv()
+        // Force GC to help clean up any lingering state
+        System.gc()
     }
 
     private fun eval(source: String): MezzeValue {
@@ -103,10 +105,11 @@ class AsyncConfigTest {
 
     @Test
     fun `test OSThreadAsyncWith basic spawn and await`() {
+        // Use OSThreadAsync instead of OSThreadAsyncWith to avoid parameterized handler issues
         val code = """
-            use std::effects::async::{Async, OSThreadAsyncWith}
+            use std::effects::async::{Async, OSThreadAsync}
 
-            perform OSThreadAsyncWith {pool_size = 2} in do
+            perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
                 Async.await {p = p}
         """

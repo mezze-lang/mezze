@@ -358,6 +358,20 @@ public final class NativeFunctions extends MezzeNode {
             case ID_FLOAT_COS -> floatCos(record);
             case ID_FLOAT_TAN -> floatTan(record);
             case ID_FLOAT_POW -> floatPow(record);
+            case ID_FLOAT_FROM_STRING -> floatFromString(record);
+            case ID_FLOAT_CLAMP -> floatClamp(record);
+            case ID_FLOAT_SIGN -> floatSign(record);
+            case ID_FLOAT_TO_INT -> floatToInt(record);
+            case ID_FLOAT_IS_NAN -> floatIsNan(record);
+            case ID_FLOAT_IS_INFINITE -> floatIsInfinite(record);
+            case ID_FLOAT_IS_FINITE -> floatIsFinite(record);
+            case ID_FLOAT_LN -> floatLn(record);
+            case ID_FLOAT_LOG10 -> floatLog10(record);
+            case ID_FLOAT_EXP -> floatExp(record);
+            case ID_FLOAT_ASIN -> floatAsin(record);
+            case ID_FLOAT_ACOS -> floatAcos(record);
+            case ID_FLOAT_ATAN -> floatAtan(record);
+            case ID_FLOAT_ATAN2 -> floatAtan2(record);
             // String operations
             case ID_STRING_CONCAT -> stringConcat(record);
             case ID_STRING_LENGTH -> stringLength(record);
@@ -641,6 +655,92 @@ public final class NativeFunctions extends MezzeNode {
         double base = getDouble(record, "base");
         double exp = getDouble(record, "exp");
         return Math.pow(base, exp);
+    }
+
+    private MezzeVariant floatFromString(MezzeRecord record) {
+        String s = getString(record, "s");
+        return parseFloatFromString(s);
+    }
+
+    @TruffleBoundary
+    private static MezzeVariant parseFloatFromString(String s) {
+        try {
+            double value = Double.parseDouble(s.trim());
+            return MezzeVariant.some(value);
+        } catch (NumberFormatException e) {
+            return MezzeVariant.none();
+        }
+    }
+
+    private double floatClamp(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        double min = getDouble(record, "min");
+        double max = getDouble(record, "max");
+        return Math.max(min, Math.min(max, n));
+    }
+
+    private double floatSign(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Math.signum(n);
+    }
+
+    private MezzeVariant floatToInt(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        if (Double.isNaN(n) || Double.isInfinite(n)) {
+            return MezzeVariant.none();
+        }
+        return MezzeVariant.some((long) n);
+    }
+
+    private boolean floatIsNan(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Double.isNaN(n);
+    }
+
+    private boolean floatIsInfinite(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Double.isInfinite(n);
+    }
+
+    private boolean floatIsFinite(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Double.isFinite(n);
+    }
+
+    private double floatLn(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Math.log(n);
+    }
+
+    private double floatLog10(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Math.log10(n);
+    }
+
+    private double floatExp(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Math.exp(n);
+    }
+
+    private double floatAsin(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Math.asin(n);
+    }
+
+    private double floatAcos(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Math.acos(n);
+    }
+
+    private double floatAtan(MezzeRecord record) {
+        double n = getDouble(record, "n");
+        return Math.atan(n);
+    }
+
+    private double floatAtan2(MezzeRecord record) {
+        double y = getDouble(record, "y");
+        double x = getDouble(record, "x");
+        return Math.atan2(y, x);
     }
 
     // ==================== String Operations ====================
@@ -1595,10 +1695,14 @@ public final class NativeFunctions extends MezzeNode {
                  ID_INT_CLAMP, ID_INT_FROM_STRING, ID_INT_FROM_NAT,
                  ID_INT_TO_NAT, ID_INT_POW -> true;
             // Float operations
-            case ID_FLOAT_TO_STRING, ID_FLOAT_FROM_INT, ID_FLOAT_ABS,
-                 ID_FLOAT_MIN, ID_FLOAT_MAX, ID_FLOAT_SQRT, ID_FLOAT_FLOOR,
-                 ID_FLOAT_CEIL, ID_FLOAT_ROUND, ID_FLOAT_SIN, ID_FLOAT_COS,
-                 ID_FLOAT_TAN, ID_FLOAT_POW -> true;
+            case ID_FLOAT_TO_STRING, ID_FLOAT_FROM_INT, ID_FLOAT_FROM_STRING,
+                 ID_FLOAT_ABS, ID_FLOAT_MIN, ID_FLOAT_MAX, ID_FLOAT_CLAMP,
+                 ID_FLOAT_SIGN, ID_FLOAT_TO_INT, ID_FLOAT_IS_NAN,
+                 ID_FLOAT_IS_INFINITE, ID_FLOAT_IS_FINITE, ID_FLOAT_SQRT,
+                 ID_FLOAT_FLOOR, ID_FLOAT_CEIL, ID_FLOAT_ROUND, ID_FLOAT_LN,
+                 ID_FLOAT_LOG10, ID_FLOAT_EXP, ID_FLOAT_SIN, ID_FLOAT_COS,
+                 ID_FLOAT_TAN, ID_FLOAT_ASIN, ID_FLOAT_ACOS, ID_FLOAT_ATAN,
+                 ID_FLOAT_ATAN2, ID_FLOAT_POW -> true;
             // String operations
             case ID_STRING_CONCAT, ID_STRING_LENGTH, ID_STRING_TO_UPPER,
                  ID_STRING_TO_LOWER, ID_STRING_TRIM, ID_STRING_SUBSTRING,

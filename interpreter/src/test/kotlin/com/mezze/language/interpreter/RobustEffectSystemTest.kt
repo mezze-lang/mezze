@@ -39,9 +39,9 @@ class RobustEffectSystemTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             perform Terminal in Console.print {msg = "Hello World"}
         """.trimIndent()
 
@@ -99,9 +99,9 @@ class RobustEffectSystemTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             # This should fail - perform not allowed in performer implementation
             impl Log for BadLogger where {
               info : {msg: String} -> {} = {msg} -> perform Terminal in Console.print {msg = msg}
@@ -133,9 +133,9 @@ class RobustEffectSystemTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             # This should fail - cross-effect reuse not allowed
             impl Log for BadLogger where {
               info : {msg: String} -> {} = {msg} -> Terminal.print {msg = msg}
@@ -186,7 +186,7 @@ class RobustEffectSystemTest {
             }
 
             impl Log for TestLogger where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              info : {msg: String} -> {} = {msg} -> {}
             }
 
             # This should fail - warn operation doesn't exist

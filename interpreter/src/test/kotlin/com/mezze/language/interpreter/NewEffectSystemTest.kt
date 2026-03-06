@@ -29,9 +29,9 @@ class NewEffectSystemTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             perform Terminal in Console.print {msg = "Hello World"}
         """.trimIndent()
 
@@ -53,7 +53,7 @@ class NewEffectSystemTest {
             }
 
             impl Log for FileLogger {path: String} where {
-              info : {msg: String} -> {} = {msg} -> native_print {msg = "$(path): $(msg)"}
+              info : {msg: String} -> {} = {msg} -> {}
             }
             
             perform FileLogger {path = "app.log"} in Log.info {msg = "Test message"}
@@ -78,9 +78,9 @@ class NewEffectSystemTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             impl Log for ConsoleLogger where {
               info : {msg: String} -> {} = {msg} -> Console.print {msg = "[INFO] $(msg)"}
             }
@@ -113,9 +113,9 @@ class NewEffectSystemTest {
             }
 
             impl Console for Terminal where {
-              print : {msg: String} -> {} = {msg} -> native_print {msg = msg}
+              print : {msg: String} -> {} = {msg} -> {}
             }
-            
+
             impl Log for ConsoleLogger where {
               info : {msg: String} -> {} = {msg} -> Console.print {msg = "[LOG] $(msg)"}
             }

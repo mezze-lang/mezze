@@ -47,6 +47,11 @@ public final class MezzeFunctionRootNode extends RootNode {
     @CompilationFinal(dimensions = 1)
     private final int[] slotTypes;
 
+    // Ability operation slot indices - where to write passed ability operations
+    // Layout: abilities are passed after the record argument
+    @CompilationFinal(dimensions = 1)
+    private final int[] abilitySlots;
+
     // Cached field indices for fast record access (populated after shape stabilizes)
     @CompilationFinal(dimensions = 1)
     private int[] cachedFieldIndices;
@@ -61,6 +66,12 @@ public final class MezzeFunctionRootNode extends RootNode {
     @CompilationFinal
     private final int parameterCount;
 
+    @CompilationFinal
+    private final int abilityCount;
+
+    /**
+     * Standard constructor without ability slots.
+     */
     public MezzeFunctionRootNode(
             MezzeLanguage language,
             FrameDescriptor frameDescriptor,
@@ -70,14 +81,33 @@ public final class MezzeFunctionRootNode extends RootNode {
             int[] closureSlots,
             int[] slotTypes
     ) {
+        this(language, frameDescriptor, bodyNode, name, parameterNames, closureSlots, slotTypes, null);
+    }
+
+    /**
+     * Full constructor with ability slots for polymorphic functions.
+     * Ability operations are passed after the record argument and written to the specified slots.
+     */
+    public MezzeFunctionRootNode(
+            MezzeLanguage language,
+            FrameDescriptor frameDescriptor,
+            MezzeNode bodyNode,
+            String name,
+            String[] parameterNames,
+            int[] closureSlots,
+            int[] slotTypes,
+            int[] abilitySlots
+    ) {
         super(language, frameDescriptor);
         this.bodyNode = bodyNode;
         this.name = name;
         this.parameterNames = parameterNames != null ? parameterNames : EMPTY_STRINGS;
         this.closureSlots = closureSlots != null ? closureSlots : EMPTY_INTS;
         this.slotTypes = slotTypes != null ? slotTypes : EMPTY_INTS;
+        this.abilitySlots = abilitySlots != null ? abilitySlots : EMPTY_INTS;
         this.closureCount = this.closureSlots.length;
         this.parameterCount = this.parameterNames.length;
+        this.abilityCount = this.abilitySlots.length;
     }
 
     private static final String[] EMPTY_STRINGS = new String[0];
@@ -105,6 +135,19 @@ public final class MezzeFunctionRootNode extends RootNode {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 throw new IllegalArgumentException("Expected record argument, got: " +
                     (recordArg == null ? "null" : recordArg.getClass().getName()));
+            }
+        }
+
+        // Bind ability operation functions (passed after the record argument)
+        // Layout: [closure0, ..., closureN, recordArg, abilityOp0, ..., abilityOpM]
+        if (abilityCount > 0) {
+            int abilityArgStart = closureCount + 1; // After closure args and record arg
+            for (int i = 0; i < abilityCount; i++) {
+                int argIndex = abilityArgStart + i;
+                if (argIndex < args.length) {
+                    int slotIndex = abilitySlots[i];
+                    frame.setObject(slotIndex, args[argIndex]);
+                }
             }
         }
 

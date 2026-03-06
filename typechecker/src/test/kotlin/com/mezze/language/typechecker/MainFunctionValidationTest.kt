@@ -38,7 +38,7 @@ class MainFunctionValidationTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let main = {} -> perform Console in Log.println { msg = "Hello World" }
@@ -62,7 +62,7 @@ class MainFunctionValidationTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             impl Random for SystemRandom having 'val = Int where {
@@ -88,7 +88,7 @@ class MainFunctionValidationTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let helper = {} -> perform Console in Log.println { msg = "helper" }
@@ -149,7 +149,7 @@ class MainFunctionValidationTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let main = {} -> perform Console in do
@@ -173,7 +173,7 @@ class MainFunctionValidationTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let main = {x} -> perform Console in Log.println { msg = "Hello" }
@@ -232,7 +232,7 @@ class MainFunctionValidationTest {
             }
 
             impl Log for Console having 'msg = String where {
-                println = { msg } -> __native_print { s = msg }
+                println = { msg } -> {}
             }
 
             let main = {} -> perform Console in do

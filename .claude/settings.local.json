@@ -142,7 +142,9 @@
       "WebFetch(domain:mullr.github.io)",
       "WebFetch(domain:docs.servant.dev)",
       "WebFetch(domain:tapir.softwaremill.com)",
-      "WebFetch(domain:hono.dev)"
+      "WebFetch(domain:hono.dev)",
+      "Bash(do echo \"=== Run $i ===\")",
+      "Bash(git ls-files:*)"
     ],
     "deny": [],
     "ask": []

@@ -67,7 +67,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             impl IO for Console where {
-                print = { msg } -> __native_print { msg = msg }
+                print = { msg } -> {}
             }
 
             effect DB where {
@@ -115,7 +115,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             impl IO for Console where {
-                print = { msg } -> __native_print { msg = msg }
+                print = { msg } -> {}
             }
 
             effect DB where {
@@ -153,7 +153,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             impl Log for Console where {
-                info = { msg } -> __native_print { msg = msg }
+                info = { msg } -> {}
             }
 
             effect Metrics where {
@@ -161,7 +161,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             impl Metrics for StatsD where {
-                increment = { counter } -> __native_increment { counter = counter }
+                increment = { counter } -> {}
             }
 
             effect DB where {
@@ -203,7 +203,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             impl IO for Console where {
-                print = { msg } -> __native_print { msg = msg }
+                print = { msg } -> {}
             }
 
             effect DB where {
@@ -240,7 +240,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             impl Log for Console where {
-                info = { msg } -> __native_print { msg = msg }
+                info = { msg } -> {}
             }
 
             effect Metrics where {
@@ -248,7 +248,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             impl Metrics for StatsD where {
-                increment = { counter } -> __native_increment { counter = counter }
+                increment = { counter } -> {}
             }
 
             effect IO where {
@@ -256,7 +256,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             impl IO for FileIO where {
-                write = { data } -> __native_write { data = data }
+                write = { data } -> {}
             }
 
             effect DB where {
@@ -552,7 +552,7 @@ class ScopedEffectsComprehensiveTest {
             }
 
             impl IO for Console where {
-                print = { msg } -> __native_print { msg = msg }
+                print = { msg } -> {}
             }
 
             effect DB where {
